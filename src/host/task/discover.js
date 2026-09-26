@@ -8,7 +8,7 @@
  * source root.
  */
 import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 /**
  * Whether a directory is a source repository, that is, its `.git` is a real
@@ -54,15 +54,20 @@ export async function discoverSourceRepos(sourceRoot) {
 
 /**
  * Resolve explicitly named repositories under a source root.
+ *
+ * A source root that is itself a repository lists that repository by its own
+ * name, because that is the name discoverSourceRepos reports for it: the root,
+ * not a child of the root.
  * @param sourceRoot - the directory holding the source repositories.
  * @param names - repository directory names.
  * @returns the resolved repository paths, in the given order.
  * @throws Error when a name does not name a source repository.
  */
 export async function resolveSourceRepos(sourceRoot, names) {
+  const selfName = (await isSourceRepository(sourceRoot)) ? basename(sourceRoot) : undefined
   const repositories = []
   for (const name of names) {
-    const candidate = join(sourceRoot, name)
+    const candidate = name === selfName ? sourceRoot : join(sourceRoot, name)
     if (!(await isSourceRepository(candidate))) throw new Error(`not a source repository: ${name}`)
     repositories.push(candidate)
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import {
   discoverSourceRepos,
   isSourceRepository,
@@ -90,6 +90,15 @@ describe("resolveSourceRepos", () => {
     try {
       await expect(resolveSourceRepos(root, ["linked"])).rejects.toThrow(/not a source repository: linked/)
       await expect(resolveSourceRepos(root, ["notes"])).rejects.toThrow(/not a source repository: notes/)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("resolves the root's own name when the root is a repository", async () => {
+    const { alpha, cleanup } = await fixture()
+    try {
+      expect(await resolveSourceRepos(alpha, [basename(alpha)])).toEqual([alpha])
     } finally {
       await cleanup()
     }
