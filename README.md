@@ -78,19 +78,6 @@ dsh plugin --profile web add dsh-worktree-space
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 ```
 
-**Install a specific tag or branch:**
-
-```sh
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space#v1.0.0   # a tag
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space#main     # a branch
-```
-
-**From the release attachment:**
-
-```sh
-dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
-```
-
 The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's bundle
 patch, which normally writes it for you; if the plugin never shows up, add it by hand:
 

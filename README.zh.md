@@ -66,19 +66,6 @@ dsh plugin --profile web add dsh-worktree-space
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 ```
 
-**安装指定 tag/分支：**
-
-```sh
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space#v1.0.0   # tag
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space#main     # 分支
-```
-
-**用 Release 附件的地址装：**
-
-```sh
-dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
-```
-
 插件的挂载行写在 profile 的 `cordis.patch.yml` —— 本仓库带着 DSH 的 bundle patch，一般会自动生效；
 若插件列表里一直没出现，就手动补上：
 
