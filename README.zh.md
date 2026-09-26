@@ -52,14 +52,13 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
 ### 安装
 
-**用 Release 附件（推荐）** —— 从 [Releases](https://github.com/kangtsang/dsh-worktree-space/releases)
-下载最新版的 `.tgz` 附件，或者直接用地址装：
+**从 npm（推荐）：**
 
 ```sh
-dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
+dsh plugin --profile web add dsh-worktree-space
 ```
 
-**直接从 GitHub 仓库装** —— 不用下载附件，取仓库当前代码：
+**直接从 GitHub 仓库装：**
 
 ```sh
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space
@@ -72,10 +71,10 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space#v1.0.0   # tag
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space#main     # 分支
 ```
 
-**从 npm：**
+**用 Release 附件的地址装：**
 
 ```sh
-dsh plugin --profile web add dsh-worktree-space
+dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
 ```
 
 插件的挂载行写在 profile 的 `cordis.patch.yml` —— 本仓库带着 DSH 的 bundle patch，一般会自动生效；

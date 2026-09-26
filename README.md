@@ -64,15 +64,13 @@ plugin list shows the name, description, icon and configuration section correctl
 
 ### Install
 
-**From the release attachment (recommended)** — download the latest `.tgz` from
-[Releases](https://github.com/kangtsang/dsh-worktree-space/releases), or install straight from its
-address:
+**From npm (recommended):**
 
 ```sh
-dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
+dsh plugin --profile web add dsh-worktree-space
 ```
 
-**Straight from the GitHub repository** — no download, takes the repository as it stands:
+**Straight from the GitHub repository:**
 
 ```sh
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space
@@ -85,14 +83,14 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space#v1.0.0   # a ta
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space#main     # a branch
 ```
 
-**From npm:**
+**From the release attachment:**
 
 ```sh
-dsh plugin --profile web add dsh-worktree-space
+dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/releases/download/v1.0.0/dsh-worktree-space-1.0.0.tgz
 ```
 
-The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's
-bundle patch, which normally writes it for you; if the plugin never shows up, add it by hand:
+The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's bundle
+patch, which normally writes it for you; if the plugin never shows up, add it by hand:
 
 ```yaml
 - id: worktree-space
