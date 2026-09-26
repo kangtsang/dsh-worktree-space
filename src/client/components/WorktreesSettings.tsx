@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "lucide-react"
 import { format, useT } from "../lib/i18n"
-import { cleanPath } from "../lib/paths"
+import { cleanPath, slashPath } from "../lib/paths"
 import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
 import type { SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -166,7 +166,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       <Button className="dws-icon-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={16} className={busy ? "dws-spin" : undefined} /></Button>
     </div>
     <div className="dws-list-controls">
-      <div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{([['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)}<span className="dws-filter-divider" aria-hidden="true">|</span><button type="button" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button></div>
+      <div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{([['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)}<span className="dws-filter-divider" aria-hidden="true">|</span><button type="button" className="dws-filter-fold" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button></div>
       <div className="dws-filters" role="group" aria-label={t("worktrees")}>{FILTERS.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)}</div>
       <span className="dws-summary">{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("repositories")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
     </div>
@@ -183,7 +183,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           <header className="dws-repo-header">
             <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(repo.repoPath)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>
               {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit2 size={18} className="dws-repo-icon" />
-              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count">{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={repo.repoPath}>{repo.repoPath}</span></span>
+              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count">{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             </button>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
@@ -192,7 +192,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
               const state = row.statusError === t("checkingStatus") ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
                 <GitPullRequest size={16} className="dws-tree-icon" aria-hidden="true" />
-                <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={row.path}>{relativePath(repo.repoPath, row.path)}</div></div>
+                <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div></div>
               </div>
             })}
           </div> : null}
@@ -210,7 +210,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
               <span className="dws-branch-label" title={`${t("branch")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
               <span className="dws-count">{task.repositories.length}</span>
             </span>
-            <span className="dws-task-path" title={task.path}>{task.path}</span>
+            <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
           </button>
           <Button className="dws-button-ghost dws-finish-task" disabled={busy || !!action} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
@@ -220,7 +220,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             const state = taskRepoStatus(repository)
             return <div className="dws-worktree" key={repository.path}>
               <FolderGit2 size={16} className="dws-tree-icon" aria-hidden="true" />
-              <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{repository.name}</strong><span className={`dws-status dws-status-${state.state}`}><span className="dws-status-dot" />{state.label}</span>{repository.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={repository.path}>{repository.path}</div></div>
+              <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{repository.name}</strong><span className={`dws-status dws-status-${state.state}`}><span className="dws-status-dot" />{state.label}</span>{repository.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div></div>
             </div>
           })}
         </div> : null}
@@ -241,7 +241,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
                   {state === "checking" ? t("workspaceChecking") : ready && state.isSourceRoot ? format(t("workspaceSpans"), { count: String(state.repositoryCount) }) : t("workspaceCannot")}
                 </span>
               </span>
-              <span className="dws-repo-path" title={workspace.path}>{workspace.path}</span>
+              <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
             </span>
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>

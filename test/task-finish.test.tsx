@@ -103,7 +103,8 @@ describe("task view", () => {
     await ready()
 
     expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
-    expect(screen.getByText(container)).toBeTruthy()
+    // The panel shows every path with forward slashes, whichever separator the host reported.
+    expect(screen.getByText(container.replace(/\\/g, "/"))).toBeTruthy()
     expect(screen.getByText(branch)).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin")).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin-web")).toBeTruthy()

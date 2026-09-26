@@ -40,3 +40,14 @@ export function nameOf(value: unknown) {
   const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"))
   return index < 0 ? trimmed : trimmed.slice(index + 1)
 }
+
+/**
+ * A path as this plugin displays it: forward slashes, whichever separator the
+ * host or the user reported. Windows accepts both, so showing one style keeps
+ * the panel and the dialogs from mixing them.
+ * @param value - a path in either separator style.
+ * @returns the path with every backslash replaced by a forward slash.
+ */
+export function slashPath(value: unknown) {
+  return String(value ?? "").split(/\\/).join("/")
+}

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, Loader2 } from "lucide-react"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { slugOf, taskDirectory } from "../lib/paths"
+import { slashPath, slugOf, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
 
@@ -202,7 +202,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
         <header className="dws-dialog-heading">
           <DialogTitle className="dws-dialog-title">{t("dialogTitle")}</DialogTitle>
           <DialogDescription className="dws-form-note">{t("createDescription")}</DialogDescription>
-          <div className="dws-repo-context"><strong>{target.title}</strong><code title={target.path}>{target.path}</code></div>
+          <div className="dws-repo-context"><strong>{target.title}</strong><code title={slashPath(target.path)}>{slashPath(target.path)}</code></div>
         </header>
 
         <form className="dws-create-form" onSubmit={(event) => { event.preventDefault(); void create() }} aria-busy={busy}>
@@ -241,7 +241,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
                 <div className="dws-repo-choices">
                   {repositories.map((repository) => <label key={repository.name} className="dws-check-option" htmlFor={`${id}-repo-${repository.name}`}>
                     <input id={`${id}-repo-${repository.name}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.name)} onChange={(event) => toggleRepository(repository.name, event.target.checked)} />
-                    <span className="dws-check-copy"><span className="dws-check-label">{repository.name}</span><span className="dws-check-path" title={repository.path}>{repository.path}</span></span>
+                    <span className="dws-check-copy"><span className="dws-check-label">{repository.name}</span><span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span></span>
                   </label>)}
                 </div>
               </fieldset>
@@ -262,7 +262,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
 
               <dl className="dws-preview" aria-live="polite" aria-atomic="true">
                 <div className="dws-preview-row"><dt className="dws-preview-label">{t("branch")}</dt><dd className="dws-preview-value">{recovery?.branch ?? (taskBranch || "—")}</dd></div>
-                <div className="dws-preview-row"><dt className="dws-preview-label">{t("taskDirectoryLabel")}</dt><dd className="dws-preview-value">{recovery?.path ?? (taskPath || "—")}</dd></div>
+                <div className="dws-preview-row"><dt className="dws-preview-label">{t("taskDirectoryLabel")}</dt><dd className="dws-preview-value">{slashPath(recovery?.path ?? taskPath) || "—"}</dd></div>
               </dl>
             </>}
           </div>
