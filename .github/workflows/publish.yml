@@ -1,0 +1,57 @@
+name: Publish
+
+# Tag a release and npm gets it: no token, no one-time password. npm exchanges the
+# workflow's OIDC identity for publish rights, so the only setup is the trusted
+# publisher registered on the package (see the README's release notes).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  # Required for trusted publishing: without it npm has no identity to exchange.
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  # Never interrupt a run that may already be uploading.
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      # Node 24 ships npm 11; the OIDC exchange needs npm 11.5.1 or newer, which
+      # Node 22's bundled npm is not. registry-url is what npm reads the identity
+      # through, and no NODE_AUTH_TOKEN is involved.
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check that the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          echo "tag=$tag version=$version"
+          test "$tag" = "$version"
+
+      # The package's prepublishOnly script runs the project gate, so a failing
+      # test or a stale bundle stops the publish here.
+      - name: Publish
+        run: npm publish
