@@ -1,0 +1,124 @@
+{
+  "name": "dsh-worktree-space",
+  "version": "1.0.0",
+  "description": "Per-task Git worktrees for DeepSeek Harness: a task space spans one or more repositories, is registered as a DSH Workspace, and finishing merges the branches, removes the worktrees and files the documents.",
+  "icon": "./icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kangtsang/dsh-worktree-space.git"
+  },
+  "homepage": "https://github.com/kangtsang/dsh-worktree-space#readme",
+  "bugs": "https://github.com/kangtsang/dsh-worktree-space/issues",
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "git",
+    "worktree",
+    "multi-repo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "assets",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "package.json",
+    "README.md",
+    "README.zh.md",
+    "docs/new-session.png",
+    "docs/finish-task.png",
+    "docs/manage-worktree-space.png",
+    "docs/new-worktree-space.png"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "check:client-bundle": "node scripts/check-client-bundle.mjs",
+    "check:tracked-bundle": "node scripts/check-tracked-bundle.mjs",
+    "check:package": "node scripts/check-package-contents.mjs",
+    "test": "pnpm build && pnpm typecheck && pnpm test:unit && pnpm check:client-bundle && pnpm check:tracked-bundle && pnpm check:package",
+    "prepublishOnly": "pnpm test"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-client-connection": "^0.1.7-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-plugins",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-api-session-controller"
+      ],
+      "platform": "web"
+    },
+    "compatibility": {
+      "dsh": "0.1.7-rc.1",
+      "dshReleases": {
+        "0.1.7-rc.1": "compatible"
+      },
+      "profiles": [
+        "web"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-layout": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.5",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "1.1.6",
+    "lucide-react": "0.474.0"
+  }
+}

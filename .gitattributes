@@ -1,0 +1,16 @@
+# Keep every text file at LF in the working tree, on every platform.
+#
+# The client bundle is a tracked build artifact whose bytes must match the
+# source it is built from: build.mjs inlines src/client/styles.css into
+# client/client.js. With core.autocrlf=true on Windows the CSS reaches the
+# bundler with CRLF, so the committed client/client.js can never be
+# reproduced and the repository's own `check:tracked-bundle` gate fails.
+* text=auto eol=lf
+
+# Binary assets must never be converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary

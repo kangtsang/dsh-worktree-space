@@ -1,0 +1,10 @@
+# The DSH profile itself installs with the hoisted linker, and it is also the
+# layout that avoids a Windows pnpm bug this project hit: with the default
+# isolated linker, pnpm linked @deepseek-ai/dsh-tools to an unhashed virtual
+# store name while creating the hashed one, leaving a dangling junction that
+# made the package unresolvable. Hoisted installs the package directly, so
+# import resolution does not depend on that link at all.
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true

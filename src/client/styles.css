@@ -1,0 +1,304 @@
+@layer dsh-worktree-space {
+  /* DSH owns typography and colour. Keep these aliases local to our surfaces. */
+  .dws-settings, .dws-dialog-content, .dws-new-session-action, .dws-footer-action {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-muted: var(--dsw-alias-label-tertiary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    --wt-soft: var(--dsw-alias-bg-module-platform);
+    --wt-hover: var(--dsw-alias-interactive-bg-hover);
+    --wt-danger: var(--dsw-alias-state-error-primary);
+    box-sizing: border-box;
+    color: var(--wt-text);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 22px;
+  }
+  .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { box-sizing: border-box; }
+  .dws-settings { min-width: 0; padding: 2px 0 16px; }
+  .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }
+  .dws-settings-header { margin-bottom: 20px; }
+  .dws-settings-header h2 { font-size: 16px; font-weight: 500; line-height: 24px; }
+  .dws-settings-header p { margin-top: 5px; color: var(--wt-secondary); font-size: 13px; line-height: 20px; }
+  .dws-button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 34px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+  .dws-button svg { flex: none; }
+  .dws-button:hover:not(:disabled) { background: var(--wt-hover); }
+  .dws-button:disabled { opacity: .4; cursor: not-allowed; }
+  .dws-button-ghost { border-color: transparent; }
+  .dws-button-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
+  .dws-button-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
+  .dws-button-danger { color: var(--wt-danger); }
+  .dws-button-danger-solid { border-color: transparent; background: var(--wt-danger); color: var(--dsw-static-neutral-00); }
+  .dws-button-danger-solid:hover:not(:disabled) { background: var(--dsw-alias-state-error-secondary); }
+  .dws-icon-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--wt-secondary); }
+  .dws-delete-action:hover:not(:disabled) { color: var(--wt-danger); background: var(--dsw-alias-interactive-bg-hover-danger); }
+  .dws-button:focus-visible, .dws-repo-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+  .dws-input, .dws-select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--wt-line); border-radius: 9px; padding: 7px 10px; outline: none; background: var(--wt-surface); color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; }
+  .dws-input::placeholder { color: var(--wt-muted); }
+  .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
+  .dws-input:disabled, .dws-select:disabled { opacity: .5; }
+  .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .dws-search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 100px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
+  .dws-search:focus-within { border-color: var(--dsw-alias-brand-primary); }
+  .dws-search > svg { flex: none; }
+  .dws-search .dws-input { min-height: 34px; padding: 6px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .dws-search .dws-icon-button { width: 24px; height: 24px; min-height: 24px; margin-right: -4px; }
+  .dws-depth { display: flex; flex: none; align-items: center; gap: 7px; }
+  .dws-depth-label { color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  /* The box owns the width so the chevron sits inside it, matching the scope
+     selector beside it rather than floating in a gap. */
+  .dws-depth-box { position: relative; flex: none; width: 92px; }
+  .dws-depth-box .dws-select { appearance: none; width: 100%; padding-right: 28px; background: var(--wt-soft); border-color: transparent; cursor: pointer; }
+  .dws-depth-box > svg { position: absolute; right: 10px; top: 11px; pointer-events: none; color: var(--wt-secondary); }
+  .dws-list-controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .dws-filters { display: inline-flex; align-items: center; gap: 3px; }
+  /* Separates the fold button from the views, at the group's own 3px spacing. */
+  .dws-filter-divider { color: var(--wt-line); user-select: none; }
+  .dws-filters button { border: 0; border-radius: 7px; padding: 4px 9px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
+  .dws-filters button:hover { background: var(--wt-hover); }
+  .dws-filters button[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); font-weight: 500; }
+  /* The entry switches sit at the end of the toolbar, where the panel is managed. */
+  .dws-summary { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
+  .dws-repo-list { min-width: 0; border-top: 1px solid var(--wt-line); }
+  .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
+  .dws-repo-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 14px 0; }
+  .dws-repo-toggle { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--wt-text); font: inherit; text-align: left; cursor: pointer; }
+  .dws-repo-toggle > svg { flex: none; }
+  .dws-repo-toggle:disabled { opacity: 1; cursor: default; }
+  .dws-chevron-placeholder { display: block; flex: none; width: 14px; }
+  .dws-branch-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .dws-chevron { color: var(--wt-muted); transition: transform .14s ease; }
+  .dws-repo-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }
+  .dws-repo-icon { color: var(--wt-secondary); }
+  .dws-repo-heading { display: block; flex: 1; min-width: 0; }
+  .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
+  .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }
+  .dws-branch-label > svg { flex: none; }
+  .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-create-repo { min-height: 30px; padding: 4px 9px; font-size: 12px; }
+  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 14px 30px; border-left: 1px solid var(--wt-line); padding-left: 18px; }
+  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px 0; }
+  .dws-worktree::before { content: ""; position: absolute; left: -19px; top: 25px; width: 10px; border-top: 1px solid var(--wt-line); }
+  .dws-worktree + .dws-worktree { border-top: 1px solid color-mix(in srgb, var(--wt-line) 60%, transparent); }
+  .dws-tree-icon { flex: none; align-self: flex-start; margin-top: 3px; color: var(--wt-muted); }
+  .dws-worktree-info { flex: 1; min-width: 0; }
+  .dws-worktree-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; min-width: 0; }
+  .dws-worktree-title strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 20px; }
+  .dws-worktree-path { overflow-wrap: anywhere; margin-top: 4px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }
+  .dws-status-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
+  .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }
+  .dws-status-unavailable, .dws-status-prunable { color: var(--wt-danger); }
+  .dws-status-dirty .dws-status-dot { color: var(--dsw-static-amber-600); }
+  .dws-worktree-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+  .dws-settings .dws-no-linked { padding: 0 0 2px; color: var(--wt-muted); font-size: 12px; line-height: 20px; }
+  .dws-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 18px; text-align: center; color: var(--wt-muted); }
+  .dws-empty h3 { color: var(--wt-text); font-size: 14px; font-weight: 500; }
+  .dws-empty p { max-width: 340px; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-error { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin: 12px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wt-danger) 20%, transparent); border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--wt-danger); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+  .dws-error > svg { flex: none; margin-top: 2px; }
+  .dws-error > span { flex: 1; min-width: 0; }
+  .dws-error .dws-button { margin: -4px -5px -4px 0; }
+  .dws-loading-message { display: flex; align-items: center; gap: 7px; padding: 8px 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-loading-message > svg { flex: none; }
+  .dws-skeleton-list { padding: 4px 0; }
+  .dws-skeleton-row { display: flex; align-items: center; gap: 12px; padding: 16px 0; }
+  .dws-skeleton-row > span { width: 18px; height: 18px; border-radius: 5px; background: var(--wt-soft); }
+  .dws-skeleton-row > div { display: grid; gap: 8px; flex: 1; }
+  .dws-skeleton-row > div span { width: 45%; height: 10px; border-radius: 4px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
+  .dws-skeleton-row > div span + span { width: 70%; height: 8px; }
+
+  .dws-dialog-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
+  .dws-dialog-content { position: fixed; z-index: 1001; top: 50%; left: 50%; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); transform: translate(-50%, -50%); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }
+  /* The create form carries more per row than a confirmation does, and fits a
+     1080p viewport without scrolling at these numbers. */
+  .dws-create-dialog { width: min(690px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+  /* Archiving reports as much per repository as the create form does — branches,
+     merge targets, commit counts, leftovers — so it takes the same width. */
+  .dws-finish-dialog { width: min(690px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+  /* The archive dialog stacks a status line, notices, options and a report. They
+     ran into each other without a rhythm, so the body lays them out with one —
+     the same everywhere, since giving sections extra space above only made the
+     top half airier than the bottom. */
+  .dws-finish-dialog .dws-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+  .dws-finish-dialog .dws-dialog-body > * { margin: 0; }
+  /* The sidebar's footer entry, a row of the footer exactly like Settings: icon,
+     label, full width, hover highlight.
+     
+     DSH lays this slot's container out as a row, which put this entry and the
+     neighbouring plugin's on one line. The container is stacked instead — scoped
+     with :has() to a footer that actually holds this entry, so DSH's own layout is
+     untouched when the plugin is absent. It applies to every entry in that
+     container, which is the point: they read as footer rows, not as chips. */
+  [class*="footerActions"]:has(.dws-footer-action) { flex-direction: column; align-items: stretch; gap: 2px; }
+  /* The configuration card the Plugins page draws for this bundle: a label that
+     takes the room and a pill control at the end of the row, measured off the
+     settings rows the neighbouring plugin draws in the same section. */
+  .dws-plugin-config { padding: 4px 0; }
+  .dws-config-toast { position: fixed; left: 50%; bottom: 28px; z-index: 60; transform: translateX(-50%); border-radius: 10px; padding: 8px 14px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: var(--dsw-alias-label-primary); font-size: 13px; }
+  .dws-plugin-config-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+  .dws-plugin-config-label { flex: 1; min-width: 0; color: var(--dsw-alias-label-primary); font-size: 14px; }
+  .dws-plugin-config-field { position: relative; display: inline-flex; flex: none; align-items: center; }
+  .dws-plugin-config-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; border: none; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out); }
+  .dws-plugin-config-select:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dws-plugin-config-select > svg { flex: none; }
+  /* The list opens at the control's trailing edge, as the Plugins page's own menus do. */
+  .dws-plugin-config-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 100%; padding: 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+  .dws-plugin-config-item { display: flex; width: 100%; align-items: center; gap: 12px; border: 0; border-radius: 8px; padding: 7px 10px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; white-space: nowrap; cursor: pointer; }
+  .dws-plugin-config-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dws-plugin-config-item-label { flex: 1; }
+  .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }
+  /* Geometry copied from the row the neighbouring plugin draws in the same slot,
+     measured off its own stylesheet rather than guessed: same height, radius,
+     padding, type size, and the same 4px bleed with 2px insets. */
+  .dws-footer-action { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: calc(100% + 4px); margin: 0 -2px; height: 42px; min-width: 0; border: 0; border-radius: 12px; padding: 0 10px 0 8px; background: 0 0; color: var(--wt-text); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; overflow: hidden; }
+  .dws-footer-action:hover { background: var(--wt-hover); }
+  .dws-footer-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-footer-action-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; color: var(--wt-secondary); }
+  .dws-footer-action-label { flex: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The 56px rail shows the icon alone, as the neighbouring row does. */
+  .dws-footer-action[data-wide="false"] { flex: none; justify-content: center; gap: 0; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; }
+  /* The management panel: the settings page's own component in a wide dialog. */
+  .dws-manage-panel { width: min(1040px, calc(100vw - 32px)); max-height: min(880px, calc(100dvh - 32px)); }
+  /* The panel supplies the heading, so the section keeps only its toolbar. */
+  .dws-manage-panel .dws-settings { padding: 0; }
+  .dws-dialog-close { position: absolute; top: 14px; right: 14px;display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; color: var(--wt-muted); background: transparent; cursor: pointer; }
+  .dws-dialog-close:hover:not(:disabled) { color: var(--wt-text); background: var(--wt-hover); }
+  .dws-dialog-close:disabled { opacity: .4; cursor: not-allowed; }
+  .dws-dialog-heading { padding: 22px 24px 0; }
+  .dws-dialog-title { margin: 0; padding-right: 24px; font-size: 16px; font-weight: 500; line-height: 24px; }
+  .dws-form-note { margin: 6px 0 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-repo-context { display: flex; flex-direction: column; gap: 3px; margin: 16px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--wt-soft); }
+  .dws-repo-context strong { font-size: 13px; font-weight: 500; }
+  .dws-repo-context code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  .dws-create-form { display: flex; flex-direction: column; min-height: 0; }
+  /* Only the body scrolls, so the heading stays put and the footer stays
+     reachable however long the form grows — the repository list is not clipped
+     to its own little viewport. */
+  .dws-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 24px 18px; }
+  .dws-field { display: block; min-width: 0; margin: 0 0 15px; padding: 0; border: 0; }
+  .dws-field-label { display: block; margin: 0; padding: 0; color: var(--wt-text); font-size: 13px; font-weight: 400; line-height: 20px; }
+  /* An option's explanation sits beside its name rather than under the control. */
+  .dws-field-heading, .dws-field-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; padding: 0; }
+  .dws-field-note { margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-field-note-warning { color: var(--wt-danger); }
+  .dws-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dws-radio-option { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--wt-line); border-radius: 9px; cursor: pointer; background: var(--wt-surface); }
+  .dws-radio-option:hover { background: var(--wt-hover); }
+  .dws-radio-option[data-selected="true"] { border-color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
+  .dws-radio-option:has(input:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-radio-option:has(input:disabled) { cursor: not-allowed; opacity: .5; }
+  .dws-radio-input { appearance: none; display: grid; place-content: center; flex: none; width: 14px; height: 14px; margin: 3px 0 0; border: 1px solid var(--wt-muted); border-radius: 50%; background: transparent; }
+  .dws-radio-input::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--wt-text); transform: scale(0); }
+  .dws-radio-input:checked { border-color: var(--wt-text); }
+  .dws-radio-input:checked::before { transform: scale(1); }
+  .dws-radio-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .dws-radio-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--wt-line); }
+  /* The label column takes what the label needs, so a label is never split
+     mid-word; the value keeps the rest of the row and wraps there instead. */
+  .dws-preview-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: baseline; }
+  .dws-preview-label { color: var(--wt-muted); font-size: 12px; line-height: 20px; }
+  .dws-preview-value { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 19px; }
+  .dws-dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 14px 24px 18px; border-top: 1px solid var(--wt-line); }
+  .dws-dialog-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; color: var(--wt-muted); font-size: 13px; }
+  .dws-dialog-loading > div { display: flex; align-items: center; gap: 8px; }
+  .dws-dialog-loading > span[aria-hidden] { display: block; flex-basis: 100%; height: 30px; margin-top: 6px; border-radius: 8px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
+  .dws-remove-target { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 9px; background: var(--wt-soft); }
+  .dws-remove-target > svg { flex: none; margin-top: 2px; color: var(--wt-secondary); }
+  .dws-remove-target > div { min-width: 0; }
+  .dws-remove-target strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+  .dws-remove-target code { display: block; overflow-wrap: anywhere; margin-top: 5px; color: var(--wt-secondary); font-size: 11px; line-height: 19px; }
+  .dws-preserved { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--wt-secondary); font-size: 12px; }
+  .dws-hero-action { display: inline-flex; flex: none; align-items: center; }
+  .dws-hero-action:empty { display: none; }
+  .dws-new-session-action { display: inline-flex; flex: none; align-items: center; margin: 0; padding: 0; }
+  .dws-new-session-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--wt-secondary); }
+  .dws-new-session-button > svg { width: 16px; height: 16px; }
+  .dws-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* Everything the source root holds, two to a row, with no inner scrollbar:
+     the dialog's body scrolls instead when the whole form outgrows the screen. */
+  .dws-repo-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 2px; }
+  /* Two to a row, so a path has half the width: keep each on one line, with the
+     full value still available from the label's title. */
+  .dws-repo-choices .dws-check-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-check-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); cursor: pointer; }
+  .dws-check-option:hover { background: var(--wt-hover); }
+  .dws-checkbox { appearance: none; display: grid; place-content: center; flex: none; width: 14px; height: 14px; margin: 2px 0 0; border: 1px solid var(--wt-muted); border-radius: 4px; background: transparent; }
+  .dws-checkbox::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: var(--dsw-alias-button-primary-fill); transform: scale(0); }
+  .dws-checkbox:checked { border-color: var(--dsw-alias-button-primary-fill); }
+  .dws-checkbox:checked::before { transform: scale(1); }
+  .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
+  .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .dws-check-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-check-path { overflow-wrap: anywhere; white-space: pre-line; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  .dws-base-ref { margin-top: 9px; }
+  /* The task view reuses the repository card's shape: a task is the same kind of
+     row, one level up from the repositories it spans. */
+  .dws-task { min-width: 0; border-bottom: 1px solid var(--wt-line); }
+  .dws-task-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 14px 0; }
+  .dws-task-icon { flex: none; color: var(--wt-secondary); }
+  .dws-task-heading { display: block; flex: 1; min-width: 0; }
+  .dws-task-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dws-task-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
+  .dws-task-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-finish-task { flex: none; }
+  /* An entry added to DSH's own row menu, which owns the surrounding chrome. */
+  .dws-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+  .dws-menu-item:hover { background: var(--wt-hover); }
+  .dws-menu-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-menu-item-icon { display: inline-flex; flex: none; align-items: center; color: var(--wt-secondary); }
+  .dws-finish-report { display: grid; gap: 7px; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }
+  .dws-finish-report p { margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 19px; }
+  .dws-finish-repos { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .dws-finish-repos li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+  .dws-finish-repos strong { font-size: 12px; font-weight: 500; }
+  .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
+  /* What there is to archive, stated above everything the dialog asks. */
+  .dws-dialog-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  .dws-plan { margin-top: 12px; }
+  /* What cleaning the container would remove, shown before it is chosen. */
+  .dws-plan-strays { display: grid; gap: 6px; margin-top: 14px; }
+  .dws-plan-strays-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  .dws-plan-strays-none { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* Two to a row, like the repository choices: these are mostly short names. */
+  .dws-plan-strays ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 0; padding: 0; list-style: none; }
+  .dws-plan-strays li { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--wt-text); font-size: 12px; line-height: 18px; }
+  /* Half a row is not much for a name, so it ellipsises; the title has the rest. */
+  .dws-plan-strays code { overflow: hidden; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-plan-doc { flex: none; color: var(--wt-danger); }
+  .dws-plan-noise, .dws-plan-breadcrumb { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--dsw-static-amber-600) 45%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--dsw-static-amber-600) 10%, transparent); color: var(--wt-text); font-size: 12px; line-height: 18px; }
+  .dws-notice > svg { flex: none; margin-top: 1px; color: var(--dsw-static-amber-600); }
+  .dws-notice-danger { border-color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 10%, transparent); }
+  .dws-notice-danger > svg { color: var(--wt-danger); }
+  .dws-spin { animation: dws-spin 1s linear infinite; }
+  @keyframes dws-spin { to { transform: rotate(360deg); } }
+  @keyframes dws-pulse { 50% { opacity: .45; } }
+  @media (max-width: 640px) {
+    .dws-toolbar { flex-wrap: wrap; }
+    .dws-search { flex-basis: calc(100% - 44px); }
+    .dws-summary { font-size: 11px; }
+    .dws-repo-title { gap: 4px 7px; }
+    .dws-branch-label { max-width: 135px; overflow-wrap: anywhere; }
+    .dws-worktree-list { margin-left: 15px; padding-left: 13px; }
+    .dws-worktree::before { left: -14px; width: 8px; }
+    .dws-worktree { flex-wrap: wrap; gap: 6px; }
+    .dws-worktree-actions { margin-left: auto; }
+    .dws-dialog-content { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 14px; }
+    .dws-dialog-heading { padding: 20px 18px 0; }
+    .dws-dialog-body { padding: 16px 18px 20px; }
+    .dws-dialog-footer { padding: 12px 18px 16px; }
+    .dws-preview { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .dws-preview-row { grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { animation: none !important; transition: none !important; }
+  }
+}
