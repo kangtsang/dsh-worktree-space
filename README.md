@@ -7,6 +7,8 @@ registered as a DSH Workspace with its own sessions.
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
+<img src="docs/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
+
 [中文](README.zh.md) · **English**
 
 ## Features
@@ -138,8 +140,6 @@ If the task space is built but registering the Workspace fails, the dialog says 
 you retry the registration.
 
 ### Manage tasks
-
-<img src="docs/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
 
 Open the **management page** from the Worktree Space entry in the sidebar footer. The three
 views differ as described under Features: Tasks shows each task and its repositories,

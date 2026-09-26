@@ -1,6 +1,6 @@
 {
   "name": "dsh-worktree-space",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Per-task Git worktrees for DeepSeek Harness: a task space spans one or more repositories, is registered as a DSH Workspace, and finishing merges the branches, removes the worktrees and files the documents.",
   "icon": "./icon.svg",
   "repository": {

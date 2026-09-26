@@ -6,6 +6,8 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
+<img src="docs/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
+
 **简体中文** · [English](README.md)
 
 ## 功能
@@ -120,8 +122,6 @@ dsh plugin --profile web add https://github.com/kangtsang/dsh-worktree-space/rel
 如果任务空间已经建好、但工作区注册失败，对话框会说明原因，并让你重试注册。
 
 ### 管理任务
-
-<img src="docs/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
 
 打开 **管理页面**（侧边栏底部的 Worktree Space 入口）。三个视图的区别见「功能」一节：任务视图看每个
 任务和它的各个仓库，工作区视图看哪些工作区能建任务空间，仓库视图看扫到的每个 Git 项目及其 worktree。
