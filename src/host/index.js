@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
+import { recallScan, rememberScan, rememberStatus } from './task/scanCache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { registerTaskTool } from './task/tool.js'
 
@@ -13,7 +14,7 @@ import { registerTaskTool } from './task/tool.js'
 export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
-const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.status']
+const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
 const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.list', 'task.inspect', 'task.plan', 'task.done']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
@@ -116,6 +117,20 @@ export async function recover(operation, classify) {
   }
 }
 
+/**
+ * The Workspace paths a request carries.
+ *
+ * Both the scan and the read of what the Host remembers are asked for the same
+ * set, and they have to read it the same way for one to answer for the other. The
+ * order is kept: it is the caller's, and nothing here depends on it.
+ * @param payload - the request payload.
+ * @returns the usable paths, empty when none were given.
+ */
+export function requestedPaths(payload) {
+  if (!Array.isArray(payload?.paths)) return []
+  return payload.paths.filter((path) => typeof path === 'string').map((path) => path.trim()).filter(Boolean)
+}
+
 
 export const name = 'dsh-worktree-space'
 export const inject = ['connection', 'subprocess']
@@ -194,9 +209,7 @@ export function apply(ctx, config = {}) {
     }
 
     if (endpoint === 'worktree.scan') return recover(async () => {
-      const paths = Array.isArray(payload.paths)
-        ? payload.paths.filter((path) => typeof path === 'string').map((path) => path.trim()).filter(Boolean)
-        : []
+      const paths = requestedPaths(payload)
       const maxDepth = resolveScanDepth(payload.depth ?? scanBounds.depth)
       const roots = [...new Set((await Promise.all([...new Set(paths)].map((path) => discoverGitRoots(path, { signal, maxDepth, maxDirectories: scanBounds.directories })))).flat())]
       const seen = new Set()
@@ -214,20 +227,32 @@ export function apply(ctx, config = {}) {
           // A repository can disappear while a scan is in progress.
         }
       }
+      // The scan is what refreshes the panel's memory of these Workspaces. An
+      // empty answer is remembered too: a task space whose worktrees are all gone
+      // is exactly what the next panel should paint, rather than an older list.
+      // A failed scan never gets here, so it leaves the last good answer standing.
+      rememberScan(paths, repositories)
       return repositories
     })
 
+    if (endpoint === 'worktree.cached') return recover(async () => {
+      // The whole point of this endpoint is the repaint it saves, so a miss is an
+      // answer - `null` - and not an error the panel has to handle.
+      return recallScan(requestedPaths(payload)) ?? null
+    })
 
     if (endpoint === 'worktree.status') return recover(async () => {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
       if (!path) throw new Error('Worktree path is required.')
       const output = await runGit(ctx.subprocess, path, ['status', '--short', '--branch'])
       const lines = output ? output.split(/\r?\n/) : []
-      return {
+      const status = {
         branchLine: lines.find((line) => line.startsWith('## ')) ?? '',
         changedFiles: lines.filter((line) => line && !line.startsWith('## ')).length,
         output,
       }
+      rememberStatus(path, status)
+      return status
     })
 
     if (endpoint === 'task.classify-root') return recover(async () => {

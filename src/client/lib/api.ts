@@ -2,6 +2,7 @@ import type {
   ConnectionService,
   CreateTaskResult,
   FinishTaskResult,
+  RememberedScan,
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
@@ -51,6 +52,14 @@ export function createWorktreeApi(connection: ConnectionService) {
 
   return {
     scan: (paths: string[], signal?: AbortSignal) => read<WorktreeList[]>("worktree.scan", { paths }, signal),
+    /**
+     * What the Host remembers of the last scan of these Workspaces.
+     *
+     * Reading it is a memory lookup on the Host, not a scan: it is what lets a
+     * reopened panel paint the previous result at once, while the fresh scan it
+     * starts alongside it is still running. `null` means this Host holds nothing.
+     */
+    cachedScan: (paths: string[], signal?: AbortSignal) => read<RememberedScan | null>("worktree.cached", { paths }, signal),
     status: (path: string, signal?: AbortSignal) => read<WorktreeStatus>("worktree.status", { path }, signal),
 
     /** Whether a workspace can hold a task, and which repositories it would span. */

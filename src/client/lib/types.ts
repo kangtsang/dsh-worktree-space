@@ -32,6 +32,19 @@ export interface WorktreeList {
   worktrees: Worktree[]
 }
 
+/**
+ * Answer of `worktree.cached`: what the Host still remembers of a scan.
+ *
+ * It is the previous scan's own answer, held in the Host's memory since that scan
+ * and dropped when the DSH instance exits — never written down, and never the last
+ * word, because the panel scans again as soon as it has painted this.
+ */
+export interface RememberedScan {
+  repositories: WorktreeList[]
+  /** The statuses the Host happens to hold, by worktree path; others are missing. */
+  statuses: Record<string, WorktreeStatus>
+}
+
 /** One repository a task would span. */
 export interface SourceRepository {
   name: string

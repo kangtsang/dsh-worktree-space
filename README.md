@@ -115,6 +115,10 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 右侧的统计会跟着视图变（`N 个任务` / `N 个工作区` / `N 个仓库 · M 个 Worktree`），搜索或筛选时显示
 `可见 / 总数`。
 
+面板每次打开都会重新扫描，但会先用宿主记住的上一次扫描结果把界面画出来，所以打开就能看到数据，扫描
+结束后自动换成新结果（标题栏会显示「正在刷新…」）。这份记忆只放在 DSH 实例的内存里：既不写磁盘，
+也会在实例关闭时随之清空。
+
 ### 结束任务
 
 <img src="docs/finish-task.png" alt="结束任务对话框" width="612">

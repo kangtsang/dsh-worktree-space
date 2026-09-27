@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, beforeEach } from "vitest"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { apply, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
+import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
 
 function handleFor(outputs = {}) {
   const routes = new Map()
@@ -181,7 +182,7 @@ describe("worktree porcelain parser", () => {
 describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
-      "worktree.scan", "worktree.status",
+      "worktree.scan", "worktree.cached", "worktree.status",
       "task.classify-root", "task.suggest-root", "task.create", "task.list", "task.inspect", "task.plan", "task.done",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
@@ -250,5 +251,143 @@ describe("worktree RPC contract", () => {
       ok: false, error: { code: "bad-request", message: "RPC method does not match endpoint.", details: { issues: [] } },
     })
     expect(await handler("worktree.status", {}, { aborted: true })).toMatchObject({ ok: false, error: { code: "cancelled" } })
+  })
+})
+
+/**
+ * What a reopened panel is handed before its own scan answers. The cache's
+ * lifetime is the process, so every case here starts from an empty one.
+ */
+describe("the Host's memory of the last scan", () => {
+  beforeEach(() => clearScanCache())
+
+  const porcelain = [
+    "worktree /repo",
+    "HEAD abc",
+    "branch refs/heads/main",
+    "",
+    "worktree /repo.worktrees/feature",
+    "HEAD def",
+    "branch refs/heads/feature",
+  ].join("\n")
+
+  /** A scan walks the disk before it asks git, so the root has to exist. */
+  async function scanFixture() {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-memory-"))
+    await mkdir(join(root, "repo", ".git"), { recursive: true })
+    return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  /** A Host whose git answers describe the one repository the fixture holds. */
+  const scannerFor = (root) => handleFor({
+    "worktree list --porcelain": porcelain,
+    "rev-parse --show-toplevel": join(root, "repo"),
+    "rev-parse --git-common-dir": ".git",
+    "symbolic-ref --quiet --short refs/remotes/origin/HEAD": "origin/main",
+    "status --short --branch": "## feature\n M a.txt\n?? b.txt",
+  })
+
+  it("serves what the last scan of those Workspaces found, and nothing before it", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      const paths = [join(fixture.root, "repo")]
+      expect((await handler("worktree.cached", { paths })).value).toBeNull()
+
+      await handler("worktree.scan", { paths })
+      const remembered = (await handler("worktree.cached", { paths })).value
+      expect(remembered.repositories).toHaveLength(1)
+      expect(remembered.repositories[0]).toMatchObject({ repoPath: "/repo", defaultBranch: "main" })
+      // No worktree status has been asked about yet, so none is claimed.
+      expect(remembered.statuses).toEqual({})
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("keeps each worktree status alongside the scan that lists it", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      const paths = [join(fixture.root, "repo")]
+      await handler("worktree.scan", { paths })
+      await handler("worktree.status", { path: "/repo.worktrees/feature" })
+
+      const remembered = (await handler("worktree.cached", { paths })).value
+      expect(remembered.statuses).toEqual({
+        "/repo.worktrees/feature": { branchLine: "## feature", changedFiles: 2, output: "## feature\n M a.txt\n?? b.txt" },
+      })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("answers nothing for Workspaces it has never scanned", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      await handler("worktree.scan", { paths: [join(fixture.root, "repo")] })
+      expect((await handler("worktree.cached", { paths: [join(fixture.root, "other")] })).value).toBeNull()
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("replaces the remembered answer on the next scan, empty result included", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      const paths = [join(fixture.root, "repo")]
+      await handler("worktree.scan", { paths })
+      expect((await handler("worktree.cached", { paths })).value.repositories).toHaveLength(1)
+
+      // The repository is gone by the next scan, and that is an answer too: the
+      // panel must not be handed the older list back.
+      await rm(join(fixture.root, "repo"), { recursive: true, force: true })
+      await handler("worktree.scan", { paths })
+      expect((await handler("worktree.cached", { paths })).value).toEqual({ repositories: [], statuses: {} })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("forgets the Workspace set that has gone longest without a scan", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      const sets = []
+      for (let index = 0; index <= SCAN_CACHE_LIMIT; index += 1) {
+        const path = join(fixture.root, `set-${index}`)
+        await mkdir(path, { recursive: true })
+        sets.push(path)
+      }
+      for (const path of sets) await handler("worktree.scan", { paths: [path] })
+
+      expect((await handler("worktree.cached", { paths: [sets[0]] })).value).toBeNull()
+      const last = sets[sets.length - 1]
+      expect((await handler("worktree.cached", { paths: [last] })).value).toEqual({ repositories: [], statuses: {} })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("identifies a scan by its Workspace paths, not by how they are spelled or ordered", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      const repo = join(fixture.root, "repo")
+      const other = join(fixture.root, "other")
+      await mkdir(other, { recursive: true })
+      await handler("worktree.scan", { paths: [repo, other] })
+
+      // Reversed, and with a trailing separator: still the same two Workspaces.
+      const separator = process.platform === "win32" ? "\\" : "/"
+      const remembered = (await handler("worktree.cached", { paths: [other, `${repo}${separator}`] })).value
+      expect(remembered.repositories).toHaveLength(1)
+      // A set that only overlaps is a set this Host has never scanned.
+      expect((await handler("worktree.cached", { paths: [repo] })).value).toBeNull()
+    } finally {
+      await fixture.cleanup()
+    }
   })
 })

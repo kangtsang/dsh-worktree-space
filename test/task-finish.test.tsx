@@ -52,6 +52,7 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
+    cachedScan: vi.fn().mockResolvedValue(null),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),

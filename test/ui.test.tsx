@@ -155,7 +155,7 @@ describe("NewSessionWorktreeButton", () => {
 describe("WorktreesSettings", () => {
   function renderSettings(rows: any[], items: any[] = []) {
     const workspaces: any = { list: { getSnapshot: () => ({ items }), subscribe: () => () => {} }, create: vi.fn().mockResolvedValue({ workspaceId: "new", path: rows[1]?.path, title: "" }), rename: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) }
-    const api: any = { list: vi.fn().mockResolvedValue({ repoPath: "/repo", worktrees: rows }), scan: vi.fn().mockResolvedValue([{ repoPath: "/repo", worktrees: rows }]), status: vi.fn().mockImplementation((path: string) => Promise.resolve({ changedFiles: path.includes("dirty") ? 1 : 0, branchLine: "", output: "" })), remove: vi.fn().mockResolvedValue({}), prune: vi.fn().mockResolvedValue({}) }
+    const api: any = { list: vi.fn().mockResolvedValue({ repoPath: "/repo", worktrees: rows }), scan: vi.fn().mockResolvedValue([{ repoPath: "/repo", worktrees: rows }]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn().mockImplementation((path: string) => Promise.resolve({ changedFiles: path.includes("dirty") ? 1 : 0, branchLine: "", output: "" })), remove: vi.fn().mockResolvedValue({}), prune: vi.fn().mockResolvedValue({}) }
     const uiWorkspace: any = { openWorkspace: vi.fn().mockResolvedValue(undefined) }
     render(<WorktreesSettings api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} />)
     // The page opens on tasks; these cases cover the repository list.

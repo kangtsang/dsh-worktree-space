@@ -135,6 +135,11 @@ its worktrees. The summary on the right follows the view (`N tasks` / `N Workspa
 `N repositories · M Worktrees`), and reads `shown / total` while a search or filter is
 narrowing the list.
 
+The panel rescans every time it is opened, but it first paints what the Host still remembers
+of the previous scan, so it shows data straight away and swaps in the fresh result when the
+scan lands (`Refreshing…` marks the wait). That memory lives in the DSH instance's own
+process only: nothing is written to disk, and it is gone when the instance exits.
+
 ### Finish a task
 
 <img src="docs/finish-task.png" alt="The Finish task dialog" width="612">
