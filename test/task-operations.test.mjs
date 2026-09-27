@@ -668,6 +668,32 @@ describe("finishTask", () => {
     }
   })
 
+  it("keeps a worktree it could not remove instead of reporting it gone", async () => {
+    const fixture = await taskFixture()
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      // What git says when the worktree still holds modified or untracked files and
+      // the caller did not force the removal.
+      "worktree remove": ({ args }) => args[2].endsWith("alpha")
+        ? { exitCode: 1, stderr: "fatal: 'alpha' contains modified or untracked files" }
+        : "",
+    })
+    try {
+      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root })
+
+      expect(result.failed).toBe(true)
+      const kept = result.repositories.find((entry) => entry.name === "alpha")
+      expect(kept).toMatchObject({ merged: false, removed: false, branchDeleted: false })
+      expect(kept.error).toMatch(/uncommitted changes\? force/)
+      // The rest of the task still finishes, and the container stays because this
+      // worktree is still in it.
+      expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ removed: true })
+      expect(result.containerRemoved).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("refuses an unknown task", async () => {
     const fixture = await taskFixture()
     const { subprocess } = subprocessMock(fixture.handlers)

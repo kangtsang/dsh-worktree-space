@@ -175,11 +175,15 @@ branch that was never merged.
 | | | ✓ | Only the worktrees go, uncommitted changes and all; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged, the branch force-deleted, and **the commits it held are discarded with it** |
 
-Whichever combination is chosen: the plugin's own `README.en.md` is always cleared, anything
-else in the task space follows the archive choice (unticked, it is discarded outright), and
-as long as any repository was kept — a conflicted merge, say — both the task space directory
-and its workspace registration stay; otherwise both are removed and its sessions fall back
-to Ungrouped with their transcripts intact.
+Whichever combination is chosen: the plugin's own `README.en.md` is always cleared, and
+anything else in the task space follows the archive choice (unticked, it is discarded
+outright). **Without Force, a worktree that still holds uncommitted files cannot be removed
+at all** — `git worktree remove` refuses, so that repository is kept as it is and reported
+as unfinished while the others finish, which is also why the task space directory and its
+workspace registration stay: nothing uncommitted is ever lost unless Force says so. The
+directory and the registration are removed only once every repository really went and the
+container is empty, and its sessions then fall back to Ungrouped with their transcripts
+intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
 merge can be reverted and nothing is discarded), and it is **red** only where the dialog can
