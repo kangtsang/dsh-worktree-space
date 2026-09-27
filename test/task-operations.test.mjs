@@ -124,15 +124,28 @@ describe("classifySourceRoot", () => {
 describe("suggestTaskRoot", () => {
   it("reports the discovered repositories alongside the suggested container", async () => {
     const source = await sourceFixture()
+    // The dialog names each repository's current branch, so the suggestion asks git.
+    const { subprocess } = subprocessMock({ "rev-parse --abbrev-ref HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "main" : "develop") })
     try {
-      const result = await suggestTaskRoot(source.root)
+      const result = await suggestTaskRoot(subprocess, source.root)
       expect(result.sourceRoot).toBe(source.root)
       expect(result.explicit).toBe(false)
       expect(result.suggested.length).toBeGreaterThan(0)
       expect(result.repositories).toEqual([
-        { name: "alpha", path: source.alpha },
-        { name: "beta", path: source.beta },
+        { name: "alpha", path: source.alpha, branch: "main" },
+        { name: "beta", path: source.beta, branch: "develop" },
       ])
+    } finally {
+      await source.cleanup()
+    }
+  })
+
+  it("names no branch for a detached HEAD, which is on none", async () => {
+    const source = await sourceFixture()
+    const { subprocess } = subprocessMock({ "rev-parse --abbrev-ref HEAD": "HEAD" })
+    try {
+      const result = await suggestTaskRoot(subprocess, source.root)
+      expect(result.repositories.map((entry) => entry.branch)).toEqual([undefined, undefined])
     } finally {
       await source.cleanup()
     }
@@ -142,7 +155,7 @@ describe("suggestTaskRoot", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     try {
-      const result = await suggestTaskRoot(source.root, { tasksRoot: container.root })
+      const result = await suggestTaskRoot(subprocessMock().subprocess, source.root, { tasksRoot: container.root })
       expect(result).toMatchObject({ suggested: container.root, explicit: true })
     } finally {
       await source.cleanup()
@@ -153,7 +166,7 @@ describe("suggestTaskRoot", () => {
   it("refuses a container inside the source tree", async () => {
     const source = await sourceFixture()
     try {
-      await expect(suggestTaskRoot(source.root, { tasksRoot: join(source.root, "tasks") })).rejects.toThrow(
+      await expect(suggestTaskRoot(subprocessMock().subprocess, source.root, { tasksRoot: join(source.root, "tasks") })).rejects.toThrow(
         /inside the source root/,
       )
     } finally {

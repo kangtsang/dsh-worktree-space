@@ -36,6 +36,8 @@ export interface WorktreeList {
 export interface SourceRepository {
   name: string
   path: string
+  /** The branch its HEAD is on, absent for a detached or unreadable HEAD. */
+  branch?: string
 }
 
 /**

@@ -236,6 +236,9 @@
   .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
   .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  /* The card's first line is the repository view's title row: the name, then the
+     branch HEAD is on with the same icon, wrapping instead of overflowing. */
+  .dws-check-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
   .dws-check-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }
   .dws-check-path { overflow-wrap: anywhere; white-space: pre-line; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
   .dws-base-ref { margin-top: 9px; }

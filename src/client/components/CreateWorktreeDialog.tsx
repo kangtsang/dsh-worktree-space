@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { AlertCircle, Loader2 } from "lucide-react"
+import { AlertCircle, GitPullRequest, Loader2 } from "lucide-react"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { slashPath, slugOf, taskDirectory } from "../lib/paths"
@@ -283,7 +283,15 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
                 <div className="dws-repo-choices">
                   {repositories.map((repository) => <label key={repository.name} className="dws-check-option" htmlFor={`${id}-repo-${repository.name}`}>
                     <input id={`${id}-repo-${repository.name}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.name)} onChange={(event) => toggleRepository(repository.name, event.target.checked)} />
-                    <span className="dws-check-copy"><span className="dws-check-label">{repository.name}</span><span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span></span>
+                    {/* The same name-then-branch line the repository view renders, so a
+                        repository reads the same wherever this plugin lists it. */}
+                    <span className="dws-check-copy">
+                      <span className="dws-check-name">
+                        <span className="dws-check-label">{repository.name}</span>
+                        {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("branch")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
+                      </span>
+                      <span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span>
+                    </span>
                   </label>)}
                 </div>
               </fieldset>

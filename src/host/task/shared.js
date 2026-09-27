@@ -104,11 +104,13 @@ export async function listTaskWorktrees(subprocess, taskPath) {
 /**
  * Describe where a task container should live and which repositories the task
  * would span, without creating anything.
+ * @param subprocess - the profile's subprocess service, used to read the branch
+ * each repository's HEAD is on.
  * @param sourceRoot - the directory holding the source repositories.
  * @param options - `tasksRoot` overrides the recommendation; `branchPrefix`
  * overrides the branch prefix a create would use.
- * @returns the recommendation, the discovered repositories, the branch prefix,
- * and whether the container root came from the caller.
+ * @returns the recommendation, the discovered repositories with their current
+ * branch, the branch prefix, and whether the container root came from the caller.
  * @throws IsolationError when the container layout would nest with the source.
  */
 

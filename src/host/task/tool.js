@@ -118,17 +118,18 @@ function required(value, name) {
 /**
  * Resolve the task space root a list or done action should read: an explicit
  * root, else the recommendation for the given source root.
+ * @param subprocess - the profile's subprocess service.
  * @param tasksRoot - the explicit task space root, if any.
  * @param sourceRoot - the source root, if any.
  * @returns the task space root to use.
  * @throws Error when neither is available.
  */
-async function containerFor(tasksRoot, sourceRoot) {
+async function containerFor(subprocess, tasksRoot, sourceRoot) {
   const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
   if (source === '') throw new Error('tasksRoot is required (or sourceRoot, to use its recommended task space)')
-  return (await suggestTaskRoot(source)).suggested
+  return (await suggestTaskRoot(subprocess, source)).suggested
 }
 
 /**
@@ -202,14 +203,14 @@ export function registerTaskTool(ctx) {
 
       if (action === 'suggest-root') {
         const sourceRoot = required(args.sourceRoot, 'sourceRoot')
-        const result = await suggestTaskRoot(sourceRoot, {
+        const result = await suggestTaskRoot(ctx.subprocess, sourceRoot, {
           tasksRoot: args.tasksRoot,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
         })
         const value = envelope(action)
         value.tasksRoot = result.sourceRoot
         value.suggested = result.suggested
-        value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path }))
+        value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: entry.branch ?? '' }))
         value.summary = summarize(action, value)
         return value
       }
@@ -237,7 +238,7 @@ export function registerTaskTool(ctx) {
       }
 
       if (action === 'list') {
-        const tasksRoot = await containerFor(args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
         const result = await listTasks(ctx.subprocess, { tasksRoot })
         const value = envelope(action)
         value.tasksRoot = result.tasksRoot
@@ -261,7 +262,7 @@ export function registerTaskTool(ctx) {
 
       if (action === 'done') {
         const task = required(args.task, 'task')
-        const tasksRoot = await containerFor(args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
         const result = await finishTask(ctx.subprocess, {
           task,
           tasksRoot,

@@ -121,7 +121,8 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
    name, and it defaults to `task/`; clearing the field puts that default back.
 4. Say where the task space goes. It has to sit outside the source tree, and a recommended
    path is filled in for you.
-5. Tick the repositories the task should span, and choose the branch base.
+5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
+   choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
    task space.
 

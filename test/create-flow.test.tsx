@@ -18,8 +18,8 @@ const suggestion = {
   explicit: false,
   branchPrefix: "task/",
   repositories: [
-    { name: "alpha", path: "/repo/alpha" },
-    { name: "beta", path: "/repo/beta" },
+    { name: "alpha", path: "/repo/alpha", branch: "main" },
+    { name: "beta", path: "/repo/beta", branch: "develop" },
   ],
 }
 const created = {
@@ -184,6 +184,29 @@ describe("native task create flow", () => {
     expect(next.api.createTask).not.toHaveBeenCalled()
     expect(screen.getByRole("alert").textContent).toBe(t("invalidBranchPrefix"))
     expect([...screen.getAllByText(t("invalidBranchPrefix"))].some((node) => node.className.includes("dws-field-note-warning"))).toBe(true)
+  })
+
+  it("names the branch each repository's HEAD is on, in the repository view's own label", async () => {
+    const next = setup()
+    next.mount()
+    await ready()
+
+    const cards = [...document.querySelectorAll(".dws-check-option")]
+    // One per repository, carrying the branch the host reported.
+    expect(cards.map((card) => card.querySelector(".dws-branch-label .dws-branch-value")?.textContent)).toEqual(["main", "develop"])
+    // The icon is the one the repository view's branch label renders.
+    expect(document.querySelectorAll(".dws-check-option .dws-branch-label > svg")).toHaveLength(2)
+
+    // A detached or unreadable HEAD has no branch to name, so its card shows none.
+    cleanup()
+    const detached = setup()
+    detached.api.suggestRoot.mockResolvedValue({
+      ...suggestion,
+      repositories: [{ name: "alpha", path: "/repo/alpha" }, { name: "beta", path: "/repo/beta" }],
+    })
+    detached.mount()
+    await ready()
+    expect(document.querySelectorAll(".dws-check-option .dws-branch-label")).toHaveLength(0)
   })
 
   // Each invalid input, and the one rule it breaks.

@@ -26,7 +26,7 @@ export async function classifySourceRoot(sourceRoot) {
 }
 
 
-export async function suggestTaskRoot(sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX } = {}) {
+export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX } = {}) {
   const requested = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   const suggested = resolveTasksRoot(sourceRoot, requested)
   assertIsolated(sourceRoot, suggested)
@@ -38,8 +38,34 @@ export async function suggestTaskRoot(sourceRoot, { tasksRoot, branchPrefix = DE
     // The same resolution a create performs, so the preview the dialog shows and
     // the branch the host would make cannot disagree.
     branchPrefix: validateBranchPrefix(branchPrefix),
-    repositories: repositories.map((repoPath) => ({ name: basename(repoPath), path: repoPath })),
+    // One git call per repository, in parallel: the dialog's cards name the branch
+    // each HEAD is on, which is the fact the repository view shows for its main
+    // worktree.
+    repositories: await Promise.all(repositories.map(async (repoPath) => {
+      const branch = await currentBranchOf(subprocess, repoPath)
+      return {
+        name: basename(repoPath),
+        path: repoPath,
+        ...(branch === undefined ? {} : { branch }),
+      }
+    })),
   }
+}
+
+
+/**
+ * The branch a repository's HEAD is on.
+ *
+ * `git rev-parse --abbrev-ref HEAD` prints `HEAD` for a detached HEAD, which is
+ * no branch at all, and prints nothing when the call fails — both leave the
+ * caller with no branch to name rather than with a made-up one.
+ * @param subprocess - the profile's subprocess service.
+ * @param repoPath - the repository to inspect.
+ * @returns the branch name, or undefined when HEAD is detached or unreadable.
+ */
+async function currentBranchOf(subprocess, repoPath) {
+  const branch = await tryRunGit(subprocess, repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return branch === '' || branch === 'HEAD' ? undefined : branch
 }
 
 
