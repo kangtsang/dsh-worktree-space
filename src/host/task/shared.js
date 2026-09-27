@@ -20,11 +20,6 @@ import { assertIsolated, recommendTasksRoot } from './paths.js'
 export const BREADCRUMB = 'README.en.md'
 
 
-/** Merge targets, in the order they are tried when none is named. */
-
-export const MERGE_TARGET_CANDIDATES = ['main', 'master']
-
-
 /**
  * Whether a directory is a linked worktree, that is, its `.git` is a file
  * pointing back at a source repository. A source repository's `.git` is a
@@ -168,13 +163,13 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  */
 
 /**
- * Pick the branch a finished task merges into: an explicit target, else the
- * remote's default, else the first conventional name that exists locally.
+ * Pick the branch a finished task merges into: the one the source repository has
+ * checked out, which an explicit target may only confirm.
  * @param subprocess - the profile's subprocess service.
  * @param mainRepo - the source repository.
  * @param requested - an explicitly requested target, possibly empty.
  * @returns the local branch name to merge into.
- * @throws Error when no target can be determined.
+ * @throws Error when that branch cannot be determined, or the request names another.
  */
 
 /**

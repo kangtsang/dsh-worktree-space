@@ -12,31 +12,45 @@ import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 import { breadcrumb } from './create.js'
-import { BREADCRUMB, MERGE_TARGET_CANDIDATES, isLinkedWorktree } from './shared.js'
+import { BREADCRUMB, isLinkedWorktree } from './shared.js'
 
+/**
+ * The branch a finished task merges into.
+ *
+ * `git merge` writes into whatever branch is checked out, and nothing here moves a
+ * source checkout — so the branch the source repository is on *is* the merge
+ * target, and this returns exactly that. Naming any other branch would be a promise
+ * this cannot keep: resolving the project's mainline from `origin/HEAD` and
+ * reporting it while merging into the checked-out branch is how a finish could
+ * announce `main` and land on `develop`.
+ * @param subprocess - the profile's subprocess service.
+ * @param mainRepo - the source repository.
+ * @param requested - an explicit target, which may only agree with that branch.
+ * @returns the local branch name to merge into.
+ * @throws Error when that branch cannot be determined, or the request names another.
+ */
 export async function resolveMergeTarget(subprocess, mainRepo, requested) {
+  const name = basename(mainRepo)
+  const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  // Git answers `HEAD` for a detached checkout, and nothing at all in a repository
+  // with no commits yet: neither names a branch a merge could land on.
+  const onBranch = checkedOut !== '' && checkedOut !== 'HEAD'
+
   const explicit = typeof requested === 'string' ? requested.trim() : ''
   if (explicit !== '') {
     if (!(await gitSucceeded(subprocess, mainRepo, ['show-ref', '--verify', '--quiet', `refs/heads/${explicit}`]))) {
-      throw new Error(`merge target '${explicit}' is not a local branch of '${basename(mainRepo)}'`)
+      throw new Error(`merge target '${explicit}' is not a local branch of '${name}'`)
+    }
+    if (explicit !== checkedOut) {
+      throw new Error(`'${name}' has ${onBranch ? `'${checkedOut}'` : 'no branch'} checked out, so nothing merges into '${explicit}' from here`)
     }
     return explicit
   }
 
-  const remoteHead = await tryRunGit(subprocess, mainRepo, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'])
-  if (remoteHead !== '') {
-    const derived = remoteHead.replace(/^refs\/remotes\/[^/]+\//, '')
-    if (await gitSucceeded(subprocess, mainRepo, ['show-ref', '--verify', '--quiet', `refs/heads/${derived}`])) {
-      return derived
-    }
+  if (!onBranch) {
+    throw new Error(`'${name}' has no branch checked out, so there is nothing to merge into; check one out, then finish the task`)
   }
-
-  for (const candidate of MERGE_TARGET_CANDIDATES) {
-    if (await gitSucceeded(subprocess, mainRepo, ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`])) {
-      return candidate
-    }
-  }
-  throw new Error(`cannot determine the merge target of '${basename(mainRepo)}' (tried origin/HEAD, main, master); name one explicitly`)
+  return checkedOut
 }
 
 

@@ -64,7 +64,7 @@ describe("registerTaskSkill", () => {
     expect(loaded.content).toContain("task_worktree_space")
     // The workflow rules the model must apply live in the body.
     expect(loaded.content).toContain("Never create a workspace with a guessed location")
-    expect(loaded.content).toContain("Never merge into main or master")
+    expect(loaded.content).toContain("Never merge by hand")
   })
 
   it("reads the file on every load, so an edited asset is served", async () => {
