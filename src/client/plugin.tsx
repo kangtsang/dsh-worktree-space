@@ -4,7 +4,7 @@ import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots"
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client"
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client"
-import type {} from "@deepseek-ai/dsh-client-ui-layout/client"
+import type { ILayout } from "@deepseek-ai/dsh-client-ui-layout/client"
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client"
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client"
 import type {} from "@deepseek-ai/dsh-client-ui-workspace/client"
@@ -29,6 +29,7 @@ import type { Workspace } from "./lib/types"
 /** The client plugin context surface this plugin touches. */
 export type WorktreeClientContext = Context & {
   connection: ConnectionHandle
+  layout: ILayout
 }
 
 const STYLE_TAG = "data-dsh-worktree-space-style"
@@ -47,9 +48,10 @@ const SIDEBAR_FOOTER_ORDER = 5
  * The management page's key, which is also its sidebar row's id.
  *
  * A keyed `main` slot and a `sidebar.panellist` list entry meet on this string: the
- * row is what selects the panel. The sidebar footer's shortcut does not select it —
- * it opens the same page as a dialog, so a shortcut cannot move the session you were
- * reading off screen.
+ * row is what selects the panel, and the page's own way back is `selectPanel(null)` —
+ * the shell's reserved "show the Conversation" selection. The sidebar footer's
+ * shortcut does not select it at all: it opens the same page as a dialog, so a
+ * shortcut cannot move the session you were reading off screen.
  */
 const PANEL_ID = "dsh-worktree-space"
 
@@ -72,7 +74,7 @@ function installStyles() {
 
 export const WorktreePlugin = {
   name: "dsh-worktree-space",
-  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions"],
+  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout"],
   apply(ctx: WorktreeClientContext) {
     ctx.effect(installStyles, "dsh-worktree-space styles")
     ctx.effect(() => installLocale(ctx), "dsh-worktree-space locale")
@@ -229,36 +231,39 @@ export const WorktreePlugin = {
       WorktreeOverlay,
     ))
 
-    // The plugin's front door: a row in the sidebar's panel list, under New Session,
-    // selecting the management page in the main column — where the shell puts a
-    // plugin's own page, and where the native Plugins and Task board entries sit.
-    // Both halves are always registered: the sidebar row is this plugin's way in, and
-    // a panel nobody can select is a page nobody can reach.
+    // The management page itself, registered once as the `main` panel its sidebar row
+    // selects. It stays registered even when that row is hidden: the panel is what the
+    // id means, and a hidden row is a preference, not an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={(target) => openCreate(target)} />,
+      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={(target) => openCreate(target)} onBack={() => ctx.layout.selectPanel(null)} />,
     ))
 
-    ctx.slots.inject("sidebar.panellist", () => ctx.slots.register(
-      { name: "sidebar.panellist", id: PANEL_ID, order: SIDEBAR_PANEL_ORDER, label: () => t("worktrees") },
-      (props: PropsRuntime<"sidebar.panellist">) => <WorktreePanelIcon size={props.size} />,
-    ))
-
-    // The sidebar footer's shortcut to the same page, shown or hidden by this
-    // plugin's own configuration on the Plugins page — the same place, and the same
-    // shape, the neighbouring plugins use. The value arrives through the
-    // `configForms` service and is subscribed to, so the slot follows every change
-    // instead of waiting for a reload. Without that service the default stands: shown,
-    // since a workspace tool belongs in the sidebar.
+    // The plugin's two ways in, each shown or hidden by this plugin's own
+    // configuration on the Plugins page — the same place, and the same shape, the
+    // neighbouring plugins use. The values arrive through the `configForms` service
+    // and are subscribed to, so the slots follow every change instead of waiting for a
+    // reload. Without that service the defaults stand: both shown.
+    //
+    // The panel row is the front door — a row in the sidebar's panel list, under New
+    // Session, where the native Plugins and Task board entries sit. The footer action
+    // is a shortcut to the same page. Hiding one leaves the other, the workspace menu
+    // and the composer's own button, so nothing becomes unreachable.
+    // The panel row is asked for and the footer shortcut is assumed, which is what the
+    // Host's defaults say: one way in is always there, a second one is a choice.
     let disposeEntries: Array<() => void> = []
-    const showEntries = (value: { sidebarEntry?: string } | undefined) => {
+    const showEntries = (value: { sidebarEntry?: string; panelEntry?: string } | undefined) => {
       for (const dispose of disposeEntries) dispose()
       disposeEntries = []
-      // Hiding it is honoured: the panel row above, the workspace menu and the
-      // composer's own button all stay, so nothing becomes unreachable.
+      if (value?.panelEntry === "show") {
+        // A list slot: the sidebar owns the row and sorts by `order`, so placement is
+        // arranged rather than claimed.
+        disposeEntries.push(ctx.slots.inject("sidebar.panellist", () => ctx.slots.register(
+          { name: "sidebar.panellist", id: PANEL_ID, order: SIDEBAR_PANEL_ORDER, label: () => t("worktrees") },
+          (props: PropsRuntime<"sidebar.panellist">) => <WorktreePanelIcon size={props.size} />,
+        )))
+      }
       if (value?.sidebarEntry !== "hide") {
-        // The footer is a list slot: the sidebar sorts what every plugin registers
-        // there by its own `order`, so placement is arranged rather than claimed.
         disposeEntries.push(ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register(
           { name: "sidebar.footer.action", id: "dsh-worktree-space", order: SIDEBAR_FOOTER_ORDER, label: () => t("worktrees") },
           (props: PropsRuntime<"sidebar.footer.action">) => <WorktreeFooterAction wide={props.wide} onOpen={() => openManage()} />,
@@ -279,8 +284,11 @@ export const WorktreePlugin = {
       // A pending choice counts here too: the entry appears or disappears with the
       // click rather than a round trip later.
       const read = () => {
-        const served = form.getSnapshot().value as { sidebarEntry?: string } | undefined
-        showEntries({ sidebarEntry: previewValue("sidebarEntry") ?? served?.sidebarEntry })
+        const served = form.getSnapshot().value as { sidebarEntry?: string; panelEntry?: string } | undefined
+        showEntries({
+          sidebarEntry: previewValue("sidebarEntry") ?? served?.sidebarEntry,
+          panelEntry: previewValue("panelEntry") ?? served?.panelEntry,
+        })
       }
       read()
       ctx.effect(() => form.subscribe(read), "dsh-worktree-space entry configuration")

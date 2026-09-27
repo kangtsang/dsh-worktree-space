@@ -175,8 +175,10 @@ export const inject = ['connection', 'subprocess']
  * applies as soon as it is made.
  */
 export const Config = z.object({
+  panelEntry: z.union(['show', 'hide']).default('hide').loose().volatile()
+    .description('Also show the management page as a row in the sidebar panel list, under New session. Hidden by default: the footer shortcut is the one way in.'),
   sidebarEntry: z.union(['show', 'hide']).default('show').loose().volatile()
-    .description('Show the Worktree Space shortcut in the sidebar footer. The panel entry under New session is always there.'),
+    .description('Show the Worktree Space shortcut in the sidebar footer.'),
   /** The Web UI's control is gone: this is the one place the depth is chosen. */
   scanDepth: z.number().min(MIN_SCAN_DEPTH).max(MAX_SCAN_DEPTH).step(1).default(DEFAULT_SCAN_DEPTH).volatile()
     .description('How many directory levels a scan descends from a Workspace root.'),

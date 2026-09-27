@@ -103,9 +103,9 @@ describe("WorktreesSettings discovery controls", () => {
     const next = setup({ repos })
     next.mount()
     await settled()
-    const filters = within(screen.getByRole("group", { name: t("worktrees") }))
-    // The same two filters the task view offers.
-    expect([...filters.getAllByRole("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention")])
+    const filters = within(screen.getByRole("group", { name: t("filters") }))
+    // The same two filters the task view offers, and the fold button shares their run.
+    expect([...filters.getAllByRole("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
     expect(filters.getByRole("button", { name: t("filterAll") }).getAttribute("aria-pressed")).toBe("true")
     expect(visibleRepositories()).toEqual(["alpha", "beta", "empty"])
     await user.click(filters.getByRole("button", { name: t("filterAttention") }))

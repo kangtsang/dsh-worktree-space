@@ -120,10 +120,12 @@ describe("task view", () => {
     expect(screen.getByText(branch)).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin")).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin-web")).toBeTruthy()
-    // Tasks lead the switch, since they are what the page opens on.
-    // The fold button shares the run, after the views, separated by a `|`.
+    // Tasks lead the switch, since they are what the page opens on. The filters and
+    // the fold button follow it in one run, the order the panel reads them in too.
     const viewSwitch = screen.getByRole("group", { name: t("viewSwitch") })
-    expect([...viewSwitch.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories"), t("collapseAll")])
+    expect([...viewSwitch.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
+    const foldRun = screen.getByRole("group", { name: t("filters") })
+    expect([...foldRun.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
     // The hand-made `spike` worktree shares no container with a matching branch.
     expect(taskArticles()).toHaveLength(1)
     expect(document.querySelector(".dws-summary")?.textContent).toContain(t("taskCount"))
@@ -150,9 +152,10 @@ describe("task view", () => {
     })
     await ready()
 
-    const filters = screen.getByRole("group", { name: t("worktrees") })
-    // Every task holds worktrees, so that filter has nothing to say here.
-    expect([...filters.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention")])
+    const filters = screen.getByRole("group", { name: t("filters") })
+    // Every task holds worktrees, so that filter has nothing to say here; the fold
+    // button shares the run, as it does in the panel.
+    expect([...filters.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
     expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
     expect(screen.getByRole("heading", { name: "dirty" })).toBeTruthy()
 

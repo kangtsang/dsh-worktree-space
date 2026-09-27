@@ -9,6 +9,10 @@ import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
+/** The three views this page has, in the order they are offered. */
+export const WORKTREE_VIEWS = [['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const
+export type WorktreeView = (typeof WORKTREE_VIEWS)[number][0]
+
 interface Props {
   api: any
   workspaces: WorkspacesService
@@ -17,6 +21,12 @@ interface Props {
   /** Render the section's own header. Off when the host supplies the heading. */
   heading?: boolean
   onCreate?: (target: Pick<Workspace, "path" | "title">) => void
+  /**
+   * The view and its setter, for a host that offers the switcher itself — the main
+   * panel has a nav column of its own, so the toolbar keeps only the filters.
+   * Left out, the section holds the view and renders the switcher in its toolbar.
+   */
+  control?: { view: WorktreeView; onView: (view: WorktreeView) => void }
 }
 type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
@@ -24,8 +34,11 @@ const FILTERS = [['all', 'filterAll'], ['attention', 'filterAttention']] as cons
 const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control }: Props) {
   const t = useT()
+  const [ownView, setOwnView] = useState<WorktreeView>("tasks")
+  const view = control?.view ?? ownView
+  const setView = control?.onView ?? setOwnView
   const [repos, setRepos] = useState<WorktreeList[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -33,9 +46,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("all")
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
-  // Tasks are the unit this page is about, so it opens on them; the repository
-  // list stays one click away for everything a task does not cover.
-  const [view, setView] = useState<"repos" | "tasks" | "spaces">("tasks")
   // What each Workspace is, once asked: whether a task space can start there, and
   // how many repositories it would span. Filled when the view is opened.
   //
@@ -183,17 +193,29 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return { state: "clean", label: t("clean") }
   }
 
+  // The toolbar's pieces, in the two orders the two hosts read them in.
+  const viewButtons = WORKTREE_VIEWS.map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)
+  const filterButtons = FILTERS.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)
+  const foldButton = <button type="button" className="dws-filter-fold" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button>
+  const divider = <span className="dws-filter-divider" aria-hidden="true">|</span>
+  /** Between two runs rather than inside one, so it gets air on both sides. */
+  const separator = <span className="dws-filter-divider dws-filter-separator" aria-hidden="true">|</span>
+
   return <section className="dws-settings" aria-label={t("worktrees")}>
     {heading ? <header className="dws-settings-header">
       <div><h2>{t("worktreesTitle")}</h2><p>{t("panelDescription")}</p></div>
     </header> : null}
     <div className="dws-toolbar">
       <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
-      <Button className="dws-icon-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={16} className={busy ? "dws-spin" : undefined} /></Button>
+      <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
     </div>
     <div className="dws-list-controls">
-      <div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{([['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)}<span className="dws-filter-divider" aria-hidden="true">|</span><button type="button" className="dws-filter-fold" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button></div>
-      <div className="dws-filters" role="group" aria-label={t("worktrees")}>{FILTERS.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)}</div>
+      {/* The dialog form offers the three views here, as it always has, set off from
+          the run that follows by the same `|` the filters and the fold button share. */}
+      {control === undefined
+        ? <><div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{viewButtons}</div>{separator}</>
+        : null}
+      <div className="dws-filters" role="group" aria-label={t("filters")}>{filterButtons}{divider}{foldButton}</div>
       <span className="dws-summary">{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("repositories")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
     </div>
     {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}

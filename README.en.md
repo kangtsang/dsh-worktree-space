@@ -20,7 +20,7 @@ registered as a DSH Workspace with its own sessions.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
-- **A management page** (the Worktree Space row under New session, opened full-width in the main column), with three views:
+- **A management page**, with three views (both ways in, and their defaults, are described under Manage tasks):
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
@@ -71,16 +71,10 @@ plugin list shows the name, description, icon and configuration section correctl
 
 ### Install
 
-**From npm (recommended):**
+**From npm:**
 
 ```sh
 dsh plugin --profile web add dsh-worktree-space
-```
-
-**Straight from the GitHub repository:**
-
-```sh
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 ```
 
 The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's bundle
@@ -90,22 +84,25 @@ patch, which normally writes it for you; if the plugin never shows up, add it by
 - id: worktree-space
   name: dsh-worktree-space
   config:
-    sidebarEntry: show       # the shortcut in the sidebar footer (the panel row is always there)
+    panelEntry: hide         # the management page's row under New session (hidden by default)
+    sidebarEntry: show       # the shortcut in the sidebar footer (shown by default)
     scanDepth: 2
     maxScanDirectories: 1000
 ```
 
-To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and install
-again.
+To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and reinstall.
 
 ### Configuration
 
-Change these in **Plugins → Worktree Space** in the sidebar, next to every other plugin's
-configuration; they take effect immediately.
+**In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → its configuration
+section, beside every other plugin's; changes take effect immediately, no restart. You can also
+edit the file: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
+data directory (as in the sample above), which needs a DSH restart.
 
 | Setting | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening the management page as a **dialog** — closing it returns you to the page you were on; the panel row under New session is always there and opens the full page |
+| Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
+| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
 | Scan depth | 1–5 levels | 2 levels | How far down from each Workspace root the scan goes (the root itself does not count) |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 
@@ -134,7 +131,15 @@ you retry the registration.
 
 ### Manage tasks
 
-Open the **management page** from the Worktree Space row under New session (full page in the main column), or from the shortcut at the sidebar foot (the same page in a dialog, so closing it leaves you where you were). The three
+Open the **management page** — two ways in:
+
+- **The Worktree Space shortcut at the sidebar foot** (shown by default) — opens it as a **dialog**;
+- **The Worktree Space row under New session** (hidden by default, turn it on in the
+  **configuration**) — opens it **full width** in the main column, where the page brings its own
+  left-hand navigation: **Back to conversation** first, since the panel takes the column the
+  conversation was in, then the three views. The dialog form keeps the switcher in its toolbar.
+
+The three
 views differ as described under Features: Task spaces shows each task and its repositories,
 Workspaces shows where a task space can start, Code repositories shows every Git project found
 and its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /

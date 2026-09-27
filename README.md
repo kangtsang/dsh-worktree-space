@@ -17,7 +17,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
   也可以指定某个分支或提交。
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— Agent 可以
   跨仓库改代码，不会动到源码检出。
-- **管理页面**（侧边栏「新会话」下方的 Worktree Space 入口，在主区域整页打开），分三个视图：
+- **管理页面**，分三个视图（两种入口与各自默认值见「管理任务」一节）：
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理）；
   - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库；
   - **代码仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree。
@@ -57,16 +57,10 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
 ### 安装
 
-**从 npm（推荐）：**
+**从 npm 安装：**
 
 ```sh
 dsh plugin --profile web add dsh-worktree-space
-```
-
-**直接从 GitHub 仓库装：**
-
-```sh
-dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 ```
 
 插件的挂载行写在 profile 的 `cordis.patch.yml` —— 本仓库带着 DSH 的 bundle patch，一般会自动生效；
@@ -76,20 +70,24 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 - id: worktree-space
   name: dsh-worktree-space
   config:
-    sidebarEntry: show       # 侧边栏底部的快捷入口（「新会话」下方的面板入口始终存在）
+    panelEntry: hide         # 「新会话」下方的管理页面入口（默认隐藏）
+    sidebarEntry: show       # 侧边栏底部的快捷入口（默认显示）
     scanDepth: 2
     maxScanDirectories: 1000
 ```
 
-卸载：`dsh plugin --profile web remove dsh-worktree-space`；更新时先卸载再装一次。
+卸载：`dsh plugin --profile web remove dsh-worktree-space`；更新时先卸载再重新安装。
 
 ### 配置
 
-在 **侧边栏 → 插件 → Worktree Space** 里改，和其它插件的配置在同一处，改完立刻生效：
+**在界面里改**（推荐）：侧边栏 →「插件」→ **Worktree Space** → 配置区，和其它插件的配置在同一处，
+改完立刻生效，不用重启。也可以直接改配置文件：DSH 数据目录下 `profiles/<profile>/cordis.patch.yml`
+里这个插件的 `config:` 区块（见上方示例），改完重启 DSH 生效。
 
 | 设置 | 取值 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| 侧边栏底部入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开管理页面（关掉就回到你原来的页面）；「新会话」下方的面板入口不受它影响，永远都在，那个是整页打开 |
+| 面板入口（新会话下方） | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
+| 侧边栏底部入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
 | 扫描深度 | 1–5 层 | 2 层 | 从每个工作区根目录往下扫几层（根目录本身不算） |
 | 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | 一次扫描最多读多少个目录；超过会提示你换一个更小的工作区 |
 
@@ -112,7 +110,14 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 ### 管理任务
 
-打开 **管理页面**（侧边栏「新会话」下方的 Worktree Space 入口，或侧边栏底部的快捷入口）。三个视图的区别见「功能」一节：任务空间视图看每个
+打开 **管理页面**，两种入口：
+
+- **侧边栏底部的 Worktree Space**（默认显示）—— 以**对话框**打开；
+- **侧边栏「新会话」下方的 Worktree Space 行**（默认隐藏，在**配置**里打开）—— 在主区域**整页**打开，
+  页面自带左侧导航：第一项是 **返回会话**（面板占用了会话所在的主区域，所以留一个明确的回头路），
+  下面三项切换视图。对话框形态的视图切换仍在工具栏里。
+
+三个视图的区别见「功能」一节：任务空间视图看每个
 任务和它的各个仓库，工作区视图看哪些工作区能建任务空间，代码仓库视图看扫到的每个 Git 项目及其 worktree。
 右侧的统计会跟着视图变（`N 个任务` / `N 个工作区` / `N 个仓库 · M 个 Worktree`），搜索或筛选时显示
 `可见 / 总数`。

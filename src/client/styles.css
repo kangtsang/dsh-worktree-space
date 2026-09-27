@@ -18,11 +18,23 @@
   }
   .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { box-sizing: border-box; }
   /* The management page as a main panel: the shell gives the column, so this owns the
-     scroll container and the reading measure inside it, the way the shipped panels do. */
-  .dws-panel { display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+     navigation column, the scroll container and the reading measure inside it. */
+  .dws-panel { display: flex; flex-direction: row; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
   .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
-  .dws-panel-scroll { flex: 1; min-height: 0; overflow: auto; }
-  .dws-panel-content { max-width: 960px; margin: 0 auto; padding: 28px clamp(24px, 4vw, 48px) 48px; }
+  /* The page's own nav: the way back to the conversation, then the three views.
+     Its rows are the sidebar's own panel rows, to the pixel — same radius, height,
+     inset and fill — so the two navigation surfaces read as one product. */
+  .dws-panel-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: 208px; padding: 24px 14px; border-right: 1px solid var(--wt-line); overflow: auto; }
+  .dws-panel-nav button { box-sizing: border-box; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: right; white-space: nowrap; cursor: pointer; }
+  .dws-panel-nav button:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
+  .dws-panel-nav button[aria-current="true"] { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); color: var(--dsw-alias-label-primary, var(--wt-text)); }
+  .dws-panel-nav button:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
+  .dws-panel-nav svg { flex: none; }
+  .dws-panel-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
+  .dws-panel-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+  /* Flush against the navigation, not centred in the leftover width: the two columns
+     share one left inset, so their text lines up from the panel's edge inward. */
+  .dws-panel-content { max-width: 960px; padding: 28px 32px 48px 24px; }
   .dws-panel-heading { margin-bottom: 20px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
@@ -54,7 +66,9 @@
   .dws-input:disabled, .dws-select:disabled { opacity: .5; }
   .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
   .dws-filter-fold { margin-left: 20px; }
-  .dws-search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 100px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
+  /* The search field takes half the row and the refresh button follows it: a button
+     that says what it does, not an icon parked at the far edge. */
+  .dws-search { display: flex; flex: 0 1 50%; align-items: center; gap: 8px; min-width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
   .dws-search:focus-within { border-color: var(--dsw-alias-brand-primary); }
   .dws-search > svg { flex: none; }
   .dws-search .dws-input { min-height: 34px; padding: 6px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
@@ -66,15 +80,17 @@
   .dws-depth-box { position: relative; flex: none; width: 92px; }
   .dws-depth-box .dws-select { appearance: none; width: 100%; padding-right: 28px; background: var(--wt-soft); border-color: transparent; cursor: pointer; }
   .dws-depth-box > svg { position: absolute; right: 10px; top: 11px; pointer-events: none; color: var(--wt-secondary); }
-  .dws-list-controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .dws-list-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
   .dws-filters { display: inline-flex; align-items: center; gap: 3px; }
   /* Separates the fold button from the views, at the group's own 3px spacing. */
   .dws-filter-divider { color: var(--wt-line); user-select: none; }
+  /* The one that separates two runs gets air on both sides of it. */
+  .dws-filter-separator { margin: 0 6px; }
   .dws-filters button { border: 0; border-radius: 7px; padding: 4px 9px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
   .dws-filters button:hover { background: var(--wt-hover); }
   .dws-filters button[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); font-weight: 500; }
   /* The entry switches sit at the end of the toolbar, where the panel is managed. */
-  .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
+  .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; margin-left: auto; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
   .dws-repo-list { min-width: 0; border-top: 1px solid var(--wt-line); }
   .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
   /* The list's vertical rhythm. Rows are separated by their own padding, kept
@@ -330,7 +346,8 @@
   @keyframes dws-pulse { 50% { opacity: .45; } }
   @media (max-width: 640px) {
     .dws-toolbar { flex-wrap: wrap; }
-    .dws-search { flex-basis: calc(100% - 44px); }
+    /* One per row once there is no room for half a field beside the button. */
+    .dws-search { flex-basis: 100%; }
     .dws-summary { font-size: 11px; }
     .dws-repo-title { gap: 4px 7px; }
     .dws-branch-label { max-width: 135px; overflow-wrap: anywhere; }
