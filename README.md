@@ -17,7 +17,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
   也可以指定某个分支或提交。
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— Agent 可以
   跨仓库改代码，不会动到源码检出。
-- **管理页面**（侧边栏底部的 Worktree Space 入口），分三个视图：
+- **管理页面**（侧边栏「新会话」下方的 Worktree Space 入口，在主区域整页打开），分三个视图：
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理）；
   - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库；
   - **代码仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree。
@@ -76,8 +76,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 - id: worktree-space
   name: dsh-worktree-space
   config:
-    sidebarEntry: show       # 侧边栏底部的入口
-    settingsEntry: hide      # 是否也放进设置面板
+    sidebarEntry: show       # 侧边栏底部的快捷入口（「新会话」下方的面板入口始终存在）
     scanDepth: 2
     maxScanDirectories: 1000
 ```
@@ -90,8 +89,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 | 设置 | 取值 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| 侧边栏入口 | 显示 / 隐藏 | 显示 | 侧边栏底部的 Worktree Space 入口 |
-| 设置面板入口 | 显示 / 隐藏 | 隐藏 | 是否也在设置面板里放一个入口；两个入口互相独立 |
+| 侧边栏底部入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个指向管理页面的快捷入口；「新会话」下方的面板入口不受它影响，永远都在 |
 | 扫描深度 | 1–5 层 | 2 层 | 从每个工作区根目录往下扫几层（根目录本身不算） |
 | 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | 一次扫描最多读多少个目录；超过会提示你换一个更小的工作区 |
 
@@ -114,7 +112,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 ### 管理任务
 
-打开 **管理页面**（侧边栏底部的 Worktree Space 入口）。三个视图的区别见「功能」一节：任务空间视图看每个
+打开 **管理页面**（侧边栏「新会话」下方的 Worktree Space 入口，或侧边栏底部的快捷入口）。三个视图的区别见「功能」一节：任务空间视图看每个
 任务和它的各个仓库，工作区视图看哪些工作区能建任务空间，代码仓库视图看扫到的每个 Git 项目及其 worktree。
 右侧的统计会跟着视图变（`N 个任务` / `N 个工作区` / `N 个仓库 · M 个 Worktree`），搜索或筛选时显示
 `可见 / 总数`。

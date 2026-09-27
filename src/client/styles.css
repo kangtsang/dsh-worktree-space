@@ -17,6 +17,15 @@
     line-height: 22px;
   }
   .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { box-sizing: border-box; }
+  /* The management page as a main panel: the shell gives the column, so this owns the
+     scroll container and the reading measure inside it, the way the shipped panels do. */
+  .dws-panel { display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+  .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
+  .dws-panel-scroll { flex: 1; min-height: 0; overflow: auto; }
+  .dws-panel-content { max-width: 960px; margin: 0 auto; padding: 28px clamp(24px, 4vw, 48px) 48px; }
+  .dws-panel-heading { margin-bottom: 20px; }
+  .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
+  .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
   .dws-settings { min-width: 0; padding: 2px 0 16px; }
   .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }
   .dws-settings-header { margin-bottom: 20px; }
@@ -185,10 +194,6 @@
   .dws-footer-action-label { flex: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The 56px rail shows the icon alone, as the neighbouring row does. */
   .dws-footer-action[data-wide="false"] { flex: none; justify-content: center; gap: 0; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; }
-  /* The management panel: the settings page's own component in a wide dialog. */
-  .dws-manage-panel { width: min(900px, calc(100vw - 32px)); height: 95dvh; max-height: 95dvh; }
-  /* The panel supplies the heading, so the section keeps only its toolbar. */
-  .dws-manage-panel .dws-settings { padding: 0; }
   .dws-dialog-close { position: absolute; top: 14px; right: 14px;display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; color: var(--wt-muted); background: transparent; cursor: pointer; }
   .dws-dialog-close:hover:not(:disabled) { color: var(--wt-text); background: var(--wt-hover); }
   .dws-dialog-close:disabled { opacity: .4; cursor: not-allowed; }

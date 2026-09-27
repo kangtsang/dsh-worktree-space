@@ -14,9 +14,8 @@ interface Props {
   workspaces: WorkspacesService
   uiWorkspace: WorkspaceNavigation
   sessions: ISessions
-  /** Render the section's own header. Off when a dialog supplies the heading. */
+  /** Render the section's own header. Off when the host supplies the heading. */
   heading?: boolean
-  close?: () => void
   onCreate?: (target: Pick<Workspace, "path" | "title">) => void
 }
 type Filter = "all" | "attention"
@@ -25,7 +24,7 @@ const FILTERS = [['all', 'filterAll'], ['attention', 'filterAttention']] as cons
 const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, close, onCreate }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate }: Props) {
   const t = useT()
   const [repos, setRepos] = useState<WorktreeList[]>([])
   const [busy, setBusy] = useState(false)

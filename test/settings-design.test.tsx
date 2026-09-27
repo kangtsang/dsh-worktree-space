@@ -30,9 +30,8 @@ function setup({ repos = [repository("alpha", [worktree(linkedPath, "task/featur
   }
   const uiWorkspace = { openWorkspace: vi.fn().mockResolvedValue(undefined) }
   const onCreate = vi.fn()
-  const close = vi.fn()
-  const mount = () => render(<WorktreesSettings api={api} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} onCreate={onCreate} close={close} />)
-  return { api, workspaces, uiWorkspace, onCreate, close, mount }
+  const mount = () => render(<WorktreesSettings api={api} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} onCreate={onCreate} />)
+  return { api, workspaces, uiWorkspace, onCreate, mount }
 }
 async function settled() {
   await waitFor(() => expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false))

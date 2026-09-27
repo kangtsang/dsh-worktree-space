@@ -20,7 +20,7 @@ registered as a DSH Workspace with its own sessions.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
-- **A management page** (the Worktree Space entry in the sidebar footer), with three views:
+- **A management page** (the Worktree Space row under New session, opened full-width in the main column), with three views:
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
@@ -90,8 +90,7 @@ patch, which normally writes it for you; if the plugin never shows up, add it by
 - id: worktree-space
   name: dsh-worktree-space
   config:
-    sidebarEntry: show       # the entry in the sidebar footer
-    settingsEntry: hide      # whether to offer one in Settings as well
+    sidebarEntry: show       # the shortcut in the sidebar footer (the panel row is always there)
     scanDepth: 2
     maxScanDirectories: 1000
 ```
@@ -106,8 +105,7 @@ configuration; they take effect immediately.
 
 | Setting | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| Sidebar entry | show / hide | show | The Worktree Space entry in the sidebar footer |
-| Settings entry | show / hide | hide | Whether to put an entry in Settings as well; the two are independent |
+| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening the management page as a **dialog** — closing it returns you to the page you were on; the panel row under New session is always there and opens the full page |
 | Scan depth | 1–5 levels | 2 levels | How far down from each Workspace root the scan goes (the root itself does not count) |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 
@@ -136,7 +134,7 @@ you retry the registration.
 
 ### Manage tasks
 
-Open the **management page** from the Worktree Space entry in the sidebar footer. The three
+Open the **management page** from the Worktree Space row under New session (full page in the main column), or from the shortcut at the sidebar foot (the same page in a dialog, so closing it leaves you where you were). The three
 views differ as described under Features: Task spaces shows each task and its repositories,
 Workspaces shows where a task space can start, Code repositories shows every Git project found
 and its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /

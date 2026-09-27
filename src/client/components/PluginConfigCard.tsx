@@ -39,12 +39,6 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
   },
   {
-    field: "settingsEntry",
-    label: t("entrySettingsLabel"),
-    fallback: "hide",
-    choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
-  },
-  {
     field: "scanDepth",
     label: t("scanDepth"),
     fallback: "3",
@@ -75,7 +69,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["sidebarEntry", "settingsEntry", "scanDepth", "maxScanDirectories"]) {
+  for (const field of ["sidebarEntry", "scanDepth", "maxScanDirectories"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
