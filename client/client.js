@@ -69,7 +69,10 @@ window.__ModuleLoader__.load({
   .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
   .dws-repo-list { min-width: 0; border-top: 1px solid var(--wt-line); }
   .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
-  .dws-repo-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 0; }
+  /* The list's vertical rhythm. Rows are separated by their own padding, kept
+     just wide enough that two rows still read as two rows: a branch line and the
+     path under it belong together, so their gap is the smaller one. */
+  .dws-repo-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 0; }
   .dws-repo-toggle { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--wt-text); font: inherit; text-align: left; cursor: pointer; }
   .dws-repo-toggle > svg { flex: none; }
   .dws-repo-toggle:disabled { opacity: 1; cursor: default; }
@@ -86,15 +89,15 @@ window.__ModuleLoader__.load({
   .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
   .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
   .dws-create-repo { min-height: 30px; padding: 4px 9px; font-size: 12px; }
-  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 8px 30px; border-left: 1px solid var(--wt-line); padding-left: 18px; }
-  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px 0; }
-  .dws-worktree::before { content: ""; position: absolute; left: -19px; top: 25px; width: 10px; border-top: 1px solid var(--wt-line); }
+  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 6px 30px; border-left: 1px solid var(--wt-line); padding-left: 18px; }
+  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 5px 0; }
+  .dws-worktree::before { content: ""; position: absolute; left: -19px; top: 23px; width: 10px; border-top: 1px solid var(--wt-line); }
   .dws-worktree + .dws-worktree { border-top: 1px solid color-mix(in srgb, var(--wt-line) 60%, transparent); }
   .dws-tree-icon { flex: none; align-self: flex-start; margin-top: 3px; color: var(--wt-muted); }
   .dws-worktree-info { flex: 1; min-width: 0; }
   .dws-worktree-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; min-width: 0; }
   .dws-worktree-title strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 20px; }
-  .dws-worktree-path { overflow-wrap: anywhere; margin-top: 4px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  .dws-worktree-path { overflow-wrap: anywhere; margin-top: 2px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
   .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }
   .dws-status-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
   .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }
@@ -250,7 +253,7 @@ window.__ModuleLoader__.load({
   /* The task view reuses the repository card's shape: a task is the same kind of
      row, one level up from the repositories it spans. */
   .dws-task { min-width: 0; border-bottom: 1px solid var(--wt-line); }
-  .dws-task-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 0; }
+  .dws-task-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 0; }
   .dws-task-icon { flex: none; color: var(--wt-secondary); }
   .dws-task-heading { display: block; flex: 1; min-width: 0; }
   .dws-task-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
