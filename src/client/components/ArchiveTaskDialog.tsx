@@ -114,6 +114,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
     : entry.branches
 
   const close = () => { if (!busy) onClose() }
+  /**
+   * Whether confirming would throw work away, which is what the button's colour is
+   * for. Finishing a task is routine - it merges, keeps the branches unless asked,
+   * and the merge itself can be reverted - so the button warns rather than shouts.
+   * It turns red only when something concrete is about to be lost, and this dialog
+   * can name it: uncommitted files that Force will discard, or a branch whose
+   * commits it will force-delete without merging them anywhere.
+   */
+  const discardsWork = (plan?.changedFiles ?? 0) > 0 && options.force
+    || (plan?.commits ?? 0) > 0 && options.deleteBranch && !options.merge
   const archive = async () => {
     if (plan === null || busy || running) return
     setBusy(true); setError(""); setRegistrationError("")
@@ -300,7 +310,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         <div className="dws-dialog-footer">
           {result
             ? <Button onClick={close}>{t("close")}</Button>
-            : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className="dws-button-danger-solid" disabled={optionsDisabled} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}
+            : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className={discardsWork ? "dws-button-danger-solid" : "dws-button-warn-solid"} disabled={optionsDisabled} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}
         </div>
       </DialogContent>
     </Dialog>

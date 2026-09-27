@@ -32,6 +32,10 @@
   .dws-button-danger { color: var(--wt-danger); }
   .dws-button-danger-solid { border-color: transparent; background: var(--wt-danger); color: var(--dsw-static-neutral-00); }
   .dws-button-danger-solid:hover:not(:disabled) { background: var(--dsw-alias-state-error-secondary); }
+  /* Finishing a task is a commitment, not a loss: the same button, one step down
+     from danger, until the dialog can name something that will be thrown away. */
+  .dws-button-warn-solid { border-color: transparent; background: var(--dsw-static-amber-600); color: var(--dsw-static-neutral-00); }
+  .dws-button-warn-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-static-amber-600) 84%, black); }
   .dws-icon-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--wt-secondary); }
   .dws-delete-action:hover:not(:disabled) { color: var(--wt-danger); background: var(--dsw-alias-interactive-bg-hover-danger); }
   .dws-button:focus-visible, .dws-repo-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }

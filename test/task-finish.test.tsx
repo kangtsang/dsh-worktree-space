@@ -388,6 +388,53 @@ describe("finishing a task", () => {
     expect(screen.queryByText(t("finishDoneKept"))).toBeNull()
   })
 
+  it("warns while finishing is routine, and turns red once Force would discard uncommitted files", async () => {
+    const user = userEvent.setup()
+    // Two uncommitted files and three commits waiting: the plan the dialog reads.
+    const next = setup()
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task, tasksRoot, path: `${tasksRoot}\\${task}`, changedFiles: 2, commits: 3, strays: [],
+      repositories: [{ name: "kratos-vue-admin", path: `${tasksRoot}\\${task}\\kratos-vue-admin`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 3, changedFiles: 2 }],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    const confirm = () => screen.getByRole("button", { name: t("finishConfirmAction") })
+
+    // Merging with the branches kept is routine: the merge can be reverted and
+    // nothing is discarded, so the button warns instead of shouting.
+    expect(confirm().className).toContain("dws-button-warn-solid")
+    // Force discards those two files, which is not reversible.
+    await user.click(option(t("finishForce")))
+    expect(confirm().className).toContain("dws-button-danger-solid")
+    // Deleting a branch that was merged loses nothing, so with the files gone this
+    // is a warning again.
+    await user.click(option(t("finishForce")))
+    await user.click(option(t("finishDeleteBranch")))
+    expect(confirm().className).toContain("dws-button-warn-solid")
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+  })
+
+  it("turns red when abandoning a branch that still has commits", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task, tasksRoot, path: `${tasksRoot}\\${task}`, changedFiles: 0, commits: 3, strays: [],
+      repositories: [{ name: "kratos-vue-admin", path: `${tasksRoot}\\${task}\\kratos-vue-admin`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 3, changedFiles: 0 }],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    const confirm = () => screen.getByRole("button", { name: t("finishConfirmAction") })
+
+    // A clean worktree and no branch deletion: still routine.
+    expect(confirm().className).toContain("dws-button-warn-solid")
+    // No merge, forced branch deletion, and three commits that live only there.
+    await user.click(option(t("finishMerge")))
+    await user.click(option(t("finishForce")))
+    await user.click(option(t("finishDeleteBranch")))
+    expect(confirm().className).toContain("dws-button-danger-solid")
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+  })
+
   it("reports a repository left untouched instead of hiding it behind the others", async () => {
     const user = userEvent.setup()
     const conflicted = finishResult({

@@ -162,3 +162,26 @@ Deleting a branch normally needs the merge: untick the merge and the branch opti
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and
 the commits on them discarded — tick **Force** as well, which is what allows deleting a
 branch that was never merged.
+
+#### What each combination does
+
+| Merge back | Delete branch | Force | What happens |
+| --- | --- | --- | --- |
+| ✓ | | | Every repository's branch is merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository whose merge conflicts is left as it is, the others still finish |
+| ✓ | ✓ | | The same, and the branch is deleted once merged (`git branch -d`, so an unmerged branch cannot be deleted this way) |
+| ✓ | | ✓ | The same, and **uncommitted** changes in the worktrees are discarded (without it, a worktree with uncommitted changes fails `worktree remove` and is kept whole); the branches stay |
+| ✓ | ✓ | ✓ | Merge, discard uncommitted changes, force-delete the branch (`git branch -D`); the branch was merged, so nothing extra is lost |
+| | | | Nothing is merged: the worktrees and the task space go, **the branches stay** for you to merge by hand |
+| | | ✓ | Only the worktrees go, uncommitted changes and all; the branches stay |
+| | ✓ | ✓ | **Abandon**: nothing merged, the branch force-deleted, and **the commits it held are discarded with it** |
+
+Whichever combination is chosen: the plugin's own `README.en.md` is always cleared, anything
+else in the task space follows the archive choice (unticked, it is discarded outright), and
+as long as any repository was kept — a conflicted merge, say — both the task space directory
+and its workspace registration stay; otherwise both are removed and its sessions fall back
+to Ungrouped with their transcripts intact.
+
+The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
+merge can be reverted and nothing is discarded), and it is **red** only where the dialog can
+name what will be lost — uncommitted files in the plan with Force ticked, or a branch with
+commits on it being deleted without a merge.
