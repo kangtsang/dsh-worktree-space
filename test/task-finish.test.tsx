@@ -331,7 +331,7 @@ describe("finishing a task", () => {
       failed: true,
       repositories: [
         { name: "kratos-vue-admin", path: `${container}\\kratos-vue-admin`, branch, target: "main", merged: true, removed: true, branchDeleted: false },
-        { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, merged: false, removed: false, branchDeleted: false, conflict: true, error: "CONFLICT (content): merge conflict in src/main.ts; worktree and branch kept" },
+        { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, merged: false, removed: false, branchDeleted: false, conflict: true, error: "CONFLICT (content): merge conflict in src/main.ts" },
       ],
       strays: [],
       containerRemoved: false,

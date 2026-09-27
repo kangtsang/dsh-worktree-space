@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { FolderGit2 } from "lucide-react"
 import { describe, expect, it } from "vitest"
@@ -38,5 +39,14 @@ describe("repository glyph mask", () => {
     const real = renderToStaticMarkup(<FolderGit2 />)
     const count = (markup: string) => [...markup.matchAll(/<(path|circle|rect|line|polyline|polygon|ellipse)\b/g)].length
     expect(count(decodeMask())).toBe(count(real))
+  })
+
+  it("restates the mark this package ships as icon.svg", () => {
+    // The package's own icon, read from the package root vitest runs in.
+    const shipped = readFileSync("icon.svg", "utf8")
+    const shapes = (markup: string) => [...markup.matchAll(/ (d|cx|cy|r)="([^"]+)"/g)].map(([, name, value]) => `${name}=${value}`)
+
+    expect(shapes(shipped).length).toBeGreaterThan(0)
+    expect(shapes(decodeMask())).toEqual(shapes(shipped))
   })
 })

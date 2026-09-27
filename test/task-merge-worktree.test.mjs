@@ -150,6 +150,9 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
 
       expect(result.failed).toBe(true)
       expect(result.repositories[0].error).toMatch(/CONFLICT/)
+      // git's own words only: the page says the rest in the user's language, and the
+      // answer's flags say it to a caller, so the plugin appends nothing here.
+      expect(result.repositories[0].error).not.toContain("kept")
       // The flag is what lets the page say all of this in the user's own language,
       // instead of printing git's English next to a Chinese dialog.
       expect(result.repositories[0].conflict).toBe(true)

@@ -282,10 +282,10 @@
   .dws-finish-repos strong { font-size: 12px; font-weight: 500; }
   .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
   .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
-  /* A conflict the host already aborted: told in the user's language, amber because
-     it wants an action, with git's own output kept one click away rather than
-     dumped in the middle of the sentence. */
-  .dws-finish-report .dws-finish-conflict { flex-basis: 100%; color: var(--dsw-static-amber-600); }
+  /* A conflicted merge the host already aborted: told in the user's language, in the
+     danger colour because it is an unfinished task the user has to go and resolve,
+     with git's own output kept one click away rather than dumped mid-sentence. */
+  .dws-finish-report .dws-finish-conflict { flex-basis: 100%; color: var(--wt-danger); }
   .dws-finish-log { flex-basis: 100%; min-width: 0; color: var(--wt-muted); font-size: 11px; line-height: 17px; }
   .dws-finish-log summary { cursor: pointer; }
   .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }

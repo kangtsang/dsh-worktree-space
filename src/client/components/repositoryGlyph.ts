@@ -5,8 +5,9 @@
  * The settings navigation row belongs to DSH, which takes no icon from a
  * contributed section, so the only way to give that row this shape is CSS. CSS
  * needs the geometry as data rather than as a component, so the shapes are
- * written out here; `repositoryGlyph.test.tsx` renders the real icon and
- * compares the two, so they cannot drift apart unnoticed.
+ * written out here; `repository-glyph.test.tsx` renders the real icon — and reads
+ * the `icon.svg` this package ships — and compares all three, so they cannot drift
+ * apart unnoticed.
  *
  * TODO(DSH): the row is not ours to paint yet. As of DSH 0.1.7-rc.1 the
  * `settings.section` registrant options are `id`, `order` and `label` only, and the
