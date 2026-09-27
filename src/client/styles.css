@@ -84,7 +84,12 @@
   .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
   .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
   .dws-create-repo { min-height: 30px; padding: 4px 9px; font-size: 12px; }
-  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 6px 30px; border-left: 1px solid var(--wt-line); padding-left: 18px; }
+  /* A header and its list, and a list and the header that follows it, sit half as
+     far apart as the row paddings alone would leave them: 6px between a header and
+     its first child (7 + 5), 9px between a last child and the next header (5 + 6 +
+     7). Only rows that have children move; sibling rows and childless headers keep
+     the rhythm above. */
+  .dws-worktree-list { position: relative; min-width: 0; margin: -6px 0 -3px 30px; border-left: 1px solid var(--wt-line); padding-left: 18px; }
   .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 5px 0; }
   .dws-worktree::before { content: ""; position: absolute; left: -19px; top: 23px; width: 10px; border-top: 1px solid var(--wt-line); }
   .dws-worktree + .dws-worktree { border-top: 1px solid color-mix(in srgb, var(--wt-line) 60%, transparent); }
@@ -97,7 +102,14 @@
   .dws-status-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
   .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }
   .dws-status-unavailable, .dws-status-prunable { color: var(--wt-danger); }
-  .dws-status-dirty .dws-status-dot { color: var(--dsw-static-amber-600); }
+  .dws-status-dirty .dws-status-dot, .dws-status-zero .dws-status-dot { color: var(--dsw-static-amber-600); }
+  /* Committed work waiting to be merged back wears the same amber as uncommitted
+     work: both are work that has not landed yet, and they sit side by side. */
+  .dws-status-pending .dws-status-dot { color: var(--dsw-static-amber-600); }
+  /* A Workspace that holds no repository has no creation button beside it, so the
+     sentence saying so is pushed to the row's right edge: the edge those buttons
+     end on. No dot, and the amber the zero-count dot already wears. */
+  .dws-space-status { flex: none; margin-left: auto; color: var(--dsw-static-amber-600); }
   .dws-worktree-actions { display: flex; flex: none; align-items: center; gap: 2px; }
   .dws-settings .dws-no-linked { padding: 0 0 2px; color: var(--wt-muted); font-size: 12px; line-height: 20px; }
   .dws-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 18px; text-align: center; color: var(--wt-muted); }

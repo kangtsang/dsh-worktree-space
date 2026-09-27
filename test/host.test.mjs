@@ -243,6 +243,20 @@ describe("worktree RPC contract", () => {
       error: { code: "bad-request", message: "fatal: not a git repository" },
     })
   })
+  it("counts the commits a worktree carries back when a target is named", async () => {
+    const handler = handleFor({
+      "status --short --branch": "## feat/antest",
+      "rev-list --count develop..HEAD": "4",
+    })
+
+    expect((await handler("worktree.status", { path: "/repo", target: "develop" })).value)
+      .toMatchObject({ changedFiles: 0, commits: 4 })
+    // No target, or one git cannot resolve, leaves the count out rather than
+    // claiming a clean branch: the page shows nothing instead of a wrong zero.
+    expect((await handler("worktree.status", { path: "/repo" })).value).not.toHaveProperty("commits")
+    expect((await handler("worktree.status", { path: "/repo", target: "ghost" })).value).not.toHaveProperty("commits")
+  })
+
   it("returns the stable error envelope for bad requests and cancellation", async () => {
     const handler = handleFor()
     expect(await handler("worktree.status", {})).toMatchObject({ ok: false, error: { code: "bad-request", details: { issues: [] } } })

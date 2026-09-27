@@ -14,12 +14,16 @@ export interface Worktree {
   locked: boolean
   prunable: boolean
   changedFiles?: number
+  /** Commits on this worktree's HEAD that the merge target does not have yet. */
+  commits?: number
   statusError?: string
 }
 
 export interface WorktreeStatus {
   branchLine: string
   changedFiles: number
+  /** Absent when no target was named, or git could not resolve the one named. */
+  commits?: number
   output: string
 }
 

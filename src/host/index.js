@@ -3,7 +3,7 @@ import { clientRequestSchema } from '@deepseek-ai/dsh-client-connection'
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
+import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { registerTaskSkill } from './task/skill.js'
 import { registerTaskTool } from './task/tool.js'
@@ -223,9 +223,18 @@ export function apply(ctx, config = {}) {
       if (!path) throw new Error('Worktree path is required.')
       const output = await runGit(ctx.subprocess, path, ['status', '--short', '--branch'])
       const lines = output ? output.split(/\r?\n/) : []
+      // What this worktree would carry back: everything on its HEAD the named branch
+      // does not have. The caller names that branch, because the page already knows
+      // which one the source checkout sits on - the branch finishing would merge
+      // into. No name, or one git cannot resolve, leaves the count out rather than
+      // claiming zero commits.
+      const target = typeof payload.target === 'string' ? payload.target.trim() : ''
+      const ahead = target === '' ? '' : await tryRunGit(ctx.subprocess, path, ['rev-list', '--count', `${target}..HEAD`])
+      const commits = Number.parseInt(ahead, 10)
       return {
         branchLine: lines.find((line) => line.startsWith('## ')) ?? '',
         changedFiles: lines.filter((line) => line && !line.startsWith('## ')).length,
+        ...(Number.isFinite(commits) ? { commits } : {}),
         output,
       }
     })

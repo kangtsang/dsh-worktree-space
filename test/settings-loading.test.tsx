@@ -88,7 +88,7 @@ describe("WorktreesSettings loading lifecycle", () => {
     next.api.status.mockReturnValue(status.promise)
     const view = next.mount()
     await waitFor(() => expect(next.api.status).toHaveBeenCalledTimes(1))
-    const signal = next.api.status.mock.calls[0][1] as AbortSignal
+    const signal = next.api.status.mock.calls[0][2] as AbortSignal
     expect(signal.aborted).toBe(false)
     view.unmount()
     expect(signal.aborted).toBe(true)

@@ -30,7 +30,7 @@ describe("worktree client API routing", () => {
     const call = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
     const api = createWorktreeApi({ rpc: { call } })
     const controller = new AbortController()
-    const request = operation === "scan" ? api.scan(["/repo"], controller.signal) : api.status("/repo", controller.signal)
+    const request = operation === "scan" ? api.scan(["/repo"], controller.signal) : api.status("/repo", undefined, controller.signal)
     const rejected = expect(request).rejects.toThrow(/cancelled/)
     controller.abort()
     await rejected
@@ -103,6 +103,16 @@ describe("worktree client API routing", () => {
 
     await expect(api.status("/repo")).rejects.toMatchObject({ message, code })
     expect(call.mock.calls).toEqual([["/api", "dsh-worktree-space/worktree.status", { path: "/repo" }, expect.any(AbortSignal)]])
+  })
+
+  it("names the merge target when one is given, and leaves it out otherwise", async () => {
+    const call = vi.fn().mockResolvedValue({ ok: true, value: {} })
+    const api = createWorktreeApi({ rpc: { call } })
+
+    await api.status("/repo", "develop")
+    expect(call.mock.calls[0][2]).toEqual({ path: "/repo", target: "develop" })
+    await api.status("/repo")
+    expect(call.mock.calls[1][2]).toEqual({ path: "/repo" })
   })
 
   it("propagates transport failures without wrapping or retrying them", async () => {

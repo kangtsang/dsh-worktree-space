@@ -41,9 +41,17 @@ describe("WorktreesSettings workspace view", () => {
     // The answers arrive, so no row may be left saying it is still checking: the
     // effect that fills them once re-ran on its own state and aborted its own work.
     expect(await screen.findByText(t("workspaceCannot"))).toBeTruthy()
+    expect(screen.getByText(format(t("workspaceSpans"), { count: "0" }))).toBeTruthy()
     expect(screen.getByText(format(t("workspaceSpans"), { count: "1" }))).toBeTruthy()
     expect(screen.getByText(format(t("workspaceSpans"), { count: "3" }))).toBeTruthy()
     expect(screen.queryByText(t("workspaceChecking"))).toBeNull()
+    // Every count rides the heading, zero included, while the sentence saying no task
+    // space can start there is not a count: it sits outside the heading, so it ends
+    // where the creation buttons of the rows that can host one end.
+    expect(screen.getByText(format(t("workspaceSpans"), { count: "0" })).closest(".dws-repo-heading")).toBeTruthy()
+    const cannot = document.querySelector(".dws-space-status")
+    expect(cannot?.textContent).toBe(t("workspaceCannot"))
+    expect(cannot?.parentElement?.className).toBe("dws-repo-header")
     // The summary counts Workspaces here, not tasks, which is what it did before.
     expect(document.querySelector(".dws-summary")?.textContent).toBe(`3 ${t("workspaceCount")}`)
 

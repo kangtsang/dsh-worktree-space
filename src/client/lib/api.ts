@@ -51,7 +51,12 @@ export function createWorktreeApi(connection: ConnectionService) {
 
   return {
     scan: (paths: string[], signal?: AbortSignal) => read<WorktreeList[]>("worktree.scan", { paths }, signal),
-    status: (path: string, signal?: AbortSignal) => read<WorktreeStatus>("worktree.status", { path }, signal),
+    /**
+     * One worktree's status. `target` names the branch the commits are counted
+     * against - the one the source checkout sits on, which is where finishing
+     * merges - and is optional: without it the answer carries no commit count.
+     */
+    status: (path: string, target?: string, signal?: AbortSignal) => read<WorktreeStatus>("worktree.status", target ? { path, target } : { path }, signal),
 
     /** Whether a workspace can hold a task, and which repositories it would span. */
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),

@@ -82,7 +82,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       const next = await Promise.all(discovered.map(async list => ({
         ...list,
         worktrees: await Promise.all(list.worktrees.map(async row => {
-          try { return { ...row, ...(await api.status(row.path, controller.signal)) } }
+          try { return { ...row, ...(await api.status(row.path, list.currentBranch, controller.signal)) } }
           catch (reason: any) { return { ...row, statusError: String(reason?.message ?? reason) } }
         })),
       })))
@@ -98,7 +98,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return () => { refreshController.current?.abort() }
   }, [refresh])
 
-  const needsAttention = (row: Worktree) => !!(row.changedFiles || row.locked || row.prunable || (row.statusError && row.statusError !== t("checkingStatus")))
+  // Committed work the merge target does not have is something to act on even
+  // though the working tree is clean, which is why it counts as attention.
+  const needsAttention = (row: Worktree) => !!(row.changedFiles || row.commits || row.locked || row.prunable || (row.statusError && row.statusError !== t("checkingStatus")))
   const needle = query.trim().toLocaleLowerCase()
   const visibleRepos = repos.filter(repo => {
     if (filter === "attention" && !repo.worktrees.some(needsAttention)) return false
@@ -117,6 +119,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     if (row.prunable) return t("prunable")
     return t("clean")
   }
+  // A clean working tree can still hold a branch's worth of committed work that has
+  // not been merged back, so this rides beside the status rather than inside it.
+  const pendingBadge = (commits: number | undefined) => commits
+    ? <span className="dws-status dws-status-pending" title={t("pendingHint")}><span className="dws-status-dot" />{format(t("pending"), { count: String(commits) })}</span>
+    : null
   const toggleRepo = (path: string) => setCollapsed(previous => {
     const next = new Set(previous)
     if (next.has(path)) next.delete(path); else next.add(path)
@@ -125,7 +132,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const tasks = groupTasks(repos)
   // A task needs attention when any of its repositories does, which is the same
   // condition the repository view filters on, one level up.
-  const taskNeedsAttention = (task: TaskGroup) => task.changedFiles > 0 || task.lockedRepositories > 0 || task.prunableRepositories > 0 || task.unknownRepositories > 0
+  const taskNeedsAttention = (task: TaskGroup) => task.changedFiles > 0 || task.commits > 0 || task.lockedRepositories > 0 || task.prunableRepositories > 0 || task.unknownRepositories > 0
   const visibleTasks = tasks.filter(task => {
     if (filter === "attention" && !taskNeedsAttention(task)) return false
     return !needle || [task.name, task.path, task.branch, ...task.repositories.map(repository => repository.path)].some(value => value?.toLocaleLowerCase().includes(needle))
@@ -192,7 +199,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
               const state = row.statusError === t("checkingStatus") ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
                 <GitPullRequest size={16} className="dws-tree-icon" aria-hidden="true" />
-                <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div></div>
+                <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{pendingBadge(row.commits)}{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div></div>
               </div>
             })}
           </div> : null}
@@ -209,6 +216,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
               <h3>{task.name}</h3>
               <span className="dws-branch-label" title={`${t("branch")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
               <span className="dws-count">{task.repositories.length}</span>
+              {pendingBadge(task.commits)}
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
@@ -220,7 +228,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             const state = taskRepoStatus(repository)
             return <div className="dws-worktree" key={repository.path}>
               <FolderGit2 size={16} className="dws-tree-icon" aria-hidden="true" />
-              <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{repository.name}</strong><span className={`dws-status dws-status-${state.state}`}><span className="dws-status-dot" />{state.label}</span>{repository.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div></div>
+              <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{repository.name}</strong><span className={`dws-status dws-status-${state.state}`}><span className="dws-status-dot" />{state.label}</span>{pendingBadge(repository.commits)}{repository.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div></div>
             </div>
           })}
         </div> : null}
@@ -231,18 +239,29 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         const state = classifications[workspace.path]
         const ready = state !== undefined && state !== "checking" && state !== "failed"
         const canHost = ready && state.isSourceRoot
+        // Every Workspace that has answered says what it spans, right after its name,
+        // a count of zero included. The sentence explaining that no task space can
+        // start there is not a count, so it takes the row's right edge instead: the
+        // edge the creation button of the rows that can host one ends on.
+        const empty = ready && state.repositoryCount === 0
+        const badge = state === "checking"
+          ? { className: "dws-status-checking", label: t("workspaceChecking") }
+          : ready
+            ? { className: canHost ? "dws-status-clean" : "dws-status-zero", label: format(t("workspaceSpans"), { count: String(state.repositoryCount) }) }
+            : { className: "dws-status-checking", label: t("workspaceCannot") }
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
             <span className="dws-repo-heading">
               <span className="dws-repo-title">
                 <h3>{workspace.title}</h3>
-                <span className={"dws-status " + (canHost ? "dws-status-clean" : ready ? "dws-status-prunable" : "dws-status-checking")}>
+                <span className={"dws-status " + badge.className}>
                   <span className="dws-status-dot" />
-                  {state === "checking" ? t("workspaceChecking") : ready && state.isSourceRoot ? format(t("workspaceSpans"), { count: String(state.repositoryCount) }) : t("workspaceCannot")}
+                  {badge.label}
                 </span>
               </span>
               <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
             </span>
+            {empty ? <span className="dws-status dws-space-status">{t("workspaceCannot")}</span> : null}
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
         </article>

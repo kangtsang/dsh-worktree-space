@@ -7,6 +7,8 @@ export interface TaskRepository {
   path: string
   branch?: string
   changedFiles: number
+  /** Commits on this worktree's branch that its merge target does not have yet. */
+  commits: number
   locked: boolean
   /** Git keeps the record but the directory is gone. */
   prunable: boolean
@@ -35,6 +37,8 @@ export interface TaskGroup {
   repositories: TaskRepository[]
   /** Uncommitted files across the task; a removal without `force` keeps these. */
   changedFiles: number
+  /** Commits waiting to be merged back, across the task's repositories. */
+  commits: number
   lockedRepositories: number
   prunableRepositories: number
   unknownRepositories: number
@@ -81,6 +85,7 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
             tasksRoot: parentOf(container),
             repositories: [],
             changedFiles: 0,
+            commits: 0,
             lockedRepositories: 0,
             prunableRepositories: 0,
             unknownRepositories: 0,
@@ -95,16 +100,19 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
       entry.seen.add(repoKey)
       const unknown = worktree.statusError !== undefined && worktree.statusError !== ""
       const changedFiles = worktree.changedFiles ?? 0
+      const commits = worktree.commits ?? 0
       entry.group.repositories.push({
         name: nameOf(worktree.path),
         path: worktree.path,
         branch: worktree.branch,
         changedFiles,
+        commits,
         locked: worktree.locked,
         prunable: worktree.prunable,
         unknown,
       })
       entry.group.changedFiles += changedFiles
+      entry.group.commits += commits
       if (worktree.locked) entry.group.lockedRepositories += 1
       if (worktree.prunable) entry.group.prunableRepositories += 1
       if (unknown) entry.group.unknownRepositories += 1

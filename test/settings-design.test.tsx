@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { t } from "../src/client/lib/i18n"
+import { format, t } from "../src/client/lib/i18n"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -126,21 +126,42 @@ describe("WorktreesSettings discovery controls", () => {
     expect(next.api.scan).toHaveBeenCalledTimes(1)
   })
 
-  it("includes locked, prunable and failed-status worktrees in attention, but excludes clean repositories", async () => {
+  it("includes locked, prunable, failed-status and unmerged worktrees in attention, but excludes clean repositories", async () => {
     const next = setup({ repos: [
       repository("locked", [worktree("/locked", "locked-task", { locked: true })]),
       repository("prunable", [worktree("/prunable", "prunable-task", { prunable: true })]),
       repository("failed", [worktree("/failed", "failed-task")]),
+      repository("pending", [worktree("/pending", "pending-task")]),
       repository("clean", [worktree("/clean", "clean-task")]),
     ] })
     next.api.status.mockImplementation(async path => {
       if (path === "/failed") throw new Error("status unavailable")
-      return clean
+      // A clean working tree whose branch still carries commits back to the target.
+      return path === "/pending" ? { ...clean, commits: 4 } : clean
     })
     next.mount()
     await settled()
     await userEvent.setup().click(screen.getByRole("button", { name: t("filterAttention") }))
-    expect(visibleRepositories()).toEqual(["locked", "prunable", "failed"])
+    expect(visibleRepositories()).toEqual(["locked", "prunable", "failed", "pending"])
+    // The count is asked for against the branch the source checkout sits on, which
+    // is where finishing merges; it is what the row reports beside "no changes".
+    expect(next.api.status).toHaveBeenCalledWith("/pending", "main-pending", expect.anything())
+    expect(screen.getByText(format(t("pending"), { count: "4" })).closest(".dws-status-pending")).toBeTruthy()
+  })
+
+  it("reports the commits a clean task has not merged back, on the task and on its repository", async () => {
+    const taskRow = worktree("/spaces/antest/alpha", "feat/antest")
+    const next = setup({ repos: [repository("alpha", [taskRow])] })
+    next.api.status.mockImplementation(async (path: string) => path === taskRow.path ? { ...clean, commits: 4 } : clean)
+    next.mount()
+    await waitFor(() => expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false))
+
+    // The page opens on the task view: the count rides the task's own row and the
+    // repository row under it, so a task reads as needing attention while collapsed.
+    const badges = screen.getAllByText(format(t("pending"), { count: "4" }))
+    expect(badges).toHaveLength(2)
+    expect(badges.every(badge => badge.closest(".dws-status-pending"))).toBe(true)
+    expect(screen.getAllByText(t("clean")).length).toBeGreaterThan(0)
   })
 
   it("collapses and expands each repository with accessible state without rescanning", async () => {

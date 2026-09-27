@@ -83,6 +83,20 @@ describe("task grouping", () => {
     expect(disagreeing[0].branch).toBeUndefined()
   })
 
+  it("adds up the commits each repository still has to merge back", () => {
+    const tasks = groupTasks([
+      repository("/projects/api", [worktree(taskPath("antest", "api"), "feat/antest", { commits: 3 })]),
+      repository("/projects/web", [worktree(taskPath("antest", "web"), "feat/antest", { commits: 1 })]),
+    ])
+
+    expect(tasks[0].commits).toBe(4)
+    expect(tasks[0].repositories.map((entry) => [entry.name, entry.commits])).toEqual([["api", 3], ["web", 1]])
+    // A row whose status carried no count contributes nothing rather than NaN.
+    const uncounted = groupTasks([repository("/projects/api", [worktree(taskPath("antest", "api"), "feat/antest")])])
+    expect(uncounted[0].commits).toBe(0)
+    expect(uncounted[0].repositories[0].commits).toBe(0)
+  })
+
   it("separates unavailable status, a locked worktree and a stale record from a clean one", () => {
     const tasks = groupTasks([
       repository("/projects/api", [worktree(taskPath("antest", "api"), "feat/antest", { statusError: "worktree-unavailable" })]),
