@@ -8,7 +8,7 @@ import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:f
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 import { BREADCRUMB, resolveTasksRoot } from './shared.js'
@@ -72,6 +72,9 @@ export async function createTask(subprocess, options) {
   } = options
 
   const name = validateTaskName(task)
+  // Resolved before anything is touched: an unusable prefix must fail as a
+  // request, not halfway through a worktree.
+  const prefix = validateBranchPrefix(branchPrefix)
   const tasksRoot = resolveTasksRoot(sourceRoot, requestedRoot)
   assertIsolated(sourceRoot, tasksRoot)
 
@@ -95,7 +98,7 @@ export async function createTask(subprocess, options) {
     throw new Error(`two selected repositories are both named '${duplicate}'; select repositories with distinct names`)
   }
 
-  const branch = branchNameFor(name, branchPrefix)
+  const branch = branchNameFor(name, prefix)
   const taskPath = join(tasksRoot, name)
   if (existsSync(taskPath)) throw new Error(`task space already exists: ${taskPath}`)
 

@@ -18,6 +18,7 @@ const DESCRIPTION = [
   'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: one directory outside the source tree holding a worktree of every selected repository, all on one branch.',
   '',
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
+  'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'Pass merge only when the user asked to merge, deleteBranch only after a merge, and force only when the user has decided to discard uncommitted work.',
 ].join('\n')
 
@@ -117,17 +118,18 @@ function required(value, name) {
 /**
  * Resolve the task space root a list or done action should read: an explicit
  * root, else the recommendation for the given source root.
+ * @param subprocess - the profile's subprocess service.
  * @param tasksRoot - the explicit task space root, if any.
  * @param sourceRoot - the source root, if any.
  * @returns the task space root to use.
  * @throws Error when neither is available.
  */
-async function containerFor(tasksRoot, sourceRoot) {
+async function containerFor(subprocess, tasksRoot, sourceRoot) {
   const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
   if (source === '') throw new Error('tasksRoot is required (or sourceRoot, to use its recommended task space)')
-  return (await suggestTaskRoot(source)).suggested
+  return (await suggestTaskRoot(subprocess, source)).suggested
 }
 
 /**
@@ -184,6 +186,7 @@ export function registerTaskTool(ctx) {
       tasksRoot: { type: 'string', description: 'Container root, outside the source tree. Omit for the recommendation.' },
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository names (create). Omit for all discovered.' },
       baseRef: { type: 'string', description: 'Start point (create). Omit for each repository HEAD.' },
+      branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
       target: { type: 'string', description: 'Branch to merge into (done). Omit to detect origin/HEAD, main, master.' },
       deleteBranch: { type: 'boolean', description: 'Delete each branch after a merge (done). Needs merge.' },
@@ -200,11 +203,14 @@ export function registerTaskTool(ctx) {
 
       if (action === 'suggest-root') {
         const sourceRoot = required(args.sourceRoot, 'sourceRoot')
-        const result = await suggestTaskRoot(sourceRoot, { tasksRoot: args.tasksRoot })
+        const result = await suggestTaskRoot(ctx.subprocess, sourceRoot, {
+          tasksRoot: args.tasksRoot,
+          branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
+        })
         const value = envelope(action)
         value.tasksRoot = result.sourceRoot
         value.suggested = result.suggested
-        value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path }))
+        value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: entry.branch ?? '' }))
         value.summary = summarize(action, value)
         return value
       }
@@ -217,6 +223,7 @@ export function registerTaskTool(ctx) {
           tasksRoot: args.tasksRoot,
           repos: Array.isArray(args.repos) ? args.repos : undefined,
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
+          branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           push: false,
         })
         const value = envelope(action)
@@ -231,7 +238,7 @@ export function registerTaskTool(ctx) {
       }
 
       if (action === 'list') {
-        const tasksRoot = await containerFor(args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
         const result = await listTasks(ctx.subprocess, { tasksRoot })
         const value = envelope(action)
         value.tasksRoot = result.tasksRoot
@@ -255,7 +262,7 @@ export function registerTaskTool(ctx) {
 
       if (action === 'done') {
         const task = required(args.task, 'task')
-        const tasksRoot = await containerFor(args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
         const result = await finishTask(ctx.subprocess, {
           task,
           tasksRoot,

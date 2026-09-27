@@ -239,7 +239,7 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.suggest-root') return recover(async () => {
       const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
       if (!sourceRoot) throw new Error('A source root is required.')
-      return suggestTaskRoot(sourceRoot, {
+      return suggestTaskRoot(ctx.subprocess, sourceRoot, {
         tasksRoot: payload.tasksRoot,
         branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== '' ? payload.branchPrefix : undefined,
       })

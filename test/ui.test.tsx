@@ -28,7 +28,7 @@ function suggestion() {
     sourceRoot: "/repo",
     suggested: "/tasks",
     explicit: false,
-    branchPrefix: "feat/",
+    branchPrefix: "task/",
     repositories: [
       { name: "alpha", path: "/repo/alpha" },
       { name: "beta", path: "/repo/beta" },
@@ -40,7 +40,7 @@ function suggestion() {
 function createdTask(names: string[] = ["alpha", "beta"]) {
   return {
     task: "fix-login",
-    branch: "feat/fix-login",
+    branch: "task/fix-login",
     path: "/tasks/fix-login",
     tasksRoot: "/tasks",
     repositories: names.map((name) => ({ name, path: `/tasks/fix-login/${name}` })),
@@ -66,7 +66,7 @@ describe("CreateWorktreeDialog", () => {
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledWith("ws-wt"))
-    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined })
+    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined, branchPrefix: "task/" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: "/tasks/fix-login" })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-wt", "apple/fix-login")
     expect(onClose).toHaveBeenCalled()
@@ -83,7 +83,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(t("taskName")), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha"], baseRef: undefined }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha"], baseRef: undefined, branchPrefix: "task/" }))
   })
 
   it("starts every branch from the named ref the user chose", async () => {
@@ -98,7 +98,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(t("taskName")), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: "main" }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: "main", branchPrefix: "task/" }))
   })
 
   it("refuses to create without a valid name or a selected repository", async () => {
