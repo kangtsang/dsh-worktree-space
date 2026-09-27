@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
+import { apply, branchTargets, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
 
 function handleFor(outputs = {}) {
@@ -238,8 +238,7 @@ describe("worktree RPC contract", () => {
     }
   })
 
-  it("normalizes plugin-specific errors to the DSH public error contract", () => {
-    expect(fail("not-git-repository", "fatal: not a git repository")).toMatchObject({
+  it("normalizes plugin-specific errors to the DSH public error contract", () => {    expect(fail("not-git-repository", "fatal: not a git repository")).toMatchObject({
       ok: false,
       error: { code: "bad-request", message: "fatal: not a git repository" },
     })
@@ -251,6 +250,20 @@ describe("worktree RPC contract", () => {
       ok: false, error: { code: "bad-request", message: "RPC method does not match endpoint.", details: { issues: [] } },
     })
     expect(await handler("worktree.status", {}, { aborted: true })).toMatchObject({ ok: false, error: { code: "cancelled" } })
+  })
+})
+
+describe("the branch each repository merges into", () => {
+  it("reads a per-repository choice, and nothing usable out of a malformed one", () => {
+    expect(branchTargets({ alpha: " develop ", beta: "main" })).toEqual({ alpha: "develop", beta: "main" })
+    // An entry that names nothing usable is dropped, and an empty result is "no
+    // choice at all" rather than a target named "".
+    expect(branchTargets({ alpha: "" })).toBeUndefined()
+    expect(branchTargets({ "  ": "develop" })).toBeUndefined()
+    expect(branchTargets({ alpha: 7 })).toBeUndefined()
+    expect(branchTargets(undefined)).toBeUndefined()
+    expect(branchTargets(null)).toBeUndefined()
+    expect(branchTargets(["develop"])).toBeUndefined()
   })
 })
 

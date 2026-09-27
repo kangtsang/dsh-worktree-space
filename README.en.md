@@ -32,8 +32,9 @@ registered as a DSH Workspace with its own sessions.
   folds that row on its own; the button beside the filters folds or opens them all at once.
 - **Finish a task** from its row. By default each repository's branch is merged back into the
   branch that repository has checked out — the task space's own starting point, since nothing
-  here switches a source checkout — the worktrees are removed, the task space's own documents
-  are filed under
+  here switches a source checkout — and the dialog can point any repository at another local
+  branch instead, which is then merged in a temporary worktree without touching your checkout.
+  The worktrees are removed, the task space's own documents are filed under
   `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option unticked and they
   are deleted along with everything else), and the Workspace registration is removed. It will not finish while a
   session in that Workspace is still running — stop it or let it end, then try again.

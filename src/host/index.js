@@ -132,6 +132,27 @@ export function requestedPaths(payload) {
 }
 
 
+/**
+ * The branch each named repository should merge into.
+ *
+ * The dialog chooses per repository and the tool names one branch for all of them,
+ * so both shapes reach the Host: this reads the map, and a request without one
+ * leaves every repository on its own default.
+ * @param value - the request's `targets`.
+ * @returns the branch per repository name, or undefined when none were named.
+ */
+export function branchTargets(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const targets = {}
+  for (const [name, branch] of Object.entries(value)) {
+    const repository = name.trim()
+    const target = typeof branch === 'string' ? branch.trim() : ''
+    if (repository !== '' && target !== '') targets[repository] = target
+  }
+  return Object.keys(targets).length === 0 ? undefined : targets
+}
+
+
 export const name = 'dsh-worktree-space'
 export const inject = ['connection', 'subprocess']
 
@@ -306,6 +327,7 @@ export function apply(ctx, config = {}) {
       return planTask(ctx.subprocess, {
         task,
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
+        targets: branchTargets(payload.targets),
       })
     })
 
@@ -317,6 +339,7 @@ export function apply(ctx, config = {}) {
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
         merge: payload.merge === true,
         target: typeof payload.target === 'string' ? payload.target : undefined,
+        targets: branchTargets(payload.targets),
         deleteBranch: payload.deleteBranch === true,
         force: payload.force === true,
         cleanStray: payload.cleanStray === true,

@@ -122,8 +122,17 @@ export interface TaskPlanRepository {
   name: string
   path: string
   branch?: string
-  /** The branch this repository's branch would merge into. */
+  /** The branch this repository's branch would merge into, as things stand. */
   target?: string
+  /** The branch the source repository has checked out: the default target. */
+  checkedOut?: string
+  /**
+   * Every branch that could be merged into instead, the checked-out one first.
+   *
+   * Branches another worktree holds are left out — merging into one of those would
+   * mean moving a checkout someone else is using.
+   */
+  branches: string[]
   /** Commits that merge would bring. */
   commits: number
   changedFiles: number

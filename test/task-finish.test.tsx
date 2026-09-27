@@ -59,21 +59,32 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     remove: vi.fn().mockResolvedValue({}),
     prune: vi.fn().mockResolvedValue({}),
     doneTask: vi.fn().mockResolvedValue(result),
-    // The archive dialog resolves the task from its path, the same way the menu
     // The archive dialog asks the host what archiving would do, and shows the
-    // answer: branch, merge target, commits and uncommitted files per repository.
-    planTask: vi.fn().mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => {
+    // answer: branch, merge target, the branches it could merge into instead,
+    // commits and uncommitted files per repository. A chosen target comes back
+    // with the commits that belong to it, exactly as the Host answers.
+    planTask: vi.fn().mockImplementation(async ({ task, tasksRoot, targets }: { task: string; tasksRoot: string; targets?: Record<string, string> }) => {
       const repositories = ["kratos-vue-admin", "kratos-vue-admin-web"].map((name) => {
         const repoPath = tasksRoot + "\\" + task + "\\" + name
-        return { name, path: repoPath, branch: "feat/" + task, target: "main", commits: 0, changedFiles: statusFor(repoPath) }
+        const target = targets?.[name] ?? "main"
+        return {
+          name,
+          path: repoPath,
+          branch: "feat/" + task,
+          target,
+          checkedOut: "main",
+          branches: ["main", "develop"],
+          commits: target === "main" ? 0 : 4,
+          changedFiles: statusFor(repoPath),
+        }
       })
       return {
         task,
         tasksRoot,
         path: tasksRoot + "\\" + task,
-        mergeTarget: "main",
+        mergeTarget: repositories[0].target,
         changedFiles: repositories.reduce((total, repository) => total + repository.changedFiles, 0),
-        commits: 0,
+        commits: repositories.reduce((total, repository) => total + repository.commits, 0),
         repositories,
         strays,
       }
@@ -179,6 +190,36 @@ describe("finishing a task", () => {
     // The report replaces the options: nothing left to confirm twice.
     expect(screen.queryByRole("button", { name: t("finishConfirmAction") })).toBeNull()
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("points one repository at another branch, previews it, and merges there", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await waitFor(() => expect(next.api.planTask).toHaveBeenCalledTimes(1))
+
+    // Each repository offers the branch it is on first, then the alternatives the
+    // Host listed — the task branch itself is never among them.
+    const picker = screen.getByRole("combobox", { name: `${t("planTargetLabel")} · kratos-vue-admin` })
+    expect([...picker.querySelectorAll("option")].map((choice) => choice.textContent)).toEqual(["main", "develop"])
+
+    await user.selectOptions(picker, "develop")
+    await waitFor(() => expect(next.api.planTask).toHaveBeenCalledWith(expect.objectContaining({ targets: { "kratos-vue-admin": "develop" } })))
+    // The preview follows the choice: the commits that branch would bring, and the
+    // note that it is not the branch the source repository is on.
+    const plan = () => document.querySelector(".dws-finish-repos")!.textContent ?? ""
+    await waitFor(() => expect(plan()).toContain(format(t("planCommits"), { count: "4" })))
+    expect(screen.getAllByText(t("planTemporaryWorktree"))).toHaveLength(1)
+    // The repository left alone keeps its own default, counted on its own branch.
+    expect(plan()).toContain(format(t("planCommits"), { count: "0" }))
+
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
+    expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ merge: true, targets: { "kratos-vue-admin": "develop" } }))
+    // The plan stays on screen as the record of what was done, so its choice is
+    // read-only rather than pointing at a task space that no longer exists.
+    await waitFor(() => expect(screen.getByRole("combobox", { name: `${t("planTargetLabel")} · kratos-vue-admin` })).toHaveProperty("disabled", true))
   })
 
   it("lists the user's own leftovers before the choice, and only summarises build noise", async () => {

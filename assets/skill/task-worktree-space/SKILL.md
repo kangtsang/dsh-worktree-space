@@ -91,12 +91,13 @@ merge, delete a branch, or delete stray files unless asked.
 
 Confirm each destructive step with the user before passing it:
 
-1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. The
-   merge lands on the branch each source repository has checked out — that is the
-   merge target, and nothing here switches a source checkout, so `target` exists
-   only to confirm that branch: naming another one is refused rather than silently
-   ignored. A conflict leaves that repository's worktree and branch in place and
-   reports it; the other repositories still complete.
+1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. By
+   default the merge lands on the branch each source repository has checked out —
+   the task's own starting point. Ask which branch to merge into when the user has
+   another one in mind, and pass it as `target` (one branch for every repository);
+   a branch that is checked out nowhere is merged in a temporary worktree, so no
+   source checkout is ever switched. A conflict leaves that repository's worktree
+   and branch in place and reports it; the other repositories still complete.
 2. **Delete the branch?** Only after it is merged, and only when the user asks.
    Pass `deleteBranch: true` together with `merge: true`.
 3. **Stray files?** When the outcome lists strays (agent notes, editor caches, a

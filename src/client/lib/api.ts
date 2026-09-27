@@ -71,8 +71,8 @@ export function createWorktreeApi(connection: ConnectionService) {
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
     /** What archiving a task would do, before doing any of it. */
-    planTask: (payload: { task: string; tasksRoot: string }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
+    planTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; tasksRoot: string; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
   }
 }

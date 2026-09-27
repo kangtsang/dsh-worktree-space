@@ -465,23 +465,97 @@ describe("finishTask", () => {
     }
   })
 
-  it("refuses a merge target other than the branch the source repository is on", async () => {
+  it("merges into a named branch in a worktree of its own, leaving the source checkout alone", async () => {
     const fixture = await taskFixture()
-    const { subprocess, keys } = subprocessMock({
+    const { subprocess, calls, keys } = subprocessMock({
       ...fixture.handlers,
       "show-ref --verify --quiet refs/heads/develop": "",
+      "worktree add": "",
+      "worktree remove": "",
+      // A merge only lands on a branch that is checked out, so the merge has to be
+      // the one run inside the worktree this plugin created for it.
+      "merge --no-ff --no-edit feat/login": ({ cwd }) => (cwd.includes("dsh-worktree-space-merge-") ? "" : { exitCode: 1, stderr: "fatal: refusing to merge here\n" }),
     })
     try {
-      // The source repositories are on `main`, so naming `develop` would need
-      // their checkouts moved — which nothing here does.
-      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, merge: true, target: "develop" })
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+        targets: { alpha: "develop", beta: "develop" },
+      })
+
+      expect(result.failed).toBe(false)
+      expect(result.mergeTarget).toBe("develop")
+      expect(result.repositories.map((entry) => entry.target)).toEqual(["develop", "develop"])
+      // The branch is checked out in a temporary worktree, merged there, and that
+      // worktree is dropped again — the source repositories are never switched.
+      const added = calls.filter((call) => call.args[1] === "add")
+      expect(added).toHaveLength(2)
+      expect(added.map((call) => call.args[3])).toEqual(["develop", "develop"])
+      // `--force` is what dropping the scratch checkout looks like; the task's own
+      // worktrees are removed without it, so this picks out the temporary ones.
+      const dropped = calls.filter((call) => call.args[1] === "remove" && call.args[2] === "--force")
+      expect(dropped.map((call) => call.args[3])).toEqual(added.map((call) => call.args[2]))
+      expect(keys().filter((key) => key.startsWith("checkout") || key.startsWith("switch"))).toEqual([])
+      expect(added.every((call) => call.args[2].includes("dsh-worktree-space-merge-"))).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves the target branch untouched when the merge in that worktree conflicts", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, calls, keys } = subprocessMock({
+      ...fixture.handlers,
+      "show-ref --verify --quiet refs/heads/develop": "",
+      "worktree add": "",
+      "worktree remove": "",
+      "merge --abort": "",
+      "merge --no-ff --no-edit feat/login": ({ cwd }) =>
+        cwd.endsWith("alpha") || cwd.includes("dsh-worktree-space-merge-")
+          ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" }
+          : "",
+    })
+    try {
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+        targets: { alpha: "develop", beta: "develop" },
+      })
 
       expect(result.failed).toBe(true)
-      expect(result.repositories.map((entry) => entry.merged)).toEqual([false, false])
-      expect(result.repositories[0].error).toMatch(/has 'main' checked out, so nothing merges into 'develop'/)
-      // Nothing was merged, and the source checkouts were never switched.
-      expect(keys()).not.toContain("merge --no-ff --no-edit feat/login")
-      expect(keys().filter((key) => key.startsWith("checkout") || key.startsWith("switch"))).toEqual([])
+      expect(result.repositories.every((entry) => entry.merged === false)).toBe(true)
+      expect(result.repositories[0].error).toMatch(/CONFLICT/)
+      // Aborted and dropped: the merge commit that would move `develop` was never
+      // made, so the branch is where it was and no scratch checkout is left behind.
+      expect(keys()).toContain("merge --abort")
+      expect(calls.filter((call) => call.args[1] === "remove")).toHaveLength(2)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("reports the path holding a branch when the worktree cannot take it", async () => {
+    const fixture = await taskFixture()
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "show-ref --verify --quiet refs/heads/develop": "",
+      // Git's own refusal, which names the checkout in the way.
+      "worktree add": { exitCode: 128, stderr: "fatal: 'develop' is already checked out at 'E:/elsewhere'\n" },
+      "worktree remove": "",
+    })
+    try {
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+        targets: { alpha: "develop", beta: "develop" },
+      })
+
+      expect(result.failed).toBe(true)
+      expect(result.repositories[0].error).toMatch(/already checked out at 'E:\/elsewhere'/)
+      expect(result.repositories.every((entry) => entry.merged === false)).toBe(true)
       expect(existsSync(fixture.taskPath)).toBe(true)
     } finally {
       await fixture.cleanup()
@@ -705,36 +779,42 @@ describe("resolveMergeTarget", () => {
 
   it("is the branch the source repository has checked out", async () => {
     const { subprocess, keys } = subprocessMock(handlers)
-    expect(await resolveMergeTarget(subprocess, sourceRepo, undefined)).toBe("develop")
+    expect(await resolveMergeTarget(subprocess, sourceRepo, undefined, "feat/login")).toBe("develop")
     // The mainline is never consulted: `git merge` writes into the checked-out
-    // branch, so anything else would be a target this cannot deliver.
+    // branch, so anything else would be a target that cannot be delivered.
     expect(keys().filter((key) => key.includes("origin/HEAD") || key.includes("refs/heads/main"))).toEqual([])
   })
 
   it("accepts a request that confirms that branch", async () => {
     const { subprocess } = subprocessMock(handlers)
-    expect(await resolveMergeTarget(subprocess, sourceRepo, " develop ")).toBe("develop")
+    expect(await resolveMergeTarget(subprocess, sourceRepo, " develop ", "feat/login")).toBe("develop")
   })
 
-  it("refuses a request that would need the source checkout to move", async () => {
-    const { subprocess } = subprocessMock(handlers)
-    await expect(resolveMergeTarget(subprocess, sourceRepo, "main"))
-      .rejects.toThrow(/'alpha' has 'develop' checked out, so nothing merges into 'main' from here/)
+  it("accepts a request for another local branch, which the merge handles elsewhere", async () => {
+    const { subprocess, keys } = subprocessMock(handlers)
+    expect(await resolveMergeTarget(subprocess, sourceRepo, "main", "feat/login")).toBe("main")
+    // Resolving it moves nothing: the branch is only checked out where it is merged.
+    expect(keys().filter((key) => key.startsWith("checkout") || key.startsWith("switch"))).toEqual([])
   })
 
-  it("refuses a request that is not a local branch", async () => {
+  it("refuses the branch being merged, and a request that is not a local branch", async () => {
     const { subprocess } = subprocessMock(handlers)
-    await expect(resolveMergeTarget(subprocess, sourceRepo, "nope"))
+    await expect(resolveMergeTarget(subprocess, sourceRepo, "feat/login", "feat/login"))
+      .rejects.toThrow(/'feat\/login' is the branch being merged/)
+    await expect(resolveMergeTarget(subprocess, sourceRepo, "nope", "feat/login"))
       .rejects.toThrow(/merge target 'nope' is not a local branch of 'alpha'/)
   })
 
-  it("refuses a detached checkout, and a repository with no commits", async () => {
+  it("asks for a branch when the source repository has none checked out", async () => {
     // Git answers `HEAD` when nothing is checked out, and prints nothing at all in
-    // a repository that has no commits yet: neither can receive a merge.
+    // a repository that has no commits yet: neither names a default target.
     for (const reply of ["HEAD", ""]) {
       const { subprocess } = subprocessMock({ ...handlers, "rev-parse --abbrev-ref HEAD": reply })
-      await expect(resolveMergeTarget(subprocess, sourceRepo, undefined))
-        .rejects.toThrow(/'alpha' has no branch checked out, so there is nothing to merge into/)
+      await expect(resolveMergeTarget(subprocess, sourceRepo, undefined, "feat/login"))
+        .rejects.toThrow(/'alpha' has no branch checked out; name the branch to merge into/)
+      // Named anyway, it works: the merge checks the branch out in a worktree of
+      // its own, so a detached source repository is not a dead end.
+      expect(await resolveMergeTarget(subprocess, sourceRepo, "main", "feat/login")).toBe("main")
     }
   })
 })
@@ -773,8 +853,13 @@ describe("planTask", () => {
       // the source repository is on, not the project's mainline.
       "symbolic-ref --quiet refs/remotes/origin/HEAD": "refs/remotes/origin/main\n",
       "show-ref --verify --quiet refs/heads/main": "",
+      // What the dialog offers per repository: every local branch, minus the ones a
+      // worktree already holds. `feat/login` is the task branch and is checked out
+      // in the task's own worktree, so it can never be a target.
+      "for-each-ref --format=%(refname:short) refs/heads": "other\nmain\nfeat/login\ndevelop\n",
       // `alpha` is three commits ahead of develop, `beta` one.
       "rev-list --count develop..HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "3\n" : "1\n",
+      "rev-list --count main..HEAD": "",
     }
     return { root, taskPath, handlers, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
@@ -789,11 +874,41 @@ describe("planTask", () => {
       // `origin/HEAD` and a local `main` both exist to be found.
       expect(plan).toMatchObject({ task: "login", path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "develop", changedFiles: 2, commits: 4 })
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
-      expect(byName.alpha).toEqual({ name: "alpha", path: join(fixtureUnderTest.taskPath, "alpha"), branch: "feat/login", target: "develop", commits: 3, changedFiles: 2 })
-      expect(byName.beta).toMatchObject({ branch: "feat/login", target: "develop", commits: 1, changedFiles: 0 })
+      expect(byName.alpha).toEqual({
+        name: "alpha",
+        path: join(fixtureUnderTest.taskPath, "alpha"),
+        branch: "feat/login",
+        target: "develop",
+        checkedOut: "develop",
+        // The task branch is not offered, and the branch the repository is on leads.
+        branches: ["develop", "main", "other"],
+        commits: 3,
+        changedFiles: 2,
+      })
+      expect(byName.beta).toMatchObject({ branch: "feat/login", target: "develop", checkedOut: "develop", branches: ["develop", "main", "other"], commits: 1, changedFiles: 0 })
       // The mainline is never asked about: naming it is what made the dialog and
       // the merge disagree.
       expect(keys().filter((key) => key.includes("origin/HEAD") || key.includes("refs/heads/main"))).toEqual([])
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("previews a branch the dialog chose instead of the default", async () => {
+    const fixtureUnderTest = await fixture()
+    const { subprocess } = subprocessMock({
+      ...fixtureUnderTest.handlers,
+      "rev-list --count main..HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "7\n" : "2\n",
+    })
+    try {
+      const plan = await planTask(subprocess, { task: "login", tasksRoot: fixtureUnderTest.root, targets: { alpha: "main" } })
+
+      const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
+      // The chosen branch, the count that goes with it, and the note that it is not
+      // the branch the source repository is on — everything the second click needs.
+      expect(byName.alpha).toMatchObject({ target: "main", checkedOut: "develop", commits: 7 })
+      // A repository left alone keeps its own default.
+      expect(byName.beta).toMatchObject({ target: "develop", commits: 1 })
     } finally {
       await fixtureUnderTest.cleanup()
     }
