@@ -68,7 +68,7 @@ async function containerFixture() {
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
-/** Replies that make a create of `feat/<task>` succeed across both repositories. */
+/** Replies that make a create of `task/<task>` succeed across both repositories. */
 const branchIsNew = (branch) => ({ [`show-ref --verify --quiet refs/heads/${branch}`]: { exitCode: 1 } })
 
 describe("classifySourceRoot", () => {
@@ -166,7 +166,7 @@ describe("createTask", () => {
   it("makes one worktree per repository on one shared branch and records the task", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
-    const { subprocess, keys } = subprocessMock(branchIsNew("feat/fix-login"))
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/fix-login"))
     try {
       const result = await createTask(subprocess, {
         sourceRoot: source.root,
@@ -174,19 +174,19 @@ describe("createTask", () => {
         tasksRoot: container.root,
       })
 
-      expect(result.branch).toBe("feat/fix-login")
+      expect(result.branch).toBe("task/fix-login")
       expect(result.path).toBe(join(container.root, "fix-login"))
       expect(result.repositories.map((entry) => entry.name)).toEqual(["alpha", "beta"])
 
       const adds = keys().filter((key) => key.startsWith("worktree add"))
       expect(adds).toEqual([
-        `worktree add ${join(container.root, "fix-login", "alpha")} -b feat/fix-login`,
-        `worktree add ${join(container.root, "fix-login", "beta")} -b feat/fix-login`,
+        `worktree add ${join(container.root, "fix-login", "alpha")} -b task/fix-login`,
+        `worktree add ${join(container.root, "fix-login", "beta")} -b task/fix-login`,
       ])
 
       const breadcrumb = await readFile(join(result.path, "README.en.md"), "utf8")
       expect(breadcrumb).toContain("# Task: fix-login")
-      expect(breadcrumb).toContain("- Branch: `feat/fix-login` (one branch per repository below)")
+      expect(breadcrumb).toContain("- Branch: `task/fix-login` (one branch per repository below)")
       expect(breadcrumb).toContain("each repository's current HEAD")
       expect(breadcrumb).toContain("- `alpha`")
       expect(breadcrumb).toContain("Source repositories are read-only")
@@ -200,7 +200,7 @@ describe("createTask", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess, keys } = subprocessMock({
-      ...branchIsNew("task/login"),
+      ...branchIsNew("hotfix/login"),
       "rev-parse --verify --quiet main^{commit}": "",
     })
     try {
@@ -209,14 +209,28 @@ describe("createTask", () => {
         task: "login",
         tasksRoot: container.root,
         baseRef: "main",
-        branchPrefix: "task/",
+        branchPrefix: "hotfix/",
       })
-      expect(result.branch).toBe("task/login")
+      expect(result.branch).toBe("hotfix/login")
       expect(result.baseRef).toBe("main")
       expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([
-        `worktree add ${join(container.root, "login", "alpha")} -b task/login main`,
-        `worktree add ${join(container.root, "login", "beta")} -b task/login main`,
+        `worktree add ${join(container.root, "login", "alpha")} -b hotfix/login main`,
+        `worktree add ${join(container.root, "login", "beta")} -b hotfix/login main`,
       ])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a branch prefix Git would not accept, before touching a repository", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock()
+    try {
+      await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root, branchPrefix: "task /" }))
+        .rejects.toThrow(/branch prefix must not contain/)
+      expect(keys()).toEqual([])
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -226,7 +240,7 @@ describe("createTask", () => {
   it("creates only the selected repositories", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
-    const { subprocess, keys } = subprocessMock(branchIsNew("feat/login"))
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
     try {
       const result = await createTask(subprocess, {
         sourceRoot: source.root,
@@ -258,7 +272,7 @@ describe("createTask", () => {
   it("refuses a branch that already exists in any repository", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
-    const { subprocess } = subprocessMock({ "show-ref --verify --quiet refs/heads/feat/login": "" })
+    const { subprocess } = subprocessMock({ "show-ref --verify --quiet refs/heads/task/login": "" })
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
         .rejects.toThrow(/already exists in 'alpha'/)
@@ -272,7 +286,7 @@ describe("createTask", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess } = subprocessMock({
-      ...branchIsNew("feat/login"),
+      ...branchIsNew("task/login"),
       "rev-parse --verify --quiet release^{commit}": { exitCode: 128, stderr: "unknown revision" },
     })
     try {
@@ -288,7 +302,7 @@ describe("createTask", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     await mkdir(join(container.root, "login"), { recursive: true })
-    const { subprocess } = subprocessMock(branchIsNew("feat/login"))
+    const { subprocess } = subprocessMock(branchIsNew("task/login"))
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
         .rejects.toThrow(/already exists/)
@@ -301,7 +315,7 @@ describe("createTask", () => {
   it("refuses an explicitly empty repository selection instead of creating every one", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
-    const { subprocess, keys } = subprocessMock(branchIsNew("feat/login"))
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root, repos: [] }))
         .rejects.toThrow(/select at least one repository/)
@@ -331,8 +345,8 @@ describe("createTask", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess, keys } = subprocessMock({
-      ...branchIsNew("feat/login"),
-      [`worktree add ${join(container.root, "login", "beta")} -b feat/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(container.root, "login", "beta")} -b task/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
     })
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
@@ -350,8 +364,8 @@ describe("createTask", () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess } = subprocessMock({
-      ...branchIsNew("feat/login"),
-      "push -u origin feat/login": { exitCode: 1, stderr: "no remote" },
+      ...branchIsNew("task/login"),
+      "push -u origin task/login": { exitCode: 1, stderr: "no remote" },
     })
     try {
       const result = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root, push: true })
@@ -375,7 +389,7 @@ describe("listTasks", () => {
     }
     await writeFile(join(taskPath, "notes.md"), "stray")
     const { subprocess } = subprocessMock({
-      "rev-parse --abbrev-ref HEAD": () => "feat/login",
+      "rev-parse --abbrev-ref HEAD": () => "task/login",
       "status --porcelain": ({ cwd }) => (basename(cwd) === "alpha" ? " M a.ts\n?? b.ts" : ""),
     })
     try {
@@ -383,8 +397,8 @@ describe("listTasks", () => {
       expect(result.tasks).toHaveLength(1)
       expect(result.tasks[0].name).toBe("login")
       expect(result.tasks[0].repositories).toEqual([
-        { name: "alpha", path: join(taskPath, "alpha"), branch: "feat/login", changedFiles: 2 },
-        { name: "beta", path: join(taskPath, "beta"), branch: "feat/login", changedFiles: 0 },
+        { name: "alpha", path: join(taskPath, "alpha"), branch: "task/login", changedFiles: 2 },
+        { name: "beta", path: join(taskPath, "beta"), branch: "task/login", changedFiles: 0 },
       ])
     } finally {
       await container.cleanup()
@@ -415,9 +429,9 @@ describe("finishTask", () => {
       mainRepos[name] = join(tmpdir(), `multi-worktree-main-${name}`)
     }
     const porcelain = (name) =>
-      `worktree ${mainRepos[name]}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${join(taskPath, name)}\nHEAD bbb\nbranch refs/heads/feat/login\n`
+      `worktree ${mainRepos[name]}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${join(taskPath, name)}\nHEAD bbb\nbranch refs/heads/task/login\n`
     const handlers = {
-      "rev-parse --abbrev-ref HEAD": "feat/login",
+      "rev-parse --abbrev-ref HEAD": "task/login",
       "worktree list --porcelain": ({ cwd }) => porcelain(basename(cwd)),
       "show-ref --verify --quiet refs/heads/main": "",
     }
@@ -451,8 +465,8 @@ describe("finishTask", () => {
           { merged: true, removed: true, branchDeleted: true },
           { merged: true, removed: true, branchDeleted: true },
         ])
-      expect(keys().filter((key) => key === "merge --no-ff --no-edit feat/login")).toHaveLength(2)
-      expect(keys().filter((key) => key === "branch -d feat/login")).toHaveLength(2)
+      expect(keys().filter((key) => key === "merge --no-ff --no-edit task/login")).toHaveLength(2)
+      expect(keys().filter((key) => key === "branch -d task/login")).toHaveLength(2)
       expect(result.containerRemoved).toBe(true)
       expect(existsSync(fixture.taskPath)).toBe(false)
     } finally {
@@ -464,7 +478,7 @@ describe("finishTask", () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({
       ...fixture.handlers,
-      "merge --no-ff --no-edit feat/login": ({ cwd }) =>
+      "merge --no-ff --no-edit task/login": ({ cwd }) =>
         cwd.endsWith("alpha")
           ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict" }
           : "",
@@ -554,7 +568,7 @@ describe("finishTask documents", () => {
     const handlers = {
       "worktree list --porcelain": ({ cwd }) => [
         "worktree E:/main-alpha", "HEAD aaa", "branch refs/heads/main", "",
-        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/feat/login", "",
+        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/task/login", "",
       ].join("\n"),
       "worktree remove": ({ args }) => {
         rmSync(args[2], { recursive: true, force: true })
@@ -683,13 +697,13 @@ describe("planTask", () => {
     await writeFile(join(taskPath, "docs", "one.md"), "# one\n")
     await writeFile(join(taskPath, "docs", "two.txt"), "two\n")
     const handlers = {
-      "rev-parse --abbrev-ref HEAD": "feat/login",
+      "rev-parse --abbrev-ref HEAD": "task/login",
       "worktree list --porcelain": ({ cwd }) => [
         `worktree E:/main-${basename(cwd)}`, "HEAD aaa", "branch refs/heads/main", "",
-        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/feat/login", "",
+        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/task/login", "",
       ].join("\n"),
       // `alpha` has one modified and one untracked file; `beta` is clean.
-      "status --short --branch": ({ cwd }) => basename(cwd) === "alpha" ? "## feat/login\n M a.ts\n?? b.ts\n" : "## feat/login\n",
+      "status --short --branch": ({ cwd }) => basename(cwd) === "alpha" ? "## task/login\n M a.ts\n?? b.ts\n" : "## task/login\n",
       "symbolic-ref --quiet refs/remotes/origin/HEAD": "refs/remotes/origin/main\n",
       "show-ref --verify --quiet refs/heads/main": "",
       // `alpha` is three commits ahead of main, `beta` one.
@@ -706,8 +720,8 @@ describe("planTask", () => {
 
       expect(plan).toMatchObject({ task: "login", path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "main", changedFiles: 2, commits: 4 })
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
-      expect(byName.alpha).toEqual({ name: "alpha", path: join(fixtureUnderTest.taskPath, "alpha"), branch: "feat/login", target: "main", commits: 3, changedFiles: 2 })
-      expect(byName.beta).toMatchObject({ branch: "feat/login", target: "main", commits: 1, changedFiles: 0 })
+      expect(byName.alpha).toEqual({ name: "alpha", path: join(fixtureUnderTest.taskPath, "alpha"), branch: "task/login", target: "main", commits: 3, changedFiles: 2 })
+      expect(byName.beta).toMatchObject({ branch: "task/login", target: "main", commits: 1, changedFiles: 0 })
     } finally {
       await fixtureUnderTest.cleanup()
     }
@@ -762,7 +776,7 @@ describe("inspectTask", () => {
       await writeFile(join(taskPath, "README.en.md"), [
         "# Task: login",
         "",
-        "- Branch: `feat/login` (one branch per repository below)",
+        "- Branch: `task/login` (one branch per repository below)",
         "- Base: each repository's current HEAD",
         "- Created: 2026-01-01T00:00:00.000Z",
         "- Source root: `E:\\workspace\\public\\kratos-admin`",
@@ -778,11 +792,11 @@ describe("inspectTask", () => {
   }
 
   it("reads the identity a breadcrumb names", () => {
-    expect(parseBreadcrumb("# Task: login\n\n- Branch: `feat/login` (one branch per repository below)\n- Source root: `E:\\src`\n"))
-      .toEqual({ task: "login", branch: "feat/login", sourceRoot: "E:\\src" })
+    expect(parseBreadcrumb("# Task: login\n\n- Branch: `task/login` (one branch per repository below)\n- Source root: `E:\\src`\n"))
+      .toEqual({ task: "login", branch: "task/login", sourceRoot: "E:\\src" })
     // Only the task name is required; the rest is optional detail.
     expect(parseBreadcrumb("# Task: login\n")).toEqual({ task: "login" })
-    expect(parseBreadcrumb("# Something else\n- Branch: `feat/x`\n")).toBeUndefined()
+    expect(parseBreadcrumb("# Something else\n- Branch: `task/x`\n")).toBeUndefined()
     expect(parseBreadcrumb("")).toBeUndefined()
     expect(parseBreadcrumb(undefined)).toBeUndefined()
   })
@@ -795,7 +809,7 @@ describe("inspectTask", () => {
         isTask: true,
         task: "login",
         tasksRoot: fixtureUnderTest.root,
-        branch: "feat/login",
+        branch: "task/login",
         sourceRoot: "E:\\workspace\\public\\kratos-admin",
         repositories: ["alpha", "beta"],
       })

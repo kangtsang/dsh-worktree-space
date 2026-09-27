@@ -8,7 +8,7 @@ import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:f
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 import { breadcrumb } from './create.js'
@@ -35,7 +35,9 @@ export async function suggestTaskRoot(sourceRoot, { tasksRoot, branchPrefix = DE
     sourceRoot,
     suggested,
     explicit: requested !== '',
-    branchPrefix,
+    // The same resolution a create performs, so the preview the dialog shows and
+    // the branch the host would make cannot disagree.
+    branchPrefix: validateBranchPrefix(branchPrefix),
     repositories: repositories.map((repoPath) => ({ name: basename(repoPath), path: repoPath })),
   }
 }

@@ -8,6 +8,27 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } 
 
 type BaseMode = "head" | "named"
 
+/** Prefix the host uses when the caller names none; a suggestion normally carries it. */
+const FALLBACK_BRANCH_PREFIX = "task/"
+
+/** Characters Git refuses anywhere in a ref, plus the sequences it refuses. */
+const ILLEGAL_BRANCH_CHARACTERS = /[\s~^:?*\[\]\\\u0000-\u001f\u007f]/
+
+/**
+ * Whether a branch prefix would make Git refuse the branch, so the dialog can
+ * say so before the host has to. The host remains the authority; this only keeps
+ * a request that cannot succeed from being sent.
+ * @param prefix - the prefix as typed, already trimmed.
+ * @returns the message key to show, or `""` when the prefix can be used.
+ */
+function branchPrefixProblem(prefix: string) {
+  if (prefix === "") return ""
+  if (ILLEGAL_BRANCH_CHARACTERS.test(prefix)) return "invalidBranchPrefix"
+  if (prefix.includes("..") || prefix.includes("@{") || prefix.includes("//")) return "invalidBranchPrefix"
+  if (prefix.startsWith("/") || prefix.startsWith("-")) return "invalidBranchPrefix"
+  return ""
+}
+
 interface CreateWorktreeDialogProps {
   target: Pick<Workspace, "path" | "title">
   api: ReturnType<typeof createWorktreeApi>
@@ -35,6 +56,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
   const [loading, setLoading] = useState(true)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [taskName, setTaskName] = useState("")
+  const [branchPrefix, setBranchPrefix] = useState("")
   const [tasksRoot, setTasksRoot] = useState("")
   const [selected, setSelected] = useState<string[]>([])
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
@@ -61,6 +83,8 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
       if (!alive) return
       setSuggestion(next)
       setTasksRoot(next.suggested)
+      // The prefix the host itself would use until the user overrides it.
+      setBranchPrefix(next.branchPrefix ?? FALLBACK_BRANCH_PREFIX)
       // Every discovered repository is in the task until the user narrows it.
       setSelected(next.repositories.map((repository) => repository.name))
     }).catch((reason) => {
@@ -72,14 +96,19 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
   }, [api, target.path, loadAttempt])
 
   const repositories = suggestion?.repositories ?? []
-  const branchPrefix = suggestion?.branchPrefix ?? "feat/"
+  const suggestedPrefix = suggestion?.branchPrefix ?? FALLBACK_BRANCH_PREFIX
+  // Clearing the field asks for the host's own default rather than for no prefix
+  // at all, which is what the preview and the request then both say.
+  const typedPrefix = branchPrefix.trim()
+  const effectivePrefix = typedPrefix === "" ? suggestedPrefix : typedPrefix
+  const prefixProblem = branchPrefixProblem(typedPrefix)
   // The host refuses separators and whitespace; this form additionally keeps the
   // name a valid Git ref, so the branch cannot fail later.
   const normalizedName = taskName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
   const taskSlug = normalizedName ? slugOf(taskName) : ""
   const validSlug = /^[a-z0-9_][a-z0-9._-]*$/.test(taskSlug)
     && !taskSlug.includes("..") && !taskSlug.endsWith(".") && !taskSlug.endsWith(".lock")
-  const taskBranch = validSlug ? `${branchPrefix}${taskSlug}` : ""
+  const taskBranch = validSlug && prefixProblem === "" ? `${effectivePrefix}${taskSlug}` : ""
   const taskPath = taskSlug !== "" && tasksRoot.trim() !== "" ? taskDirectory(tasksRoot.trim(), taskSlug) : ""
   const invalidName = taskName.length > 0 && !validSlug
   // Which rule it broke, in the order the checks run.
@@ -87,7 +116,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
   const sourceReady = suggestion !== null && repositories.length > 0
   const fieldsDisabled = busy || loading || !sourceReady || !!recovery
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
-  const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== ""
+  const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === ""
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
   const endBusy = () => { busyRef.current = false; setBusy(false) }
@@ -135,6 +164,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
       setError(t(taskName.trim() !== "" && nameProblem !== "" ? nameProblem : "fillTaskName"))
       return
     }
+    if (prefixProblem !== "") {
+      setError(t(prefixProblem))
+      return
+    }
     if (selected.length === 0) {
       setError(t("repositoriesHint"))
       return
@@ -152,6 +185,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
         tasksRoot: tasksRoot.trim(),
         repos: selected,
         baseRef: baseRef === "" ? undefined : baseRef,
+        branchPrefix: effectivePrefix,
       })
       created = { path: result.path, task: result.task }
       phase = "register"
@@ -221,6 +255,14 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
                   <p id={`${id}-name-note`} className={invalidName ? "dws-field-note dws-field-note-warning" : "dws-field-note"}>{invalidName ? t(nameProblem) : t("taskNameHint")}</p>
                 </div>
                 <Input id={`${id}-name`} value={taskName} disabled={fieldsDisabled} onChange={(event) => setTaskName(event.target.value)} placeholder={t("taskNamePlaceholder")} autoFocus autoComplete="off" spellCheck={false} aria-invalid={invalidName || undefined} aria-describedby={`${id}-name-note`} />
+              </div>
+
+              <div className="dws-field">
+                <div className="dws-field-heading">
+                  <label className="dws-field-label" htmlFor={`${id}-prefix`}>{t("branchPrefix")}</label>
+                  <p id={`${id}-prefix-note`} className={prefixProblem ? "dws-field-note dws-field-note-warning" : "dws-field-note"}>{prefixProblem ? t(prefixProblem) : format(t("branchPrefixHint"), { prefix: suggestedPrefix })}</p>
+                </div>
+                <Input id={`${id}-prefix`} value={branchPrefix} disabled={fieldsDisabled} onChange={(event) => setBranchPrefix(event.target.value)} placeholder={suggestedPrefix} autoComplete="off" spellCheck={false} aria-invalid={prefixProblem !== "" || undefined} aria-describedby={`${id}-prefix-note`} />
               </div>
 
               <div className="dws-field">

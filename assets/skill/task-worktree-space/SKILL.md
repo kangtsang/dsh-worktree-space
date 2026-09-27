@@ -23,7 +23,7 @@ E:\workspace\public\projects\      ← source root: the repositories, stay on ma
 
 E:\worktree-space\                 ← task space: outside the source tree
 └── fix-login\                     ← the task directory — the session's cwd
-    ├── project_a\                 ← worktree, branch feat/fix-login
+    ├── project_a\                 ← worktree, branch task/fix-login
     └── project_b\
 ```
 
@@ -34,7 +34,7 @@ Why this shape:
 
 - **File isolation** — each task directory is a physically separate checkout, so
   sessions cannot overwrite each other's uncommitted work.
-- **Commit isolation** — every worktree is on `feat/<task>`, so commits from
+- **Commit isolation** — every worktree is on `task/<task>`, so commits from
   different tasks never interleave on one branch.
 - **Cross-repo coherence** — every repository in a task shares the branch name;
   that is what links the task's commits across repositories.
@@ -59,9 +59,12 @@ Follow this order. Never create a workspace with a guessed location.
    the user did not say; pass the chosen directory names as `repos`.
 6. **Ask which commit to start from** — recommend each repository's current HEAD
    (omit `baseRef`); alternatives are another active branch or the main branch.
-7. **Run `action: "create"`** and report the task directory path and the branch
-   name (`feat/<task>`).
-8. **Work in the task directory**: it is where the task's session belongs.
+7. **Branch prefix** — `task/` unless the user asks for another one; pass the
+   choice as `branchPrefix` and expect the branch to be that prefix plus the task
+   name (`hotfix/<task>`, `release-<task>`, …).
+8. **Run `action: "create"`** and report the task directory path and the branch
+   name.
+9. **Work in the task directory**: it is where the task's session belongs.
 
 Pass `push: true` only when the user explicitly asked for a remote branch.
 Branches are local-only by default.

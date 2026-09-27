@@ -3,6 +3,7 @@ import {
   branchNameFor,
   DEFAULT_BRANCH_PREFIX,
   TaskNameError,
+  validateBranchPrefix,
   validateTaskName,
 } from "../src/host/task/naming.js"
 
@@ -40,11 +41,44 @@ describe("validateTaskName", () => {
 
 describe("branchNameFor", () => {
   it("shares one prefixed branch across every repository by default", () => {
-    expect(DEFAULT_BRANCH_PREFIX).toBe("feat/")
-    expect(branchNameFor("fix-login")).toBe("feat/fix-login")
+    expect(DEFAULT_BRANCH_PREFIX).toBe("task/")
+    expect(branchNameFor("fix-login")).toBe("task/fix-login")
   })
 
   it("honours a configured prefix", () => {
-    expect(branchNameFor("fix-login", "task/")).toBe("task/fix-login")
+    expect(branchNameFor("fix-login", "feat/")).toBe("feat/fix-login")
+  })
+})
+
+describe("validateBranchPrefix", () => {
+  it("falls back to the default when nothing is requested", () => {
+    expect(validateBranchPrefix(undefined)).toBe(DEFAULT_BRANCH_PREFIX)
+    expect(validateBranchPrefix("")).toBe(DEFAULT_BRANCH_PREFIX)
+    expect(validateBranchPrefix("   ")).toBe(DEFAULT_BRANCH_PREFIX)
+  })
+
+  it("keeps a chosen prefix verbatim, separator and all", () => {
+    expect(validateBranchPrefix("feat/")).toBe("feat/")
+    expect(validateBranchPrefix("  release-  ")).toBe("release-")
+    expect(validateBranchPrefix("team/task/")).toBe("team/task/")
+  })
+
+  it.each([
+    ["fix login"],
+    ["task /"],
+    ["task~1/"],
+    ["task^/"],
+    ["task:/"],
+    ["task?/"],
+    ["task*/"],
+    ["task[/"],
+    ["task\\"],
+    ["task//login"],
+    ["task../"],
+    ["task@{1}/"],
+    ["/task"],
+    ["-task"],
+  ])("refuses %j, which Git would not accept in a ref", (prefix) => {
+    expect(() => validateBranchPrefix(prefix)).toThrow(TaskNameError)
   })
 })

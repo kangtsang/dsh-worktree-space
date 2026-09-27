@@ -13,9 +13,9 @@ registered as a DSH Workspace with its own sessions.
 
 ## Features
 
-- **Create a task from a session.** Pick a source root, name the task, tick the repositories
-  it should span, and say where the task space goes. Every repository gets a worktree on
-  `<branch prefix>/<task>` — `feat/<task>` by default — starting from each repository's
+- **Create a task from a session.** Pick a source root, name the task, choose the branch prefix,
+  tick the repositories it should span, and say where the task space goes. Every repository gets a
+  worktree on `<branch prefix><task>` — `task/<task>` by default — starting from each repository's
   current HEAD, or from a branch or commit you name.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit across repositories without touching the
@@ -47,7 +47,7 @@ registered as a DSH Workspace with its own sessions.
 <task space root>/
 ├── <task>/                        the task space — also the session's working directory
 │   ├── README.md                  the task's branch, base and conventions
-│   ├── <repository A>/            a worktree on <branch prefix>/<task>
+│   ├── <repository A>/            a worktree on <branch prefix><task>
 │   └── <repository B>/            a worktree on the same branch name
 └── archived-docs/
     └── <parent>-<task>-20260926-020933/    documents filed here when a task is finished
@@ -117,10 +117,12 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
    (`hotfix-placeorder`); an invalid name tells you which rule it breaks.
-3. Say where the task space goes. It has to sit outside the source tree, and a recommended
+3. Set the **branch prefix** if you want another one. The branch is this prefix plus the task
+   name, and it defaults to `task/`; clearing the field puts that default back.
+4. Say where the task space goes. It has to sit outside the source tree, and a recommended
    path is filled in for you.
-4. Tick the repositories the task should span, and choose the branch base.
-5. Click **Create and open**. The new Workspace opens a session whose working directory is the
+5. Tick the repositories the task should span, and choose the branch base.
+6. Click **Create and open**. The new Workspace opens a session whose working directory is the
    task space.
 
 If the task space is built but registering the Workspace fails, the dialog says why and lets

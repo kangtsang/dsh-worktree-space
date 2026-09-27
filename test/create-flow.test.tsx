@@ -16,7 +16,7 @@ const suggestion = {
   sourceRoot: "/repo",
   suggested: "/tasks",
   explicit: false,
-  branchPrefix: "feat/",
+  branchPrefix: "task/",
   repositories: [
     { name: "alpha", path: "/repo/alpha" },
     { name: "beta", path: "/repo/beta" },
@@ -24,7 +24,7 @@ const suggestion = {
 }
 const created = {
   task: "fix-login",
-  branch: "feat/fix-login",
+  branch: "task/fix-login",
   path: "/tasks/fix-login",
   tasksRoot: "/tasks",
   repositories: [
@@ -52,6 +52,7 @@ function setup() {
   return { api, workspaces, uiWorkspace, onClose, onCreated, mount }
 }
 const nameField = () => screen.getByRole("textbox", { name: t("taskName") })
+const prefixField = () => screen.getByRole("textbox", { name: t("branchPrefix") })
 const submit = () => screen.getByRole("button", { name: t("createAndOpen") })
 const form = () => document.querySelector("form")!
 const ready = () => screen.findByRole("textbox", { name: t("taskName") })
@@ -123,12 +124,12 @@ describe("native task create flow", () => {
     expect(input.id).not.toBe("")
     expect(document.querySelector(`label[for="${input.id}"]`)?.textContent).toBe(t("taskName"))
     await user.type(input, "Fix login")
-    expect(screen.getByText("feat/fix-login")).toBeTruthy()
+    expect(screen.getByText("task/fix-login")).toBeTruthy()
     expect(screen.getByText(created.path)).toBeTruthy()
     expect(document.querySelector(".dws-preview")?.getAttribute("aria-live")).toBe("polite")
     await user.keyboard("{Enter}")
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledExactlyOnceWith("ws-task"))
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined })
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined, branchPrefix: "task/" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)
@@ -151,6 +152,40 @@ describe("native task create flow", () => {
     await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ baseRef: "origin/main" })))
   })
 
+  it("starts the branch on the host's prefix and sends the prefix the user chose", async () => {
+    const next = setup()
+    next.mount()
+    await ready()
+
+    // The prefix arrives with the suggestion, so the form and the host cannot
+    // disagree about the branch a create would make.
+    expect(prefixField()).toHaveProperty("value", "task/")
+    fireEvent.change(prefixField(), { target: { value: "hotfix/" } })
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    expect(screen.getByText("hotfix/fix-login")).toBeTruthy()
+
+    // Clearing the field asks for the host's default, not for no prefix at all.
+    fireEvent.change(prefixField(), { target: { value: "  " } })
+    expect(screen.getByText("task/fix-login")).toBeTruthy()
+
+    fireEvent.change(prefixField(), { target: { value: "hotfix/" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ branchPrefix: "hotfix/" })))
+  })
+
+  it("refuses a prefix Git would refuse, and says which rule it broke", async () => {
+    const next = setup()
+    next.mount()
+    await ready()
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.change(prefixField(), { target: { value: "task /" } })
+    expect(submit()).toHaveProperty("disabled", true)
+    fireEvent.submit(form())
+    expect(next.api.createTask).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert").textContent).toBe(t("invalidBranchPrefix"))
+    expect([...screen.getAllByText(t("invalidBranchPrefix"))].some((node) => node.className.includes("dws-field-note-warning"))).toBe(true)
+  })
+
   // Each invalid input, and the one rule it breaks.
   it.each([
     ["", "fillTaskName"],
@@ -168,7 +203,7 @@ describe("native task create flow", () => {
     expect(submit()).toHaveProperty("disabled", true)
     fireEvent.submit(form())
     expect(next.api.createTask).not.toHaveBeenCalled()
-    expect(screen.queryByText(/^feat\//)).toBeNull()
+    expect(screen.queryByText(/^task\//)).toBeNull()
     expect(screen.getByRole("alert").textContent).toBe(t(reason))
     // A broken name is called out in the warning colour, not in the hint's grey.
     // The same sentence is also in the banner above the form, which is why this
