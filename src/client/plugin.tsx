@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client"
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots"
@@ -15,7 +15,7 @@ import { ArchiveTaskDialog } from "./components/ArchiveTaskDialog"
 import { CreateWorktreeDialog } from "./components/CreateWorktreeDialog"
 import { NewSessionWorktreeButton } from "./components/NewSessionWorktreeButton"
 import { PluginConfigCard } from "./components/PluginConfigCard"
-import { WorkspaceArchiveEntry } from "./components/WorkspaceArchiveEntry"
+import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
 import { WorkspaceActionPlacement } from "./components/WorkspaceActionPlacement"
 import { WorktreeFooterAction } from "./components/WorktreeFooterAction"
 import { WorktreesSettings } from "./components/WorktreesSettings"
@@ -87,6 +87,14 @@ export const WorktreePlugin = {
   let openManage: () => void = () => {}
     let refreshGeneration = 0
 
+    // Stable faces onto the handlers the overlay installs when it mounts. The menu
+    // adapter lives outside React's tree and holds the props it was first given, so
+    // handing it these wrappers - which read the current handler when a row is
+    // clicked - keeps a click from landing on the placeholder that stood there
+    // before the overlay mounted, without re-registering on every render.
+    const requestCreate = (target: Pick<Workspace, "path" | "title">) => openCreate(target)
+    const requestArchive = (path: string) => openArchive(path)
+
     const refreshClassification = async () => {
       if (!active) return
       const generation = ++refreshGeneration
@@ -121,14 +129,18 @@ export const WorktreePlugin = {
 
     function WorktreeOverlay() {
       // One overlay host for everything this plugin shows on top of the shell: the
-      // composer opens the create form, the workspace list's menu opens the archive
-      // form, and the sidebar's footer entry opens the management panel.
+      // composer opens the create form, the workspace list's menu opens the create
+      // or the archive form, and the sidebar's footer entry opens the panel.
       const [request, setRequest] = useState<
         | { kind: "create"; target: Pick<Workspace, "path" | "title"> }
         | { kind: "archive"; path: string }
         | { kind: "manage" }
         | null
       >(null)
+      // The menu offers a task space exactly where the composer's button does, so
+      // both read the one classification rather than asking the Host again.
+      const { sourceRootPaths } = useSyncExternalStore(subscribeClassification, getClassification, getClassification)
+      const canCreate = useCallback((workspace: Workspace) => sourceRootPaths.has(cleanPath(workspace.path)), [sourceRootPaths])
       useEffect(() => {
         openCreate = (target) => setRequest({ kind: "create", target })
         openArchive = (path) => setRequest({ kind: "archive", path })
@@ -136,7 +148,7 @@ export const WorktreePlugin = {
         return () => { openCreate = () => {}; openArchive = () => {}; openManage = () => {} }
       }, [])
       return <>
-        <WorkspaceArchiveEntry api={api} workspaces={workspaces} onArchive={openArchive} />
+        <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} />
         {request?.kind === "create" ? (
           <CreateWorktreeDialog
             target={request.target}

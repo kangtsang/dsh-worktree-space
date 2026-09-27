@@ -80,8 +80,9 @@ worktrees of different repositories:
   branch name is the same everywhere.
 - **Never edit, commit or merge in the source repositories** — for the session
   they are read-only references.
-- **Never merge into main or master** from a session. Finishing a task is the
-  user's action.
+- **Never merge by hand** from a session: not the task branch, and not into any
+  branch of the source repositories. Finishing a task is the user's action, and it
+  merges into whichever branch each source repository has checked out.
 - Read the task's `README.md` for its branch, base and repositories rather than
   guessing; if another session created the workspace, follow that file.
 
@@ -93,10 +94,13 @@ merge, delete a branch, or delete stray files unless asked.
 
 Confirm each destructive step with the user before passing it:
 
-1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`,
-   and ask which branch to merge into, then pass it as `target`. A conflict
-   leaves that repository's worktree and branch in place and reports it; the
-   other repositories still complete.
+1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. By
+   default the merge lands on the branch each source repository has checked out —
+   the task's own starting point. Ask which branch to merge into when the user has
+   another one in mind, and pass it as `target` (one branch for every repository);
+   a branch that is checked out nowhere is merged in a temporary worktree, so no
+   source checkout is ever switched. A conflict leaves that repository's worktree
+   and branch in place and reports it; the other repositories still complete.
 2. **Delete the branch?** Only after it is merged, and only when the user asks.
    Pass `deleteBranch: true` together with `merge: true`.
 3. **Stray files?** When the outcome lists strays (agent notes, editor caches, a

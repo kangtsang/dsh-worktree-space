@@ -8,6 +8,7 @@ import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 function setup(classification: (path: string) => unknown) {
   const api: any = {
     scan: vi.fn().mockResolvedValue([]),
+    cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn(),
     classifyRoot: vi.fn().mockImplementation((path: string) => Promise.resolve(classification(path))),
   }

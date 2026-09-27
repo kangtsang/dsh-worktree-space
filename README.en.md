@@ -7,7 +7,7 @@ registered as a DSH Workspace with its own sessions.
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
 
 [中文](README.md) · **English**
 
@@ -30,13 +30,18 @@ registered as a DSH Workspace with its own sessions.
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
   folds that row on its own; the button beside the filters folds or opens them all at once.
-- **Finish a task** from its row. By default each repository's branch is merged back, the
-  worktrees are removed, the task space's own documents are filed under
+- **Finish a task** from its row. By default each repository's branch is merged back into the
+  branch that repository has checked out — the task space's own starting point, since nothing
+  here switches a source checkout — and the dialog can point any repository at another local
+  branch instead, which is then merged in a temporary worktree without touching your checkout.
+  The worktrees are removed, the task space's own documents are filed under
   `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option unticked and they
   are deleted along with everything else), and the Workspace registration is removed. It will not finish while a
   session in that Workspace is still running — stop it or let it end, then try again.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
+- **New task space** is in that same `⋯` menu, for Workspaces that hold repositories, and
+  opens the one create dialog.
 - **No extra service needed.** The two entries, the scan depth and the directory limit all
   live in the plugin's own configuration (see Configuration). It follows DSH themes, takes
   its language from DSH, and gives the plugin list its own name, description and icon.
@@ -112,7 +117,7 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 
 ### Create a task
 
-<img src="docs/new-worktree-space.png" alt="New Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="598">
 
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
@@ -138,9 +143,14 @@ and its worktrees. The summary on the right follows the view (`N tasks` / `N Wor
 `N repositories · M Worktrees`), and reads `shown / total` while a search or filter is
 narrowing the list.
 
+The panel rescans every time it is opened, but it first paints what the Host still remembers
+of the previous scan, so it shows data straight away and swaps in the fresh result when the
+scan lands (`Refreshing…` marks the wait). That memory lives in the DSH instance's own
+process only: nothing is written to disk, and it is gone when the instance exits.
+
 ### Finish a task
 
-<img src="docs/finish-task.png" alt="The Finish task dialog" width="612">
+<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="612">
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu.
 The dialog spells out what is about to happen — uncommitted files, commits to merge, the

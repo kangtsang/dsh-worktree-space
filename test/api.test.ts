@@ -6,12 +6,21 @@ describe("worktree client API routing", () => {
 
   afterEach(() => vi.useRealTimers())
 
-  it.each(["scan", "status", "classifyRoot", "suggestRoot"] as const)("bounds never-resolving %s reads to 15 seconds and aborts transport", async operation => {
+  /** Every read endpoint, with the arguments its method takes. */
+  const READS = [
+    { operation: "scan", args: [["/repo"]] },
+    { operation: "cachedScan", args: [["/repo"]] },
+    { operation: "status", args: ["/repo"] },
+    { operation: "classifyRoot", args: ["/repo"] },
+    { operation: "suggestRoot", args: ["/repo"] },
+  ] as const
+
+  it.each(READS)("bounds never-resolving $operation reads to 15 seconds and aborts transport", async ({ operation, args }) => {
     vi.useFakeTimers()
     const call = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
     const api = createWorktreeApi({ rpc: { call } })
     const invoke = api[operation] as (...call: any[]) => Promise<unknown>
-    const request = operation === "scan" ? invoke(["/repo"]) : invoke("/repo")
+    const request = invoke(...args)
     const rejected = expect(request).rejects.toThrow(/timed out/)
     const signal = call.mock.calls[0][3] as AbortSignal
     expect(signal.aborted).toBe(false)
@@ -25,12 +34,12 @@ describe("worktree client API routing", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it.each(["scan", "status"] as const)("cancels %s reads when the caller aborts", async operation => {
+  it.each(["scan", "cachedScan", "status"] as const)("cancels %s reads when the caller aborts", async operation => {
     vi.useFakeTimers()
     const call = vi.fn().mockImplementation(() => new Promise<never>(() => {}))
     const api = createWorktreeApi({ rpc: { call } })
     const controller = new AbortController()
-    const request = operation === "scan" ? api.scan(["/repo"], controller.signal) : api.status("/repo", undefined, controller.signal)
+    const request = operation === "status" ? api.status("/repo", undefined, controller.signal) : api[operation](["/repo"], controller.signal)
     const rejected = expect(request).rejects.toThrow(/cancelled/)
     controller.abort()
     await rejected
@@ -39,12 +48,12 @@ describe("worktree client API routing", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it.each(["scan", "status", "classifyRoot", "suggestRoot"] as const)("clears the %s read timer after a successful response", async operation => {
+  it.each(READS)("clears the $operation read timer after a successful response", async ({ operation, args }) => {
     vi.useFakeTimers()
     const call = vi.fn().mockResolvedValue({ ok: true, value: [] })
     const api = createWorktreeApi({ rpc: { call } })
     const invoke = api[operation] as (...call: any[]) => Promise<unknown>
-    await (operation === "scan" ? invoke(["/repo"]) : invoke("/repo"))
+    await invoke(...args)
     expect(vi.getTimerCount()).toBe(0)
     await vi.advanceTimersByTimeAsync(30000)
     expect(call.mock.calls[0][3].aborted).toBe(false)
@@ -75,6 +84,7 @@ describe("worktree client API routing", () => {
 
   it.each([
     { operation: "scan", endpoint: "worktree.scan", args: [["/repo"]], payload: { paths: ["/repo"] } },
+    { operation: "cachedScan", endpoint: "worktree.cached", args: [["/repo"]], payload: { paths: ["/repo"] } },
     { operation: "status", endpoint: "worktree.status", args: ["/repo"], payload: { path: "/repo" } },
     { operation: "classifyRoot", endpoint: "task.classify-root", args: ["/repo"], payload: { sourceRoot: "/repo" } },
     { operation: "suggestRoot", endpoint: "task.suggest-root", args: ["/repo"], payload: { sourceRoot: "/repo", tasksRoot: undefined } },
@@ -87,7 +97,7 @@ describe("worktree client API routing", () => {
 
     await expect(invoke(...args)).resolves.toBe(value)
     const expected: unknown[] = ["/api", `dsh-worktree-space/${endpoint}`, payload]
-    if (["scan", "status", "classifyRoot", "suggestRoot"].includes(operation)) expected.push(expect.any(AbortSignal))
+    if (READS.some(read => read.operation === operation)) expected.push(expect.any(AbortSignal))
     expect(call.mock.calls).toEqual([expected])
   })
 

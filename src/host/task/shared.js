@@ -20,11 +20,6 @@ import { assertIsolated, recommendTasksRoot } from './paths.js'
 export const BREADCRUMB = 'README.en.md'
 
 
-/** Merge targets, in the order they are tried when none is named. */
-
-export const MERGE_TARGET_CANDIDATES = ['main', 'master']
-
-
 /**
  * Whether a directory is a linked worktree, that is, its `.git` is a file
  * pointing back at a source repository. A source repository's `.git` is a
@@ -169,30 +164,6 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * @throws Error when no container root is given.
  */
 
-/**
- * Pick the branch a finished task merges into: an explicit target, else the
- * remote's default, else the first conventional name that exists locally.
- * @param subprocess - the profile's subprocess service.
- * @param mainRepo - the source repository.
- * @param requested - an explicitly requested target, possibly empty.
- * @returns the local branch name to merge into.
- * @throws Error when no target can be determined.
- */
-
-/**
- * Report what archiving a task would do, without doing any of it.
- *
- * Each repository reports the branch its worktree is on, the branch that branch
- * would merge into, how many commits that merge would bring, and how many files
- * are uncommitted — which is what the archive dialog shows before the user
- * chooses. The merge target is resolved the same way {@link finishTask} resolves
- * it, so the promise and the outcome cannot disagree.
- * @param subprocess - the profile's subprocess service.
- * @param options - `task` and `tasksRoot`.
- * @returns the per-repository plan and its totals.
- * @throws Error when the task directory or its worktrees cannot be found.
- */
-
 /** Extensions whose files are the user's own writing rather than build output. */
 
 /** Directories a build writes, which nobody misses when they go. */
@@ -238,9 +209,13 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * happened per repository so a conflict or a dirty worktree never hides the
  * repositories that did complete.
  * @param subprocess - the profile's subprocess service.
- * @param options - `task` and `tasksRoot`, plus the optional `merge`, `target`,
+ * @param options - `task` and `tasksRoot`, plus the optional `merge`, `target`
+ * (one branch for every repository), `targets` (a branch per repository),
  * `deleteBranch`, `force`, `cleanStray`, `keep`, `documentsDirectory` and
- * `discardDocuments`. The container's own content is filed into
+ * `discardDocuments`. A merge lands on the branch each source repository has
+ * checked out unless another is named, and a named one that is checked out nowhere
+ * is merged in a temporary worktree, so no source checkout is ever switched. The
+ * container's own content is filed into
  * `documentsDirectory` when one is named, discarded when `discardDocuments` is
  * set, and otherwise left where it is.
  * @returns the per-repository outcome and whether the container was removed.

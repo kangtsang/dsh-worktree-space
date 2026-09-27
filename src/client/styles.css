@@ -282,6 +282,11 @@
   /* What there is to archive, stated above everything the dialog asks. */
   .dws-dialog-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
   .dws-plan { margin-top: 12px; }
+  /* The branch a repository merges into, chosen in place: sized like the text it
+     replaces rather than like a form field. */
+  .dws-plan-target { width: auto; max-width: 100%; min-height: 26px; padding: 2px 6px; font-size: 12px; line-height: 18px; }
+  /* Said before the merge rather than reported after it. */
+  .dws-plan-detour { color: var(--wt-muted); }
   /* What cleaning the container would remove, shown before it is chosen. */
   .dws-plan-strays { display: grid; gap: 6px; margin-top: 14px; }
   .dws-plan-strays-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }

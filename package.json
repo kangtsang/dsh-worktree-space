@@ -40,10 +40,10 @@
     "package.json",
     "README.en.md",
     "README.md",
-    "docs/new-session.png",
-    "docs/finish-task.png",
-    "docs/manage-worktree-space.png",
-    "docs/new-worktree-space.png"
+    "docs/img/new-session.png",
+    "docs/img/finish-task.png",
+    "docs/img/manage-worktree-space.png",
+    "docs/img/new-worktree-space.png"
   ],
   "scripts": {
     "build": "node build.mjs",

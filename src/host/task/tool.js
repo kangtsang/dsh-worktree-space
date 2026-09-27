@@ -20,6 +20,7 @@ const DESCRIPTION = [
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'Pass merge only when the user asked to merge, deleteBranch only after a merge, and force only when the user has decided to discard uncommitted work.',
+  'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a temporary worktree, so no source checkout is ever switched.',
 ].join('\n')
 
 /**
@@ -188,7 +189,7 @@ export function registerTaskTool(ctx) {
       baseRef: { type: 'string', description: 'Start point (create). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
-      target: { type: 'string', description: 'Branch to merge into (done). Omit to detect origin/HEAD, main, master.' },
+      target: { type: 'string', description: 'Branch to merge into (done), for every repository. Omit for the branch each source repository has checked out.' },
       deleteBranch: { type: 'boolean', description: 'Delete each branch after a merge (done). Needs merge.' },
       cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Off by default.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },

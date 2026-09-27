@@ -36,6 +36,19 @@ export interface WorktreeList {
   worktrees: Worktree[]
 }
 
+/**
+ * Answer of `worktree.cached`: what the Host still remembers of a scan.
+ *
+ * It is the previous scan's own answer, held in the Host's memory since that scan
+ * and dropped when the DSH instance exits — never written down, and never the last
+ * word, because the panel scans again as soon as it has painted this.
+ */
+export interface RememberedScan {
+  repositories: WorktreeList[]
+  /** The statuses the Host happens to hold, by worktree path; others are missing. */
+  statuses: Record<string, WorktreeStatus>
+}
+
 /** One repository a task would span. */
 export interface SourceRepository {
   name: string
@@ -115,8 +128,17 @@ export interface TaskPlanRepository {
   name: string
   path: string
   branch?: string
-  /** The branch this repository's branch would merge into. */
+  /** The branch this repository's branch would merge into, as things stand. */
   target?: string
+  /** The branch the source repository has checked out: the default target. */
+  checkedOut?: string
+  /**
+   * Every branch that could be merged into instead, the checked-out one first.
+   *
+   * Branches another worktree holds are left out — merging into one of those would
+   * mean moving a checkout someone else is using.
+   */
+  branches: string[]
   /** Commits that merge would bring. */
   commits: number
   changedFiles: number

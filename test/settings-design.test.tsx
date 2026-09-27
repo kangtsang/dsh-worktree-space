@@ -17,6 +17,7 @@ function repository(name: string, rows: ReturnType<typeof worktree>[] = []) {
 function setup({ repos = [repository("alpha", [worktree(linkedPath, "task/feature")])], items = [] as any[] } = {}) {
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
+    cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockImplementation(async (path: string) => ({ ...clean, changedFiles: path.includes("dirty") ? 2 : 0 })),
     remove: vi.fn().mockResolvedValue({}),
     prune: vi.fn().mockResolvedValue({}),

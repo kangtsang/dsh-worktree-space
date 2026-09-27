@@ -6,7 +6,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
 
 **简体中文** · [English](README.en.md)
 
@@ -24,10 +24,13 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
   三个视图都能搜索，也能用「待处理」筛出需要注意的行（有改动、被锁定、可清理，或状态读取失败）；
   每行左边的箭头能单独折叠，筛选旁的按钮可以一次全部展开或折叠。
-- **结束任务**：在任务行上点「结束任务」。默认把各仓库的分支合并回主线，删掉 worktree，把任务空间里的
+- **结束任务**：在任务行上点「结束任务」。默认把各仓库的分支合并回该仓库当前检出的分支（也就是任务空间的
+  起点；插件不会切换源码仓库的检出），也可以在对话框里按仓库改成别的分支 —— 那会在一个临时 worktree 里
+  合并，同样不碰你的检出。然后删掉 worktree，把任务空间里的
   文档存到 `archived-docs/<工作区名>-<YYYYMMDD-HHMMSS>`（不勾选归档，就会连这些文件一起删掉），
   最后注销这个工作区。要是该工作区里还有会话在跑，会先拒绝，等它结束或停掉再试。
 - **结束任务空间**也在这个工作区列表自己的 `⋯` 菜单里 —— 只对确实是任务空间的目录出现。
+- **新建任务空间**同样在那个 `⋯` 菜单里 —— 只对挂有代码仓库的工作区出现，点开的就是同一个创建对话框。
 - **不需要额外服务。** 入口开关、扫描深度和目录上限都在插件自己的配置里改（见「配置」）。支持 DSH
   主题；界面语言跟着 DSH 的语言设置走；插件列表里的名称、描述和图标也由本插件提供。
 
@@ -97,7 +100,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 ### 创建任务
 
-<img src="docs/new-worktree-space.png" alt="新建 Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space" width="598">
 
 1. 在会话里，点输入框上方的 **新建 Worktree Space**。
 2. 给任务起名 —— 会转成小写，空格、中文和其它字符都换成连字符（`hotfix-placeorder`）；名字不合法时
@@ -116,10 +119,14 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 右侧的统计会跟着视图变（`N 个任务` / `N 个工作区` / `N 个仓库 · M 个 Worktree`），搜索或筛选时显示
 `可见 / 总数`。
 
+面板每次打开都会重新扫描，但会先用宿主记住的上一次扫描结果把界面画出来，所以打开就能看到数据，扫描
+结束后自动换成新结果（标题栏会显示「正在刷新…」）。这份记忆只放在 DSH 实例的内存里：既不写磁盘，
+也会在实例关闭时随之清空。
+
 ### 结束任务
 
-<img src="docs/finish-task.png" alt="结束任务对话框" width="612">
+<img src="docs/img/finish-task.png" alt="结束任务对话框" width="612">
 
 在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框会先说明接下来会
 发生什么：未提交的文件、待合并的提交、合并到哪个分支，以及任务空间里的文档（确实有东西可归档时，
-才会出现「归档文档」选项）。默认勾选「合并回主线」；「删除分支」和「强制」默认不勾选。
+才会出现「归档文档」选项）。默认勾选「合并回目标分支」；「删除分支」和「强制」默认不勾选。

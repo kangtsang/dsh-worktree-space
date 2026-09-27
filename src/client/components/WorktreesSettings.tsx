@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "lucide-react"
 import { format, useT } from "../lib/i18n"
-import { cleanPath, slashPath } from "../lib/paths"
+import { slashPath } from "../lib/paths"
+import { rememberedRepositories, scannedRepositories } from "../lib/scan"
 import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
-import type { SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
+import type { RememberedScan, SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
@@ -63,21 +64,21 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
   const refreshController = useRef<AbortController | null>(null)
+  // Whether a scan of this mount has already landed. The remembered answer is
+  // painted only until then: once real rows exist, a late-arriving memory must not
+  // put back what the scan has just replaced - including an empty result.
+  const paintedFresh = useRef(false)
   const refresh = useCallback(async () => {
     refreshController.current?.abort()
     const controller = new AbortController()
     refreshController.current = controller
     setBusy(true); setError("")
     try {
-      const seen = new Set<string>()
       const paths = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
       const lists: WorktreeList[] = await api.scan(paths, controller.signal)
       if (controller.signal.aborted) return
-      const discovered = lists.filter(list => {
-        const key = cleanPath(list.repoPath)
-        if (!key || seen.has(key)) return false
-        seen.add(key); return true
-      }).map(list => ({ ...list, currentBranch: list.worktrees.find(row => row.isMain)?.branch, worktrees: list.worktrees.filter(row => !row.isMain) }))
+      const discovered = scannedRepositories(lists)
+      paintedFresh.current = true
       setRepos(discovered.map(list => ({ ...list, worktrees: list.worktrees.map(row => ({ ...row, statusError: t("checkingStatus") })) })))
       const next = await Promise.all(discovered.map(async list => ({
         ...list,
@@ -93,10 +94,26 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       if (!controller.signal.aborted) setBusy(false)
     }
   }, [api, workspaces, t])
+  // The panel is unmounted whenever it is closed, so every opening starts here.
+  // It paints what the Host remembers of the last scan - which is the whole point
+  // of that memory - and scans again regardless: the remembered rows are replaced
+  // the moment the fresh answer lands, so a stale list costs one repaint at most.
   useEffect(() => {
+    const controller = new AbortController()
+    const paths = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
+    void api.cachedScan(paths, controller.signal).then((remembered: RememberedScan | null) => {
+      if (!remembered || controller.signal.aborted || paintedFresh.current) return
+      setRepos(rememberedRepositories(remembered, t("checkingStatus")))
+    }).catch(() => {
+      // Remembered rows are a shortcut, never a fallback the panel depends on: a
+      // Host that cannot answer leaves it with the scan already under way.
+    })
     void refresh()
-    return () => { refreshController.current?.abort() }
-  }, [refresh])
+    return () => {
+      controller.abort()
+      refreshController.current?.abort()
+    }
+  }, [api, workspaces, refresh, t])
 
   // Committed work the merge target does not have is something to act on even
   // though the working tree is clean, which is why it counts as attention.
@@ -178,7 +195,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       <span className="dws-summary">{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("repositories")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
     </div>
     {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
-    {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{t("scanning")}</span></div> : null}
+    {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{repos.length > 0 ? t("refreshing") : t("scanning")}</span></div> : null}
     {busy && repos.length === 0 ? <div className="dws-skeleton-list" aria-hidden="true">{[0, 1, 2].map(index => <div className="dws-skeleton-row" key={index}><span /><div><span /><span /></div></div>)}</div> : null}
     {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit2 size={26} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
     {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><GitPullRequest size={26} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}

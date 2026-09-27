@@ -2,6 +2,7 @@ import type {
   ConnectionService,
   CreateTaskResult,
   FinishTaskResult,
+  RememberedScan,
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
@@ -52,6 +53,14 @@ export function createWorktreeApi(connection: ConnectionService) {
   return {
     scan: (paths: string[], signal?: AbortSignal) => read<WorktreeList[]>("worktree.scan", { paths }, signal),
     /**
+     * What the Host remembers of the last scan of these Workspaces.
+     *
+     * Reading it is a memory lookup on the Host, not a scan: it is what lets a
+     * reopened panel paint the previous result at once, while the fresh scan it
+     * starts alongside it is still running. `null` means this Host holds nothing.
+     */
+    cachedScan: (paths: string[], signal?: AbortSignal) => read<RememberedScan | null>("worktree.cached", { paths }, signal),
+    /**
      * One worktree's status. `target` names the branch the commits are counted
      * against - the one the source checkout sits on, which is where finishing
      * merges - and is optional: without it the answer carries no commit count.
@@ -67,8 +76,8 @@ export function createWorktreeApi(connection: ConnectionService) {
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
     /** What archiving a task would do, before doing any of it. */
-    planTask: (payload: { task: string; tasksRoot: string }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
+    planTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; tasksRoot: string; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
   }
 }

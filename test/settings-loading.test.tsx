@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { t } from "../src/client/lib/i18n"
+import { format, t } from "../src/client/lib/i18n"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
@@ -23,7 +23,7 @@ function repository(path: string, linked = false) {
 }
 
 function setup() {
-  const api = { scan: vi.fn(), status: vi.fn(), remove: vi.fn(), prune: vi.fn() }
+  const api = { scan: vi.fn(), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn(), remove: vi.fn(), prune: vi.fn() }
   const items = [
     { workspaceId: "broad", path: "/projects", title: "Projects" },
     { workspaceId: "narrow", path: "/projects/narrow", title: "Narrow" },
@@ -105,5 +105,64 @@ describe("WorktreesSettings loading lifecycle", () => {
     expect(screen.queryByRole("status")).toBeNull()
     expect(screen.getByRole("alert").textContent).toContain("Worktree request timed out")
     expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false)
+  })
+})
+
+/**
+ * The Host remembers the last scan of each Workspace set, so a panel that has just
+ * been reopened has something to paint before its own scan answers. What it paints
+ * is never the last word: the scan it started alongside is.
+ */
+describe("WorktreesSettings and the remembered scan", () => {
+  function remembered() {
+    return {
+      repositories: [repository("/projects/linked", true)],
+      statuses: { "/projects/linked.worktrees/task": { branchLine: "## task", changedFiles: 3, output: "## task\n M a.txt" } },
+    }
+  }
+
+  it("paints the remembered rows at once, then replaces them with the fresh scan", async () => {
+    const next = setup()
+    next.api.cachedScan.mockResolvedValue(remembered())
+    const scan = deferred<any[]>()
+    next.api.scan.mockReturnValue(scan.promise)
+    next.mount()
+    showRepositories()
+
+    // The remembered rows are up before the scan has answered anything, with the
+    // status the Host still holds, and without the skeleton in front of them.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "linked" })).toBeTruthy())
+    expect(screen.getByText(format(t("dirty"), { count: "3" }))).toBeTruthy()
+    expect(document.querySelectorAll(".dws-skeleton-row")).toHaveLength(0)
+    expect(screen.getByRole("status").textContent).toContain(t("refreshing"))
+
+    // The scan is the last word, and an empty result is a result.
+    await act(async () => { scan.resolve([]) })
+    expect(screen.queryByRole("heading", { name: "linked" })).toBeNull()
+    expect(screen.getByRole("heading", { name: t("noMatches") })).toBeTruthy()
+  })
+
+  it("ignores a remembered answer that arrives after the fresh scan has landed", async () => {
+    const next = setup()
+    const cache = deferred<any>()
+    next.api.cachedScan.mockReturnValue(cache.promise)
+    next.api.scan.mockResolvedValue([])
+    next.mount()
+    showRepositories()
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull())
+
+    await act(async () => { cache.resolve(remembered()) })
+    expect(screen.queryByRole("heading", { name: "linked" })).toBeNull()
+  })
+
+  it("scans anyway when the Host cannot answer for the last scan", async () => {
+    const next = setup()
+    next.api.cachedScan.mockRejectedValue(new Error("Unknown endpoint: worktree.cached"))
+    next.api.scan.mockResolvedValue([repository("/projects/linked")])
+    next.mount()
+    showRepositories()
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "linked" })).toBeTruthy())
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 })

@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, GitPullRequestArrow, Loader2 } from "lucide-react"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
 import { cleanPath, nameOf, parentOf } from "../lib/paths"
-import type { FinishTaskResult, TaskPlan, WorkspacesService } from "../lib/types"
+import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
 
 interface ArchiveTaskDialogProps {
   /** Absolute path of the task container to archive. Either entry point knows it. */
@@ -52,24 +52,45 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   const [result, setResult] = useState<FinishTaskResult | null>(null)
   const [registrationError, setRegistrationError] = useState("")
   const [busy, setBusy] = useState(false)
+  // The branch chosen per repository, once it differs from the default. Held here
+  // rather than read back from the plan, so a choice keeps showing while the
+  // preview of it — its commit count, its warnings — is still being fetched.
+  const [targets, setTargets] = useState<Record<string, string>>({})
+  const planGeneration = useRef(0)
+  /** One read answers everything this dialog shows: each repository's branch, what
+   * it would merge into, how many commits that is, and how much is uncommitted —
+   * none of it trusted from the opener, since this dialog removes those worktrees. */
+  const loadPlan = useCallback(async (chosen?: Record<string, string>) => {
+    // Answering a request the user has already replaced would put a stale preview
+    // back on screen, so only the newest call is allowed to land.
+    const generation = ++planGeneration.current
+    try {
+      const planned = await api.planTask({
+        task: nameOf(path),
+        tasksRoot: parentOf(path),
+        ...(chosen === undefined || Object.keys(chosen).length === 0 ? {} : { targets: chosen }),
+      })
+      if (generation !== planGeneration.current) return
+      setPlan(planned)
+      setLoadError("")
+    } catch (reason: any) {
+      if (generation !== planGeneration.current) return
+      setLoadError(String(reason?.message ?? reason))
+    }
+  }, [api, path])
 
   useEffect(() => {
-    let active = true
-    setPlan(null); setLoadError("")
-    void (async () => {
-      try {
-        // One call answers everything this dialog shows: the branch each
-        // repository is on, what it would merge into, how many commits that is,
-        // and how much is uncommitted — none of it trusted from the opener, since
-        // this dialog is about to remove those worktrees.
-        const planned = await api.planTask({ task: nameOf(path), tasksRoot: parentOf(path) })
-        if (active) setPlan(planned)
-      } catch (reason: any) {
-        if (active) setLoadError(String(reason?.message ?? reason))
-      }
-    })()
-    return () => { active = false }
-  }, [api, path])
+    setPlan(null); setLoadError(""); setTargets({})
+    void loadPlan()
+    return () => { planGeneration.current += 1 }
+  }, [loadPlan])
+
+  /** Preview this repository merging into the branch just chosen. */
+  const chooseTarget = (name: string, branch: string) => {
+    const next = { ...targets, [name]: branch }
+    setTargets(next)
+    void loadPlan(next)
+  }
 
   const running = (workspace?.sessionIds ?? []).some((sessionId) => sessions.list.getSnapshot().byId[sessionId]?.running === true)
   /** Strays carrying writing, which the warning names one by one. */
@@ -79,6 +100,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   const contentStrays = (plan?.strays ?? []).filter((stray) => stray.kind === "content")
   const noiseStrays = (plan?.strays ?? []).filter((stray) => stray.kind !== "content")
   const strayName = (stray: { name: string; directory: boolean }) => stray.directory ? `${stray.name}/` : stray.name
+  /**
+   * The branches offered for a repository.
+   *
+   * The resolved target leads, even when the Host's own list left it out — a select
+   * whose value is missing from its options renders blank and would silently drop
+   * the branch the merge is actually going to use.
+   */
+  const candidates = (entry: TaskPlanRepository) => entry.target !== undefined && !entry.branches.includes(entry.target)
+    ? [entry.target, ...entry.branches]
+    : entry.branches
 
   const close = () => { if (!busy) onClose() }
   const archive = async () => {
@@ -89,6 +120,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         task: plan.task,
         tasksRoot: plan.tasksRoot,
         merge: options.merge,
+        // The branch each repository was pointed at, when the user picked one; a
+        // repository left alone is the Host's own default to resolve.
+        ...(options.merge && Object.keys(targets).length > 0 ? { targets } : {}),
         // Deleting a branch only means something once it was merged, and the host
         // refuses the pair the other way round.
         deleteBranch: options.merge && options.deleteBranch,
@@ -140,13 +174,36 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           </p> : null}
           <div className="dws-remove-target"><GitPullRequestArrow size={18} /><div><strong>{plan?.mergeTarget ?? plan?.task ?? ""}</strong><code>{path}</code></div></div>
           {/* Each repository's branch, the branch it would merge into, and how far
-              ahead it is — the per-repository detail behind the totals above. */}
+              ahead it is — the per-repository detail behind the totals above. The
+              target is choosable where the Host offered branches to choose from. */}
           {plan !== null && plan.repositories.length > 0 ? <ul className="dws-finish-repos dws-plan">
             {plan.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
-              <span>{entry.branch ?? "—"}{entry.target === undefined ? null : ` → ${entry.target}`}</span>
+              <span>{entry.branch ?? "—"}</span>
+              {candidates(entry).length === 0
+                ? <span>{entry.target === undefined ? "" : `→ ${entry.target}`}</span>
+                : <>
+                  <span aria-hidden="true">→</span>
+                  <Select
+                    className="dws-plan-target"
+                    aria-label={`${t("planTargetLabel")} · ${entry.name}`}
+                    // Read-only once the task is finished: the plan stays on screen
+                    // as the record of what was done, but nothing here still points
+                    // at a task space that no longer exists.
+                    disabled={optionsDisabled || result !== null}
+                    value={targets[entry.name] ?? entry.target ?? ""}
+                    onChange={(event) => chooseTarget(entry.name, event.target.value)}
+                  >
+                    {candidates(entry).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
+                  </Select>
+                </>}
               <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>
               <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
+              {/* Saying it before the merge, not after: a target the source
+                  repository is not on is merged in a checkout of its own. */}
+              {entry.target !== undefined && entry.target !== entry.checkedOut
+                ? <span className="dws-plan-detour">{t("planTemporaryWorktree")}</span>
+                : null}
               {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
             </li>)}
           </ul> : null}
