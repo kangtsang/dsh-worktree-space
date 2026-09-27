@@ -7,7 +7,7 @@ registered as a DSH Workspace with its own sessions.
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
 
 [中文](README.md) · **English**
 
@@ -112,7 +112,7 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 
 ### Create a task
 
-<img src="docs/new-worktree-space.png" alt="New Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="598">
 
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
@@ -142,7 +142,7 @@ process only: nothing is written to disk, and it is gone when the instance exits
 
 ### Finish a task
 
-<img src="docs/finish-task.png" alt="The Finish task dialog" width="612">
+<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="612">
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu.
 The dialog spells out what is about to happen — uncommitted files, commits to merge, the

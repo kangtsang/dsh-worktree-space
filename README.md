@@ -6,7 +6,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
 
 **简体中文** · [English](README.en.md)
 
@@ -97,7 +97,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 ### 创建任务
 
-<img src="docs/new-worktree-space.png" alt="新建 Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space" width="598">
 
 1. 在会话里，点输入框上方的 **新建 Worktree Space**。
 2. 给任务起名 —— 会转成小写，空格、中文和其它字符都换成连字符（`hotfix-placeorder`）；名字不合法时
@@ -121,7 +121,7 @@ dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 
 ### 结束任务
 
-<img src="docs/finish-task.png" alt="结束任务对话框" width="612">
+<img src="docs/img/finish-task.png" alt="结束任务对话框" width="612">
 
 在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框会先说明接下来会
 发生什么：未提交的文件、待合并的提交、合并到哪个分支，以及任务空间里的文档（确实有东西可归档时，
