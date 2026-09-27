@@ -6,7 +6,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="960">
 
 **简体中文** · [English](README.en.md)
 
@@ -88,20 +88,23 @@ dsh plugin --profile web add dsh-worktree-space
 | --- | --- | --- | --- |
 | 面板入口（新会话下方） | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
 | 侧边栏底部入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
-| 扫描深度 | 1–5 层 | 2 层 | 从每个工作区根目录往下扫几层（根目录本身不算） |
+| 扫描深度 | 1–5 层 | 2 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
 | 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | 一次扫描最多读多少个目录；超过会提示你换一个更小的工作区 |
+| 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建面板里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
 
 扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` 就认定是
 仓库；`node_modules`、`dist`、`build`、`vendor` 等目录和隐藏目录会跳过（`.worktrees` 除外）。
 
 ### 创建任务
 
-<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space" width="720">
 
 1. 在会话里，点输入框上方的 **新建 Worktree Space**。
 2. 给任务起名 —— 会转成小写，空格、中文和其它字符都换成连字符（`hotfix-placeorder`）；名字不合法时
    会告诉你哪里不合规。
-3. 需要的话改 **分支前缀**。分支名就是这个前缀加上任务名，默认 `task/`；清空该输入框就回到默认值。
+3. 需要的话改 **分支前缀**。分支名就是这个前缀加上任务名；留空则用配置里的默认前缀（默认 `task/`），
+   输入框下面那行会告诉你当前用的是哪个。只有你填的前缀和默认不一致时，才会出现 **设为默认分支前缀**
+   勾选框 —— 勾上它，点「创建并打开」时会把这个前缀写回插件设置。
 4. 设置任务空间放哪。必须在源码树之外，界面会填好推荐的路径。
 5. 勾选任务要横跨的仓库（每张仓库卡片上标出它当前 HEAD 所在的分支），并选择分支起点。
 6. 点 **创建并打开**。新工作区会直接开一个会话，工作目录就是任务空间。

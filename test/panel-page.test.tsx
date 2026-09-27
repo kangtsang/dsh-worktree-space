@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act } from "react"
 import { WorktreePanelPage } from "../src/client/components/WorktreePanel"
+import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { t } from "../src/client/lib/i18n"
 
@@ -66,6 +67,36 @@ describe("the management page as a main panel", () => {
     await waitFor(() => expect(screen.getByText(t("workspaceEmpty"))).toBeTruthy())
   })
 
+  it("switches the dialog's views from the same navigation the panel draws", async () => {
+    const api: any = { scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
+    const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
+    const onClose = vi.fn()
+    render(<WorktreeManagePanel
+      api={api}
+      workspaces={workspaces}
+      uiWorkspace={{ openWorkspace: vi.fn() } as any}
+      sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
+      onCreate={vi.fn()}
+      onClose={onClose}
+    />)
+    await settle()
+
+    // The dialog is the panel's page in a window: the same three views in the same
+    // column, selected the same way — and no way back, because closing is the way out.
+    const nav = screen.getByRole("navigation", { name: t("worktreesTitle") })
+    expect(within(nav).getAllByRole("button").map((button) => button.textContent))
+      .toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
+    expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
+    // The navigation is the switcher, so the toolbar keeps only the filters here too.
+    expect(screen.queryByRole("group", { name: t("viewSwitch") })).toBeNull()
+
+    fireEvent.click(within(nav).getByRole("button", { name: t("viewWorkspaces") }))
+    expect(within(nav).getByRole("button", { name: t("viewWorkspaces") }).getAttribute("aria-current")).toBe("true")
+    await waitFor(() => expect(screen.getByText(t("workspaceEmpty"))).toBeTruthy())
+    // The dialog did not close on the way: switching views is not leaving the page.
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it("leaves the dialog's own layout alone: without a navigation, the toolbar keeps the switcher", async () => {
     const api: any = { scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
     const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
@@ -89,5 +120,28 @@ describe("the management page as a main panel", () => {
     // The two runs are set off from each other, which the panel's own single run is not.
     expect(document.querySelectorAll(".dws-filter-separator")).toHaveLength(1)
     expect(screen.queryByRole("navigation", { name: t("worktreesTitle") })).toBeNull()
+  })
+
+  it("renders a repository's worktrees as one set the parent owns", async () => {
+    const api: any = {
+      scan: vi.fn().mockResolvedValue([{ repoPath: "/projects/alpha", currentBranch: "main", worktrees: [{ path: "/projects/alpha", branch: "main", isMain: true, locked: false, prunable: false }, { path: "/spaces/task/alpha", branch: "task/task", isMain: false, locked: false, prunable: false }] }]),
+      cachedScan: vi.fn().mockResolvedValue(null),
+      status: vi.fn().mockResolvedValue({ changedFiles: 0, branchLine: "", output: "" }),
+    }
+    const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
+    render(<WorktreesSettings
+      api={api}
+      workspaces={workspaces}
+      uiWorkspace={{ openWorkspace: vi.fn() } as any}
+      sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
+    />)
+    await settle()
+    // A repository's worktrees are one list of their own under the repository row —
+    // the nesting the tree rail used to draw, said with the list instead of a line.
+    const list = document.querySelector(".dws-worktree-list")
+    expect(list).toBeTruthy()
+    expect(list?.querySelectorAll(".dws-worktree").length).toBe(1)
+    // The stylesheet draws no connector into the rows any more: `styles.test.ts`
+    // holds that rule, because reading a file is not this environment's job.
   })
 })

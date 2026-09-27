@@ -4,6 +4,7 @@ import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
+import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scanCache.js'
 import { registerTaskSkill } from './task/skill.js'
@@ -15,7 +16,7 @@ export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.list', 'task.inspect', 'task.plan', 'task.done']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.preference']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 export const ok = (value) => ({ ok: true, value })
@@ -60,6 +61,25 @@ export const MAX_SCAN_DIRECTORIES = 1000
  * once and used by every scan, rather than travelling with each request.
  */
 const scanBounds = { depth: DEFAULT_SCAN_DEPTH, directories: MAX_SCAN_DIRECTORIES }
+
+/**
+ * The configured branch prefix, as the running entry carries it.
+ *
+ * `defaultBranchPrefix` is a volatile field, so the Loader hands the plugin a live
+ * reference rather than a snapshot: reading it here answers with the value in force
+ * at the moment of the request, which is what lets the create dialog and the
+ * configuration card agree about the default without a reload in between.
+ */
+let branchPrefixReference
+
+/**
+ * The branch prefix a request that names none should use.
+ * @returns the configured prefix, or the built-in default when none is set.
+ */
+export function configuredBranchPrefix() {
+  const value = branchPrefixReference?.get()
+  return typeof value === 'string' && value.trim() !== '' ? value : DEFAULT_BRANCH_PREFIX
+}
 
 /**
  * Clamp a requested scan depth into the supported range.
@@ -184,6 +204,16 @@ export const Config = z.object({
     .description('How many directory levels a scan descends from a Workspace root.'),
   maxScanDirectories: z.number().min(1).step(1).default(MAX_SCAN_DIRECTORIES).volatile()
     .description('Directories one scan may inspect before it stops looking.'),
+  /**
+   * The branch prefix every new task space starts from.
+   *
+   * It is the one setting both halves of this plugin write: the configuration card
+   * edits it directly, and the create dialog offers to save the prefix it is about to
+   * use. Volatile like the rest of this schema, which is what makes the Plugins page
+   * render it and every edit land on the running entry instead of waiting for a reload.
+   */
+  defaultBranchPrefix: z.string().default(DEFAULT_BRANCH_PREFIX).volatile()
+    .description('The prefix every new task space starts from: the branch is this plus the task name. The create dialog offers to update it.'),
 })
 
 export function apply(ctx, config = {}) {
@@ -193,6 +223,9 @@ export function apply(ctx, config = {}) {
   if (Number.isFinite(Number(config.maxScanDirectories))) {
     scanBounds.directories = Math.max(1, Math.trunc(Number(config.maxScanDirectories)))
   }
+  // Kept as the live reference, not its value: a prefix saved from the Web UI
+  // reaches the running entry through this same accessor.
+  branchPrefixReference = config.defaultBranchPrefix
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
@@ -296,8 +329,19 @@ export function apply(ctx, config = {}) {
       if (!sourceRoot) throw new Error('A source root is required.')
       return suggestTaskRoot(ctx.subprocess, sourceRoot, {
         tasksRoot: payload.tasksRoot,
-        branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== '' ? payload.branchPrefix : undefined,
+        // An unnamed prefix is the configured one, not the built-in: the suggestion
+        // is what the create dialog shows, and it must show the same default the
+        // request will fall back to.
+        branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
+          ? payload.branchPrefix
+          : configuredBranchPrefix(),
       })
+    })
+
+    if (endpoint === 'task.preference') return recover(async () => {
+      // Read-only, and shaped as a record rather than a bare string: the next
+      // preference this dialog needs joins it without a second endpoint.
+      return { defaultBranchPrefix: configuredBranchPrefix() }
     })
 
     if (endpoint === 'task.create') return recover(async () => {
@@ -314,7 +358,11 @@ export function apply(ctx, config = {}) {
         tasksRoot: payload.tasksRoot,
         repos,
         baseRef: typeof payload.baseRef === 'string' ? payload.baseRef.trim() : undefined,
-        branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== '' ? payload.branchPrefix : undefined,
+        // A caller that names no prefix gets the configured one; an empty string
+        // means the same thing, which is what an emptied dialog field sends.
+        branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
+          ? payload.branchPrefix
+          : configuredBranchPrefix(),
         push: payload.push === true,
       })
     })

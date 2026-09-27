@@ -15,6 +15,7 @@ import { ArchiveTaskDialog } from "./components/ArchiveTaskDialog"
 import { CreateWorktreeDialog } from "./components/CreateWorktreeDialog"
 import { NewSessionWorktreeButton } from "./components/NewSessionWorktreeButton"
 import { PluginConfigCard } from "./components/PluginConfigCard"
+import type { ConfigFormLike } from "./components/PluginConfigCard"
 import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
 import { WorkspaceActionPlacement } from "./components/WorkspaceActionPlacement"
 import { WorktreeFooterAction } from "./components/WorktreeFooterAction"
@@ -54,6 +55,17 @@ const SIDEBAR_FOOTER_ORDER = 5
  * shortcut cannot move the session you were reading off screen.
  */
 const PANEL_ID = "dsh-worktree-space"
+
+/**
+ * This plugin's configuration form, once the shell has served one.
+ *
+ * Held at module scope because the form arrives inside an inject callback while the
+ * dialog that needs it is rendered from a later closure: it is read for the
+ * configured default branch prefix and written to when the user ticks the box that
+ * remembers a new one. Undefined simply means no form is served, in which case the
+ * dialog starts from the Host's own default and offers no checkbox.
+ */
+let pluginConfigForm: ConfigFormLike | undefined
 
 /**
  * Where the row sits in the sidebar's panel list.
@@ -176,6 +188,7 @@ export const WorktreePlugin = {
             api={api}
             workspaces={workspaces}
             uiWorkspace={uiWorkspace}
+            config={pluginConfigForm ?? undefined}
             onCreated={() => {
               void refreshClassification()
             }}
@@ -281,6 +294,10 @@ export const WorktreePlugin = {
         return
       }
       const form = forms.get(ENTRY_ID)
+      // The same form the Plugins page edits, published for the dialogs: the create
+      // dialog reads the configured default branch prefix from it and writes a new
+      // one back through it, rather than keeping a second copy of the setting.
+      pluginConfigForm = form
       // A pending choice counts here too: the entry appears or disappears with the
       // click rather than a round trip later.
       const read = () => {

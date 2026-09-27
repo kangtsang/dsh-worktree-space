@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronRight, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "lucide-react"
+import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
 import { slashPath } from "../lib/paths"
 import { rememberedRepositories, scannedRepositories } from "../lib/scan"
@@ -12,6 +12,18 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, S
 /** The three views this page has, in the order they are offered. */
 export const WORKTREE_VIEWS = [['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const
 export type WorktreeView = (typeof WORKTREE_VIEWS)[number][0]
+
+/**
+ * The same three views as the navigation column's rows.
+ *
+ * The label comes back as a copy key, because the column is a component and resolves it
+ * through the locale; the pair travels together so a host drawing its own switcher and
+ * the column cannot offer the views in different orders.
+ * @returns one `{ value, label }` per view, in the order they are offered.
+ */
+export function worktreeNavItems() {
+  return WORKTREE_VIEWS.map(([value, label]) => ({ value, label: label as string }))
+}
 
 interface Props {
   api: any
@@ -221,8 +233,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
     {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{repos.length > 0 ? t("refreshing") : t("scanning")}</span></div> : null}
     {busy && repos.length === 0 ? <div className="dws-skeleton-list" aria-hidden="true">{[0, 1, 2].map(index => <div className="dws-skeleton-row" key={index}><span /><div><span /><span /></div></div>)}</div> : null}
-    {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit2 size={26} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
-    {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><GitPullRequest size={26} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}
+    {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
+    {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}
     {view === "repos" ? <div className="dws-repo-list">
       {visibleRepos.map(repo => {
         const canExpand = repo.worktrees.length > 0
@@ -230,7 +242,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         return <article className="dws-repo" key={repo.repoPath}>
           <header className="dws-repo-header">
             <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(repo.repoPath)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>
-              {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit2 size={18} className="dws-repo-icon" />
+              {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit size={24} className="dws-repo-icon" />
               <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count">{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             </button>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
@@ -239,7 +251,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             {repo.worktrees.map(row => {
               const state = row.statusError === t("checkingStatus") ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
-                <GitPullRequest size={16} className="dws-tree-icon" aria-hidden="true" />
+                <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
                 <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{pendingBadge(row.commits)}{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div></div>
               </div>
             })}
@@ -251,7 +263,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       {visibleTasks.map(task => <article className="dws-task" key={task.path}>
         <header className="dws-task-header">
           <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={task.repositories.length === 0} aria-expanded={task.repositories.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleRepository")} ${task.name}`}>
-          {task.repositories.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit size={18} className="dws-task-icon" />
+          {task.repositories.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-task-icon" />
           <span className="dws-task-heading">
             <span className="dws-task-title">
               <h3>{task.name}</h3>
@@ -268,7 +280,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           {task.repositories.map(repository => {
             const state = taskRepoStatus(repository)
             return <div className="dws-worktree" key={repository.path}>
-              <FolderGit2 size={16} className="dws-tree-icon" aria-hidden="true" />
+              <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
               <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{repository.name}</strong><span className={`dws-status dws-status-${state.state}`}><span className="dws-status-dot" />{state.label}</span>{pendingBadge(repository.commits)}{repository.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div></div>
             </div>
           })}
@@ -276,7 +288,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       </article>)}
     </div> : null}
     {view === "spaces" ? <div className="dws-repo-list">
-      {workspaceItems.length === 0 ? <p className="dws-no-linked">{t("workspaceEmpty")}</p> : visibleWorkspaces.length === 0 ? <div className="dws-empty"><FolderGit2 size={26} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : visibleWorkspaces.map(workspace => {
+      {workspaceItems.length === 0 ? <p className="dws-no-linked">{t("workspaceEmpty")}</p> : visibleWorkspaces.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : visibleWorkspaces.map(workspace => {
         const state = classifications[workspace.path]
         const ready = state !== undefined && state !== "checking" && state !== "failed"
         const canHost = ready && state.isSourceRoot
@@ -292,6 +304,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             : { className: "dws-status-checking", label: t("workspaceCannot") }
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
+            {/* A Workspace is a folder like a task is, and it wears the same closed one:
+                both name a place work starts from rather than something the plugin made.
+                No chevron and no placeholder, because these rows do not expand. */}
+            <FolderClosed size={24} className="dws-repo-icon" />
             <span className="dws-repo-heading">
               <span className="dws-repo-title">
                 <h3>{workspace.title}</h3>

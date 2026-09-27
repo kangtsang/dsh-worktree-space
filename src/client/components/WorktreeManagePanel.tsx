@@ -1,6 +1,6 @@
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
-import { WorktreesSettings } from "./WorktreesSettings"
+import { WorktreesPage } from "./WorktreePanel"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
 import type { createWorktreeApi } from "../lib/api"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -10,7 +10,7 @@ interface WorktreeManagePanelProps {
   workspaces: WorkspacesService
   uiWorkspace: WorkspaceNavigation
   sessions: ISessions
-  /** Opens the create form; the panel steps aside for it. */
+  /** Opens the create form; the dialog steps aside for it. */
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
   onClose: () => void
 }
@@ -21,29 +21,27 @@ interface WorktreeManagePanelProps {
  * The panel row under New session opens the same page as a main panel; this is the
  * other way in, and it is a dialog on purpose: a shortcut at the foot of the sidebar
  * should not take the session you were reading off screen, and closing it puts you
- * back where you were. It is that page's own component rather than a second
- * implementation of it, with the heading turned off because the dialog supplies one
- * — and the accessible title — of its own.
+ * back where you were. It draws the page the panel draws — the same navigation column,
+ * the same lists — inside the dialog's own header and footer chrome, so the two ways
+ * in are one page seen twice rather than two implementations of it.
  */
 export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onClose }: WorktreeManagePanelProps) {
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="dws-manage-panel">
-        <div className="dws-dialog-heading">
+      <DialogContent className="dws-manage-dialog">
+        <header className="dws-manage-heading">
           <DialogTitle className="dws-dialog-title">{t("worktreesTitle")}</DialogTitle>
           <DialogDescription className="dws-form-note">{t("panelDescription")}</DialogDescription>
-        </div>
-        <div className="dws-dialog-body">
-          <WorktreesSettings
-            api={api}
-            workspaces={workspaces}
-            uiWorkspace={uiWorkspace}
-            sessions={sessions}
-            heading={false}
-            onCreate={onCreate}
-          />
-        </div>
+        </header>
+        <WorktreesPage
+          api={api}
+          workspaces={workspaces}
+          uiWorkspace={uiWorkspace}
+          sessions={sessions}
+          onCreate={onCreate}
+          variant="dialog"
+        />
       </DialogContent>
     </Dialog>
   )

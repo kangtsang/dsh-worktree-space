@@ -1,4 +1,4 @@
-import { FolderGit2 } from "lucide-react"
+import { BrandGlyph } from "./icons"
 import { useT } from "../lib/i18n"
 
 interface WorktreeFooterActionProps {
@@ -20,7 +20,7 @@ export function WorktreeFooterAction({ wide, onOpen }: WorktreeFooterActionProps
   const label = t("worktrees")
   return (
     <button type="button" className="dws-footer-action" data-wide={wide ? "true" : "false"} title={label} aria-label={label} onClick={onOpen}>
-      <span className="dws-footer-action-icon" aria-hidden="true"><FolderGit2 size={18} /></span>
+      <span className="dws-footer-action-icon" aria-hidden="true"><BrandGlyph size={18} className="dws-brand-glyph" /></span>
       {wide ? <span className="dws-footer-action-label">{label}</span> : null}
     </button>
   )

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
-import { FolderGit2 } from "lucide-react"
 import { describe, expect, it } from "vitest"
+import { FolderGit2 } from "../src/client/components/icons"
 import { repositoryGlyphMask } from "../src/client/components/repositoryGlyph"
 
 const PREFIX = 'url("data:image/svg+xml,'
@@ -24,12 +24,14 @@ describe("repository glyph mask", () => {
     for (const [, name, value] of geometry) expect(mask).toContain(`${name}="${value}"`)
 
     // Same stroke setup as the icon, painted opaque: a mask reads alpha, not color.
+    // The weight is the hugeicons family's own 1.5, which the component passes as a
+    // prop and the mask carries on the outer `<svg>`.
     expect(real).toContain('stroke="currentColor"')
-    expect(real).toContain("stroke-width=\"2\"")
+    expect(real).toContain('stroke-width="1.5"')
     expect(real).toContain('fill="none"')
     expect(mask).toContain('stroke="#000"')
     expect(mask).toContain('fill="none"')
-    for (const attribute of ['viewBox="0 0 24 24"', 'stroke-width="2"', 'stroke-linecap="round"', 'stroke-linejoin="round"']) {
+    for (const attribute of ['viewBox="0 0 24 24"', 'stroke-width="1.5"', 'stroke-linecap="round"', 'stroke-linejoin="round"']) {
       expect(real).toContain(attribute)
       expect(mask).toContain(attribute)
     }

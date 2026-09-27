@@ -34,7 +34,7 @@ const created = {
   warnings: [],
 }
 
-function setup() {
+function setup(config?: any) {
   const api = {
     suggestRoot: vi.fn().mockResolvedValue(suggestion),
     createTask: vi.fn().mockResolvedValue(created),
@@ -48,14 +48,22 @@ function setup() {
   const uiWorkspace = { openWorkspace: vi.fn().mockResolvedValue(undefined) }
   const onClose = vi.fn()
   const onCreated = vi.fn()
-  const mount = () => render(<CreateWorktreeDialog target={{ path: "/repo", title: "App" }} api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} onClose={onClose} onCreated={onCreated} />)
+  const mount = () => render(<CreateWorktreeDialog target={{ path: "/repo", title: "App" }} api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} config={config} onClose={onClose} onCreated={onCreated} />)
   return { api, workspaces, uiWorkspace, onClose, onCreated, mount }
 }
-const nameField = () => screen.getByRole("textbox", { name: t("taskName") })
-const prefixField = () => screen.getByRole("textbox", { name: t("branchPrefix") })
+// The label line carries the field's own explanation too, so the control is looked up
+// by the name it starts with rather than by the whole label line.
+const nameField = () => screen.getByRole("textbox", { name: new RegExp(`^${t("taskName")}`) })
+const prefixField = () => screen.getByRole("textbox", { name: new RegExp(`^${t("branchPrefix")}`) }) as HTMLInputElement
 const submit = () => screen.getByRole("button", { name: t("createAndOpen") })
 const form = () => document.querySelector("form")!
 const ready = () => screen.findByRole("textbox", { name: t("taskName") })
+/** The repository field, found by the label the group is announced with. */
+const repoGroup = () => screen.getByRole("group", { name: t("repositoriesLabel") })
+/** What each repository card offers, read off the cards themselves. */
+const offered = () => [...document.querySelectorAll(".dws-check-option .dws-checkbox")] as HTMLInputElement[]
+/** The selection's count, as the live region beside the bulk actions reports it. */
+const count = () => document.querySelector(".dws-check-count")!.textContent
 
 afterEach(cleanup)
 
@@ -67,20 +75,23 @@ describe("native task create flow", () => {
 
     // The name's explanation sits with the name, not under the input.
     for (const [label, note] of [[t("taskName"), t("taskNameHint")], [t("containerLocation"), t("containerHint")]] as const) {
-      const heading = screen.getByText(label).closest(".dws-field-heading")
+      const heading = screen.getByText(label).closest(".dws-field-row")
       expect(heading).not.toBeNull()
       expect(heading?.querySelector(".dws-field-note")?.textContent).toBe(note)
-      // The control the explanation is about follows the heading.
-      expect(heading?.nextElementSibling?.tagName).toBe("INPUT")
+      // The control the explanation is about is in the same row, under the label.
+      expect(heading?.querySelector("input.dws-input")).not.toBeNull()
+      // The label line names the field and then explains it; its first span is the name,
+      // so the control's accessible name comes from that and not from the explanation.
+      expect(heading?.querySelector("label.dws-field-label > span:first-child")?.textContent).toBe(label)
     }
 
-    // The count is part of the group's name, so nothing repeats it beside it. It
-    // reads "selected / total", so the total comes from what the dialog offered.
-    const offered = document.querySelectorAll(".dws-check-option").length
-    const counted = format(t("repositoriesCountLabel"), { count: "2", total: String(offered) })
-    const group = screen.getByRole("group", { name: counted })
-    expect(group.querySelector("legend .dws-field-label")?.textContent).toBe(counted)
-    expect(group.querySelector("legend .dws-field-note")).toBeNull()
+    // The group is named by the field alone; its count is a live region beside the bulk
+    // actions, because a count inside the label would be re-announced on every click.
+    // It reads "selected / total", so the total comes from what the dialog offered.
+    expect(count()).toBe(format(t("repositoriesCountLabel"), { count: "2", total: String(offered().length) }))
+    expect(offered().filter((box) => box.checked)).toHaveLength(2)
+    expect([...repoGroup().querySelectorAll("button")].map((button) => button.textContent))
+      .toEqual([t("selectAll"), t("selectNone")])
 
     // The preview shows what will be created and nothing that the form above
     // already says: the branch and the directory share its one line.
@@ -89,8 +100,8 @@ describe("native task create flow", () => {
       t("branch"),
       t("taskDirectoryLabel"),
     ])
-    // The selected repositories are visible as checked boxes and counted in the
-    // group's name, so the preview does not list them again.
+    // The selected repositories are visible as checked boxes and counted beside the
+    // field, so the preview does not list them again.
     expect(preview.textContent).not.toContain("alpha")
   })
 
@@ -105,11 +116,27 @@ describe("native task create flow", () => {
 
     // Two clicks clear the pre-selected pair, so the field is back to nothing
     // chosen: the count says so and the rule beside it comes back.
-    const offered = document.querySelectorAll(".dws-check-option").length
-    const cleared = format(t("repositoriesCountLabel"), { count: "0", total: String(offered) })
-    const group = screen.getByRole("group", { name: cleared })
-    expect(group.querySelector("legend .dws-field-label")?.textContent).toBe(cleared)
-    expect(group.querySelector("legend .dws-field-note")?.textContent).toBe(t("repositoriesHint"))
+    expect(count()).toBe(format(t("repositoriesCountLabel"), { count: "0", total: String(offered().length) }))
+    expect(repoGroup().querySelector(".dws-repo-picker-foot .dws-field-note")?.textContent).toBe(t("repositoriesHint"))
+    expect(offered().every((box) => !box.checked)).toBe(true)
+  })
+
+  it("clears and restores the whole selection from the field's own actions", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // The bulk actions are the pair the field carries, and they act on its cards only.
+    await user.click(screen.getByRole("button", { name: t("selectNone") }))
+    expect(offered().every((box) => !box.checked)).toBe(true)
+    expect(submit()).toHaveProperty("disabled", true)
+
+    await user.click(screen.getByRole("button", { name: t("selectAll") }))
+    expect(offered().every((box) => box.checked)).toBe(true)
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["alpha", "beta"] })))
   })
 
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
@@ -122,7 +149,9 @@ describe("native task create flow", () => {
     expect(submit()).toHaveProperty("disabled", true)
     const input = nameField()
     expect(input.id).not.toBe("")
-    expect(document.querySelector(`label[for="${input.id}"]`)?.textContent).toBe(t("taskName"))
+    // The label line is the field's name and then its explanation: the name it belongs to
+    // is the label's first span, which is what the control is announced by.
+    expect(document.querySelector(`label[for="${input.id}"] > span:first-child`)?.textContent).toBe(t("taskName"))
     await user.type(input, "Fix login")
     expect(screen.getByText("task/fix-login")).toBeTruthy()
     expect(screen.getByText(created.path)).toBeTruthy()
@@ -347,5 +376,102 @@ describe("native task create flow", () => {
     expect(next.api.doneTask).not.toHaveBeenCalled()
     expect(screen.getByRole("button", { name: t("retryRegister") })).toBeTruthy()
     expect(next.onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe("the default branch prefix this dialog may record", () => {
+  /** The plugin configuration form, as the shell serves it to the dialog. */
+  function configForm(prefix: string, accepted = true) {
+    let value: unknown = { defaultBranchPrefix: prefix, panelEntry: "hide" }
+    const listeners = new Set<() => void>()
+    return {
+      form: {
+        getSnapshot: () => ({ status: "ready", value }),
+        subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) },
+        set: vi.fn(async (field: string, next: unknown) => {
+          if (!accepted) return false
+          value = { ...(value as Record<string, unknown>), [field]: next }
+          listeners.forEach((listener) => listener())
+          return true
+        }),
+      },
+      read: () => value,
+    }
+  }
+  const remember = () => screen.queryByRole("checkbox", { name: t("rememberPrefix") }) as HTMLInputElement | null
+
+  it("offers the checkbox only once the typed prefix is one worth keeping", async () => {
+    const { form: form0 } = configForm("task/")
+    const next = setup(form0)
+    next.mount()
+    await ready()
+
+    // Prefilled from the Host's own default: nothing to save yet, so no offer.
+    expect(prefixField().value).toBe("task/")
+    expect(remember()).toBeNull()
+
+    fireEvent.change(prefixField(), { target: { value: "task/" } })
+    expect(remember()).toBeNull()
+    fireEvent.change(prefixField(), { target: { value: "wt/" } })
+    expect(remember()).not.toBeNull()
+    // An unusable prefix is refused by the field, so it cannot be promised either.
+    fireEvent.change(prefixField(), { target: { value: "wt /" } })
+    expect(remember()).toBeNull()
+    fireEvent.change(prefixField(), { target: { value: "" } })
+    expect(remember()).toBeNull()
+  })
+
+  it("starts the field from the configured prefix and writes a new one only on create", async () => {
+    const { form: form0, read } = configForm("wt/")
+    const next = setup(form0)
+    next.mount()
+    await ready()
+    // The configured default wins over whatever the Host would have suggested.
+    expect(prefixField().value).toBe("wt/")
+
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    fireEvent.click(remember()!)
+    // Ticking alone promises; it does not write.
+    expect(form0.set).not.toHaveBeenCalled()
+
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.onClose).toHaveBeenCalledTimes(1))
+    expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ branchPrefix: "feat/" }))
+    expect(form0.set).toHaveBeenCalledWith("defaultBranchPrefix", "feat/")
+    expect(read()).toMatchObject({ defaultBranchPrefix: "feat/" })
+  })
+
+  it("warns with the configured prefix when the field is left empty", async () => {
+    const { form } = configForm("wt/")
+    const next = setup(form)
+    next.mount()
+    await ready()
+
+    // The field holds the configured default, so clearing it is what asks for that default
+    // — and the sentence beside it names the prefix that would then be used. The copy is in
+    // the document twice (once for the eye, once for a screen reader), so the label's own
+    // span is the one read here.
+    const note = () => document.querySelector(`label[for="${prefixField().id}"] > .dws-field-note`)?.textContent
+    fireEvent.change(prefixField(), { target: { value: "" } })
+    expect(note()).toBe(format(t("branchPrefixHint"), { prefix: "wt/" }))
+
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    expect(note()).toBe(format(t("branchPrefixHint"), { prefix: "feat/" }))
+  })
+
+  it("creates the task space even when the Host refuses the new default", async () => {    const { form: form0 } = configForm("task/", false)
+    const next = setup(form0)
+    next.mount()
+    await ready()
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    fireEvent.click(remember()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    // A refused preference may not undo the space that already exists.
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.api.createTask).toHaveBeenCalledTimes(1)
+    expect(next.workspaces.create).toHaveBeenCalledTimes(1)
   })
 })

@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { apply, branchTargets, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
 
-function handleFor(outputs = {}) {
+function handleFor(outputs = {}, config) {
   const routes = new Map()
   const subprocess = {
     spawn({ argv }) {
@@ -32,7 +32,7 @@ function handleFor(outputs = {}) {
     } } },
     effect(effect) { return effect() },
   }
-  apply(ctx)
+  apply(ctx, config)
   const handler = async (endpoint, payload = {}, signal, method = `dsh-worktree-space/${endpoint}`) => {
     const path = `/api/dsh-worktree-space/${endpoint}`
     const route = routes.get(path)
@@ -183,7 +183,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.suggest-root", "task.create", "task.list", "task.inspect", "task.plan", "task.done",
+      "task.classify-root", "task.suggest-root", "task.create", "task.list", "task.inspect", "task.plan", "task.done", "task.preference",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -242,6 +242,19 @@ describe("worktree RPC contract", () => {
       ok: false,
       error: { code: "bad-request", message: "fatal: not a git repository" },
     })
+  })
+
+  it("answers the configured default branch prefix, and follows it without a reload", async () => {
+    // The entry keeps the volatile accessor itself, so a prefix written while the
+    // Host is running is the one the next request answers with.
+    let prefix = "task/"
+    const handler = handleFor({}, { defaultBranchPrefix: { get: () => prefix } })
+    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "task/" })
+    prefix = "wt/"
+    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "wt/" })
+    // An emptied setting falls back to the built-in default rather than to no prefix.
+    prefix = "  "
+    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "task/" })
   })
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({

@@ -3,3 +3,6 @@ node_modules/
 dist/
 .DS_Store
 .idea/
+# Written by scripts/preview.render.tsx, which renders the plugin's surfaces for a
+# browser to look at without the GUI.
+_preview/

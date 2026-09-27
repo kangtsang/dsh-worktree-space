@@ -59,10 +59,10 @@ describe("CreateWorktreeDialog", () => {
     await waitFor(() => expect(screen.getByRole("dialog", { name: t("dialogTitle") })).toBeTruthy())
     // The container arrives pre-filled with the recommendation, and every
     // discovered repository starts included.
-    expect(screen.getByLabelText(t("containerLocation"))).toHaveProperty("value", "/tasks")
+    expect(screen.getByLabelText(new RegExp(`^${t("containerLocation")}`))).toHaveProperty("value", "/tasks")
     expect(screen.getByRole("checkbox", { name: /alpha/ })).toHaveProperty("checked", true)
     expect(screen.getByRole("checkbox", { name: /beta/ })).toHaveProperty("checked", true)
-    await user.type(screen.getByLabelText(t("taskName")), "Fix login")
+    await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledWith("ws-wt"))
@@ -80,7 +80,7 @@ describe("CreateWorktreeDialog", () => {
 
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /beta/ })).toBeTruthy())
     await user.click(screen.getByRole("checkbox", { name: /beta/ }))
-    await user.type(screen.getByLabelText(t("taskName")), "Fix login")
+    await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha"], baseRef: undefined, branchPrefix: "task/" }))
@@ -95,7 +95,7 @@ describe("CreateWorktreeDialog", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: t("baseNamed") })).toBeTruthy())
     await user.click(screen.getByRole("radio", { name: t("baseNamed") }))
     await user.type(screen.getByPlaceholderText(t("baseRefPlaceholder")), "main")
-    await user.type(screen.getByLabelText(t("taskName")), "Fix login")
+    await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: "main", branchPrefix: "task/" }))
@@ -110,7 +110,7 @@ describe("CreateWorktreeDialog", () => {
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /alpha/ })).toBeTruthy())
     const submit = screen.getByRole("button", { name: t("createAndOpen") })
     expect(submit).toHaveProperty("disabled", true)
-    await user.type(screen.getByLabelText(t("taskName")), "Fix login")
+    await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await waitFor(() => expect(submit).toHaveProperty("disabled", false))
     await user.click(screen.getByRole("checkbox", { name: /alpha/ }))
     await user.click(screen.getByRole("checkbox", { name: /beta/ }))

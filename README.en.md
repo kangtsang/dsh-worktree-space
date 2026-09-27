@@ -7,7 +7,7 @@ registered as a DSH Workspace with its own sessions.
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
 
 [中文](README.md) · **English**
 
@@ -103,8 +103,9 @@ data directory (as in the sample above), which needs a DSH restart.
 | --- | --- | --- | --- |
 | Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
-| Scan depth | 1–5 levels | 2 levels | How far down from each Workspace root the scan goes (the root itself does not count) |
+| Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
+| Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
@@ -112,13 +113,16 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 
 ### Create a task
 
-<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="598">
+<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="720">
 
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
    (`hotfix-placeorder`); an invalid name tells you which rule it breaks.
 3. Set the **branch prefix** if you want another one. The branch is this prefix plus the task
-   name, and it defaults to `task/`; clearing the field puts that default back.
+   name, and an empty field falls back to the configured default (`task/` unless you changed it).
+   The line under the field always names the default it would use. Tick **Set as the default
+   branch prefix** — offered only when what you typed differs from the configured default — to
+   write it back to the plugin's settings when you create.
 4. Say where the task space goes. It has to sit outside the source tree, and a recommended
    path is filled in for you.
 5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
@@ -153,7 +157,7 @@ process only: nothing is written to disk, and it is gone when the instance exits
 
 ### Finish a task
 
-<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="612">
+<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="960">
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu.
 The dialog spells out what is about to happen — uncommitted files, commits to merge, the

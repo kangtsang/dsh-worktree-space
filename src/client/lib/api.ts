@@ -71,6 +71,14 @@ export function createWorktreeApi(connection: ConnectionService) {
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),
     /** The recommended container location for a source root, before creating anything. */
     suggestRoot: (sourceRoot: string, tasksRoot?: string, signal?: AbortSignal) => read<TaskRootSuggestion>("task.suggest-root", { sourceRoot, tasksRoot }, signal),
+    /**
+     * This Host's preference for a new task space's branch prefix.
+     *
+     * Read rather than assumed: the value is the plugin configuration's, which the
+     * user edits on the Plugins page, and the dialog starts from whatever is in
+     * force. The write path is the configuration form itself.
+     */
+    preferences: (signal?: AbortSignal) => read<{ defaultBranchPrefix: string }>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
     /** Whether a directory is a task container, and what it holds. */

@@ -1,4 +1,4 @@
-import { FolderGit2 } from "lucide-react"
+import { BrandGlyph } from "./icons"
 import { Button } from "./ui"
 import { useT } from "../lib/i18n"
 import type { Workspace } from "../lib/types"
@@ -23,7 +23,7 @@ export function NewSessionWorktreeButton({ session, useWorkspaces, onOpen, canCr
   return (
     <div className="dws-new-session-action">
       <Button type="button" className="dws-new-session-button" aria-label={t("createTask")} title={t("createTask")} onClick={() => onOpen(workspace)}>
-        <FolderGit2 size={16} aria-hidden="true" />
+        <BrandGlyph size={16} aria-hidden="true" />
       </Button>
     </div>
   )
