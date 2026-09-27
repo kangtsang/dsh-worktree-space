@@ -37,6 +37,8 @@ registered as a DSH Workspace with its own sessions.
   session in that Workspace is still running — stop it or let it end, then try again.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
+- **New task space** is in that same `⋯` menu, for Workspaces that hold repositories, and
+  opens the one create dialog.
 - **No extra service needed.** The two entries, the scan depth and the directory limit all
   live in the plugin's own configuration (see Configuration). It follows DSH themes, takes
   its language from DSH, and gives the plugin list its own name, description and icon.

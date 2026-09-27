@@ -11,8 +11,8 @@
 /** Every row of the workspace list, workspace rows included. */
 export const WORKSPACE_ROW = '[data-row-key^="workspace:"]'
 
-/** Marks the item this plugin added, so it is never added twice. */
-export const OWN_MENU_ITEM = "data-dws-archive-item"
+/** Marks the items this plugin added, so they are never added twice. */
+export const OWN_MENU_ITEM = "data-dws-menu-item"
 
 /** The trigger the workspace list renders inside each row. */
 export const WORKSPACE_ROW_TRIGGER = "button"
