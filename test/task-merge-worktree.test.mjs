@@ -109,6 +109,14 @@ async function fixture({ conflict = false, held = false } = {}) {
 /** The source repository's own registered worktrees, the main one included. */
 const registrations = (source) => git(source, ["worktree", "list"]).split("\n").filter(Boolean)
 
+/**
+ * These tests build real repositories and move real branches: seconds of work rather
+ * than milliseconds. The suite runs its files in parallel, so the default five seconds
+ * is a coin toss on a loaded machine and on a CI runner — and a release that publishes
+ * on a tag fails with it. The timeout is stated once, here.
+ */
+const GIT_TIMEOUT = 30_000
+
 describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing", () => {
   it("moves the named branch, and leaves the source checkout where it was", async () => {
     const fixtureUnderTest = await fixture()
@@ -137,7 +145,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     } finally {
       await fixtureUnderTest.cleanup()
     }
-  })
+  }, GIT_TIMEOUT)
 
   it("leaves the target exactly where it was when that merge conflicts", async () => {
     const fixtureUnderTest = await fixture({ conflict: true })
@@ -167,7 +175,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     } finally {
       await fixtureUnderTest.cleanup()
     }
-  })
+  }, GIT_TIMEOUT)
 
   it("merges into the checked-out branch where it stands when none is named", async () => {
     const fixtureUnderTest = await fixture()
@@ -185,7 +193,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     } finally {
       await fixtureUnderTest.cleanup()
     }
-  })
+  }, GIT_TIMEOUT)
 
   it("reports the checkout in the way when another worktree holds the branch", async () => {
     const fixtureUnderTest = await fixture({ held: true })
@@ -196,14 +204,16 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       const result = await finishTask(subprocess, { task: "sample", tasksRoot, merge: true, targets: { source: "main" } })
 
       expect(result.failed).toBe(true)
-      // Git's own refusal, which names the checkout holding the branch. Only the
-      // name is asserted: git prints the path in its own separator style.
-      expect(result.repositories[0].error).toMatch(/already checked out at/)
+      // Git's own refusal, which names the checkout holding the branch. The wording
+      // moved with git's versions — "already checked out at" became "already used by
+      // worktree at" — so both are accepted, and only the path's name is asserted
+      // besides: git prints paths in its own separator style.
+      expect(result.repositories[0].error).toMatch(/already (?:checked out|used by worktree) at/)
       expect(result.repositories[0].error).toContain("elsewhere")
       expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "main"])).toBe(false)
       expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
     } finally {
       await fixtureUnderTest.cleanup()
     }
-  })
+  }, GIT_TIMEOUT)
 })
