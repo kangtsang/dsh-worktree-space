@@ -21,11 +21,11 @@ registered as a DSH Workspace with its own sessions.
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
 - **A management page** (the Worktree Space entry in the sidebar footer), with three views:
-  - **Tasks** puts each task's repositories together (branch, how many files changed,
+  - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
     each one has;
-  - **Repositories** lists every Git repository found and the worktrees linked to it.
+  - **Code repositories** lists every Git repository found and the worktrees linked to it.
 
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
@@ -131,9 +131,9 @@ you retry the registration.
 ### Manage tasks
 
 Open the **management page** from the Worktree Space entry in the sidebar footer. The three
-views differ as described under Features: Tasks shows each task and its repositories,
-Workspaces shows where a task space can start, Repositories shows every Git project found and
-its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /
+views differ as described under Features: Task spaces shows each task and its repositories,
+Workspaces shows where a task space can start, Code repositories shows every Git project found
+and its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /
 `N repositories · M Worktrees`), and reads `shown / total` while a search or filter is
 narrowing the list.
 
