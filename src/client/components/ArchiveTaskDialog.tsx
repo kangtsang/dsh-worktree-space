@@ -43,7 +43,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   const [plan, setPlan] = useState<TaskPlan | null>(null)
   const [loadError, setLoadError] = useState("")
   // Merging is what a task is for, so it is on; deleting the branch and forcing
-  // past uncommitted work are not, and are left for the user to ask for.
+  // past uncommitted work are not, and are left for the user to ask for. Deleting a
+  // branch that was never merged is how a task space is abandoned instead of
+  // finished, and that costs the work on it — which is why it takes Force as well.
   const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true })
   // Named once, and used both for the preview and for the call, so what the user
   // reads is the folder they get.
@@ -123,9 +125,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         // The branch each repository was pointed at, when the user picked one; a
         // repository left alone is the Host's own default to resolve.
         ...(options.merge && Object.keys(targets).length > 0 ? { targets } : {}),
-        // Deleting a branch only means something once it was merged, and the host
-        // refuses the pair the other way round.
-        deleteBranch: options.merge && options.deleteBranch,
+        // A merged branch is deleted as asked; an unmerged one only when the user
+        // also forced it, which is how a task space is abandoned. The Host refuses
+        // the pair the other way round.
+        deleteBranch: options.deleteBranch && (options.merge || options.force),
         force: options.force,
         // The container is cleared either way: archiving finishes a task, and a
         // task that is finished leaves nothing of its own behind. What is left to
@@ -266,9 +269,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           </div> : null}
           {result === null && plan !== null ? <>
             <p className="dws-notice" role="status"><AlertCircle size={15} aria-hidden="true" /><span>{t("archiveConsequence")}</span></p>
-            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.merge} onChange={(event) => setOptions((current) => ({ ...current, merge: event.target.checked, deleteBranch: event.target.checked ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishMerge")}</span><span className="dws-check-path">{t("finishMergeHint")}</span></span></label>
-            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled || !options.merge} checked={options.merge && options.deleteBranch} onChange={(event) => setOptions((current) => ({ ...current, deleteBranch: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishDeleteBranch")}</span><span className="dws-check-path">{t("finishDeleteBranchHint")}</span></span></label>
-            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.force} onChange={(event) => setOptions((current) => ({ ...current, force: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishForce")}</span><span className="dws-check-path">{t("finishForceHint")}</span></span></label>
+            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.merge} onChange={(event) => setOptions((current) => ({ ...current, merge: event.target.checked, deleteBranch: event.target.checked || current.force ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishMerge")}</span><span className="dws-check-path">{t("finishMergeHint")}</span></span></label>
+            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled || (!options.merge && !options.force)} checked={options.deleteBranch && (options.merge || options.force)} onChange={(event) => setOptions((current) => ({ ...current, deleteBranch: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishDeleteBranch")}</span><span className="dws-check-path">{t("finishDeleteBranchHint")}</span></span></label>
+            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.force} onChange={(event) => setOptions((current) => ({ ...current, force: event.target.checked, deleteBranch: current.merge || event.target.checked ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishForce")}</span><span className="dws-check-path">{t("finishForceHint")}</span></span></label>
             {/* The one choice about the container's own files: keep the writing,
                 or let everything in there go. Only offered when there is writing
                 to keep — otherwise there is nothing to decide. */}
@@ -283,7 +286,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
                 })}</span>
               </p> : null}</> : null}
             {plan.changedFiles > 0 && !options.force ? <p className="dws-notice" role="status"><AlertCircle size={15} aria-hidden="true" /><span>{format(t("finishDirtyNotice"), { count: String(plan.changedFiles) })}</span></p> : null}
-            {options.force ? <p className="dws-notice dws-notice-danger" role="alert"><AlertCircle size={15} aria-hidden="true" /><span>{t("finishForceWarning")}</span></p> : null}
+            {/* Forcing says what it will cost, and asking for the branch too costs
+                more: the commits that were never merged go with it. */}
+            {options.force ? <p className="dws-notice dws-notice-danger" role="alert"><AlertCircle size={15} aria-hidden="true" /><span>{options.deleteBranch ? t("finishForceWarningBranch") : t("finishForceWarning")}</span></p> : null}
             {running ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{t("archiveRunning")}</span></div> : null}
             {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div> : null}
           </> : null}

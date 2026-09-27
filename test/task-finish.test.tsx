@@ -353,6 +353,37 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ merge: false, deleteBranch: false }))
   })
 
+  it("abandons a task space without merging once the branch deletion is forced", async () => {
+    const user = userEvent.setup()
+    const next = setup({ result: finishResult({
+      mergeTarget: undefined,
+      repositories: finishResult().repositories.map((entry) => ({ ...entry, merged: false, removed: true, branchDeleted: true, target: undefined })),
+    }) })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    // Merging is on by default, so deleting a branch is available at once.
+    await user.click(option(t("finishDeleteBranch")))
+    expect(option(t("finishDeleteBranch"))).toHaveProperty("checked", true)
+
+    // Unticking the merge takes that away again - and drops the tick with it, since
+    // nothing on screen may still ask for something the flow will refuse.
+    await user.click(option(t("finishMerge")))
+    expect(option(t("finishDeleteBranch"))).toHaveProperty("disabled", true)
+    expect(option(t("finishDeleteBranch"))).toHaveProperty("checked", false)
+
+    // Forcing is what makes an unmerged branch deletable: abandoning the task space.
+    await user.click(option(t("finishForce")))
+    expect(option(t("finishDeleteBranch"))).toHaveProperty("disabled", false)
+    // What force costs is said before it is done, and it costs more with the branch.
+    expect(screen.getByText(t("finishForceWarning"))).toBeTruthy()
+    await user.click(option(t("finishDeleteBranch")))
+    expect(screen.getByText(t("finishForceWarningBranch"))).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ merge: false, deleteBranch: true, force: true })))
+  })
+
   it("reports a repository left untouched instead of hiding it behind the others", async () => {
     const user = userEvent.setup()
     const conflicted = finishResult({

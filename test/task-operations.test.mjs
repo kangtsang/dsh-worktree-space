@@ -645,12 +645,24 @@ describe("finishTask", () => {
     }
   })
 
-  it("refuses to delete a branch that was not merged", async () => {
+  it("refuses to delete a branch that was never merged unless the caller forces it", async () => {
     const fixture = await taskFixture()
-    const { subprocess } = subprocessMock(fixture.handlers)
+    const { subprocess, keys } = subprocessMock(fixture.handlers)
     try {
       await expect(finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, deleteBranch: true }))
-        .rejects.toThrow(/requires merging/)
+        .rejects.toThrow(/requires force/)
+
+      // Forced, and still not merging: this is how a task space is abandoned rather
+      // than finished - the worktrees go, and the branches go with their commits.
+      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, deleteBranch: true, force: true })
+      expect(result.failed).toBe(false)
+      expect(result.repositories.map((entry) => ({ merged: entry.merged, removed: entry.removed, branchDeleted: entry.branchDeleted })))
+        .toEqual([
+          { merged: false, removed: true, branchDeleted: true },
+          { merged: false, removed: true, branchDeleted: true },
+        ])
+      expect(keys().filter((key) => key === "branch -D task/login")).toHaveLength(2)
+      expect(keys().filter((key) => key.startsWith("merge "))).toEqual([])
     } finally {
       await fixture.cleanup()
     }

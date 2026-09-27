@@ -299,8 +299,11 @@ export async function finishTask(subprocess, options) {
     discardDocuments = false,
   } = options
 
-  if (deleteBranch && !merge) {
-    throw new Error('deleting a branch requires merging it first')
+  // Deleting a branch that was merged is routine; deleting one that was not throws
+  // its commits away, so it has to be asked for twice - with `deleteBranch` and with
+  // `force`, which is also what makes git delete it without complaint.
+  if (deleteBranch && !merge && !force) {
+    throw new Error('deleting a branch that was never merged requires force')
   }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
 

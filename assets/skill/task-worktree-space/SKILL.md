@@ -101,8 +101,11 @@ Confirm each destructive step with the user before passing it:
    a branch that is checked out nowhere is merged in a temporary worktree, so no
    source checkout is ever switched. A conflict leaves that repository's worktree
    and branch in place and reports it; the other repositories still complete.
-2. **Delete the branch?** Only after it is merged, and only when the user asks.
-   Pass `deleteBranch: true` together with `merge: true`.
+2. **Delete the branch?** After a merge, and only when the user asks: pass
+   `deleteBranch: true` together with `merge: true`. When the user wants the task
+   space gone without merging anything, that is the abandon path: pass
+   `deleteBranch: true` with `force: true` and `merge: false`, which removes the
+   worktrees and force-deletes the branches with the commits on them.
 3. **Stray files?** When the outcome lists strays (agent notes, editor caches, a
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.

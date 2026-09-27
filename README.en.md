@@ -145,7 +145,7 @@ narrowing the list.
 
 The panel rescans every time it is opened, but it first paints what the Host still remembers
 of the previous scan, so it shows data straight away and swaps in the fresh result when the
-scan lands (`Refreshing…` marks the wait). That memory lives in the DSH instance's own
+scan lands (`Scanning every Workspace…` marks the wait). That memory lives in the DSH instance's own
 process only: nothing is written to disk, and it is gone when the instance exits.
 
 ### Finish a task
@@ -157,3 +157,8 @@ The dialog spells out what is about to happen — uncommitted files, commits to 
 branch to merge into, and the task space's own documents (the archive option only appears
 when there is something to archive). Merging back is on by default; deleting the branch and
 forcing past uncommitted work are not.
+
+Deleting a branch normally needs the merge: untick the merge and the branch option goes
+with it. To abandon a task space instead of finishing it — nothing merged, the branches and
+the commits on them discarded — tick **Force** as well, which is what allows deleting a
+branch that was never merged.
