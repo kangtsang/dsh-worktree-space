@@ -184,7 +184,7 @@ describe("createTask", () => {
         `worktree add ${join(container.root, "fix-login", "beta")} -b feat/fix-login`,
       ])
 
-      const breadcrumb = await readFile(join(result.path, "README.md"), "utf8")
+      const breadcrumb = await readFile(join(result.path, "README.en.md"), "utf8")
       expect(breadcrumb).toContain("# Task: fix-login")
       expect(breadcrumb).toContain("- Branch: `feat/fix-login` (one branch per repository below)")
       expect(breadcrumb).toContain("each repository's current HEAD")
@@ -546,7 +546,7 @@ describe("finishTask documents", () => {
     const taskPath = join(root, "login")
     await mkdir(join(taskPath, "alpha"), { recursive: true })
     await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
-    await writeFile(join(taskPath, "README.md"), "# Task: login\n")
+    await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
     await writeFile(join(taskPath, "notes.md"), "# notes\n")
     await mkdir(join(taskPath, "docs"), { recursive: true })
     await writeFile(join(taskPath, "docs", "one.md"), "# one\n")
@@ -586,7 +586,7 @@ describe("finishTask documents", () => {
       expect(result.strays).toEqual(["dist"])
       expect(result.containerRemoved).toBe(false)
       // The breadcrumb this plugin wrote is cleared either way.
-      expect(existsSync(join(fixtureUnderTest.taskPath, "README.md"))).toBe(false)
+      expect(existsSync(join(fixtureUnderTest.taskPath, "README.en.md"))).toBe(false)
     } finally {
       await fixtureUnderTest.cleanup()
     }
@@ -624,7 +624,7 @@ describe("finishTask documents", () => {
       // Nothing was merged, removed or archived: the worktree is still there.
       expect(existsSync(join(fixtureUnderTest.taskPath, "alpha"))).toBe(true)
       expect(existsSync(join(fixtureUnderTest.taskPath, "notes.md"))).toBe(true)
-      expect(existsSync(join(fixtureUnderTest.taskPath, "README.md"))).toBe(true)
+      expect(existsSync(join(fixtureUnderTest.taskPath, "README.en.md"))).toBe(true)
     } finally {
       await fixtureUnderTest.cleanup()
     }
@@ -674,7 +674,7 @@ describe("planTask", () => {
     }
     // The leftovers a task directory collects: this plugin's own breadcrumb,
     // build output, editor state, and writing the user did themselves.
-    await writeFile(join(taskPath, "README.md"), "# Task: login\n")
+    await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
     await mkdir(join(taskPath, "dist"), { recursive: true })
     await writeFile(join(taskPath, "dist", "app.js"), "")
     await mkdir(join(taskPath, ".idea"), { recursive: true })
@@ -759,7 +759,7 @@ describe("inspectTask", () => {
       await writeFile(join(taskPath, name, ".git"), "gitdir: /elsewhere\n")
     }
     if (keepBreadcrumb) {
-      await writeFile(join(taskPath, "README.md"), [
+      await writeFile(join(taskPath, "README.en.md"), [
         "# Task: login",
         "",
         "- Branch: `feat/login` (one branch per repository below)",

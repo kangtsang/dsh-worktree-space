@@ -25,8 +25,8 @@ assert.equal(result.length, 1, "npm pack must produce one package manifest")
 const files = result[0].files.map(({ path }) => path).sort()
 const expected = [
   "LICENSE",
+  "README.en.md",
   "README.md",
-  "README.zh.md",
   "assets/skill/task-worktree-space/SKILL.md",
   "client/client.js",
   "cordis.patch.yml",

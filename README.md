@@ -1,146 +1,124 @@
 # Worktree Space
 
-Worktree Space for DeepSeek Harness: one task can span several repositories. Each one gets
-its own Git worktree on the same branch, kept in a task space outside the source tree and
-registered as a DSH Workspace with its own sessions.
+DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓库，每个仓库用 Git worktree 各开一份，
+共用同一个分支，放在源码树之外的任务空间里，并注册成一个 DSH 工作区，自带独立会话。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="890">
+<img src="docs/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="890">
 
-[中文](README.zh.md) · **English**
+**简体中文** · [English](README.en.md)
 
-## Features
+## 功能
 
-- **Create a task from a session.** Pick a source root, name the task, tick the repositories
-  it should span, and say where the task space goes. Every repository gets a worktree on
-  `<branch prefix>/<task>` — `feat/<task>` by default — starting from each repository's
-  current HEAD, or from a branch or commit you name.
-- **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
-  directory is the task space, so an agent can edit across repositories without touching the
-  source checkouts.
-- **A management page** (the Worktree Space entry in the sidebar footer), with three views:
-  - **Tasks** puts each task's repositories together (branch, how many files changed,
-    whether it is locked or prunable);
-  - **Workspaces** shows which Workspaces can host a task space, and how many repositories
-    each one has;
-  - **Repositories** lists every Git repository found and the worktrees linked to it.
+- **从会话里建任务。** 选源码根、给任务起名、勾选要横跨的仓库、指定任务空间放哪。每个仓库都会得到
+  一份位于 `<分支前缀>/<任务名>` 的 worktree（前缀默认 `feat/`），起点可以是各仓库当前的 HEAD，
+  也可以指定某个分支或提交。
+- **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— Agent 可以
+  跨仓库改代码，不会动到源码检出。
+- **管理页面**（侧边栏底部的 Worktree Space 入口），分三个视图：
+  - **任务视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理）；
+  - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库；
+  - **仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree。
 
-  All three can be searched, and **Needs attention** narrows them to rows worth a look
-  (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
-  folds that row on its own; the button beside the filters folds or opens them all at once.
-- **Finish a task** from its row. By default each repository's branch is merged back, the
-  worktrees are removed, the task space's own documents are filed under
-  `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option unticked and they
-  are deleted along with everything else), and the Workspace registration is removed. It will not finish while a
-  session in that Workspace is still running — stop it or let it end, then try again.
-- **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
-  really are task spaces.
-- **No extra service needed.** The two entries, the scan depth and the directory limit all
-  live in the plugin's own configuration (see Configuration). It follows DSH themes, takes
-  its language from DSH, and gives the plugin list its own name, description and icon.
+  三个视图都能搜索，也能用「待处理」筛出需要注意的行（有改动、被锁定、可清理，或状态读取失败）；
+  每行左边的箭头能单独折叠，筛选旁的按钮可以一次全部展开或折叠。
+- **结束任务**：在任务行上点「结束任务」。默认把各仓库的分支合并回主线，删掉 worktree，把任务空间里的
+  文档存到 `archived-docs/<工作区名>-<YYYYMMDD-HHMMSS>`（不勾选归档，就会连这些文件一起删掉），
+  最后注销这个工作区。要是该工作区里还有会话在跑，会先拒绝，等它结束或停掉再试。
+- **结束任务空间**也在这个工作区列表自己的 `⋯` 菜单里 —— 只对确实是任务空间的目录出现。
+- **不需要额外服务。** 入口开关、扫描深度和目录上限都在插件自己的配置里改（见「配置」）。支持 DSH
+  主题；界面语言跟着 DSH 的语言设置走；插件列表里的名称、描述和图标也由本插件提供。
 
-## Layout of a task
+## 任务目录结构
 
 ```text
-<task space root>/
-├── <task>/                        the task space — also the session's working directory
-│   ├── README.md                  the task's branch, base and conventions
-│   ├── <repository A>/            a worktree on <branch prefix>/<task>
-│   └── <repository B>/            a worktree on the same branch name
+<任务空间根目录>/
+├── <任务名>/                      任务空间 —— 同时是会话的工作目录
+│   ├── README.md                  任务的分支、起点与约定
+│   ├── <仓库 A>/                  位于 <分支前缀>/<任务名> 的 worktree
+│   └── <仓库 B>/                  同名分支的 worktree
 └── archived-docs/
-    └── <parent>-<task>-20260926-020933/    documents filed here when a task is finished
+    └── <上级>-<任务名>-20260926-020933/    归档文档时存到这里
 ```
 
-Removing a worktree never deletes its Git branch; finishing a task merges the branch back
-before the worktree goes.
+删掉 worktree 不会删除对应的 Git 分支；结束任务会先把分支合并回去，再删 worktree。
 
-## Compatibility
+## 兼容性
 
-Built against the DSH **0.1.7-rc.1** client contract (web profile). Verified on
-`0.1.7-rc.1`: the host RPC routes register, the client bundle loads without changes, and the
-plugin list shows the name, description, icon and configuration section correctly.
+基于 DSH **0.1.7-rc.1** 的客户端契约开发（web profile）。已在 `0.1.7-rc.1` 上验证：宿主 RPC 路由
+能注册，客户端 bundle 不用改就能加载，插件列表里的名称、描述、图标和配置区都正常显示。
 
-## Usage
+## 使用
 
-### Install
+### 安装
 
-**From npm (recommended):**
+**从 npm（推荐）：**
 
 ```sh
 dsh plugin --profile web add dsh-worktree-space
 ```
 
-**Straight from the GitHub repository:**
+**直接从 GitHub 仓库装：**
 
 ```sh
 dsh plugin --profile web add github:kangtsang/dsh-worktree-space
 ```
 
-The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's bundle
-patch, which normally writes it for you; if the plugin never shows up, add it by hand:
+插件的挂载行写在 profile 的 `cordis.patch.yml` —— 本仓库带着 DSH 的 bundle patch，一般会自动生效；
+若插件列表里一直没出现，就手动补上：
 
 ```yaml
 - id: worktree-space
   name: dsh-worktree-space
   config:
-    sidebarEntry: show       # the entry in the sidebar footer
-    settingsEntry: hide      # whether to offer one in Settings as well
+    sidebarEntry: show       # 侧边栏底部的入口
+    settingsEntry: hide      # 是否也放进设置面板
     scanDepth: 2
     maxScanDirectories: 1000
 ```
 
-To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and install
-again.
+卸载：`dsh plugin --profile web remove dsh-worktree-space`；更新时先卸载再装一次。
 
-### Configuration
+### 配置
 
-Change these in **Plugins → Worktree Space** in the sidebar, next to every other plugin's
-configuration; they take effect immediately.
+在 **侧边栏 → 插件 → Worktree Space** 里改，和其它插件的配置在同一处，改完立刻生效：
 
-| Setting | Values | Default | Meaning |
+| 设置 | 取值 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| Sidebar entry | show / hide | show | The Worktree Space entry in the sidebar footer |
-| Settings entry | show / hide | hide | Whether to put an entry in Settings as well; the two are independent |
-| Scan depth | 1–5 levels | 2 levels | How far down from each Workspace root the scan goes (the root itself does not count) |
-| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
+| 侧边栏入口 | 显示 / 隐藏 | 显示 | 侧边栏底部的 Worktree Space 入口 |
+| 设置面板入口 | 显示 / 隐藏 | 隐藏 | 是否也在设置面板里放一个入口；两个入口互相独立 |
+| 扫描深度 | 1–5 层 | 2 层 | 从每个工作区根目录往下扫几层（根目录本身不算） |
+| 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | 一次扫描最多读多少个目录；超过会提示你换一个更小的工作区 |
 
-A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
-a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
-`dist`, `build`, `vendor` and hidden directories are skipped (except `.worktrees`).
+扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` 就认定是
+仓库；`node_modules`、`dist`、`build`、`vendor` 等目录和隐藏目录会跳过（`.worktrees` 除外）。
 
-### Create a task
+### 创建任务
 
-<img src="docs/new-worktree-space.png" alt="New Worktree Space" width="598">
+<img src="docs/new-worktree-space.png" alt="新建 Worktree Space" width="598">
 
-1. In a session, click **New Worktree Space** above the composer.
-2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
-   (`hotfix-placeorder`); an invalid name tells you which rule it breaks.
-3. Say where the task space goes. It has to sit outside the source tree, and a recommended
-   path is filled in for you.
-4. Tick the repositories the task should span, and choose the branch base.
-5. Click **Create and open**. The new Workspace opens a session whose working directory is the
-   task space.
+1. 在会话里，点输入框上方的 **新建 Worktree Space**。
+2. 给任务起名 —— 会转成小写，空格、中文和其它字符都换成连字符（`hotfix-placeorder`）；名字不合法时
+   会告诉你哪里不合规。
+3. 设置任务空间放哪。必须在源码树之外，界面会填好推荐的路径。
+4. 勾选任务要横跨的仓库，并选择分支起点。
+5. 点 **创建并打开**。新工作区会直接开一个会话，工作目录就是任务空间。
 
-If the task space is built but registering the Workspace fails, the dialog says why and lets
-you retry the registration.
+如果任务空间已经建好、但工作区注册失败，对话框会说明原因，并让你重试注册。
 
-### Manage tasks
+### 管理任务
 
-Open the **management page** from the Worktree Space entry in the sidebar footer. The three
-views differ as described under Features: Tasks shows each task and its repositories,
-Workspaces shows where a task space can start, Repositories shows every Git project found and
-its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /
-`N repositories · M Worktrees`), and reads `shown / total` while a search or filter is
-narrowing the list.
+打开 **管理页面**（侧边栏底部的 Worktree Space 入口）。三个视图的区别见「功能」一节：任务视图看每个
+任务和它的各个仓库，工作区视图看哪些工作区能建任务空间，仓库视图看扫到的每个 Git 项目及其 worktree。
+右侧的统计会跟着视图变（`N 个任务` / `N 个工作区` / `N 个仓库 · M 个 Worktree`），搜索或筛选时显示
+`可见 / 总数`。
 
-### Finish a task
+### 结束任务
 
-<img src="docs/finish-task.png" alt="The Finish task dialog" width="612">
+<img src="docs/finish-task.png" alt="结束任务对话框" width="612">
 
-Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu.
-The dialog spells out what is about to happen — uncommitted files, commits to merge, the
-branch to merge into, and the task space's own documents (the archive option only appears
-when there is something to archive). Merging back is on by default; deleting the branch and
-forcing past uncommitted work are not.
+在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框会先说明接下来会
+发生什么：未提交的文件、待合并的提交、合并到哪个分支，以及任务空间里的文档（确实有东西可归档时，
+才会出现「归档文档」选项）。默认勾选「合并回主线」；「删除分支」和「强制」默认不勾选。

@@ -17,7 +17,7 @@ import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 /** File a task container carries so a session finds the task's own rules. */
 
-export const BREADCRUMB = 'README.md'
+export const BREADCRUMB = 'README.en.md'
 
 
 /** Merge targets, in the order they are tried when none is named. */
