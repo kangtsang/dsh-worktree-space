@@ -240,7 +240,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           {result ? <div className="dws-finish-report" role="status">
             <p>{result.failed
               ? result.repositories.every((entry) => !entry.merged && !entry.removed) ? t("finishNone") : t("finishPartial")
-              : result.repositories.some((entry) => entry.merged) ? t("finishDone") : t("finishDoneKept")}</p>
+              : result.repositories.some((entry) => entry.merged) ? t("finishDone")
+                // Nothing was merged, so what a branch's fate was is the headline: the
+                // task was either kept for a merge later, or abandoned outright.
+                : result.repositories.length > 0 && result.repositories.every((entry) => entry.branchDeleted) ? t("finishDoneDiscarded")
+                  : t("finishDoneKept")}</p>
             <ul className="dws-finish-repos">{result.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
               <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null].filter(Boolean).join(" · ") || (entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>

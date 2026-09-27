@@ -382,6 +382,10 @@ describe("finishing a task", () => {
 
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ merge: false, deleteBranch: true, force: true })))
+    // The headline has to agree with the row: nothing was merged, and the branch did
+    // not survive, so this was an abandonment rather than a task kept for later.
+    await waitFor(() => expect(screen.getByText(t("finishDoneDiscarded"))).toBeTruthy())
+    expect(screen.queryByText(t("finishDoneKept"))).toBeNull()
   })
 
   it("reports a repository left untouched instead of hiding it behind the others", async () => {
