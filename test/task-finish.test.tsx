@@ -48,7 +48,7 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [] }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[] } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[] }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[] } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
@@ -90,10 +90,10 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
       }
     }),
   }
-  const workspaces = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
+  const workspaces = { list: { getSnapshot: () => ({ items }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
   const uiWorkspace = { openWorkspace: vi.fn() }
   render(<WorktreesSettings api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} />)
-  return { api }
+  return { api, workspaces }
 }
 
 // An option's accessible name is its label followed by its hint, and one hint
@@ -186,7 +186,7 @@ describe("finishing a task", () => {
     expect(screen.getAllByText(new RegExp(t("finishMerged").replace("{target}", "main")))).toHaveLength(2)
     expect(screen.getAllByText(new RegExp(t("finishRemoved"))).length).toBeGreaterThan(0)
     expect(screen.getByText(format(t("finishStrays"), { names: "notes.md" }))).toBeTruthy()
-    expect(screen.getByText(format(t("finishContainerKept"), { path: container }))).toBeTruthy()
+    expect(screen.getByText(format(t("finishContainerKept"), { path: container.replace(/\\/g, "/") }))).toBeTruthy()
     // The report replaces the options: nothing left to confirm twice.
     expect(screen.queryByRole("button", { name: t("finishConfirmAction") })).toBeNull()
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
@@ -331,7 +331,7 @@ describe("finishing a task", () => {
       failed: true,
       repositories: [
         { name: "kratos-vue-admin", path: `${container}\\kratos-vue-admin`, branch, target: "main", merged: true, removed: true, branchDeleted: false },
-        { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, merged: false, removed: false, branchDeleted: false, error: "CONFLICT (content): merge conflict in src/main.ts; worktree and branch kept" },
+        { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, merged: false, removed: false, branchDeleted: false, conflict: true, error: "CONFLICT (content): merge conflict in src/main.ts; worktree and branch kept" },
       ],
       strays: [],
       containerRemoved: false,
@@ -342,9 +342,62 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(screen.getByText(t("finishPartial"))).toBeTruthy())
-    expect(screen.getByText(/merge conflict in src\/main\.ts/)).toBeTruthy()
-    expect(screen.getByText(t("finishUntouched"))).toBeTruthy()
+    // The conflict is explained in the user's language; git's own words are the
+    // detail behind the disclosure rather than the sentence itself.
+    expect(screen.getByText(t("finishConflict"))).toBeTruthy()
+    expect(screen.getByText(t("finishConflicted"))).toBeTruthy()
+    expect(screen.getByText(t("finishGitOutput")).parentElement?.textContent).toContain("merge conflict in src/main.ts")
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("says nothing was finished when every repository kept its own", async () => {
+    const user = userEvent.setup()
+    const next = setup({ result: finishResult({
+      failed: true,
+      repositories: finishResult().repositories.map((entry) => ({ ...entry, merged: false, removed: false, error: "cannot locate the source repository" })),
+      containerRemoved: false,
+    }) })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(screen.getByText(t("finishNone"))).toBeTruthy())
+    expect(screen.queryByText(t("finishPartial"))).toBeNull()
+  })
+
+  it("keeps the workspace registration while the task space is still there", async () => {
+    const user = userEvent.setup()
+    const next = setup({
+      items: [{ workspaceId: "ws-antest", path: container, title: "worktree-space/antest" }],
+      result: finishResult({
+        failed: true,
+        repositories: [{ name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, merged: false, removed: false, branchDeleted: false, conflict: true, error: "CONFLICT (content): merge conflict" }],
+        strays: [],
+        containerRemoved: false,
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    // The container is still on disk with the conflict inside it: dropping the
+    // registration here would hide the task space and strand its sessions.
+    await waitFor(() => expect(screen.getByText(t("archiveWorkspaceKeptIntact"))).toBeTruthy())
+    expect(next.workspaces.delete).not.toHaveBeenCalled()
+  })
+
+  it("removes the workspace registration once the container is really gone", async () => {
+    const user = userEvent.setup()
+    const next = setup({
+      items: [{ workspaceId: "ws-antest", path: container, title: "worktree-space/antest" }],
+      result: finishResult({ containerRemoved: true }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledWith("ws-antest"))
+    expect(screen.getByText(t("archiveWorkspaceRemoved"))).toBeTruthy()
   })
 
   it("surfaces a failed finish without closing the dialog or losing the choice", async () => {

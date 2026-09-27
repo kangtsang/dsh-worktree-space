@@ -101,7 +101,10 @@
   .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }
   .dws-status-dot { width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor; }
   .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }
-  .dws-status-unavailable, .dws-status-prunable { color: var(--wt-danger); }
+  /* Only a stale worktree record, which asks for a cleanup, keeps the warning
+     colour; a status the page could not read is worth an amber note, not red. */
+  .dws-status-unavailable { color: var(--dsw-static-amber-600); }
+  .dws-status-prunable { color: var(--wt-danger); }
   .dws-status-dirty .dws-status-dot, .dws-status-zero .dws-status-dot { color: var(--dsw-static-amber-600); }
   /* Committed work waiting to be merged back wears the same amber as uncommitted
      work: both are work that has not landed yet, and they sit side by side. */
@@ -279,6 +282,13 @@
   .dws-finish-repos strong { font-size: 12px; font-weight: 500; }
   .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
   .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
+  /* A conflict the host already aborted: told in the user's language, amber because
+     it wants an action, with git's own output kept one click away rather than
+     dumped in the middle of the sentence. */
+  .dws-finish-report .dws-finish-conflict { flex-basis: 100%; color: var(--dsw-static-amber-600); }
+  .dws-finish-log { flex-basis: 100%; min-width: 0; color: var(--wt-muted); font-size: 11px; line-height: 17px; }
+  .dws-finish-log summary { cursor: pointer; }
+  .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
   /* What there is to archive, stated above everything the dialog asks. */
   .dws-dialog-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
   .dws-plan { margin-top: 12px; }

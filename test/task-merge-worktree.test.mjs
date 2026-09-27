@@ -124,6 +124,8 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
 
       expect(result.failed).toBe(false)
       expect(result.mergeTarget).toBe("main")
+      // A repository that merged is not a conflicted one.
+      expect(result.repositories[0].conflict).toBeUndefined()
       // The named branch took the merge…
       expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "main"])).toBe(true)
       // …the checkout was never switched to it…
@@ -148,6 +150,9 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
 
       expect(result.failed).toBe(true)
       expect(result.repositories[0].error).toMatch(/CONFLICT/)
+      // The flag is what lets the page say all of this in the user's own language,
+      // instead of printing git's English next to a Chinese dialog.
+      expect(result.repositories[0].conflict).toBe(true)
       // The merge commit that would have moved `main` was never made…
       expect(git(source, ["rev-parse", "main"])).toBe(before)
       expect(git(source, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("develop")

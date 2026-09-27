@@ -7,6 +7,15 @@
  * needs the geometry as data rather than as a component, so the shapes are
  * written out here; `repositoryGlyph.test.tsx` renders the real icon and
  * compares the two, so they cannot drift apart unnoticed.
+ *
+ * TODO(DSH): the row is not ours to paint yet. As of DSH 0.1.7-rc.1 the
+ * `settings.section` registrant options are `id`, `order` and `label` only, and the
+ * settings shell picks a nav glyph from a fixed id-to-icon table, falling back to
+ * the settings gear for every plugin section. Overriding it from here was tried and
+ * withdrawn: marking the shell's row from the client only survives until React next
+ * writes that button's `className`, which is on the next click. When the slot (or
+ * the section options) accepts an icon, hand it this glyph — one line in the
+ * registration — and delete this note.
  */
 type GlyphNode = readonly [string, Readonly<Record<string, string>>]
 

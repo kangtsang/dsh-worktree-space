@@ -146,7 +146,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     if (next.has(path)) next.delete(path); else next.add(path)
     return next
   })
-  const tasks = groupTasks(repos)
+  // The sentinel this page writes while a read is in flight is passed down, so a
+  // repository being read is not reported as one that could not be read.
+  const tasks = groupTasks(repos, { pending: t("checkingStatus") })
   // A task needs attention when any of its repositories does, which is the same
   // condition the repository view filters on, one level up.
   const taskNeedsAttention = (task: TaskGroup) => task.changedFiles > 0 || task.commits > 0 || task.lockedRepositories > 0 || task.prunableRepositories > 0 || task.unknownRepositories > 0
@@ -175,6 +177,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return workspace.title.toLowerCase().includes(needle) || workspace.path.toLowerCase().includes(needle)
   })
   const taskRepoStatus = (repository: TaskRepository) => {
+    if (repository.checking) return { state: "checking", label: t("checkingStatus") }
     if (repository.unknown) return { state: "unavailable", label: t("statusUnknown") }
     if (repository.changedFiles) return { state: "dirty", label: format(t("dirty"), { count: String(repository.changedFiles) }) }
     if (repository.prunable) return { state: "prunable", label: t("prunable") }

@@ -108,6 +108,8 @@ export interface FinishTaskRepository {
   branchDeleted: boolean
   /** Why this repository was left alone; the worktree and branch stay put. */
   error?: string
+  /** The merge hit a conflict, was aborted, and left the worktree and branch. */
+  conflict?: boolean
 }
 
 /** Answer of `task.inspect`: whether a directory is a task container. */

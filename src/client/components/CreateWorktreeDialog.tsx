@@ -82,7 +82,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, onC
     api.suggestRoot(target.path).then((next) => {
       if (!alive) return
       setSuggestion(next)
-      setTasksRoot(next.suggested)
+      // Shown the way this plugin shows every other path: the footer already prints
+      // the task directory with forward slashes, so the field above it agrees.
+      setTasksRoot(slashPath(next.suggested))
       // The prefix the host itself would use until the user overrides it.
       setBranchPrefix(next.branchPrefix ?? FALLBACK_BRANCH_PREFIX)
       // Every discovered repository is in the task until the user narrows it.

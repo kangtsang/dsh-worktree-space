@@ -81,6 +81,37 @@ describe("WorktreesSettings loading lifecycle", () => {
     expect(next.api.status).not.toHaveBeenCalled()
   })
 
+  it("says a task's repositories are being checked, not unknown, while the reads are in flight", async () => {
+    const next = setup()
+    const linked = { path: "/spaces/antest/alpha", branch: "feat/antest", isMain: false, detached: false, locked: false, prunable: false }
+    next.api.scan.mockResolvedValue([{
+      repoPath: "/projects/alpha",
+      commonDir: "/projects/alpha/.git",
+      worktrees: [
+        { path: "/projects/alpha", branch: "develop", isMain: true, detached: false, locked: false, prunable: false },
+        linked,
+      ],
+    }])
+    const status = deferred<any>()
+    next.api.status.mockReturnValue(status.promise)
+    next.mount()
+
+    // The page opens on the task view: the sentinel a refresh writes has to read as
+    // "checking", which is what this view used to report as an unknown status.
+    await waitFor(() => expect(next.api.status).toHaveBeenCalledTimes(1))
+    expect(screen.getByText(t("checkingStatus"))).toBeTruthy()
+    expect(screen.queryByText(t("statusUnknown"))).toBeNull()
+    // Nothing to act on either, while the answer is still on its way.
+    fireEvent.click(screen.getByRole("button", { name: t("filterAttention") }))
+    expect(screen.queryByRole("heading", { name: "antest" })).toBeNull()
+
+    await act(async () => { status.resolve({ changedFiles: 0, branchLine: "", output: "" }) })
+    fireEvent.click(screen.getByRole("button", { name: t("filterAll") }))
+    expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
+    expect(screen.queryByText(t("checkingStatus"))).toBeNull()
+    expect(screen.getByText(t("clean"))).toBeTruthy()
+  })
+
   it("aborts pending linked status checks on unmount", async () => {
     const next = setup()
     const status = deferred<any>()

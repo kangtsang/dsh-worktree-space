@@ -3,7 +3,7 @@ import { AlertCircle, Check, GitPullRequestArrow, Loader2 } from "lucide-react"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, nameOf, parentOf } from "../lib/paths"
+import { cleanPath, nameOf, parentOf, slashPath } from "../lib/paths"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
@@ -138,9 +138,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           ? { documentsDirectory }
           : { discardDocuments: true }),
       })
-      // The directory is gone, so a registration pointing at it would be a row
-      // with nothing behind it, and its sessions could never be validated again.
-      if (workspace !== undefined) {
+      // A registration is dropped only once the directory behind it is really gone:
+      // a finish that failed keeps the container - with the worktree whose conflict
+      // still has to be resolved - and unregistering it then would hide the task
+      // space and scatter its sessions into "Ungrouped" while it sits there on disk.
+      if (workspace !== undefined && archived.containerRemoved) {
         try {
           await workspaces.delete(workspace.workspaceId)
         } catch (reason: any) {
@@ -172,7 +174,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
             <span aria-hidden="true">·</span>
             <span>{format(t("planCommits"), { count: String(plan.commits) })}</span>
           </p> : null}
-          <div className="dws-remove-target"><GitPullRequestArrow size={18} /><div><strong>{plan?.mergeTarget ?? plan?.task ?? ""}</strong><code>{path}</code></div></div>
+          <div className="dws-remove-target"><GitPullRequestArrow size={18} /><div><strong>{plan?.mergeTarget ?? plan?.task ?? ""}</strong><code title={slashPath(path)}>{slashPath(path)}</code></div></div>
           {/* Each repository's branch, the branch it would merge into, and how far
               ahead it is — the per-repository detail behind the totals above. The
               target is choosable where the Host offered branches to choose from. */}
@@ -229,19 +231,28 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           </div> : null}
           {loadError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{loadError}</span></div> : null}
           {result ? <div className="dws-finish-report" role="status">
-            <p>{result.failed ? t("finishPartial") : result.repositories.some((entry) => entry.merged) ? t("finishDone") : t("finishDoneKept")}</p>
+            <p>{result.failed
+              ? result.repositories.every((entry) => !entry.merged && !entry.removed) ? t("finishNone") : t("finishPartial")
+              : result.repositories.some((entry) => entry.merged) ? t("finishDone") : t("finishDoneKept")}</p>
             <ul className="dws-finish-repos">{result.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
-              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null].filter(Boolean).join(" · ") || t("finishUntouched")}</span>
-              {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
+              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null].filter(Boolean).join(" · ") || (entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
+              {/* A conflicted merge is explained in the user's language; git's own
+                  output stays one click away, where the conflict itself is legible. */}
+              {entry.conflict
+                ? <>
+                  <span className="dws-finish-conflict">{t("finishConflict")}</span>
+                  <details className="dws-finish-log"><summary>{t("finishGitOutput")}</summary><pre>{entry.error}</pre></details>
+                </>
+                : entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
             </li>)}</ul>
-            <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: result.path })}</p>
-            {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: documentsDirectory, names: result.archivedStrays.join(", ") })}</p> : null}
+            <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: slashPath(result.path) })}</p>
+            {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: slashPath(documentsDirectory), names: result.archivedStrays.join(", ") })}</p> : null}
             {result.strays.length ? <p>{format(t("finishStrays"), { names: result.strays.join(", ") })}</p> : null}
             {result.warnings.map((warning) => <p className="dws-finish-error" key={warning}>{warning}</p>)}
             {workspace !== undefined
               ? <p className={registrationError === "" ? undefined : "dws-finish-error"}>
-                {registrationError === "" ? t("archiveWorkspaceRemoved") : format(t("archiveWorkspaceKept"), { error: registrationError })}
+                {registrationError !== "" ? format(t("archiveWorkspaceKept"), { error: registrationError }) : result.containerRemoved ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptIntact")}
               </p>
               : null}
           </div> : null}
@@ -257,7 +268,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
             {/* The one choice about the container's own files: keep the writing,
                 or let everything in there go. Only offered when there is writing
                 to keep — otherwise there is nothing to decide. */}
-            {contentStrays.length > 0 ? <><label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.archiveDocuments} onChange={(event) => setOptions((current) => ({ ...current, archiveDocuments: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("archiveDocuments")}</span><span className="dws-check-path">{format(t("archiveDocumentsHint"), { path: documentsDirectory })}</span></span></label>
+            {contentStrays.length > 0 ? <><label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.archiveDocuments} onChange={(event) => setOptions((current) => ({ ...current, archiveDocuments: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("archiveDocuments")}</span><span className="dws-check-path">{format(t("archiveDocumentsHint"), { path: slashPath(documentsDirectory) })}</span></span></label>
               {/* Only unticking loses anything, so only unticking warns: ticked,
                   the content is merely filed out of the way. */}
               {!options.archiveDocuments ? <p className="dws-notice dws-notice-danger" role="alert">

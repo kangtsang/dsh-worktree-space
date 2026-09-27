@@ -97,6 +97,22 @@ describe("task grouping", () => {
     expect(uncounted[0].repositories[0].commits).toBe(0)
   })
 
+  it("tells a status still being read from one that could not be read", () => {
+    const row = worktree(taskPath("antest", "api"), "feat/antest", { statusError: "Checking status…" })
+    // Without the sentinel this is just a failed read, which is what the page used
+    // to report for every row of every refresh.
+    expect(groupTasks([repository("/projects/api", [row])])[0].unknownRepositories).toBe(1)
+
+    const [task] = groupTasks([repository("/projects/api", [row])], { pending: "Checking status…" })
+    expect(task).toMatchObject({ checkingRepositories: 1, unknownRepositories: 0 })
+    expect(task.repositories[0]).toMatchObject({ checking: true, unknown: false })
+
+    // A real failure is still a failure while other reads are in flight.
+    const failed = worktree(taskPath("antest", "web"), "feat/antest", { statusError: "worktree-unavailable" })
+    const [mixed] = groupTasks([repository("/projects/api", [row]), repository("/projects/web", [failed])], { pending: "Checking status…" })
+    expect(mixed).toMatchObject({ checkingRepositories: 1, unknownRepositories: 1 })
+  })
+
   it("separates unavailable status, a locked worktree and a stale record from a clean one", () => {
     const tasks = groupTasks([
       repository("/projects/api", [worktree(taskPath("antest", "api"), "feat/antest", { statusError: "worktree-unavailable" })]),

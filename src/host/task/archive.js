@@ -349,7 +349,10 @@ export async function finishTask(subprocess, options) {
         await mergeIntoBranch(subprocess, mainRepo, branch, mergeTarget)
         outcome.merged = true
       } catch (error) {
-        // Leave the worktree and branch in place for manual handling.
+        // Leave the worktree and branch in place for manual handling. The flag is
+        // what lets the page say that in the user's own language; the message stays
+        // git's own, which is what a reader needs to see the conflict itself.
+        outcome.conflict = true
         await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
         outcome.error = `${error.message}; worktree and branch kept`
         repositories.push(outcome)

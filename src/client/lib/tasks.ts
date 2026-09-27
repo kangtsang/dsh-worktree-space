@@ -12,6 +12,8 @@ export interface TaskRepository {
   locked: boolean
   /** Git keeps the record but the directory is gone. */
   prunable: boolean
+  /** The page has not read this repository's status yet. */
+  checking: boolean
   /** The status read failed, so this repository's state is unknown. */
   unknown: boolean
 }
@@ -41,6 +43,8 @@ export interface TaskGroup {
   commits: number
   lockedRepositories: number
   prunableRepositories: number
+  /** Repositories whose status the page is still reading. */
+  checkingRepositories: number
   unknownRepositories: number
 }
 
@@ -66,9 +70,12 @@ export function taskContainerOf(worktree: Worktree): string | undefined {
 /**
  * Group scanned repositories into the tasks their worktrees belong to.
  * @param repos - scanned repository lists, as the settings page holds them.
+ * @param options.pending - the text the page writes into `statusError` while a
+ *   status read is still in flight. It is what lets a repository be "not read
+ *   yet" rather than "could not be read": the two arrive here as the same field.
  * @returns one entry per task container, ordered by task name.
  */
-export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
+export function groupTasks(repos: WorktreeList[], { pending }: { pending?: string } = {}): TaskGroup[] {
   const groups = new Map<string, { group: TaskGroup; seen: Set<string> }>()
   for (const repo of repos) {
     for (const worktree of repo.worktrees) {
@@ -88,6 +95,7 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
             commits: 0,
             lockedRepositories: 0,
             prunableRepositories: 0,
+            checkingRepositories: 0,
             unknownRepositories: 0,
           },
         }
@@ -98,7 +106,11 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
       const repoKey = cleanPath(worktree.path)
       if (entry.seen.has(repoKey)) continue
       entry.seen.add(repoKey)
-      const unknown = worktree.statusError !== undefined && worktree.statusError !== ""
+      // "Not read yet" and "could not be read" are the same field on the row, and
+      // only the caller knows which text it wrote while the read was in flight.
+      const statusError = worktree.statusError
+      const checking = pending !== undefined && statusError === pending
+      const unknown = statusError !== undefined && statusError !== "" && !checking
       const changedFiles = worktree.changedFiles ?? 0
       const commits = worktree.commits ?? 0
       entry.group.repositories.push({
@@ -109,12 +121,14 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
         commits,
         locked: worktree.locked,
         prunable: worktree.prunable,
+        checking,
         unknown,
       })
       entry.group.changedFiles += changedFiles
       entry.group.commits += commits
       if (worktree.locked) entry.group.lockedRepositories += 1
       if (worktree.prunable) entry.group.prunableRepositories += 1
+      if (checking) entry.group.checkingRepositories += 1
       if (unknown) entry.group.unknownRepositories += 1
     }
   }
