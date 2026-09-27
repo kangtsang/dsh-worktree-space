@@ -4,7 +4,7 @@ import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots"
 import type {} from "@deepseek-ai/dsh-client-ui-renderer/client"
 import type {} from "@deepseek-ai/dsh-client-ui-conversation/client"
-import type { ILayout, MainPanelId } from "@deepseek-ai/dsh-client-ui-layout/client"
+import type {} from "@deepseek-ai/dsh-client-ui-layout/client"
 import type {} from "@deepseek-ai/dsh-client-ui-sidebar/client"
 import type {} from "@deepseek-ai/dsh-client-ui-settings/client"
 import type {} from "@deepseek-ai/dsh-client-ui-workspace/client"
@@ -18,6 +18,7 @@ import { PluginConfigCard } from "./components/PluginConfigCard"
 import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
 import { WorkspaceActionPlacement } from "./components/WorkspaceActionPlacement"
 import { WorktreeFooterAction } from "./components/WorktreeFooterAction"
+import { WorktreeManagePanel } from "./components/WorktreeManagePanel"
 import { WorktreePanelIcon, WorktreePanelPage } from "./components/WorktreePanel"
 import { createWorktreeApi } from "./lib/api"
 import { previewValue, subscribePreview } from "./lib/configPreview"
@@ -28,7 +29,6 @@ import type { Workspace } from "./lib/types"
 /** The client plugin context surface this plugin touches. */
 export type WorktreeClientContext = Context & {
   connection: ConnectionHandle
-  layout: ILayout
 }
 
 const STYLE_TAG = "data-dsh-worktree-space-style"
@@ -47,8 +47,9 @@ const SIDEBAR_FOOTER_ORDER = 5
  * The management page's key, which is also its sidebar row's id.
  *
  * A keyed `main` slot and a `sidebar.panellist` list entry meet on this string: the
- * row selects the panel, and `ctx.layout.selectPanel` opens it from anywhere else —
- * the footer entry and the workspace menu both do.
+ * row is what selects the panel. The sidebar footer's shortcut does not select it —
+ * it opens the same page as a dialog, so a shortcut cannot move the session you were
+ * reading off screen.
  */
 const PANEL_ID = "dsh-worktree-space"
 
@@ -71,7 +72,7 @@ function installStyles() {
 
 export const WorktreePlugin = {
   name: "dsh-worktree-space",
-  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout"],
+  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions"],
   apply(ctx: WorktreeClientContext) {
     ctx.effect(installStyles, "dsh-worktree-space styles")
     ctx.effect(() => installLocale(ctx), "dsh-worktree-space locale")
@@ -101,10 +102,7 @@ export const WorktreePlugin = {
     let active = true
     let openCreate: (workspace: Pick<Workspace, "path" | "title">) => void = () => {}
     let openArchive: (path: string) => void = () => {}
-    // The page lives in the shell's main column now, so "manage" is a panel
-    // selection rather than a dialog: the sidebar row, the footer entry and the
-    // workspace menu all land on the same page, at the window's size.
-    const openManage = () => ctx.layout.selectPanel(PANEL_ID as MainPanelId)
+    let openManage: () => void = () => {}
     let refreshGeneration = 0
 
     // Stable faces onto the handlers the overlay installs when it mounts. The menu
@@ -148,13 +146,14 @@ export const WorktreePlugin = {
     }, "dsh-worktree-space workspace classification")
 
     function WorktreeOverlay() {
-      // One overlay host for the two dialogs this plugin shows on top of the shell:
-      // the composer and the workspace list's menu both open the create form, and
-      // the menu also opens the archive form. The management page is not one of
-      // them — it is a main panel, selected rather than floated.
+      // One overlay host for the dialogs this plugin floats over the shell: the
+      // composer and the workspace list's menu open the create form, the menu also
+      // opens the archive form, and the sidebar footer's shortcut opens the
+      // management page here rather than switching the main column to it.
       const [request, setRequest] = useState<
         | { kind: "create"; target: Pick<Workspace, "path" | "title"> }
         | { kind: "archive"; path: string }
+        | { kind: "manage" }
         | null
       >(null)
       // The menu offers a task space exactly where the composer's button does, so
@@ -164,7 +163,8 @@ export const WorktreePlugin = {
       useEffect(() => {
         openCreate = (target) => setRequest({ kind: "create", target })
         openArchive = (path) => setRequest({ kind: "archive", path })
-        return () => { openCreate = () => {}; openArchive = () => {} }
+        openManage = () => setRequest({ kind: "manage" })
+        return () => { openCreate = () => {}; openArchive = () => {}; openManage = () => {} }
       }, [])
       return <>
         <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} />
@@ -189,6 +189,16 @@ export const WorktreePlugin = {
             onArchived={() => {
               void refreshClassification()
             }}
+            onClose={() => setRequest(null)}
+          />
+        ) : null}
+        {request?.kind === "manage" ? (
+          <WorktreeManagePanel
+            api={api}
+            workspaces={workspaces}
+            uiWorkspace={uiWorkspace}
+            sessions={sessions}
+            onCreate={(target) => setRequest({ kind: "create", target })}
             onClose={() => setRequest(null)}
           />
         ) : null}

@@ -7,7 +7,6 @@ function context(registeredSlots: string[], configForms?: { get: (name: string) 
     connection: { rpc: { call: vi.fn() } },
     workspaces: { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} } },
     uiWorkspace: {},
-    layout: { selectPanel: vi.fn() },
     effect: (effect: () => unknown) => effect(),
     slots: { inject: (name: string) => { registeredSlots.push(name); return () => {} } },
     inject: (names: string[], run: (ctx: unknown) => void) => { run(configForms === undefined ? {} : { configForms }) },
@@ -23,7 +22,7 @@ describe("WorktreePlugin compatibility", () => {
     // Without the configuration service the defaults stand: the panel row under New
     // session, and the sidebar footer's shortcut to the same page.
     expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action"])
-    expect(WorktreePlugin.inject).toEqual(["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout"])
+    expect(WorktreePlugin.inject).toEqual(["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions"])
   })
 
   it("keeps the panel row when the configuration hides the footer shortcut", () => {
