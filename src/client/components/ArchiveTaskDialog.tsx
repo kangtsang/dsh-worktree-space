@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AlertCircle, Check, GitPullRequestArrow, Loader2 } from "lucide-react"
+import { AlertCircle, Check, Loader2 } from "lucide-react"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
@@ -168,13 +168,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
           <DialogDescription className="dws-form-note">{t("finishDescription")}</DialogDescription>
         </div>
         <div className="dws-dialog-body">
-          {/* What there is to archive, before anything is chosen. */}
+          {/* What there is to archive, before anything is chosen. The branch each
+              repository merges into is per repository and named on its own row, so it
+              is not summarised here: one line would have to pick one of them. */}
           {plan !== null && result === null ? <p className="dws-dialog-status" role="status">
             <span>{plan.changedFiles > 0 ? format(t("dirty"), { count: String(plan.changedFiles) }) : t("clean")}</span>
             <span aria-hidden="true">·</span>
             <span>{format(t("planCommits"), { count: String(plan.commits) })}</span>
+            <span aria-hidden="true">·</span>
+            <span>{t("taskDirectoryLabel")}</span>
+            <code title={slashPath(path)}>{slashPath(path)}</code>
           </p> : null}
-          <div className="dws-remove-target"><GitPullRequestArrow size={18} /><div><strong>{plan?.mergeTarget ?? plan?.task ?? ""}</strong><code title={slashPath(path)}>{slashPath(path)}</code></div></div>
           {/* Each repository's branch, the branch it would merge into, and how far
               ahead it is — the per-repository detail behind the totals above. The
               target is choosable where the Host offered branches to choose from. */}

@@ -227,11 +227,9 @@
   .dws-dialog-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; color: var(--wt-muted); font-size: 13px; }
   .dws-dialog-loading > div { display: flex; align-items: center; gap: 8px; }
   .dws-dialog-loading > span[aria-hidden] { display: block; flex-basis: 100%; height: 30px; margin-top: 6px; border-radius: 8px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
-  .dws-remove-target { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 9px; background: var(--wt-soft); }
-  .dws-remove-target > svg { flex: none; margin-top: 2px; color: var(--wt-secondary); }
-  .dws-remove-target > div { min-width: 0; }
-  .dws-remove-target strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-  .dws-remove-target code { display: block; overflow-wrap: anywhere; margin-top: 5px; color: var(--wt-secondary); font-size: 11px; line-height: 19px; }
+  /* The remove-target card is gone: which branch each repository merges into is
+     named per repository now, and a single headline target would have had to pick
+     one of them. Its path moved onto the status line above. */
   .dws-preserved { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--wt-secondary); font-size: 12px; }
   .dws-hero-action { display: inline-flex; flex: none; align-items: center; }
   .dws-hero-action:empty { display: none; }
@@ -291,6 +289,7 @@
   .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
   /* What there is to archive, stated above everything the dialog asks. */
   .dws-dialog-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  .dws-dialog-status code { min-width: 0; overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
   .dws-plan { margin-top: 12px; }
   /* The branch a repository merges into, chosen in place: sized like the text it
      replaces rather than like a form field. */

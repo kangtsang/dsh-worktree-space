@@ -192,6 +192,34 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
   })
 
+  it("names the task space by its directory, not by one repository's merge target", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    // Two repositories pointed at different branches: there is no single target a
+    // headline could name, which is why the per-repository rows are the only place
+    // the target is stated.
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task,
+      tasksRoot,
+      path: `${tasksRoot}\\${task}`,
+      changedFiles: 0,
+      commits: 2,
+      strays: [],
+      repositories: [
+        { name: "kratos-vue-admin", path: `${tasksRoot}\\${task}\\kratos-vue-admin`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main", "develop"], commits: 1, changedFiles: 0 },
+        { name: "kratos-vue-admin-web", path: `${tasksRoot}\\${task}\\kratos-vue-admin-web`, branch: "feat/antest", target: "develop", checkedOut: "develop", branches: ["main", "develop"], commits: 1, changedFiles: 0 },
+      ],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    await waitFor(() => expect(screen.getByText(format(t("planCommits"), { count: "2" }))).toBeTruthy())
+    // The space is named by its directory, and each row carries its own target.
+    expect(screen.getByText(t("taskDirectoryLabel")).parentElement?.textContent).toContain(container.replace(/\\/g, "/"))
+    expect([...document.querySelectorAll(".dws-plan-target")].map((select) => (select as HTMLSelectElement).value)).toEqual(["main", "develop"])
+    expect(document.querySelector(".dws-remove-target")).toBeNull()
+  })
+
   it("points one repository at another branch, previews it, and merges there", async () => {
     const user = userEvent.setup()
     const next = setup()
