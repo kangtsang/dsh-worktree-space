@@ -12,8 +12,7 @@ import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
-import { breadcrumb } from './create.js'
-import { BREADCRUMB, isLinkedWorktree } from './shared.js'
+import { TASK_OWNED_FILES, isLinkedWorktree } from './shared.js'
 
 /**
  * The branch a finished task merges into.
@@ -168,7 +167,7 @@ export async function planTask(subprocess, { task, tasksRoot, targets } = {}) {
       worktrees.push(entryPath)
       continue
     }
-    if (entry.name === BREADCRUMB) continue
+    if (TASK_OWNED_FILES.includes(entry.name)) continue
     const kind = strayKind(entry.name, entry.isDirectory())
     strays.push({
       name: entry.name,
@@ -386,9 +385,12 @@ export async function finishTask(subprocess, options) {
     repositories.push(outcome)
   }
 
-  // The container's own breadcrumb is always cleared; other leftovers are kept
-  // unless the caller asked for them to go, minus whatever it named to keep.
-  await rm(join(taskPath, BREADCRUMB), { force: true })
+  // The files this plugin wrote into the container - the JSON record, the note
+  // rendered from it, and the note older containers still carry - are always
+  // cleared; other leftovers are kept unless the caller asked for them to go,
+  // minus whatever it named to keep. Both metadata files go: the JSON describes
+  // a task space that is being removed, and the Markdown is generated from it.
+  for (const name of TASK_OWNED_FILES) await rm(join(taskPath, name), { force: true })
 
   const leftovers = await readdir(taskPath, { withFileTypes: true })
   const strays = []

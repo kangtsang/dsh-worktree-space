@@ -182,7 +182,7 @@ branch that was never merged.
 | | | ✓ | Only the worktrees go, uncommitted changes and all; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged, the branch force-deleted, and **the commits it held are discarded with it** |
 
-Whichever combination is chosen: the plugin's own `README.en.md` is always cleared, and
+Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `README.md` generated from it (an older space may still hold `README.en.md`) — is always cleared, and
 anything else in the task space follows the archive choice (unticked, it is discarded
 outright). **Without Force, a worktree that still holds uncommitted files cannot be removed
 at all** — `git worktree remove` refuses, so that repository is kept as it is and reported

@@ -4,14 +4,14 @@
  * Creating a task: the container, the branch, one worktree per repository, and the file that tells a session what the task is.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
-import { BREADCRUMB, resolveTasksRoot } from './shared.js'
+import { TASK_OWNED_FILES, resolveTasksRoot, taskMetadata, writeTaskMetadata } from './shared.js'
 
 export function breadcrumb(details) {
   const { task, branch, baseRef, sourceRoot, repositories } = details
@@ -36,6 +36,37 @@ export function breadcrumb(details) {
 }
 
 
+/**
+ * The facts only the source repository can answer, read before a worktree is
+ * cut from it: the branch its HEAD is on, and the exact commit the new branch
+ * will start from. Recorded so the task can still be described when the source
+ * checkout is somewhere else, or gone.
+ * @param subprocess - the profile's subprocess service.
+ * @param repoPath - the source repository.
+ * @returns the branch name and the starting commit, either possibly absent.
+ */
+async function sourceFacts(subprocess, repoPath) {
+  const [branch, commit] = await Promise.all([
+    tryRunGit(subprocess, repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    tryRunGit(subprocess, repoPath, ['rev-parse', 'HEAD']),
+  ])
+  return {
+    // A detached HEAD prints `HEAD`, which is no branch to name.
+    ...(branch === '' || branch === 'HEAD' ? {} : { sourceBranch: branch }),
+    ...(commit === '' ? {} : { startCommit: commit }),
+  }
+}
+
+/**
+ * Whether a container holds nothing but what this plugin put there.
+ * @param leftovers - the container's entries.
+ * @param created - the worktrees this call created.
+ * @returns whether a failed create may remove the container.
+ */
+function holdsOnlyOurs(leftovers, created) {
+  return leftovers.every((name) => TASK_OWNED_FILES.includes(name) || created.some((entry) => basename(entry.path) === name))
+}
+
 async function rollbackTask(subprocess, taskPath, created) {
   const stranded = []
   for (const entry of created) {
@@ -50,8 +81,7 @@ async function rollbackTask(subprocess, taskPath, created) {
 
   try {
     const leftovers = await readdir(taskPath)
-    const ours = leftovers.every((name) => name === BREADCRUMB || created.some((entry) => basename(entry.path) === name))
-    if (ours) await rm(taskPath, { recursive: true, force: true })
+    if (holdsOnlyOurs(leftovers, created)) await rm(taskPath, { recursive: true, force: true })
   } catch {
     // A container that cannot be removed is reported by the caller's outcome,
     // not here.
@@ -123,11 +153,14 @@ export async function createTask(subprocess, options) {
   try {
     for (const repoPath of selected) {
       const worktreePath = join(taskPath, basename(repoPath))
+      // Read the source facts before the branch exists, so they describe the
+      // checkout the worktree was cut from rather than the worktree itself.
+      const facts = await sourceFacts(subprocess, repoPath)
       const args = baseRef === undefined || `${baseRef}`.trim() === ''
         ? ['worktree', 'add', worktreePath, '-b', branch]
         : ['worktree', 'add', worktreePath, '-b', branch, `${baseRef}`]
       await runGit(subprocess, repoPath, args)
-      created.push({ name: basename(repoPath), path: worktreePath, repoPath })
+      created.push({ name: basename(repoPath), path: worktreePath, repoPath, ...facts })
     }
 
     if (push) {
@@ -138,11 +171,20 @@ export async function createTask(subprocess, options) {
       }
     }
 
-    await writeFile(
-      join(taskPath, BREADCRUMB),
-      breadcrumb({ task: name, branch, baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`, sourceRoot, repositories: created.map((entry) => entry.name) }),
-      'utf8',
-    )
+    await writeTaskMetadata(taskPath, taskMetadata({
+      task: name,
+      tasksRoot,
+      sourceRoot,
+      branch,
+      baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
+      repositories: created.map((entry) => ({
+        name: entry.name,
+        sourcePath: entry.repoPath,
+        branch,
+        ...(entry.sourceBranch === undefined ? {} : { sourceBranch: entry.sourceBranch }),
+        ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
+      })),
+    }))
   } catch (error) {
     const stranded = await rollbackTask(subprocess, taskPath, created)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`

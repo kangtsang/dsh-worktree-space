@@ -16,6 +16,30 @@ import {
 } from "../src/host/task/operations.js"
 
 /**
+ * The metadata record a task space carries: the JSON `createTask` writes and
+ * the note rendered from it. Fixtures use this so a hand-built container looks
+ * like one the plugin made, rather than like one from before the JSON existed.
+ * @param task - the task's name.
+ * @returns the two file contents, keyed by file name.
+ */
+function metadataFiles(task) {
+  const metadata = {
+    version: 1,
+    task,
+    tasksRoot: "E:/worktree-space",
+    sourceRoot: "E:/source",
+    branch: "task/" + task,
+    baseRef: null,
+    createdAt: "2026-09-28T04:00:00.000Z",
+    repositories: [],
+  }
+  return {
+    "worktree-space.json": JSON.stringify(metadata, null, 2) + "\n",
+    "README.md": "# Task: " + task + "\n",
+  }
+}
+
+/**
  * Subprocess double: keys replies by the git arguments after the implicit
  * `-C <cwd>`, records every call, and lets one reply run a side effect so a
  * mocked removal can still change the filesystem. An exact key wins; otherwise
@@ -198,12 +222,22 @@ describe("createTask", () => {
         `worktree add ${join(container.root, "fix-login", "beta")} -b task/fix-login`,
       ])
 
-      const breadcrumb = await readFile(join(result.path, "README.en.md"), "utf8")
-      expect(breadcrumb).toContain("# Task: fix-login")
-      expect(breadcrumb).toContain("- Branch: `task/fix-login` (one branch per repository below)")
-      expect(breadcrumb).toContain("each repository's current HEAD")
-      expect(breadcrumb).toContain("- `alpha`")
-      expect(breadcrumb).toContain("Source repositories are read-only")
+      const metadata = JSON.parse(await readFile(join(result.path, "worktree-space.json"), "utf8"))
+      expect(metadata.task).toBe("fix-login")
+      expect(metadata.branch).toBe("task/fix-login")
+      expect(metadata.baseRef).toBe(null)
+      expect(metadata.sourceRoot).toBe(source.root)
+      expect(metadata.repositories.map((entry) => entry.name)).toEqual(["alpha", "beta"])
+      expect(typeof metadata.createdAt).toBe("string")
+      // The note a session reads is generated from that record, so the two cannot
+      // disagree; it says where its own facts come from.
+      const note = await readFile(join(result.path, "README.md"), "utf8")
+      expect(note).toContain("# Task: fix-login")
+      expect(note).toContain("- Branch: `task/fix-login` (one branch per repository below)")
+      expect(note).toContain("each repository's current HEAD")
+      expect(note).toContain("- `alpha`")
+      expect(note).toContain("Source repositories are read-only")
+      expect(note).toContain("worktree-space.json")
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -714,6 +748,7 @@ describe("finishTask documents", () => {
     await mkdir(join(taskPath, "alpha"), { recursive: true })
     await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
+    for (const [name, contents] of Object.entries(metadataFiles("login"))) await writeFile(join(taskPath, name), contents)
     await writeFile(join(taskPath, "notes.md"), "# notes\n")
     await mkdir(join(taskPath, "docs"), { recursive: true })
     await writeFile(join(taskPath, "docs", "one.md"), "# one\n")
@@ -896,6 +931,7 @@ describe("planTask", () => {
     // The leftovers a task directory collects: this plugin's own breadcrumb,
     // build output, editor state, and writing the user did themselves.
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
+    for (const [name, contents] of Object.entries(metadataFiles("login"))) await writeFile(join(taskPath, name), contents)
     await mkdir(join(taskPath, "dist"), { recursive: true })
     await writeFile(join(taskPath, "dist", "app.js"), "")
     await mkdir(join(taskPath, ".idea"), { recursive: true })
@@ -1039,6 +1075,20 @@ describe("inspectTask", () => {
         "- `beta`",
         "",
       ].join("\n"))
+      await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+        version: 1,
+        task: "login",
+        tasksRoot: root,
+        sourceRoot: "E:\\workspace\\public\\kratos-admin",
+        branch: "task/login",
+        baseRef: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        repositories: [
+          { name: "alpha", sourcePath: "E:\\workspace\\public\\kratos-admin\\alpha", branch: "task/login" },
+          { name: "beta", sourcePath: "E:\\workspace\\public\\kratos-admin\\beta", branch: "task/login" },
+        ],
+      }, null, 2) + "\n")
+      await writeFile(join(taskPath, "README.md"), "# Task: login\n")
     }
     return { root, taskPath, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
@@ -1053,7 +1103,7 @@ describe("inspectTask", () => {
     expect(parseBreadcrumb(undefined)).toBeUndefined()
   })
 
-  it("describes a container from its worktrees and breadcrumb", async () => {
+  it("describes a container from its worktrees and metadata", async () => {
     const fixtureUnderTest = await fixture()
     try {
       expect(await inspectTask(fixtureUnderTest.taskPath)).toEqual({
@@ -1063,10 +1113,41 @@ describe("inspectTask", () => {
         tasksRoot: fixtureUnderTest.root,
         branch: "task/login",
         sourceRoot: "E:\\workspace\\public\\kratos-admin",
+        createdAt: "2026-01-01T00:00:00.000Z",
         repositories: ["alpha", "beta"],
       })
     } finally {
       await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("still recognizes and reads a container that only has the legacy note", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-task-legacy-"))
+    const taskPath = join(root, "login")
+    try {
+      await mkdir(join(taskPath, "alpha"), { recursive: true })
+      await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
+      await writeFile(join(taskPath, "README.en.md"), [
+        "# Task: login",
+        "",
+        "- Branch: `task/login` (one branch per repository below)",
+        "- Source root: `E:\\workspace\\public\\kratos-admin`",
+        "",
+      ].join("\n"))
+      // No worktree-space.json: an older space keeps its identity through the
+      // note, and the fields the JSON would add are simply absent rather than
+      // making the space a stranger.
+      expect(await inspectTask(taskPath)).toEqual({
+        path: taskPath,
+        isTask: true,
+        task: "login",
+        tasksRoot: root,
+        branch: "task/login",
+        sourceRoot: "E:\\workspace\\public\\kratos-admin",
+        repositories: ["alpha"],
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 
