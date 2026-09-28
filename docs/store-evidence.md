@@ -131,8 +131,19 @@ SHA-256  F626FF55266DDEC472F4CA496ED05811C7F503B56302748C5F7717CAFBDB8B62  20377
 ```
 
 两者一致（同一个提交下的 `package.json` 回读出来也是 `1.0.6`），说明这次验收装的包与推上去的那个提交是
-同一份内容。npm 上的情况：**`1.0.5` 是修复之前从 `88f8808` 发布出去的**，而版本号不能复用，所以这一轮修复
-以 `1.0.6` 发布；`store-evidence.json` 的 `publicRelease` 如实记了这件事。
+同一份内容。再把 npm 上那份发出去的 tarball 也拉下来比对一次：
+
+```
+registry.npmjs.org/dsh-worktree-space/-/dsh-worktree-space-1.0.6.tgz
+SHA-1    7469017d0c65cfcfc57edd81ac1fbe525e2d68b7   307904 字节
+SHA-256  1670ACF59035DE0A640FF07B77B06C1E4936213E3FCCF3EE684CF0C28B327A2B
+本地 pack 同上（逐字节相同）
+```
+
+npm 上的落点：`1.0.5` 是修复**之前**从 `88f8808` 发布出去的，版本号不能复用，所以这一轮修复以 **`1.0.6`**
+发布——`dist-tags.latest = 1.0.6`，`gitHead = 5774c5f760790dbee99e24bd2b75f731eb779236`（就是本文件所在
+提交），`1.0.6` 自身**不带弃用**；`1.0.0`–`1.0.5` 带着一条指向 `1.0.6` 的弃用提醒。这些都在
+`store-evidence.json` 的 `publicRelease` 里如实记录。
 
 跑完后一次性 profile 与临时仓库都已删除，`remove` 之后 profile 回到 `@deepseek-ai/dsh-base` +
 `@deepseek-ai/dsh-web-app` 两个 bundle。
