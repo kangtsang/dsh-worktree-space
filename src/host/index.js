@@ -383,7 +383,10 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.preference') return recover(async () => {
       // Read-only, and shaped as a record rather than a bare string: the next
       // preference this dialog needs joins it without a second endpoint.
-      return { defaultBranchPrefix: configuredBranchPrefix(), archiveDocumentsDirectory: configuredArchiveDirectory() }
+      return {
+        defaultBranchPrefix: configuredBranchPrefix(),
+        archiveDocumentsDirectory: configuredArchiveDirectory(),
+      }
     })
 
     if (endpoint === 'task.create') return recover(async () => {

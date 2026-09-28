@@ -100,6 +100,8 @@ export interface CreateTaskResult {
 export interface FinishTaskRepository {
   name: string
   path: string
+  /** The source repository behind this worktree, as `task.plan` reports it. */
+  mainRepo?: string
   branch?: string
   /** The branch this repository was merged into, when a merge was attempted. */
   target?: string
@@ -108,8 +110,20 @@ export interface FinishTaskRepository {
   branchDeleted: boolean
   /** Why this repository was left alone; the worktree and branch stay put. */
   error?: string
-  /** The merge hit a conflict, was aborted, and left the worktree and branch. */
+  /** The merge hit a conflict and left the worktree and branch in place. */
   conflict?: boolean
+  /**
+   * A merge is deliberately still in progress in this checkout.
+   *
+   * A conflicting merge is never aborted where it would have to be resolved: the
+   * conflicted files are here, and the target branch moves when someone commits the
+   * merge here.
+   */
+  mergeInProgress?: boolean
+  /** The checkout an unresolved merge is waiting in. */
+  mergeSite?: string
+  /** The files the merge could not reconcile, relative to `mergeSite`. */
+  conflictedFiles?: string[]
 }
 
 /** Answer of `task.inspect`: whether a directory is a task container. */
@@ -129,6 +143,13 @@ export interface TaskInspection {
 export interface TaskPlanRepository {
   name: string
   path: string
+  /**
+   * The source repository behind this worktree.
+   *
+   * The worktree's git directory lives in there, so this is half of what the
+   * narrowest write boundary for a session that commits here has to reach.
+   */
+  mainRepo?: string
   branch?: string
   /** The branch this repository's branch would merge into, as things stand. */
   target?: string
@@ -187,6 +208,12 @@ export interface FinishTaskResult {
   containerRemoved: boolean
   failed: boolean
   warnings: string[]
+}
+
+/** Answer of `task.preference`: the settings a dialog defaults from. */
+export interface TaskPreference {
+  defaultBranchPrefix: string
+  archiveDocumentsDirectory: string
 }
 
 /** The sessions service face (`ctx.sessions`). */

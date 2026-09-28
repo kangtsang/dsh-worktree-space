@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "为每个任务创建一个可包含多个仓库worktree的独立工作目录进行任务隔离，各Agent在自己独立的工作目录里并行工作处理任务改动互不干扰，结束任务时合并分支、移除worktree工作目录、归档文档。"
+    "description": "为每个任务创建一个可包含多个仓库worktree的独立工作目录进行任务隔离，各Agent在自己独立的工作目录里并行工作处理任务改动互不干扰，结束任务时合并分支、移除worktree工作目录、归档文档。Beta 实验性功能：把合并冲突交给 agent 自动处理这套流程还可能调整，遇到问题请在 https://github.com/kangtsang/dsh-worktree-space/issues 反馈。"
   }
 }

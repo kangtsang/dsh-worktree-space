@@ -271,6 +271,7 @@ describe("worktree RPC contract", () => {
     directory = "   "
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
   })
+
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
       "status --short --branch": "## feat/antest",

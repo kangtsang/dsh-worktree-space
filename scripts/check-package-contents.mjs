@@ -25,6 +25,8 @@ assert.equal(result.length, 1, "npm pack must produce one package manifest")
 const files = result[0].files.map(({ path }) => path).sort()
 const expected = [
   "LICENSE",
+  "PERMISSIONS.en.md",
+  "PERMISSIONS.md",
   "README.en.md",
   "README.md",
   "assets/skill/task-worktree-space/SKILL.md",
@@ -34,6 +36,7 @@ const expected = [
   "docs/img/manage-worktree-space.png",
   "docs/img/new-session.png",
   "docs/img/new-worktree-space.png",
+  "docs/store-evidence.md",
   "icon.svg",
   "lib/index.js",
   "locale/en.json",

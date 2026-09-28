@@ -18,6 +18,7 @@ import { CreateWorktreeDialog } from "../src/client/components/CreateWorktreeDia
 import { PluginConfigCard } from "../src/client/components/PluginConfigCard"
 import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
 import { WorktreePanelPage } from "../src/client/components/WorktreePanel"
+import { NewSessionWorktreeButton } from "../src/client/components/NewSessionWorktreeButton"
 import * as icons from "../src/client/components/icons"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -125,7 +126,7 @@ describe("preview build", () => {
   it("writes the repository view", async () => {
     render(<WorktreePanelPage {...services()} onCreate={vi.fn()} onBack={vi.fn()} />)
     await settle()
-    fireEvent.click(screen.getByRole("button", { name: "代码仓库视图" }))
+    fireEvent.click(screen.getByRole("button", { name: "Git 仓库视图" }))
     await new Promise((done) => setTimeout(done, 0))
     write("repos", document.body.innerHTML)
     cleanup()
@@ -149,8 +150,28 @@ describe("preview build", () => {
     write("icons", renderToStaticMarkup(<IconSheet />))
   })
 
+  it("writes the composer entry's hover hint", async () => {
+    // The composer is the shell's, so the preview draws the entry on a bare stage: what
+    // is being looked at is the bubble, which is portalled to the body of the page.
+    const useWorkspaces = ((selector: (state: { items: Array<Record<string, unknown>> }) => unknown) =>
+      selector({ items: [{ workspaceId: "a", path: "/repo/kratos-vue-admin", title: "kratos-vue-admin", sessionIds: ["session-new"] }] })) as any
+    render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: true }} useWorkspaces={useWorkspaces} onOpen={vi.fn()} />)
+
+    fireEvent.mouseOver(screen.getByRole("button", { name: "新建 Worktree Space" }))
+    await new Promise((done) => setTimeout(done, 200))
+    // jsdom lays nothing out, so the fixed coordinates the hint reads from its anchor are
+    // all zero here — which also makes it pick the below-fallback. The page is given the
+    // place a browser puts it, centred just above the entry, because the picture is of the
+    // bubble and not of jsdom's empty geometry.
+    const hint = screen.getByRole("tooltip")
+    hint.className = "dws-hint"
+    hint.setAttribute("style", "left: 50%; top: 202px")
+    write("hint", `<div class="dws-hint-stage">${document.body.innerHTML}</div>`)
+    cleanup()
+  })
+
   it("writes the empty task and repository lists", async () => {
-    for (const [name, label] of [["empty-tasks", "任务空间视图"], ["empty-repos", "代码仓库视图"]] as const) {
+    for (const [name, label] of [["empty-tasks", "任务空间视图"], ["empty-repos", "Git 仓库视图"]] as const) {
       render(<WorktreePanelPage {...services([], true)} onCreate={vi.fn()} onBack={vi.fn()} />)
       await settle()
       fireEvent.click(screen.getByRole("button", { name: label }))
@@ -210,6 +231,8 @@ function page(markup: string) {
     --dsw-focus-ring-color: #0f1115;
     --dsw-alias-bg-mask-1: rgb(0 0 0 / 32%);
     --dsw-mask-blur: blur(2px);
+    --dsw-alias-tooltip-bg: #2c2c2e;
+    --dsw-static-neutral-bluish-00: #ffffff;
     --dsw-shadow-lv3: 0 12px 32px rgb(0 0 0 / 18%);`
   return `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>preview</title>
@@ -225,6 +248,9 @@ function page(markup: string) {
   /* The icon sheet is a development-only page: it borrows nothing from the plugin and is
      never shipped, so its rules live here rather than in the plugin's stylesheet. */
   .dws-icon-sheet { padding: 24px; display: grid; gap: 6px; background: #ffffff; }
+  /* The hint page stands the composer entry in the open, at the height where the shell
+     puts it, so the bubble above it is visible in a screenshot. */
+  .dws-hint-stage { display: flex; justify-content: center; align-items: center; min-height: 420px; background: #ffffff; }
   .dws-icon-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 16px; padding: 6px 0; border-bottom: 1px solid rgb(0 0 0 / 8%); }
   .dws-icon-row code { font-size: 13px; color: #0f1115; }
   .dws-icon-sizes { display: flex; align-items: flex-end; gap: 22px; color: #0f1115; }

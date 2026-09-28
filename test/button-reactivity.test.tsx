@@ -56,7 +56,7 @@ function setup() {
   const useWorkspaces = vi.fn((selector: (state: typeof snapshot) => unknown) => selector(snapshot))
   const locale = {
     register: () => () => {},
-    bind: () => (key: string) => key === "createTask" ? "New task space" : key,
+    bind: () => (key: string) => key === "createTask" ? "New task space" : key === "newWorktreeSpace" ? "New Worktree Space" : key,
     getSnapshot: () => "en",
     subscribe: vi.fn(() => () => {}),
   }
@@ -107,7 +107,7 @@ function setup() {
   }
 }
 
-const button = () => screen.queryByRole("button", { name: "New task space" })
+const button = () => screen.queryByRole("button", { name: "New Worktree Space" })
 
 describe("registered task dock classification reactivity", () => {
   it("shows the entry for a workspace holding repositories, after deferred classification", async () => {

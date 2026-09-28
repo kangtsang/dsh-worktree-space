@@ -20,7 +20,9 @@ const DESCRIPTION = [
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'Pass merge only when the user asked to merge, deleteBranch only after a merge or - with force - when the user asked to abandon the task, and force only when the user has decided to discard uncommitted work.',
-  'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a temporary worktree, so no source checkout is ever switched.',
+  'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
+  'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
+  'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
 ].join('\n')
 
 /**
@@ -38,6 +40,10 @@ function emptyRow(name) {
     merged: false,
     removed: false,
     branchDeleted: false,
+    mainRepo: '',
+    mergeInProgress: false,
+    mergeSite: '',
+    conflictedFiles: [],
     error: '',
   }
 }
@@ -76,6 +82,10 @@ const OUTPUT_SCHEMA = {
           merged: { type: 'boolean', required: true },
           removed: { type: 'boolean', required: true },
           branchDeleted: { type: 'boolean', required: true },
+          mainRepo: { type: 'string', required: true },
+          mergeInProgress: { type: 'boolean', required: true },
+          mergeSite: { type: 'string', required: true },
+          conflictedFiles: { type: 'array', required: true, items: { type: 'string' } },
           error: { type: 'string', required: true },
         },
       },
@@ -155,7 +165,16 @@ function summarize(action, value) {
   }
   const failed = value.failed ? ' Some repositories need attention:' : ''
   const attention = value.repositories.filter((row) => row.error !== '').map((row) => `${row.name}: ${row.error}`).join('; ')
-  return `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.${failed}${attention}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
+  // A handed-on conflict is not a failure to report and move past: it is the step
+  // that is left, so the summary says where it is rather than calling the task done.
+  const handedOn = value.repositories.filter((row) => row.mergeInProgress)
+  const headline = handedOn.length === 0
+    ? `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.`
+    : `Task '${value.task}' is unfinished: a merge is waiting to be resolved in ${handedOn.map((row) => row.mergeSite).join(', ')}.`
+  const handoff = handedOn.length === 0
+    ? ''
+    : ` Resolve ${handedOn.map((row) => row.conflictedFiles.join(', ')).filter((list) => list !== '').join('; ') || 'the conflict'}, commit the merge there, then call done again.`
+  return `${headline}${failed}${attention}${handoff}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
 }
 
 /**
@@ -287,6 +306,10 @@ export function registerTaskTool(ctx) {
           merged: entry.merged === true,
           removed: entry.removed === true,
           branchDeleted: entry.branchDeleted === true,
+          mainRepo: entry.mainRepo ?? '',
+          mergeInProgress: entry.mergeInProgress === true,
+          mergeSite: entry.mergeSite ?? '',
+          conflictedFiles: Array.isArray(entry.conflictedFiles) ? entry.conflictedFiles : [],
           error: entry.error ?? '',
         }))
         value.summary = summarize(action, value)

@@ -3,8 +3,10 @@
  *
  * Ported from the source skill's `lib.sh`. Two rules carry over unchanged:
  * work and source must never nest inside one another, and the recommended task
- * container sits beside the source root's drive rather than inside the source
- * tree.
+ * container sits outside the source tree. Where it sits is decided by
+ * {@link recommendTasksRoot}: in the source root's first directory below its
+ * volume root, which keeps the two under one common ancestor without widening
+ * the recommendation to the volume root itself.
  */
 import { existsSync } from 'node:fs'
 import { dirname, join, parse, resolve } from 'node:path'
@@ -99,13 +101,37 @@ export function chooseTasksRoot(driveRoot, fallbackParent, exists) {
 }
 
 /**
+ * The first directory a path sits in below its volume root.
+ *
+ * The source root and the task container have to end up under one common
+ * ancestor: that is the directory a session opened for a linked worktree needs
+ * as its working directory, because a commit writes into the source
+ * repository's git directory as well as the worktree. Sharing the first
+ * directory below the volume root gives them one - `E:\workspace` for both
+ * `E:\workspace\public\repo` and `E:\workspace\worktree-space\<task>\repo` -
+ * while staying off the volume root, which a session may not be opened on.
+ * @param absolute - an absolute path.
+ * @param root - that path's volume root (`E:\`, `/`).
+ * @returns the first directory below the volume root, or undefined when the path
+ * is itself that first directory — there is no room beside it then.
+ */
+function firstDirectoryBelowRoot(absolute, root) {
+  const parts = absolute.slice(root.length).split(/[\\/]+/).filter(Boolean)
+  return parts.length > 1 ? join(root, parts[0]) : undefined
+}
+
+/**
  * Recommend where the task container should live for a source root.
  *
- * The drive-root candidate is checked against the source root itself: a source
- * root that already lives under `<drive>:\workspace` would otherwise be handed
- * a container that contains it, which {@link assertIsolated} rejects. The
- * sibling fallback can never nest with the source root, so it is the answer
- * whenever the preferred candidate would.
+ * `<first directory>\worktree-space` is the recommendation whenever the source
+ * root has such a directory, since the container is then a sibling of the
+ * source root's own branch of the tree and can never nest with it. A source
+ * root that is itself the first directory (`E:\repo`) has nothing beside it
+ * that is still below the volume root, and a path without a drive has no
+ * meaningful first directory at all: both fall back to the older candidates,
+ * which are checked against the source root and replaced by a sibling when they
+ * would contain it — as `<drive>:\workspace` does for a source root that
+ * already lives under `<drive>:\workspace`.
  * @param sourceRoot - the directory holding the source repositories.
  * @param options - `exists` overrides the filesystem probe (tests).
  * @returns the recommended container root, in native separators.
@@ -114,6 +140,8 @@ export function recommendTasksRoot(sourceRoot, { exists = existsSync } = {}) {
   const absolute = resolve(sourceRoot)
   const { root } = parse(absolute)
   const driveRoot = /^[A-Za-z]:[\\/]$/.test(root) ? root : undefined
+  const first = driveRoot === undefined ? undefined : firstDirectoryBelowRoot(absolute, root)
+  if (first !== undefined) return join(first, 'worktree-space')
   const candidate = chooseTasksRoot(driveRoot, dirname(absolute), exists)
   if (isInside(candidate, absolute) || samePathLocation(candidate, absolute)) {
     return join(dirname(absolute), 'worktree-space')

@@ -51,3 +51,29 @@ export function nameOf(value: unknown) {
 export function slashPath(value: unknown) {
   return String(value ?? "").split(/\\/).join("/")
 }
+
+/**
+ * The deepest directory that contains both paths.
+ *
+ * A linked worktree keeps its git metadata inside the source repository, so a
+ * session that has to commit there needs a working directory reaching both: this is
+ * that directory - the narrowest one that reaches the worktree and the repository,
+ * and therefore the narrowest write boundary that finishes the job without an approval.
+ * @param left - one path.
+ * @param right - the other path.
+ * @returns the common ancestor, or undefined when they share only a volume root — a
+ * boundary that wide would make the whole disk writable, which is worse than the
+ * approval it avoids.
+ */
+export function commonAncestor(left: unknown, right: unknown) {
+  const first = slashPath(cleanPath(left)).split("/")
+  const second = slashPath(cleanPath(right)).split("/")
+  const shared: string[] = []
+  for (let index = 0; index < Math.min(first.length, second.length); index += 1) {
+    // Compared without case: Windows is case-insensitive, and the two paths reach
+    // here from different sources - the Host's answer and the git command output.
+    if (first[index].toLowerCase() !== second[index].toLowerCase()) break
+    shared.push(first[index])
+  }
+  return shared.length < 2 ? undefined : shared.join("/")
+}

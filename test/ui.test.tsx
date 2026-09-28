@@ -137,18 +137,40 @@ describe("NewSessionWorktreeButton", () => {
     const onOpen = vi.fn()
     render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: true }} useWorkspaces={useWorkspaces as any} onOpen={onOpen} />)
 
-    await user.click(screen.getByRole("button", { name: t("createTask") }))
+    await user.click(screen.getByRole("button", { name: t("newWorktreeSpace") }))
     expect(onOpen).toHaveBeenCalledWith(workspace)
   })
 
   it("stays hidden after the session is no longer blank", () => {
     render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: false }} useWorkspaces={useWorkspaces as any} onOpen={vi.fn()} />)
-    expect(screen.queryByRole("button", { name: t("createTask") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("newWorktreeSpace") })).toBeNull()
   })
 
   it("stays hidden when the workspace is not a source root", () => {
     render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: true }} useWorkspaces={useWorkspaces as any} canCreate={() => false} onOpen={vi.fn()} />)
-    expect(screen.queryByRole("button", { name: t("createTask") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("newWorktreeSpace") })).toBeNull()
+  })
+
+  it("names the icon in a hover hint, without waiting for the button to be clicked", async () => {
+    const user = userEvent.setup()
+    render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: true }} useWorkspaces={useWorkspaces as any} onOpen={vi.fn()} />)
+
+    const button = screen.getByRole("button", { name: t("newWorktreeSpace") })
+    expect(screen.queryByRole("tooltip")).toBeNull()
+
+    await user.hover(button)
+    const hint = await screen.findByRole("tooltip")
+    expect(hint.textContent).toBe(t("newWorktreeSpace"))
+    // The bubble escapes the composer, which clips and stacks over anything drawn inside
+    // it: it is portalled to the document body rather than nested in the entry.
+    expect(hint.parentElement).toBe(document.body)
+
+    await user.unhover(button)
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+
+    // Keyboard focus raises it too: that is the only way the icon is named without a mouse.
+    fireEvent.focus(button)
+    expect((await screen.findByRole("tooltip")).textContent).toBe(t("newWorktreeSpace"))
   })
 })
 

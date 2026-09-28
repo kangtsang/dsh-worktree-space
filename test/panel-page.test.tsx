@@ -32,18 +32,40 @@ function mount(onBack: () => void) {
 }
 
 describe("the management page as a main panel", () => {
-  it("carries its own navigation, led by the way back to the conversation", async () => {
+  it("carries its own way back, in the band above the navigation the views live in", async () => {
     const onBack = vi.fn()
     mount(onBack)
     await settle()
 
-    const nav = screen.getByRole("navigation", { name: t("worktreesTitle") })
-    // Selecting this panel took the column the conversation was in, so the way back
-    // leads the column rather than leaving the user to find their session again.
-    fireEvent.click(within(nav).getByRole("button", { name: t("backToConversation") }))
+    const back = screen.getByRole("button", { name: t("backToConversation") })
+    // Selecting this panel took the column the conversation was in, so the way back leads
+    // the page rather than leaving the user to find their session again — and it leads it
+    // from the heading's band, because it is not one of the views the column switches and
+    // must not push them off the toolbar's line.
+    expect(document.querySelector(".dws-panel-lead")?.contains(back)).toBe(true)
+    expect(document.querySelector(".dws-nav")?.contains(back)).toBe(false)
+    fireEvent.click(back)
     expect(onBack).toHaveBeenCalledTimes(1)
     // The refresh control says what it does instead of being an icon at the far edge.
     expect(screen.getByRole("button", { name: t("refresh") }).textContent).toBe(t("refresh"))
+  })
+
+  it("starts the view tabs on the toolbar's line, in the panel's second band", async () => {
+    mount(vi.fn())
+    await settle()
+
+    // jsdom lays nothing out, so this is the structure the stylesheet's bands are written
+    // against: the back row and the heading share the first band, and the view column and
+    // the reading column are the two children of the second. That is what makes the three
+    // tabs and the toolbar they switch the first rows of their columns, on one line.
+    const lead = document.querySelector(".dws-panel-lead")
+    const body = document.querySelector(".dws-panel-body")
+    expect(lead?.children).toHaveLength(2)
+    expect(lead?.querySelector(".dws-panel-lead-nav .dws-nav-item")).toBeTruthy()
+    expect(lead?.querySelector(".dws-panel-heading h1")?.textContent).toBe(t("worktreesTitle"))
+    expect(body?.children[0]).toBe(document.querySelector(".dws-nav"))
+    expect(body?.children[1]).toBe(document.querySelector(".dws-panel-scroll"))
+    expect(document.querySelector(".dws-panel-content .dws-settings-pinned .dws-toolbar")).toBeTruthy()
   })
 
   it("switches views from that navigation, and leaves the toolbar to the filters", async () => {
@@ -54,7 +76,7 @@ describe("the management page as a main panel", () => {
     // The three views live in the column, so the toolbar no longer offers them: it
     // reads the filters first, the fold button right after, and the summary stays right.
     expect(within(nav).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("backToConversation"), t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
+      .toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
     expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
     expect(screen.queryByRole("group", { name: t("viewSwitch") })).toBeNull()
     expect(within(screen.getByRole("group", { name: t("filters") })).getAllByRole("button").map((button) => button.textContent))
@@ -140,8 +162,11 @@ describe("the management page as a main panel", () => {
     expect(pinned?.contains(body as Node)).toBe(false)
     expect(body?.querySelector(".dws-repo-list")).toBeTruthy()
     // The panel draws its heading, and the heading is pinned with the toolbar: a
-    // heading that scrolled away would leave the page unlabelled.
+    // heading that scrolled away would leave the page unlabelled. It is not inside the
+    // pinned block — it is out of the scroller altogether, in the band above it.
     expect(pinned?.querySelector(".dws-panel-heading")).toBeNull()
+    expect(document.querySelector(".dws-panel-scroll")?.querySelector(".dws-panel-heading")).toBeNull()
+    expect(document.querySelector(".dws-panel-lead .dws-panel-heading")).toBeTruthy()
     expect(document.querySelector(".dws-panel-content")?.contains(pinned as Node)).toBe(true)
 
     cleanup()

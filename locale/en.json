@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "Worktree Space: Creates an isolated workspace per task with Git worktrees for multiple repositories. Agents work in parallel without interference. On completion, it merges branches, removes worktrees, and archives documents."
+    "description": "Worktree Space: Creates an isolated workspace per task with Git worktrees for multiple repositories. Agents work in parallel without interference. On completion, it merges branches, removes worktrees, and archives documents. Beta and experimental: handing a merge conflict to an agent, which may still change - report problems at https://github.com/kangtsang/dsh-worktree-space/issues"
   }
 }

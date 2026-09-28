@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { FolderGit2 } from "../src/client/components/icons"
+import { BrandGlyph, FolderGit2 } from "../src/client/components/icons"
 import { repositoryGlyphMask } from "../src/client/components/repositoryGlyph"
 
 const PREFIX = 'url("data:image/svg+xml,'
@@ -43,12 +43,24 @@ describe("repository glyph mask", () => {
     expect(count(decodeMask())).toBe(count(real))
   })
 
-  it("restates the mark this package ships as icon.svg", () => {
-    // The package's own icon, read from the package root vitest runs in.
+  it("draws the plugin's own glyph, inset, in the list's blue, with nothing behind it", () => {
+    // The package's own mark, read from the package root vitest runs in.
     const shipped = readFileSync("icon.svg", "utf8")
     const shapes = (markup: string) => [...markup.matchAll(/ (d|cx|cy|r)="([^"]+)"/g)].map(([, name, value]) => `${name}=${value}`)
 
+    // The drawing `BrandGlyph` makes, which leads the panel list, the footer and the
+    // workspace selector: the plugin is recognised by this glyph wherever it appears.
     expect(shapes(shipped).length).toBeGreaterThan(0)
-    expect(shapes(decodeMask())).toEqual(shapes(shipped))
+    expect(shapes(shipped)).toEqual(shapes(renderToStaticMarkup(<BrandGlyph />)))
+
+    // One difference from the component, and only one: the glyph is drawn at 0.8 of the
+    // box — 20 of the 24 units — so the mark the list shows does not overfill its square.
+    // The scale is the whole of the size: change it, and the drawing shrinks or grows.
+    expect(shipped).toContain('transform="translate(2.4 2.4) scale(0.8)"')
+
+    // The mark is the glyph and nothing else: the list's blue on the line, and no tile
+    // drawn behind it — a background was tried and taken back out.
+    expect(shipped).toContain('stroke="#4d6bfe"')
+    expect([...shipped.matchAll(/<(rect|linearGradient|stop)\b/g)]).toHaveLength(0)
   })
 })

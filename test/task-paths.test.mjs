@@ -100,18 +100,31 @@ describe("recommendTasksRoot", () => {
     expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 
-  it("hands back the drive candidate, or a sibling when that candidate would contain the source root", () => {
-    // A checkout that already lives under `<drive>:\workspace` — this
-    // repository's own layout on Windows — must not be handed a container that
-    // contains it, so the sibling fallback answers instead.
+  it("shares the source root's first directory below the volume root", () => {
+    // Both the source root and the container sit under one directory that is
+    // still below the volume root, which is the common ancestor a session needs
+    // to commit in a linked worktree. A path without a drive has no such
+    // directory to share, and stays beside the source root instead.
     const sourceRoot = join(process.cwd(), "nested", "source-root")
     const absolute = resolve(sourceRoot)
-    const sibling = join(dirname(absolute), "worktree-space")
     const { root } = parse(absolute)
-    const driveCandidate = /^[A-Za-z]:[\\/]$/.test(root) ? join(root, "workspace") : sibling
+    const first = /^[A-Za-z]:[\\/]$/.test(root)
+      ? join(root, absolute.slice(root.length).split(/[\\/]+/)[0])
+      : undefined
     const recommended = recommendTasksRoot(sourceRoot, { exists: () => false })
-    expect([driveCandidate, sibling]).toContain(recommended)
+    expect(recommended).toBe(first === undefined ? join(dirname(absolute), "worktree-space") : join(first, "worktree-space"))
     expect(() => assertIsolated(absolute, recommended)).not.toThrow()
+  })
+
+  it("falls back when the source root is itself that first directory", () => {
+    // Nothing sits beside `<drive>:\repo` below the volume root, so the older
+    // candidates answer, and they never nest with the source root.
+    const { root } = parse(resolve(process.cwd()))
+    const sourceRoot = join(root, "repo")
+    const recommended = recommendTasksRoot(sourceRoot, { exists: () => false })
+    const drive = /^[A-Za-z]:[\\/]$/.test(root)
+    expect(recommended).toBe(drive ? join(root, "workspace") : join(dirname(sourceRoot), "worktree-space"))
+    expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 
   it("keeps <drive>:\\worktree-space once the drive already has a workspace folder", () => {

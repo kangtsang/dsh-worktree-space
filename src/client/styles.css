@@ -25,15 +25,19 @@
   }
   .dws-settings *, .dws-dialog-content *, .dws-manage-page *, .dws-manage-page *::before, .dws-manage-page *::after, .dws-new-session-action * { box-sizing: border-box; }
   /* The management page as a main panel: the shell gives the column, so this owns the
-     navigation column, the scroll container and the reading measure inside it. */
-  .dws-panel { display: flex; flex-direction: row; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+     two bands the page is made of. The first holds the way back and the heading; the
+     second holds the view column and the reading column. Splitting them is what puts the
+     view tabs on the toolbar's own line: in one band they would start under the back row
+     instead, and the panel would read differently from the dialog for no reason but its
+     back button. */
+  .dws-panel { --dws-nav-width: 208px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
   .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
   /* The plugin's navigation column, shared by both hosts of the page: the panel that
      takes the shell's main column and the dialog the footer's shortcut opens. Every
      number below is a variable, because the two frames differ only in width, in how far
      the column is inset, and in the line that separates it from what it selects — the
      rows themselves are the shell's own panel rows, to the pixel, in both. */
-  .dws-nav { --dws-nav-width: 208px; --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
+  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 208px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
   .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }
   .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
@@ -41,14 +45,35 @@
   .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
   .dws-nav svg { flex: none; }
   .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
-  .dws-panel-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
-  /* Flush against the navigation, not centred in the leftover width: the two columns
-     share one left inset, so their text lines up from the panel's edge inward.
-     It is a column that fills its height, and the toolbar above the list is pinned
-     inside it: the panel scrolls nothing itself, the list inside it does. */
-  .dws-panel-content { display: flex; flex-direction: column; min-height: 0; max-width: 960px; padding: 28px 32px 48px 24px; }
+  /* The panel's first band, and the whole reason the page is two bands: the back row and
+     the heading share it, and it grows to the taller of the two, so whatever the
+     description wraps to, the band below begins after it. The row's inset is 24px rather
+     than the heading's 28px, because a 36px row and a 28px heading line only share a
+     centre when the row starts the 4px higher. */
+  .dws-panel-lead { display: flex; flex: none; flex-direction: row; align-items: flex-start; min-width: 0; }
+  .dws-panel-lead-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: 24px 14px 0; border-right: 1px solid var(--wt-line); }
+  /* The panel's second band: the view column and the reading column side by side, each
+     bounded in height, so the tabs and the toolbar start on one line and only the rows
+     inside the list scroll. */
+  .dws-panel-body { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
+  /* No top inset in this host: the column starts on the band's first line, which is where
+     the toolbar is. The 2px matches the settings' own inset, which is what the toolbar
+     actually starts after — so the two columns' first rows share one edge, to the pixel. */
+  .dws-panel .dws-nav { --dws-nav-pad: 2px 14px 24px; }
+  /* The scroll container holds the height and passes it down; it does not scroll itself,
+     because the list inside is the only thing that should. Left at `overflow: auto` with
+     an unbounded child, the content grew to its natural height and this element scrolled
+     the heading and the toolbar away with the rows. */
+  .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+  /* Flush against the navigation, not centred in the leftover width: the two columns share
+     one left inset, so their text lines up from the panel's edge inward. The top inset
+     belongs to the heading's band above, not here, or the toolbar would drop below the
+     tabs that switch what it filters. */
+  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 0 32px 48px 24px; }
   .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
-  .dws-panel-heading { margin-bottom: 20px; }
+  /* In the heading's band beside the back row: the same measure as the reading column
+     below it, and the band's own top inset lives here. */
+  .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
   /* The section is a column that fills the frame it is given: everything above the rows
@@ -229,15 +254,11 @@
   .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }
   /* The one row whose value is typed rather than picked. */
   .dws-plugin-config-field:has(.dws-plugin-config-text) { flex: 1; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
-  /* One width for both states, the pill's own: the value of every other row is the shell's
-     select, which is sized to its content rather than to the column, so the field a reader
-     types into is given that same width - 92px, measured off a screenshot of the card -
-     instead of stretching across the row. */
-  .dws-plugin-config-text { display: grid; grid-template-columns: auto 92px; justify-content: end; align-items: center; gap: 10px; }
-  /* The one row whose value is a path: an absolute path does not fit 92px, so this row
-     takes the rest of the line. The hook comes from the row, not from the field, because
-     which value needs the room is a property of the setting, not of the shape. */
-  .dws-plugin-config-wide .dws-plugin-config-text { grid-template-columns: auto minmax(0, 1fr); }
+  /* Both typed rows wear one length - half of what the path row used to stretch to (472px
+     measured off a screenshot of the card) - because the prefix and the archive directory
+     are the two values a reader types: one field width for both, rather than one stretching
+     across the line and one not. The picked rows keep their own size. */
+  .dws-plugin-config-text { display: grid; grid-template-columns: auto 236px; justify-content: end; align-items: center; gap: 10px; }
   /* Locked wears the same pill as every other row's value, so the card reads as one list. */
   .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* Editing: the wrapper draws the box, not the input.
@@ -360,6 +381,14 @@
   .dws-new-session-action { display: inline-flex; flex: none; align-items: center; margin: 0; padding: 0; }
   .dws-new-session-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--wt-secondary); }
   .dws-new-session-button > svg { width: 16px; height: 16px; }
+  /* The hint on that entry. The shell's composer clips and stacks over anything
+     positioned inside it, so the bubble is portalled to the document body (see
+     `HoverHint`) and reads the same tokens and shape as the shell's own tooltips: fixed,
+     shrink-to-fit, and out of the pointer's way so it never eats the click under it. */
+  .dws-hint { display: inline-flex; align-items: center; position: fixed; z-index: 1100; width: max-content; max-width: 50vw; padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg, #2c2c2e); color: var(--dsw-static-neutral-bluish-00, #ffffff); font-size: 13px; line-height: 20px; white-space: pre-line; overflow-wrap: break-word; pointer-events: none; transform: translate(-50%, -100%); animation: dws-hint-in 150ms ease-in-out; }
+  .dws-hint-below { transform: translate(-50%, 0); }
+  @keyframes dws-hint-in { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .dws-hint { animation: none; } }
   .dws-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   /* Everything the source root holds, two to a row, with no inner scrollbar:
      the dialog's body scrolls instead when the whole form outgrows the screen. */
@@ -407,6 +436,56 @@
   .dws-checkbox:indeterminate::before { width: 8px; height: 2px; margin-top: 0; border: 0; border-radius: 1px; background: var(--dsw-alias-label-primary-foreground); transform: scale(1); }
   .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
   .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* A merge left standing is the next step rather than a casualty, so it reads in the
+     warning colour and names the files in the shape a path is easiest to copy from. */
+  .dws-finish-handoff { display: block; margin-top: 4px; color: var(--wt-warn); }
+  .dws-finish-files { display: block; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* The handoff is the step that is left rather than a casualty, so it is a boxed
+     block with the sessions that carry on from it - not another line of red text. The
+     sessions are listed as data: repository, what it was asked to do, where its git
+     commands may write, and whether it is still working. */
+  .dws-finish-handoff-panel { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--wt-line); border-radius: 10px; }
+  .dws-finish-handoff-panel p { margin: 0; }
+  .dws-finish-handoff-title { color: var(--wt-text); font-weight: 600; }
+  /* The commits are in, so the panel's headline is the good news rather than a question:
+     the light is the page's own green for a clean worktree, and the sentence keeps the
+     colour of the state it reports. Nothing here is asking to be acted on but the footer's
+     button, which is the only thing that reads the state again. */
+  .dws-finish-handoff-title.is-done { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-state-success-primary); }
+  /* The title and the one word this panel waits for: authorizing the commit. They share a
+     line while it fits, and the button drops under the title rather than squeezing it. */
+  .dws-finish-handoff-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+  .dws-finish-handoff-head button { flex: none; }
+  .dws-finish-handoff-hint { color: var(--wt-muted); }
+  .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+  .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+  .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* The session's write boundary rides in the sentence above the list, in that sentence's
+     own colour and size: it is what a commit in there depends on - the narrowest directory
+     reaching both the worktree and the repository's own gitdir - not a footnote to it. */
+  /* Opening the session is the one thing this dialog can do about the agent's work, so
+     it reads as a link rather than as a button of the dialog's own. */
+  .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
+  .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* The line under the list belongs to one session, not to one repository: it says what
+     the agent is on. It reads as a single amber sentence - the same amber as every other
+     pending state here - and goes quiet once it stops. */
+  .dws-finish-handoff-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--wt-warn); }
+  .dws-finish-handoff-state.is-idle { color: var(--wt-muted); }
+  /* The beta notice: it belongs to handing work to an agent, so it lives in the panel
+     that reports those sessions - not on the page that manages worktrees. */
+  .dws-beta-notice { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-beta-notice a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .dws-beta-badge { flex: none; padding: 0 6px; border: 1px solid var(--wt-warn); border-radius: 999px; color: var(--wt-warn); font-size: 11px; line-height: 16px; letter-spacing: .02em; }
+  /* The other half of that small print, in the same size: what opening a session does to
+     the dialog it was opened from. */
+  .dws-finish-handoff-note { display: flex; align-items: flex-start; gap: 6px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The glyph is the text's own grey rather than the notice's amber: it marks a
+     consequence to read, and nothing here is asking to be acted on. Baseline alignment
+     would sit its box on the text's baseline and leave the glyph riding high, so it is
+     dropped from the line's top edge by the same optical amount the notice above uses
+     for its larger glyph. */
+  .dws-finish-handoff-note > svg { flex: none; margin-top: 2px; color: inherit; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */

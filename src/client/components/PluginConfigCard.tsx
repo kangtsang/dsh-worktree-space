@@ -37,15 +37,6 @@ interface TextField {
   fallback: string
   hint?: string
   /**
-   * Whether the value needs room for a path rather than a word.
-   *
-   * The narrow column fits the pill's own width — right for a branch prefix, whose
-   * values are short and whose row should read as one with the selects above it —
-   * but an absolute directory would be cut off there, and a path nobody can read to
-   * the end is not a setting anyone can check.
-   */
-  wide?: boolean
-  /**
    * Whether saving may send an empty value.
    *
    * False for the branch prefix, whose emptiness is a mistake the Host would only
@@ -134,7 +125,6 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     label: copyOr(t, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK),
     fallback: "",
     hint: copyOr(t, ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK),
-    wide: true,
     allowEmpty: true,
   },
 ]
@@ -160,12 +150,11 @@ export interface ConfigFormLike {
  * mistake), while the archive destination is emptied on purpose - that is how the setting
  * says "not set" and hands each task back its own computed folder.
  */
-function TextFieldRow({ field, label, fallback, hint, wide, allowEmpty, form, notify }: {
+function TextFieldRow({ field, label, fallback, hint, allowEmpty, form, notify }: {
   field: string
   label: string
   fallback: string
   hint?: string
-  wide?: boolean
   allowEmpty?: boolean
   form: ConfigFormLike
   notify: (message: string | null) => void
@@ -207,7 +196,7 @@ function TextFieldRow({ field, label, fallback, hint, wide, allowEmpty, form, no
       notify(t("configNotSaved"))
     })
   }
-  return <div className={"dws-plugin-config-row dws-plugin-config-prefix" + (wide === true ? " dws-plugin-config-wide" : "")}>
+  return <div className="dws-plugin-config-row dws-plugin-config-prefix">
     <span className="dws-plugin-config-label">{label}
       {hint === undefined ? null : <span className="dws-plugin-config-hint">{editing ? t("configPrefixEditHint") : hint}</span>}
     </span>
@@ -315,7 +304,7 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
     {fieldsFor(t).map((field) => {
       if (field.kind === "text") {
-        return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} wide={field.wide} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
+        return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
       const current = chosen[name] ?? served[name] ?? fallback

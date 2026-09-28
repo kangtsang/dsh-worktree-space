@@ -7,6 +7,7 @@ import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
 import type { RememberedScan, SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
+import { finishScenes } from "../lib/finishScene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 /** The three views this page has, in the order they are offered. */
@@ -39,6 +40,12 @@ interface Props {
    * Left out, the section holds the view and renders the switcher in its toolbar.
    */
   control?: { view: WorktreeView; onView: (view: WorktreeView) => void }
+  /**
+   * The host's own way out of the page, handed to the finish dialog: following a
+   * session there has to leave the page too, or it covers the conversation. The panel
+   * passes its way back to the conversation, the dialog passes its close.
+   */
+  onLeave?: () => void
 }
 type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
@@ -46,7 +53,7 @@ const FILTERS = [['all', 'filterAll'], ['attention', 'filterAttention']] as cons
 const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave }: Props) {
   const t = useT()
   const [ownView, setOwnView] = useState<WorktreeView>("tasks")
   const view = control?.view ?? ownView
@@ -84,6 +91,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   }, [view, api, workspaces])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
+  // A finish that stopped at a conflict left its report behind, and the session it
+  // handed on lives in a view of its own: coming back reopens that report, so the user
+  // continues from where they were instead of finding the task and starting over.
+  useEffect(() => {
+    setArchiving((current) => current ?? finishScenes()[0] ?? null)
+  }, [])
   const refreshController = useRef<AbortController | null>(null)
   // Whether a scan of this mount has already landed. The remembered answer is
   // painted only until then: once real rows exist, a late-arriving memory must not
@@ -286,7 +299,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             <span className="dws-task-title">
               <h3>{task.name}</h3>
               <span className="dws-branch-label" title={`${t("branch")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
-              <span className="dws-count">{task.repositories.length}</span>
+              {/* The same hint the repository rows carry: both numbers answer "how many
+                  worktrees", one under a repository and one under a task space. */}
+              <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(task.repositories.length) })}>{task.repositories.length}</span>
               {pendingBadge(task.commits)}
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
@@ -348,8 +363,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       api={api}
       workspaces={workspaces}
       sessions={sessions}
+      uiWorkspace={uiWorkspace}
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
+      onLeave={onLeave}
     /> : null}
   </section>
 }
