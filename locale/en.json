@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "Per-task Git worktrees for DeepSeek Harness: a task space spans one or more repositories, is registered as a DSH Workspace, and finishing merges the branches, removes the worktrees and files the documents."
+    "description": "Worktree Space: Creates an isolated workspace per task with Git worktrees for multiple repositories. Agents work in parallel without interference. On completion, it merges branches, removes worktrees, and archives documents."
   }
 }
