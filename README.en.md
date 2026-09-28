@@ -11,8 +11,10 @@ registered as a DSH Workspace with its own sessions.
 
 [中文](README.md) · **English**
 
-> **Beta (experimental)**: handing merge conflicts to an agent is the part that may still
-> change — please report problems in
+> **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
+> in an experimental validation phase, and its behaviour may still change (see the experimental
+> section at the end); the rest of this document describes the flow without an agent. Please
+> report problems in
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 ## Features
@@ -38,7 +40,9 @@ registered as a DSH Workspace with its own sessions.
   branch that repository has checked out — the task space's own starting point, since nothing
   here switches a source checkout — and the dialog can point any repository at another local
   branch instead, which is then merged in a temporary worktree without touching your checkout.
-  The worktrees are removed, the task space's own documents are filed under
+  Uncommitted changes in a worktree have to be committed by you first (the plugin writes no
+  commit; see Finish a task), and then the worktrees are removed, the task space's own documents
+  are filed under
   `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option unticked and they
   are deleted along with everything else), and the Workspace registration is removed. It will not finish while a
   session in that Workspace is still running — stop it or let it end, then try again.
@@ -68,9 +72,10 @@ before the worktree goes.
 
 ## Compatibility
 
-Built against the DSH **0.1.7-rc.1** client contract (web profile). Verified on
-`0.1.7-rc.1`: the host RPC routes register, the client bundle loads without changes, and the
-plugin list shows the name, description, icon and configuration section correctly.
+Built against the DSH **0.1.7-rc.1** client contract (web profile; the dependencies are still
+declared as `0.1.7-rc.1`). Verified on `0.1.7-rc.1` and on the `0.1.7-rc.2` that is installed and
+in use here: the host RPC routes register, the client bundle loads without changes, and the plugin
+list shows the name, description, icon and configuration section correctly.
 
 ## Usage
 
@@ -130,7 +135,14 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
    branch prefix** — offered only when what you typed differs from the configured default — to
    write it back to the plugin's settings when you create.
 4. Say where the task space goes. It has to sit outside the source tree, and a recommended
-   path is filled in for you.
+   path is filled in for you: `worktree-space` inside the **first directory below the volume
+   root** that the source root sits in (source root `E:\workspace\public\dsh-worktree-space`
+   recommends `E:\workspace\worktree-space`). At that depth the task space and the source tree
+   sit in one common ancestor below the volume root, and the recommendation itself is not
+   widened to the volume root. Another location still works; it is only a source root sitting
+   directly under the volume root (`E:\repo`) that shares nothing but that root with its
+   worktree (an agent handed the commits or the conflict then has to authorise itself in that
+   session — see the experimental section at the end).
 5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
    choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
@@ -173,43 +185,94 @@ branch and forcing are not.
 
 Finishing a task space is one standard path, in three steps:
 
-**1. Commit.** Every repository worktree in the task space is walked: one that holds
-uncommitted changes gets `git add -A` and then
-`git commit -m "chore(task): commit work in progress before finishing the task space"`, on
-its own task branch. This step always runs, takes no parameter and needs no opt-in. The one
-exception is a deliberate delete-without-merge — abandoning the task space with
-`deleteBranch` and `force` — where that commit would be deleted along with the branch, so it
-is skipped. A worktree in the middle of an unfinished merge (it holds `MERGE_HEAD`) is
-skipped too and left to the merge. A commit that fails (a hook refusing, a missing
-`user.name`/`user.email`, gpg signing, `index.lock`, a file in use) affects that repository
-only: it is neither merged nor removed and keeps its state, the others carry on, and the
-result names each one.
+**1. The commits are yours to make; this plugin never writes one.** While the plan shows
+uncommitted changes in a repository and **Force** is not ticked, **Finish task** stays
+unavailable — those changes are not this side's to write, and a worktree will not go while it
+holds them. The plan names those repositories and how many changes each one holds. Commit them in
+each worktree yourself with `git add` and `git commit` (the message is yours to write); when you
+are done, close the dialog and open it again — it re-reads the plan every time it opens, and those
+repositories stop holding **Finish task** back. You can also tick **Force**, which says those
+changes are not wanted: they are discarded with the worktree. This plugin writes no commit and
+never touches the index — the changes are yours, and so is the message. If your own commit fails
+(a hook refusing, a missing `user.name`/`user.email`, gpg signing, `index.lock`, a file in use),
+the repository is simply still dirty and still blocks the finish: fix it and commit again. If you
+would rather not do it yourself, **Authorize the agent to commit** hands it to an agent session
+(see the experimental section at the end). Two cases skip this step: a deliberate
+delete-without-merge — abandoning the task space with `deleteBranch` and `force`, where a commit
+would be deleted along with the branch — and a worktree in the middle of an unfinished merge (it
+holds `MERGE_HEAD`), which step 3 takes over.
 
-**2. Merge.** The task branch is merged into the target branch. Before that, the target is
-pre-merged into the task branch **inside the task space's own worktree**
-(`git merge --no-ff --no-edit <target>`): when that comes out clean, the pre-merge is undone
-again (`git reset --hard <the HEAD from before the pre-merge>`), and the task branch is then
-merged into the target branch as usual; when it conflicts, that merge is **not aborted and
-not reverted** — the conflict stays exactly where it stands, in that worktree, which keeps
-its `MERGE_HEAD` and its unresolved files.
+**2. Merge: rehearse the other way round, then merge for real.** The merge itself puts **the task
+branch into the target branch** (by default the branch the source repository has checked out), and
+it lands in the **source repository**. Before the target is touched, the target is merged into the
+task branch **inside the task space's own worktree** — the opposite direction — with
+`git merge --no-ff --no-edit <target>`, run in `<task space>\<repository>`. Two outcomes:
 
-**3. Stop on a conflict and ask for the agent.** As soon as one repository stands on a
-conflict the whole finish is partial (`failed: true`, the container stays, and the other
-repositories may already be merged and removed). Every repository row reports
-`autoCommitted`, `mergeCommitted`, `mergeInProgress`, `mergeSite` (the directory the
-conflict stands in) and `conflictedFiles`. The dialog then shows the conflicting
-repositories, the site paths and the conflicted files, and offers **Hand the conflict to an
-agent**: clicking it opens a separate session for every conflicting repository, working in
-the **conflict site itself**, with a first message that only asks it to edit files there
-and remove the conflict markers. Resolving a conflict writes files inside the task space and
-nothing else, so the main repository's `.git` does not have to be inside its write boundary:
-the plugin makes the merge commit (this part is experimental). Once the agent is done, **the
-user clicks Continue**, and the plugin finishes the task again with the same request: it
-first checks that no conflict markers are left, then `git add -A` and `git commit
---no-edit` conclude the merge on the plugin's side, where the worktree's git metadata is in
-reach, and what is left is merging into the target branch, removing the worktrees, deleting
-the branches, archiving and cleaning up. The plugin only opens the sessions and commits; the
-agent supplies the resolution.
+- **Clean**: that rehearsal is undone again (`git reset --hard <the HEAD from before the
+  rehearsal>`, the worktree back where it started), and the task branch is then merged into the
+  target branch with `--no-ff` as usual, so the target keeps an ordinary merge commit. A target
+  that is not checked out anywhere is merged in a temporary worktree that is discarded
+  afterwards, leaving the source checkout alone.
+- **Conflicted**: that merge is **not aborted and not reverted** — the rehearsal simply stays
+  where it stands, in the task branch's worktree, which keeps its `MERGE_HEAD` and the conflicted
+  files with their markers sitting in its working tree (for instance
+  `E:\wt-demo\spaces\demo\alpha\src\app.ts`). The **target branch is untouched**, and so is the
+  source repository's checkout.
+
+Why rehearse the other way round: a conflict in the real merge lands in your source repository and
+its checkout, and it would have to be aborted, with a side picked by hand. Rehearsing first puts
+the conflict in the plugin's own checkout — the task branch's worktree — which is exactly where the
+work can be dealt with in place, without touching your checkout.
+
+**3. A conflict stops the finish and waits for you to resolve it on the spot.** As soon as one
+repository stands on a conflict the whole finish is partial (`failed: true`, the container stays,
+and the other repositories may already be merged and removed). Every repository row reports
+`mergeInProgress`, `mergeSite` (the directory the conflict stands in) and `conflictedFiles`. The
+dialog then shows **A merge conflicted: deal with it, then finish the task again.** with the
+direction and the site explained above; the way on is **Continue finishing** at the foot of the
+panel.
+
+The site is the task branch's own worktree (for instance `E:\wt-demo\spaces\demo\alpha`), standing
+in an unfinished merge: `git -C <site> status` lists the `both modified:` files, and
+`git -C <site> rev-parse MERGE_HEAD` has a value. Resolve the conflict there, `git add`, and one
+`git commit` that says how you reconciled the two sides concludes the merge — the target branch and
+the source repository's checkout were never touched; the worktree's index lives under the source
+repository's `.git/worktrees/<name>/`, so the commit has to land on that one. To have an agent
+resolve this conflict instead, use **Authorize the agent to resolve it** (see the experimental
+section at the end).
+
+Pressing **Continue finishing** runs the same checks, in the same order:
+
+- first that no conflict markers are left on the site, then that the merge has been committed (the
+  `MERGE_HEAD` is gone);
+- then the usual question, whether the target branch is already contained in the task branch
+  (`git merge-base --is-ancestor <target> <branch>`): you have just merged the target branch into
+  the task branch and committed it, so the answer is usually yes, and **the rehearsal is skipped**,
+  going straight to the real merge from step 2 (the task branch into the target branch with
+  `--no-ff`), followed by the worktree removal and, when asked, the branch deletion;
+- **but if someone has pushed to the target branch in the meantime**, the target is no longer
+  contained in the task branch, so **the rehearsal runs once more** — this time merging those new
+  commits into the task branch. Clean, and it is undone before the real merge; conflicted, and it
+  is the same story as before: the conflict stays where it stands in the task branch's worktree,
+  and you resolve it there once more and press **Continue finishing** again. Skipping the rehearsal
+  has exactly one condition — that the target really is already contained in the task branch — so
+  resolving a conflict once never bypasses it.
+- The one exception is a **race**: the rehearsal came out clean and, a moment later, the real
+  merge (in the source repository, into the target branch) conflicts because the target moved
+  again. That one is `git merge --abort`ed: the source repository is left as it was found and
+  git's own words are reported. A rehearsal has already been paid for, so a conflict left standing
+  there could only be somebody else's commit, not a conflict to hand on. The worktree and the
+  branch are kept — merge the new target into the task branch, then finish again.
+
+If the site still holds a resolution nobody committed, the plugin does not commit it for you: the
+site is left exactly as it stands and the question goes back to the user — the row's `error` says
+`the merge in <path> is resolved but not committed`, or that conflict markers remain — and
+**Continue finishing** at the foot of the panel is the way back in.
+
+**Leaving loses no progress.** The report and any session rows opened are kept, so reopening the
+dialog shows the page you left, with the plan read again (the per-repository target branches and the
+checkboxes are not part of that, so pick those again). The backdrop, Esc and the ✕ in the corner
+leave the same way, and all of them are held back only while a finish is actually running.
 
 Deleting a branch normally needs the merge: deselect the merge and the branch option goes
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and
@@ -221,16 +284,16 @@ in step 1.
 
 | Merge back | Delete branch | Force | What happens |
 | --- | --- | --- | --- |
-| ✓ | | | Each repository's uncommitted changes are committed on its own task branch first, and its branch is then merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository standing on a conflict keeps its place, the others still finish |
+| ✓ | | | **Finish task** is unavailable at first: commit each worktree's uncommitted changes to its own task branch yourself (until you do, the finish stays on that step and names the worktree — `uncommitted work is waiting in <path>` in that row's `error`), and its branch is then merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository standing on a conflict keeps its place, the others still finish |
 | ✓ | ✓ | | The same, and the branch is deleted once merged (`git branch -d`, so an unmerged branch cannot be deleted this way) |
-| ✓ | | ✓ | The same as merging alone: the uncommitted changes were committed at step 1, so Force changes nothing further here; the branches stay |
+| ✓ | | ✓ | Merging still happens, but Force skips the commit: uncommitted changes in the worktree are **discarded with it**, and the plugin does not commit them for you; the branches stay |
 | ✓ | ✓ | ✓ | Merge and force-delete the branch (`git branch -D`); the branch was merged, so nothing extra is lost |
-| | | | Nothing is merged: the uncommitted changes are committed (they stay on the branch that stays), the worktrees and the task space go, **the branches stay** for you to merge by hand |
-| | | ✓ | The same: the commit leaves the worktree clean, so Force changes nothing further; the branches stay |
+| | | | Nothing is merged: **Finish task** is unavailable until you commit the changes yourself (they stay on the branch that stays), the worktrees and the task space go, **the branches stay** for you to merge by hand |
+| | | ✓ | The same, without the commit: uncommitted changes are **discarded with the worktree**; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged and nothing committed, the branch force-deleted, and **the commits it held are discarded along with the uncommitted changes in the worktree** |
 
 Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
-outright). **A repository whose commit failed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the container is empty, and its sessions then fall back to Ungrouped with their transcripts
+outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the container is empty, and its sessions then fall back to Ungrouped with their transcripts
 intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
@@ -238,3 +301,53 @@ merge can be reverted and nothing is discarded), and it is **red** only where th
 name what will be lost — abandoning the task space (no merge, force-deleting the branches)
 while a worktree still holds uncommitted files, or while a branch still holds commits that
 were never merged.
+
+## Experimental: handing the commits and the conflicts to an agent
+
+When finishing a task, the plugin can open a DSH agent session to do two jobs for you: commit the
+uncommitted changes, and resolve a merge that stands on a conflict.
+
+### The two buttons and what they do
+
+- Repositories with uncommitted changes in the plan → **Authorize the agent to commit**: it opens a
+  session that `git add`s those changes and commits them, with a message saying what changed and why
+  (in the language and style that repository's own commits use).
+- A repository standing on a merge conflict → **Authorize the agent to resolve it**: it opens a
+  session that reads both sides, works out what each was after, writes a version that keeps both
+  intentions, and concludes the merge itself (`git add`, then `git commit` with a message saying how
+  the two sides were reconciled).
+
+Both jobs ask the same: do not push, do not touch other repositories or the task space, and do not
+merge a branch back into its target — that step is the plugin's.
+
+Those repositories share one session (in the conflict step, a repository that already has the session
+step 1 opened reuses it). The working directory is the common ancestor of their boundaries: a
+repository's own boundary is its worktree, or, when the Host named the main checkout's path, the
+common ancestor of that worktree and the main checkout. Where that common ancestor falls back to the
+**volume root** (the repositories sit on different volumes, or both the task space and the
+repositories sit directly under the root) there is still just the one session, working in the **task
+space**, and the elevation is yours to approve in that session.
+
+### The flow and its steps
+
+1. With uncommitted changes in the plan, press **Authorize the agent to commit**: the plugin opens a
+   session and hands the job over. Ticking **Force** skips this step and opens no session at all.
+2. Wait for the session to stop. Once it does, the plugin re-reads the plan once (once per job, and a
+   session seen running re-arms that read).
+3. When the plan that comes back holds no uncommitted files in those repositories, the headline turns
+   into a **green status light** with green text: in the commit step "The commits are done: carry on
+   and finish the task.", in the conflict step "The conflict is resolved: carry on and finish the
+   task."
+4. Press **Finish task** or **Continue finishing** to carry on.
+5. When a merge stands on a conflict, press **Authorize the agent to resolve it** and repeat steps
+   2-4.
+6. An agent that only edited the files without committing (or left conflict markers behind) gets no
+   commit from this side: the site is left exactly as it stands, the result says it did not finish,
+   and you wrap it up or take over yourself before pressing **Continue finishing**.
+7. The rehearsal in step 3: once the agent has merged the target branch into the task branch and
+   committed it, pressing **Continue finishing** usually answers "yes" to whether the target branch is
+   already contained in the task branch, and the rehearsal is skipped; only when somebody has pushed
+   to the target branch again does it run once more first.
+
+**Finish task** or **Continue finishing** at the foot of the panel only ever runs once the user has
+confirmed it.
