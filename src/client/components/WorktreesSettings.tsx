@@ -350,6 +350,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       api={api}
       workspaces={workspaces}
       sessions={sessions}
+      uiWorkspace={uiWorkspace}
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
     /> : null}

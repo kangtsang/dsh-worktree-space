@@ -201,6 +201,7 @@ export const WorktreePlugin = {
             api={api}
             workspaces={workspaces}
             sessions={sessions}
+            uiWorkspace={uiWorkspace}
             onArchived={() => {
               void refreshClassification()
             }}

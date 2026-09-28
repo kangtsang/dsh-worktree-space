@@ -450,6 +450,10 @@
   .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
   .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
   .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* Opening the session is the one thing this dialog can do about the agent's work, so
+     it reads as a link rather than as a button of the dialog's own. */
+  .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
+  .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */

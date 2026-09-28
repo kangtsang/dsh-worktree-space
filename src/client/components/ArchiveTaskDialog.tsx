@@ -4,9 +4,12 @@ import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
 import { cleanPath, nameOf, parentOf, slashPath } from "../lib/paths"
-import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspacesService } from "../lib/types"
+import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
+
+/** The identity of a session this dialog opened: exactly what the Host answered with. */
+type HandoffSessionId = Awaited<ReturnType<ISessions["create"]>>
 
 interface ArchiveTaskDialogProps {
   /** Absolute path of the task container to archive. Either entry point knows it. */
@@ -14,6 +17,8 @@ interface ArchiveTaskDialogProps {
   api: ReturnType<typeof createWorktreeApi>
   workspaces: WorkspacesService
   sessions: ISessions
+  /** The navigation face, which is how the user reaches a session this dialog opened. */
+  uiWorkspace: WorkspaceNavigation
   /** Called once the task is archived, so the opener can refresh what it shows. */
   onArchived?: () => void
   onClose: () => void
@@ -35,7 +40,7 @@ interface ArchiveTaskDialogProps {
  * back to Ungrouped with their history intact; and a session still running here
  * stops the archive instead of having its directory pulled out from under it.
  */
-export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived, onClose }: ArchiveTaskDialogProps) {
+export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, onArchived, onClose }: ArchiveTaskDialogProps) {
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
@@ -61,7 +66,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   // The sessions the conflict handoff opened, one per conflicting repository, and
   // whatever stopped one from being opened at all. Kept here rather than derived
   // from the report, because the sessions outlive the request that made them.
-  const [handoff, setHandoff] = useState<{ name: string; site: string; sessionId: string }[]>([])
+  const [handoff, setHandoff] = useState<{ name: string; site: string; sessionId: HandoffSessionId }[]>([])
   const [authorizing, setAuthorizing] = useState(false)
   const [handoffError, setHandoffError] = useState("")
   // The sessions run outside this dialog, so the rows reporting on them have to
@@ -141,6 +146,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
    * exist until the merge has been tried.
    */
   const conflicts = (result?.repositories ?? []).filter((entry) => entry.mergeInProgress === true)
+  /**
+   * The sessions this dialog opened that are still working. They own the next step:
+   * the merge has to be committed before finishing can read it, so the finish waits
+   * for them rather than racing them - and only the Host's own list can say when they
+   * stopped.
+   */
+  const working = handoff.filter((opened) => sessions.list.getSnapshot().byId[opened.sessionId]?.running === true)
   const strayName = (stray: { name: string; directory: boolean }) => stray.directory ? `${stray.name}/` : stray.name
   /**
    * The branches offered for a repository.
@@ -246,7 +258,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   const authorize = async () => {
     if (conflicts.length === 0 || authorizing) return
     setAuthorizing(true); setHandoffError("")
-    const opened: { name: string; site: string; sessionId: string }[] = []
+    const opened: { name: string; site: string; sessionId: HandoffSessionId }[] = []
     const failures: string[] = []
     for (const entry of conflicts) {
       const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
@@ -394,7 +406,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
                     <strong>{opened.name}</strong>
                     <code title={slashPath(opened.site)}>{slashPath(opened.site)}</code>
                     <span>{sessions.list.getSnapshot().byId[opened.sessionId]?.running === true ? t("finishHandoffRunning") : t("finishHandoffIdle")}</span>
+                    {/* The agent works in its own session, not behind this button, so
+                        the only useful thing this dialog can do is take the user there. */}
+                    <button type="button" className="dws-finish-handoff-open" onClick={() => uiWorkspace.openSession(opened.sessionId)}>{t("finishHandoffOpen")}</button>
                   </li>)}</ul>
+                  {/* What the agent asks for is approved in that session: approvals never
+                      reach this dialog, so saying where they are is the whole of the help. */}
+                  <p className="dws-finish-handoff-hint">{t("finishHandoffApprove")}</p>
                 </>
                 : <p className="dws-finish-handoff-hint">{t("finishHandoffHint")}</p>}
               {handoff.length === 0 ? <Button className="dws-button-warn-solid" disabled={authorizing} onClick={() => void authorize()}>
@@ -453,7 +471,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
               {/* The same action as the first call, offered where the reason for it
                   is: once the conflicts have been dealt with in their worktrees, the
                   finish reads the merge they committed and does the rest. */}
-              {conflicts.length > 0 ? <Button className="dws-button-warn-solid" disabled={busy} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishContinue")}</Button> : null}
+              {/* Held back while an agent is still working: finishing now would try to
+                  merge a branch whose merge is not committed yet, and the report would
+                  describe a race instead of the result. */}
+              {conflicts.length > 0 ? <Button className="dws-button-warn-solid" disabled={busy || working.length > 0} onClick={() => void archive()}>{busy || working.length > 0 ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : working.length > 0 ? t("finishContinueWaiting") : t("finishContinue")}</Button> : null}
               <Button onClick={close}>{t("close")}</Button>
             </>
             : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className={discardsWork ? "dws-button-danger-solid" : "dws-button-warn-solid"} disabled={optionsDisabled} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}

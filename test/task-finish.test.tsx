@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
@@ -94,21 +94,27 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     }),
   }
   const workspaces = { list: { getSnapshot: () => ({ items }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
-  const uiWorkspace = { openWorkspace: vi.fn() }
+  const uiWorkspace = { openWorkspace: vi.fn(), openSession: vi.fn() }
   // The dialog opens one session per conflicting repository and sends it the work as
   // its first message, so the double records both halves of that: what each session
-  // was opened with, and what it was told.
+  // was opened with, and what it was told. The list is the Host's own; it is mutable
+  // here because `running` is how the dialog learns a handoff is still working.
   const created: { cwd?: string }[] = []
   const prompts: { sessionId: string; text: string }[] = []
+  const snapshots: Record<string, { running: boolean }> = {}
+  const sessionListeners: (() => void)[] = []
   const sessions = {
-    list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} },
+    list: {
+      getSnapshot: () => ({ byId: snapshots }),
+      subscribe: (listener: () => void) => { sessionListeners.push(listener); return () => {} },
+    },
     create: vi.fn(async (options: { cwd?: string }) => { created.push(options); return `session-${created.length}` }),
     using: vi.fn(async (sessionId: string, _options: unknown, operation: (reference: any) => unknown) => operation({
       binding: { session: { prompt: async (parts: { text?: string }[]) => { prompts.push({ sessionId, text: parts[0]?.text ?? "" }) } } },
     })),
   }
   render(<WorktreesSettings api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={sessions as any} />)
-  return { api, workspaces, sessions, created, prompts }
+  return { api, workspaces, sessions, created, prompts, snapshots, sessionListeners, uiWorkspace }
 }
 
 // An option's accessible name is its label followed by its hint, and one hint
@@ -262,6 +268,27 @@ describe("finishing a task", () => {
     expect(next.prompts[0].text).toContain(site.replace(/\\/g, "/"))
     expect(next.prompts[0].text).toContain("src/a.ts")
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", sessions: "kratos-vue-admin" }))).toBeTruthy()
+
+    // The dialog cannot see an approval and cannot do the agent's work, so it does the
+    // two things it can: report where the session state comes from, and take the user
+    // to the session itself.
+    expect(screen.getByText(t("finishHandoffApprove"))).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: t("finishHandoffOpen") }))
+    expect(next.uiWorkspace.openSession).toHaveBeenCalledWith("session-1")
+
+    // A session still working owns the next step: finishing now would try to merge a
+    // branch whose merge is not committed yet, so the button waits for the Host to
+    // report it stopped.
+    act(() => {
+      next.snapshots["session-1"] = { running: true }
+      next.sessionListeners.forEach((listener) => listener())
+    })
+    expect((screen.getByRole("button", { name: t("finishContinueWaiting") }) as HTMLButtonElement).disabled).toBe(true)
+    expect(next.api.doneTask).toHaveBeenCalledTimes(1)
+    act(() => {
+      next.snapshots["session-1"] = { running: false }
+      next.sessionListeners.forEach((listener) => listener())
+    })
 
     // Nothing finishes twice behind the user's back: the second finish is asked for,
     // because only the user knows whether what came back is what they wanted.
