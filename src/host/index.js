@@ -73,12 +73,36 @@ const scanBounds = { depth: DEFAULT_SCAN_DEPTH, directories: MAX_SCAN_DIRECTORIE
 let branchPrefixReference
 
 /**
+ * The configured archive destination, as the running entry carries it.
+ *
+ * Empty is the setting's own "unset": it means every task keeps filing its
+ * documents under its own Workspace title, which is the behaviour this plugin had
+ * before the setting existed. Volatile for the same reason as the prefix above.
+ */
+let archiveDirectoryReference
+
+/**
  * The branch prefix a request that names none should use.
  * @returns the configured prefix, or the built-in default when none is set.
  */
 export function configuredBranchPrefix() {
   const value = branchPrefixReference?.get()
   return typeof value === 'string' && value.trim() !== '' ? value : DEFAULT_BRANCH_PREFIX
+}
+
+/**
+ * The directory the configuration asks archived documents to be filed into.
+ *
+ * An empty answer is not an error: it is the setting saying "not set", and the
+ * caller keeps its own per-task default. The value is returned as it was written,
+ * without checking that it exists or is isolated - the archive is where such a
+ * path is judged, because only there is the task container known and a path inside
+ * it would be deleted moments after the copy.
+ * @returns the configured directory, or an empty string when none is set.
+ */
+export function configuredArchiveDirectory() {
+  const value = archiveDirectoryReference?.get()
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 /**
@@ -214,6 +238,21 @@ export const Config = z.object({
    */
   defaultBranchPrefix: z.string().default(DEFAULT_BRANCH_PREFIX).volatile()
     .description('The prefix every new task space starts from: the branch is this plus the task name. The create dialog offers to update it.'),
+  /**
+   * Where a task's documents are filed when it is archived.
+   *
+   * Empty means "not set", and every task keeps the destination it computed for
+   * itself: a folder of its own, named after its Workspace title, under the
+   * container's `archived-docs`. Set, it becomes the destination the archive dialog
+   * proposes instead. Volatile like the rest of this schema: the Plugins page
+   * serves it and a write lands on the running entry without a reload.
+   *
+   * The value is not checked here. A directory that cannot hold the copy, or one
+   * inside the task container, is refused by the archive itself, where the path it
+   * has to stay out of is known.
+   */
+  archiveDocumentsDirectory: z.string().default('').volatile()
+    .description('Where archived documents go. Empty files them under each workspace title, which is the default.'),
 })
 
 export function apply(ctx, config = {}) {
@@ -226,6 +265,9 @@ export function apply(ctx, config = {}) {
   // Kept as the live reference, not its value: a prefix saved from the Web UI
   // reaches the running entry through this same accessor.
   branchPrefixReference = config.defaultBranchPrefix
+  // Likewise for the archive destination: the settings card writes it and the
+  // archive dialog reads it, both through this entry rather than its snapshot.
+  archiveDirectoryReference = config.archiveDocumentsDirectory
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
@@ -341,7 +383,7 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.preference') return recover(async () => {
       // Read-only, and shaped as a record rather than a bare string: the next
       // preference this dialog needs joins it without a second endpoint.
-      return { defaultBranchPrefix: configuredBranchPrefix() }
+      return { defaultBranchPrefix: configuredBranchPrefix(), archiveDocumentsDirectory: configuredArchiveDirectory() }
     })
 
     if (endpoint === 'task.create') return recover(async () => {

@@ -234,6 +234,10 @@
      types into is given that same width - 92px, measured off a screenshot of the card -
      instead of stretching across the row. */
   .dws-plugin-config-text { display: grid; grid-template-columns: auto 92px; justify-content: end; align-items: center; gap: 10px; }
+  /* The one row whose value is a path: an absolute path does not fit 92px, so this row
+     takes the rest of the line. The hook comes from the row, not from the field, because
+     which value needs the room is a property of the setting, not of the shape. */
+  .dws-plugin-config-wide .dws-plugin-config-text { grid-template-columns: auto minmax(0, 1fr); }
   /* Locked wears the same pill as every other row's value, so the card reads as one list. */
   .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* Editing: the wrapper draws the box, not the input.

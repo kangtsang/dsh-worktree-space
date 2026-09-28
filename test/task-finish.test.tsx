@@ -48,11 +48,14 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[] }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[] } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "" }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
     cachedScan: vi.fn().mockResolvedValue(null),
+    // What the Host has configured: the archive destination is empty unless a test
+    // sets one, which is the same "not set" the real entry answers with.
+    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),
@@ -319,6 +322,43 @@ describe("finishing a task", () => {
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; discardDocuments?: boolean }
     expect(payload.discardDocuments).toBe(true)
     expect(payload.documentsDirectory).toBeUndefined()
+  })
+
+  it("files into the configured destination when the Host has one set", async () => {
+    const user = userEvent.setup()
+    // The setting is read rather than assumed: this Host has one configured, so it is
+    // the folder the dialog proposes and the one the call carries.
+    const configured = "E:\\archived-docs"
+    const next = setup({ strays: [{ name: "notes.md", directory: false, documents: 1, kind: "content" }], archiveDirectory: configured })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    const box = await waitFor(() => option(t("archiveDocuments")))
+    // The row names the configured folder, not a folder computed for this task.
+    expect(box.closest(".dws-check-option")?.textContent).toContain(configured.replace(/\\/g, "/"))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
+    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
+    // Exactly the configured directory: no title, no moment added to it, so repeated
+    // archives land in one place rather than in a folder each.
+    expect(payload.documentsDirectory).toBe(configured)
+  })
+
+  it("keeps the computed folder when the setting is empty", async () => {
+    const user = userEvent.setup()
+    // Empty is the setting's "not set", which is also the answer from a Host that has
+    // never had it written: the per-workspace folder has to come back.
+    const next = setup({ strays: [{ name: "notes.md", directory: false, documents: 1, kind: "content" }], archiveDirectory: "" })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    await waitFor(() => expect(option(t("archiveDocuments"))).toBeTruthy())
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
+    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
+    expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\antest-\\d{8}-\\d{6}$`))
   })
 
   it("warns about uncommitted work and only forces discarding it deliberately", async () => {

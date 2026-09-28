@@ -49,7 +49,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true })
   // Named once, and used both for the preview and for the call, so what the user
   // reads is the folder they get.
-  const [documentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
+  const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
   const [error, setError] = useState("")
   const [result, setResult] = useState<FinishTaskResult | null>(null)
   const [registrationError, setRegistrationError] = useState("")
@@ -86,6 +86,25 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
     void loadPlan()
     return () => { planGeneration.current += 1 }
   }, [loadPlan])
+
+  /**
+   * The configured destination, once the Host answers with it.
+   *
+   * Read rather than assumed, and it arrives after the first paint: the computed
+   * folder is on screen until then, so the row never shows an empty path while it
+   * waits. A Host that answers nothing leaves the computed folder in place — which
+   * is exactly what an empty setting means.
+   */
+  useEffect(() => {
+    let live = true
+    void api.preferences().then((served) => {
+      if (!live) return
+      const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
+      if (configured.trim() === "") return
+      setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))
+    }).catch(() => { /* falls back to the computed folder */ })
+    return () => { live = false }
+  }, [api, path, workspace?.title])
 
   /** Preview this repository merging into the branch just chosen. */
   const chooseTarget = (name: string, branch: string) => {

@@ -249,12 +249,27 @@ describe("worktree RPC contract", () => {
     // Host is running is the one the next request answers with.
     let prefix = "task/"
     const handler = handleFor({}, { defaultBranchPrefix: { get: () => prefix } })
-    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "task/" })
+    expect((await handler("task.preference")).value).toMatchObject({ defaultBranchPrefix: "task/" })
     prefix = "wt/"
-    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "wt/" })
+    expect((await handler("task.preference")).value).toMatchObject({ defaultBranchPrefix: "wt/" })
     // An emptied setting falls back to the built-in default rather than to no prefix.
     prefix = "  "
-    expect((await handler("task.preference")).value).toEqual({ defaultBranchPrefix: "task/" })
+    expect((await handler("task.preference")).value).toMatchObject({ defaultBranchPrefix: "task/" })
+  })
+
+  it("answers the configured archive destination, and treats empty as not set", async () => {
+    // The same live-accessor shape as the prefix above: a destination written from
+    // the settings card is what the next archive dialog reads.
+    let directory = ""
+    const handler = handleFor({}, { archiveDocumentsDirectory: { get: () => directory } })
+    // Unset is an answer, not a missing key: the dialog reads the key and keeps its
+    // own computed folder when it is empty.
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
+    directory = "E:\\archived-docs"
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "E:\\archived-docs" })
+    // Whitespace is emptiness, so a cleared field cannot become a destination named "  ".
+    directory = "   "
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
   })
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
