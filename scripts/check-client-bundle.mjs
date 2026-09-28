@@ -24,7 +24,11 @@ const plugin = registrations[0].factory((id) => nodeRequire(id))
 assert.equal(plugin.name, packageJson.name, "client factory must return the plugin name")
 assert.ok(Array.isArray(plugin.inject), "client factory must return an inject list")
 assert.equal(typeof plugin.apply, "function", "client factory must return apply")
-assert.doesNotMatch(clientBundle, /<\/?[A-Z][^>]*>/, "generated bundle must not contain JSX")
+// A JSX tag is `<`, an optional `/`, a name, and then a space, `/` or `>`. A comparison
+// is not: the bundle holds `<Math.min(…)` from its own code and `<Name;` from a
+// dependency, and the minifier writes both without the spaces that would make them read
+// as tags here.
+assert.doesNotMatch(clientBundle, /<\/?[A-Z][A-Za-z0-9_]*(?:[\s/>])/, "generated bundle must not contain JSX")
 assert.doesNotMatch(clientBundle, /(^|\n)\s*import\s/, "generated bundle must not contain ESM imports")
 assert.match(clientBundle, /data-dsh-worktree-space-style/, "client bundle must install the plugin stylesheet")
 assert.match(clientBundle, /appendChild/, "client bundle must append the plugin stylesheet")
