@@ -23,20 +23,14 @@ export interface WorktreesPageProps {
  *
  * Both hosts read this one column, so the panel's navigation and the dialog's cannot
  * drift apart: the alignment is the shell sidebar's own right-aligned row in both, since
- * a label reads from the same edge wherever the column sits. `onBack` leads it where the
- * host has somewhere to go back to — the panel replaced the conversation, so it does. A
- * dialog closes instead, with the shell's own button in the corner, so it passes nothing.
+ * a label reads from the same edge wherever the column sits. Only the views are in it:
+ * the panel's way back to the conversation is the panel's own chrome, and it leads the
+ * heading instead — see `WorktreeNavBack` — so that this column begins on the toolbar's
+ * own line in both hosts.
  */
-export function WorktreesNav({ view, onView, onBack }: { view: WorktreeView; onView: (view: WorktreeView) => void; onBack?: () => void }) {
+export function WorktreesNav({ view, onView }: { view: WorktreeView; onView: (view: WorktreeView) => void }) {
   const t = useT()
   return <nav className="dws-nav" aria-label={t("worktreesTitle")}>
-    {onBack === undefined ? null : <>
-      <button type="button" className="dws-nav-item" onClick={onBack}>
-        <ChevronLeft size={16} aria-hidden="true" />
-        <span>{t("backToConversation")}</span>
-      </button>
-      <span className="dws-nav-rule" aria-hidden="true" />
-    </>}
     {worktreeNavItems().map(({ value, label }) => <button
       key={value}
       type="button"
@@ -48,11 +42,33 @@ export function WorktreesNav({ view, onView, onBack }: { view: WorktreeView; onV
 }
 
 /**
+ * The panel's way back to the conversation, in the shell's own row shape.
+ *
+ * It is not one of the three views, so it cannot sit in the view column without pushing
+ * them off the toolbar's line; it leads the heading's band instead. The cell keeps the
+ * column's width and its edge line whether or not there is somewhere to go back to, so
+ * the two bands stay one column.
+ */
+function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
+  const t = useT()
+  return <div className="dws-panel-lead-nav">
+    {onBack === undefined ? null : <>
+      <button type="button" className="dws-nav-item" onClick={onBack}>
+        <ChevronLeft size={16} aria-hidden="true" />
+        <span>{t("backToConversation")}</span>
+      </button>
+      <span className="dws-nav-rule" aria-hidden="true" />
+    </>}
+  </div>
+}
+
+/**
  * The management views, in the frame their host asks for.
  *
  * The view lives here rather than in either host, so both open on the same one and a
  * switch means the same thing in both. The hosts differ only in their chrome: the panel
- * scrolls a page under a heading, the dialog scrolls a column beside its navigation.
+ * keeps its heading and its way back above the two columns, the dialog puts the title in
+ * the window's own header, and either way only the rows the view lists scroll.
  */
 export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, variant, onBack }: WorktreesPageProps & {
   variant: "panel" | "dialog"
@@ -76,15 +92,23 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     <WorktreesNav view={view} onView={setView} />
     <div className="dws-manage-page-content">{settings}</div>
   </section>
+  // The two bands of the panel's own chrome. The way back to the conversation and the
+  // page's heading share the first one; the second one holds the view column and the
+  // reading column, so the three tabs begin exactly where the toolbar above the rows
+  // begins. That is the alignment the dialog has for free — it has no back row — and it
+  // is why the back row cannot simply lead the view column.
   return <section className="dws-panel" aria-label={t("worktreesTitle")}>
-    <WorktreesNav view={view} onView={setView} onBack={onBack} />
-    <div className="dws-panel-scroll">
-      <div className="dws-panel-content">
-        <header className="dws-panel-heading">
-          <h1>{t("worktreesTitle")}</h1>
-          <p>{t("panelDescription")}</p>
-        </header>
-        {settings}
+    <div className="dws-panel-lead">
+      <WorktreeNavBack onBack={onBack} />
+      <header className="dws-panel-heading">
+        <h1>{t("worktreesTitle")}</h1>
+        <p>{t("panelDescription")}</p>
+      </header>
+    </div>
+    <div className="dws-panel-body">
+      <WorktreesNav view={view} onView={setView} />
+      <div className="dws-panel-scroll">
+        <div className="dws-panel-content">{settings}</div>
       </div>
     </div>
   </section>

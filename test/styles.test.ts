@@ -91,14 +91,19 @@ describe("floating panel surface", () => {
 
   it("draws one navigation for both hosts of the page", () => {
     // The panel's column and the dialog's are one component, so the row geometry lives
-    // in one rule and the two frames differ only in the width and the inset they set.
+    // in one rule and the two frames differ only in the width and the inset they set. The
+    // width is the host's to declare, with the column's own as a fallback: the panel's back
+    // row sits outside the column, in the heading's band, and takes the same width from the
+    // same variable, which is what keeps the two bands one column.
     const nav = rule(".dws-nav")
-    expect(nav).toContain("width: var(--dws-nav-width)")
+    expect(nav).toContain("width: var(--dws-nav-width, 208px)")
     expect(nav).toContain("padding: var(--dws-nav-pad)")
     expect(rule(".dws-nav-item")).toContain("justify-content: var(--dws-nav-align)")
     // The label hugs the column's inner edge in both, the way the shell's own rows do:
     // the dialog tunes the width and the inset, and must not move the text.
     expect(nav).toContain("--dws-nav-align: flex-end")
+    expect(rule(".dws-panel")).toContain("--dws-nav-width: 208px")
+    expect(rule(".dws-panel-lead-nav")).toContain("width: var(--dws-nav-width)")
     const dialogNav = rule(".dws-manage-page .dws-nav")
     expect(dialogNav).toContain("border-right: 0")
     expect(dialogNav).not.toContain("--dws-nav-align")
@@ -222,5 +227,23 @@ describe("floating panel surface", () => {
     expect(scroll).toContain("overflow: hidden")
     expect(scroll).not.toContain("overflow: auto")
     expect(rule(".dws-panel-content")).toContain("flex: 1 1 auto")
+  })
+
+  it("starts the panel's view tabs on the toolbar's line, in a band of their own", () => {
+    // The panel held its navigation and its reading column in one row, with the way back
+    // leading the column. The tabs therefore began under the back row while the search box
+    // began under the page's heading, and the two columns disagreed about where their first
+    // row was. The page is two bands now: the back row and the heading share the first, and
+    // the second begins after it, which is what puts the tabs and the toolbar on one line.
+    expect(rule(".dws-panel")).toContain("flex-direction: column")
+    expect(rule(".dws-panel-lead")).toContain("flex: none")
+    expect(rule(".dws-panel-body")).toContain("flex: 1 1 auto")
+    expect(rule(".dws-panel-body")).toContain("overflow: hidden")
+    // The heading's top inset moved into the band it shares with the back row, and the
+    // reading column below lost its own, so nothing but the band positions the toolbar.
+    expect(rule(".dws-panel-heading")).toContain("padding: 28px 32px 20px 24px")
+    expect(rule(".dws-panel-content")).toContain("padding: 0 32px 48px 24px")
+    // The column carries the settings' own 2px and no top inset besides.
+    expect(rule(".dws-panel .dws-nav")).toContain("--dws-nav-pad: 2px 14px 24px")
   })
 })

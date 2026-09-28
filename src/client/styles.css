@@ -25,15 +25,19 @@
   }
   .dws-settings *, .dws-dialog-content *, .dws-manage-page *, .dws-manage-page *::before, .dws-manage-page *::after, .dws-new-session-action * { box-sizing: border-box; }
   /* The management page as a main panel: the shell gives the column, so this owns the
-     navigation column, the scroll container and the reading measure inside it. */
-  .dws-panel { display: flex; flex-direction: row; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+     two bands the page is made of. The first holds the way back and the heading; the
+     second holds the view column and the reading column. Splitting them is what puts the
+     view tabs on the toolbar's own line: in one band they would start under the back row
+     instead, and the panel would read differently from the dialog for no reason but its
+     back button. */
+  .dws-panel { --dws-nav-width: 208px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
   .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
   /* The plugin's navigation column, shared by both hosts of the page: the panel that
      takes the shell's main column and the dialog the footer's shortcut opens. Every
      number below is a variable, because the two frames differ only in width, in how far
      the column is inset, and in the line that separates it from what it selects — the
      rows themselves are the shell's own panel rows, to the pixel, in both. */
-  .dws-nav { --dws-nav-width: 208px; --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
+  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 208px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
   .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }
   .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
@@ -41,18 +45,35 @@
   .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
   .dws-nav svg { flex: none; }
   .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
+  /* The panel's first band, and the whole reason the page is two bands: the back row and
+     the heading share it, and it grows to the taller of the two, so whatever the
+     description wraps to, the band below begins after it. The row's inset is 24px rather
+     than the heading's 28px, because a 36px row and a 28px heading line only share a
+     centre when the row starts the 4px higher. */
+  .dws-panel-lead { display: flex; flex: none; flex-direction: row; align-items: flex-start; min-width: 0; }
+  .dws-panel-lead-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: 24px 14px 0; border-right: 1px solid var(--wt-line); }
+  /* The panel's second band: the view column and the reading column side by side, each
+     bounded in height, so the tabs and the toolbar start on one line and only the rows
+     inside the list scroll. */
+  .dws-panel-body { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
+  /* No top inset in this host: the column starts on the band's first line, which is where
+     the toolbar is. The 2px matches the settings' own inset, which is what the toolbar
+     actually starts after — so the two columns' first rows share one edge, to the pixel. */
+  .dws-panel .dws-nav { --dws-nav-pad: 2px 14px 24px; }
   /* The scroll container holds the height and passes it down; it does not scroll itself,
      because the list inside is the only thing that should. Left at `overflow: auto` with
      an unbounded child, the content grew to its natural height and this element scrolled
      the heading and the toolbar away with the rows. */
   .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-  /* Flush against the navigation, not centred in the leftover width: the two columns
-     share one left inset, so their text lines up from the panel's edge inward.
-     It is a column that fills its height, and the toolbar above the list is pinned
-     inside it: the panel scrolls nothing itself, the list inside it does. */
-  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 28px 32px 48px 24px; }
+  /* Flush against the navigation, not centred in the leftover width: the two columns share
+     one left inset, so their text lines up from the panel's edge inward. The top inset
+     belongs to the heading's band above, not here, or the toolbar would drop below the
+     tabs that switch what it filters. */
+  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 0 32px 48px 24px; }
   .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
-  .dws-panel-heading { margin-bottom: 20px; }
+  /* In the heading's band beside the back row: the same measure as the reading column
+     below it, and the band's own top inset lives here. */
+  .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
   /* The section is a column that fills the frame it is given: everything above the rows
