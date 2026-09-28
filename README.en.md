@@ -191,6 +191,10 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 
 <img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="720">
 
+> Terms: the **source root** is the Workspace directory you hand the plugin — a repository itself, or a directory
+> whose top-level children are repositories; the **source tree** is that directory and everything under it. The
+> create dialog calls it the "repositories' directory".
+
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
    (`hotfix-placeorder`); an invalid name tells you which rule it breaks.
@@ -199,15 +203,17 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
    The line under the field always names the default it would use. Tick **Set as the default
    branch prefix** — offered only when what you typed differs from the configured default — to
    write it back to the plugin's settings when you create.
-4. Say where the task space goes. It has to sit outside the source tree, and a recommended
-   path is filled in for you: `worktree-space` inside the **first directory below the volume
-   root** that the source root sits in (source root `E:\workspace\public\dsh-worktree-space`
+4. Say where the task space goes. This directory has to sit beside the **repositories' directory** — not inside
+   it, and not above it. A recommended path is filled in for you: `worktree-space` inside the **first directory
+   below the volume root** that the source root sits in (source root `E:\workspace\public\dsh-worktree-space`
    recommends `E:\workspace\worktree-space`). At that depth the task space and the source tree
    sit in one common ancestor below the volume root, and the recommendation itself is not
-   widened to the volume root. Another location still works; it is only a source root sitting
-   directly under the volume root (`E:\repo`) that shares nothing but that root with its
-   worktree (an agent handed the commits or the conflict then has to authorise itself in that
-   session — see the experimental section at the end).
+   widened to the volume root. The container is named `worktree-space` in every case: a source
+   root sitting directly under the volume root (`E:\repo`) recommends
+   `<volume root>\worktree-space`, which shares nothing but that root with its worktree (an
+   agent handed the commits or the conflict then has to authorise itself in that session — see
+   the experimental section at the end); only where that name would land on the source root
+   itself does the recommendation take `dsh-worktree-space`. Another location still works.
 5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
    choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
