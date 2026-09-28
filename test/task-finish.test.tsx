@@ -270,6 +270,10 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.created).toHaveLength(1))
     expect(next.prompts[0].text).toContain(site.replace(/\\/g, "/"))
     expect(next.prompts[0].text).toContain("src/a.ts")
+    // Opened on the worktree itself, the session cannot be told that the repository's
+    // git metadata is writable: it may be somewhere this boundary does not reach.
+    expect(next.prompts[0].text).toContain(t("finishHandoffScopeTight"))
+    expect(next.prompts[0].text).not.toContain(t("finishHandoffScopeWide"))
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", sessions: "kratos-vue-admin" }))).toBeTruthy()
 
     // The dialog cannot see an approval and cannot do the agent's work, so it does the
@@ -330,6 +334,9 @@ describe("finishing a task", () => {
     // The message says which directory the session is in, since that is no longer the
     // directory the work is in, and the panel names the boundary it bought.
     expect(next.prompts[0].text).toContain("E:/wt-demo")
+    // A boundary that reaches the repository is what the agent is told it has, since
+    // that is what saves it from asking for a wider sandbox.
+    expect(next.prompts[0].text).toContain(t("finishHandoffScopeWide"))
     expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/wt-demo" }))).toBeTruthy()
   })
 

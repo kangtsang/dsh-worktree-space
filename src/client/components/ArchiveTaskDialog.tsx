@@ -262,6 +262,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     target: entry.target ?? "",
     site: slashPath(site),
     boundary: slashPath(boundary),
+    // Only a boundary that reaches wider than the worktree can promise that the
+    // repository's git metadata is writable. When it is the worktree itself, saying
+    // so would be a claim the sandbox is about to contradict.
+    scope: slashPath(boundary) === slashPath(site) ? t("finishHandoffScopeTight") : t("finishHandoffScopeWide"),
     files: (entry.conflictedFiles ?? []).join(", "),
   })
 
