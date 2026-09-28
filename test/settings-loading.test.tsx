@@ -165,7 +165,7 @@ describe("WorktreesSettings and the remembered scan", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "linked" })).toBeTruthy())
     expect(screen.getByText(format(t("dirty"), { count: "3" }))).toBeTruthy()
     expect(document.querySelectorAll(".dws-skeleton-row")).toHaveLength(0)
-    expect(screen.getByRole("status").textContent).toContain(t("refreshing"))
+    expect(screen.getByRole("status").textContent).toContain(t("scanning"))
 
     // The scan is the last word, and an empty result is a result.
     await act(async () => { scan.resolve([]) })

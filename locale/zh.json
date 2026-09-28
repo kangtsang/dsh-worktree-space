@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "DeepSeek Harness 的任务空间插件：每个任务一套可跨多个仓库的 Git worktree，注册为 DSH 工作区；结束任务时合并分支、移除 worktree 并归档文档。"
+    "description": "为每个任务创建一个可包含多个仓库worktree的独立工作目录进行任务隔离，各Agent在自己独立的工作目录里并行工作处理任务改动互不干扰，结束任务时合并分支、移除worktree工作目录、归档文档。"
   }
 }
