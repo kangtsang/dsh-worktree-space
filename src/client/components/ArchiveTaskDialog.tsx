@@ -46,7 +46,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   // past uncommitted work are not, and are left for the user to ask for. Deleting a
   // branch that was never merged is how a task space is abandoned instead of
   // finished, and that costs the work on it — which is why it takes Force as well.
-  const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true })
+  const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true, autoCommit: false, autoResolve: false })
   // Named once, and used both for the preview and for the call, so what the user
   // reads is the folder they get.
   const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
@@ -99,6 +99,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
+      // The two switches start where the plugin settings put them, and the user can
+      // still override either one for this task alone.
+      setOptions((current) => ({ ...current, autoCommit: served?.autoCommitUncommitted === true, autoResolve: served?.autoResolveConflicts === true }))
       const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
       if (configured.trim() === "") return
       setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))
@@ -159,6 +162,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         // the pair the other way round.
         deleteBranch: options.deleteBranch && (options.merge || options.force),
         force: options.force,
+        // What finishing should do about work that is not committed yet, and about a
+        // merge that will not reconcile on its own. Both start at the settings'
+        // defaults and are overridable here for this task.
+        autoCommit: options.autoCommit,
+        autoResolve: options.autoResolve,
         // The container is cleared either way: archiving finishes a task, and a
         // task that is finished leaves nothing of its own behind. What is left to
         // decide is whether the user's writing is kept, and where.
@@ -276,7 +284,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
                   : t("finishDoneKept")}</p>
             <ul className="dws-finish-repos">{result.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
-              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null].filter(Boolean).join(" · ") || (entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
+              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null, entry.autoCommitted ? t("finishAutoCommitted") : null].filter(Boolean).join(" · ") || (entry.mergeInProgress ? t("finishConflictKept") : entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
               {/* A conflicted merge is explained in the user's language; git's own
                   output stays one click away, where the conflict itself is legible. */}
               {entry.conflict
@@ -285,6 +293,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
                   <details className="dws-finish-log"><summary>{t("finishGitOutput")}</summary><pre>{entry.error}</pre></details>
                 </>
                 : entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
+              {/* A merge left standing is not a failure to explain away: it is the step
+                  that is left, so this names the checkout and the files to reconcile. */}
+              {entry.mergeInProgress
+                ? <>
+                  <span className="dws-finish-conflict dws-finish-handoff" role="status">{format(t("finishConflictHandoff"), { site: slashPath(entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite) })}</span>
+                  {(entry.conflictedFiles ?? []).length > 0
+                    ? <span className="dws-finish-files">{format(t("finishConflictFiles"), { files: (entry.conflictedFiles ?? []).join(", ") })}</span>
+                    : null}
+                </>
+                : null}
             </li>)}</ul>
             <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: slashPath(result.path) })}</p>
             {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: slashPath(documentsDirectory), names: result.archivedStrays.join(", ") })}</p> : null}
@@ -305,6 +323,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.merge} onChange={(event) => setOptions((current) => ({ ...current, merge: event.target.checked, deleteBranch: event.target.checked || current.force ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishMerge")}</span><span className="dws-check-path">{t("finishMergeHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled || (!options.merge && !options.force)} checked={options.deleteBranch && (options.merge || options.force)} onChange={(event) => setOptions((current) => ({ ...current, deleteBranch: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishDeleteBranch")}</span><span className="dws-check-path">{t("finishDeleteBranchHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.force} onChange={(event) => setOptions((current) => ({ ...current, force: event.target.checked, deleteBranch: current.merge || event.target.checked ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishForce")}</span><span className="dws-check-path">{t("finishForceHint")}</span></span></label>
+            {/* Work that is not committed yet cannot survive its worktree, and a merge
+                that will not reconcile stops the finish. Both are opt-in, and both only
+                do what they say - neither picks a side in a conflict. */}
+            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.autoCommit} onChange={(event) => setOptions((current) => ({ ...current, autoCommit: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishAutoCommit")}</span><span className="dws-check-path">{t("finishAutoCommitHint")}</span></span></label>
+            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.autoResolve} onChange={(event) => setOptions((current) => ({ ...current, autoResolve: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishAutoResolve")}</span><span className="dws-check-path">{t("finishAutoResolveHint")}</span></span></label>
             {/* The one choice about the container's own files: keep the writing,
                 or let everything in there go. Only offered when there is writing
                 to keep — otherwise there is nothing to decide. */}

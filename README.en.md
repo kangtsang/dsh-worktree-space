@@ -107,6 +107,8 @@ data directory (as in the sample above), which needs a DSH restart.
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
+| Commit uncommitted work when finishing | on / off | **off** | Commit each worktree's uncommitted changes on its own task branch first, so a merge carries them and the worktree can be removed |
+| Hand merge conflicts to an agent | on / off | **off** | Leave a conflicting merge standing and report the checkout and the files it could not reconcile, so an agent resolves it there and finishes the task again |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
@@ -170,6 +172,21 @@ Deleting a branch normally needs the merge: untick the merge and the branch opti
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and
 the commits on them discarded — tick **Force** as well, which is what allows deleting a
 branch that was never merged.
+
+Two further options, both off by default, cover the two ways a finish stalls:
+
+- **Commit uncommitted work**: each worktree's uncommitted changes are committed on its own
+  task branch before anything else happens. That is what unblocks both halves of the stall —
+  a merge cannot carry uncommitted work, and `worktree remove` refuses it. It is the
+  opposite of **Force**, which discards that work. A branch being deleted unmerged gets no
+  such commit, since it would be deleted with the branch.
+- **Hand merge conflicts to an agent**: a conflicting merge is left standing rather than
+  aborted, and the answer reports where it stands and which files it could not reconcile, so
+  an agent resolves them there, commits the merge, and finishes the task again. Unticked, a
+  conflict is aborted as before and the target branch is left exactly as the merge found it.
+
+Both can also be switched on for the whole plugin in its settings (see Configuration above);
+the dialog's ticks are per task and override that default.
 
 #### What each combination does
 

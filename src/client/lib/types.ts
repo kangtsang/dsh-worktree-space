@@ -106,10 +106,24 @@ export interface FinishTaskRepository {
   merged: boolean
   removed: boolean
   branchDeleted: boolean
+  /** An automatic commit carried this repository's uncommitted work before finishing. */
+  autoCommitted?: boolean
   /** Why this repository was left alone; the worktree and branch stay put. */
   error?: string
-  /** The merge hit a conflict, was aborted, and left the worktree and branch. */
+  /** The merge hit a conflict and left the worktree and branch in place. */
   conflict?: boolean
+  /**
+   * The merge is deliberately still in progress in this checkout.
+   *
+   * Set instead of aborting when the finish was asked to hand the conflict on: the
+   * conflicted files are here, and the target branch moves when someone commits the
+   * merge here.
+   */
+  mergeInProgress?: boolean
+  /** The checkout an unresolved merge is waiting in. */
+  mergeSite?: string
+  /** The files the merge could not reconcile, relative to `mergeSite`. */
+  conflictedFiles?: string[]
 }
 
 /** Answer of `task.inspect`: whether a directory is a task container. */
@@ -187,6 +201,16 @@ export interface FinishTaskResult {
   containerRemoved: boolean
   failed: boolean
   warnings: string[]
+}
+
+/** Answer of `task.preference`: the settings a dialog defaults from. */
+export interface TaskPreference {
+  defaultBranchPrefix: string
+  archiveDocumentsDirectory: string
+  /** Whether finishing commits a worktree's uncommitted work by default. */
+  autoCommitUncommitted: boolean
+  /** Whether a merge that conflicts is handed on by default. */
+  autoResolveConflicts: boolean
 }
 
 /** The sessions service face (`ctx.sessions`). */

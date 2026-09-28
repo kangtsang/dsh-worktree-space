@@ -102,14 +102,32 @@ Confirm each destructive step with the user before passing it:
    a branch that is checked out nowhere is merged in a temporary worktree, so no
    source checkout is ever switched. A conflict leaves that repository's worktree
    and branch in place and reports it; the other repositories still complete.
-2. **Delete the branch?** After a merge, and only when the user asks: pass
+2. **Work nobody committed?** A merge cannot carry uncommitted changes, and a
+   worktree holding them cannot be removed — which is how a finish stalls with the
+   work stranded in the task space. Pass `autoCommit: true` when the user wants that
+   work kept: `done` commits each worktree's uncommitted changes on its own task
+   branch first. It is skipped for a branch being deleted unmerged, because that
+   commit would be deleted with it.
+3. **A conflict an agent could resolve?** Pass `autoResolve: true` when the user
+   would rather have a conflict solved than undone: the conflicting merge is left
+   standing, and the answer reports `mergeSite` — the checkout it stands in — and
+   `conflictedFiles`. Resolve exactly those files in that checkout, commit the merge
+   there, then call `done` again with the same merge request. Never resolve a
+   conflict by picking a side the user has not picked. Without this parameter a
+   conflict is aborted and the branch is left as the merge found it.
+4. **Delete the branch?** After a merge, and only when the user asks: pass
    `deleteBranch: true` together with `merge: true`. When the user wants the task
    space gone without merging anything, that is the abandon path: pass
    `deleteBranch: true` with `force: true` and `merge: false`, which removes the
    worktrees and force-deletes the branches with the commits on them.
-3. **Stray files?** When the outcome lists strays (agent notes, editor caches, a
+5. **Stray files?** When the outcome lists strays (agent notes, editor caches, a
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.
+
+`autoCommit` and `autoResolve` are also plugin settings; omitting either parameter
+uses whatever the user configured there, so a session that never passes them still
+honours the setting. Each repository row answers `autoCommitted`, `mergeInProgress`,
+`mergeSite` and `conflictedFiles`, which is where the outcome of both is read.
 
 ## Failure modes worth knowing
 

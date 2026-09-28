@@ -20,7 +20,9 @@ const DESCRIPTION = [
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'Pass merge only when the user asked to merge, deleteBranch only after a merge or - with force - when the user asked to abandon the task, and force only when the user has decided to discard uncommitted work.',
-  'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a temporary worktree, so no source checkout is ever switched.',
+  'Pass autoCommit to commit a worktree\'s uncommitted changes on its own task branch first, and autoResolve to leave a merge that conflicts standing instead of aborting it. Both fall back to the plugin settings when omitted, and neither is a choice this tool makes on its own.',
+  'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
+  'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
 ].join('\n')
 
 /**
@@ -38,6 +40,10 @@ function emptyRow(name) {
     merged: false,
     removed: false,
     branchDeleted: false,
+    autoCommitted: false,
+    mergeInProgress: false,
+    mergeSite: '',
+    conflictedFiles: [],
     error: '',
   }
 }
@@ -76,6 +82,10 @@ const OUTPUT_SCHEMA = {
           merged: { type: 'boolean', required: true },
           removed: { type: 'boolean', required: true },
           branchDeleted: { type: 'boolean', required: true },
+          autoCommitted: { type: 'boolean', required: true },
+          mergeInProgress: { type: 'boolean', required: true },
+          mergeSite: { type: 'string', required: true },
+          conflictedFiles: { type: 'array', required: true, items: { type: 'string' } },
           error: { type: 'string', required: true },
         },
       },
@@ -155,7 +165,16 @@ function summarize(action, value) {
   }
   const failed = value.failed ? ' Some repositories need attention:' : ''
   const attention = value.repositories.filter((row) => row.error !== '').map((row) => `${row.name}: ${row.error}`).join('; ')
-  return `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.${failed}${attention}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
+  // A handed-on conflict is not a failure to report and move past: it is the step
+  // that is left, so the summary says where it is rather than calling the task done.
+  const handedOn = value.repositories.filter((row) => row.mergeInProgress)
+  const headline = handedOn.length === 0
+    ? `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.`
+    : `Task '${value.task}' is unfinished: a merge is waiting to be resolved in ${handedOn.map((row) => row.mergeSite).join(', ')}.`
+  const handoff = handedOn.length === 0
+    ? ''
+    : ` Resolve ${handedOn.map((row) => row.conflictedFiles.join(', ')).filter((list) => list !== '').join('; ') || 'the conflict'}, commit the merge there, then call done again.`
+  return `${headline}${failed}${attention}${handoff}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
 }
 
 /**
@@ -165,12 +184,18 @@ function summarize(action, value) {
  * endpoints, and a bare context double (as the host tests build) has no service
  * lookup at all, so probing it must not throw.
  * @param ctx - the host plugin context.
+ * @param finishDefaults - accessors for the configured `autoCommit` and `autoResolve`
+ * choices. They are read when a call arrives, so a setting saved while the entry is
+ * running is honoured by the next call rather than the next reload.
  * @returns the registration disposer, or undefined when tools are unavailable.
  */
-export function registerTaskTool(ctx) {
+export function registerTaskTool(ctx, finishDefaults = {}) {
   if (typeof ctx.get !== 'function') return undefined
   const tools = ctx.get('tools')
   if (tools === undefined || tools === null || typeof tools.register !== 'function') return undefined
+
+  const autoCommitDefault = typeof finishDefaults.autoCommit === 'function' ? finishDefaults.autoCommit : () => false
+  const autoResolveDefault = typeof finishDefaults.autoResolve === 'function' ? finishDefaults.autoResolve : () => false
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -194,6 +219,8 @@ export function registerTaskTool(ctx) {
       cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Off by default.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },
       force: { type: 'boolean', description: 'Discard uncommitted changes, force-delete branches (done). Only on the user decision.' },
+      autoCommit: { type: 'boolean', description: 'Commit each worktree\'s uncommitted changes on its task branch before finishing (done). Omit for the plugin setting.' },
+      autoResolve: { type: 'boolean', description: 'Leave a merge that conflicts standing, and report the checkout and files to resolve (done). Omit for the plugin setting.' },
     },
     output: {
       schema: OUTPUT_SCHEMA,
@@ -273,6 +300,8 @@ export function registerTaskTool(ctx) {
           force: args.force === true,
           cleanStray: args.cleanStray === true,
           keep: Array.isArray(args.keep) ? args.keep : [],
+          autoCommit: typeof args.autoCommit === 'boolean' ? args.autoCommit : autoCommitDefault(),
+          autoResolve: typeof args.autoResolve === 'boolean' ? args.autoResolve : autoResolveDefault(),
         })
         const value = envelope(action)
         value.task = task
@@ -287,6 +316,10 @@ export function registerTaskTool(ctx) {
           merged: entry.merged === true,
           removed: entry.removed === true,
           branchDeleted: entry.branchDeleted === true,
+          autoCommitted: entry.autoCommitted === true,
+          mergeInProgress: entry.mergeInProgress === true,
+          mergeSite: entry.mergeSite ?? '',
+          conflictedFiles: Array.isArray(entry.conflictedFiles) ? entry.conflictedFiles : [],
           error: entry.error ?? '',
         }))
         value.summary = summarize(action, value)

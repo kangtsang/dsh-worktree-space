@@ -6,6 +6,7 @@ import type {
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
+  TaskPreference,
   TaskRootSuggestion,
   WorktreeList,
   WorktreeStatus,
@@ -78,7 +79,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      * user edits on the Plugins page, and the dialog starts from whatever is in
      * force. The write path is the configuration form itself.
      */
-    preferences: (signal?: AbortSignal) => read<{ defaultBranchPrefix: string; archiveDocumentsDirectory: string }>("task.preference", {}, signal),
+    preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
     /** Whether a directory is a task container, and what it holds. */
@@ -86,6 +87,6 @@ export function createWorktreeApi(connection: ConnectionService) {
     /** What archiving a task would do, before doing any of it. */
     planTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; autoCommit?: boolean; autoResolve?: boolean }) => call<FinishTaskResult>("task.done", payload),
   }
 }

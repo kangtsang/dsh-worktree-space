@@ -265,6 +265,14 @@
   .dws-plugin-config-wide .dws-plugin-config-text { grid-template-columns: auto minmax(0, 1fr); }
   /* Locked wears the same pill as every other row's value, so the card reads as one list. */
   .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  /* A standing setting, so it wears a switch rather than the tick a list of choices
+     uses: on is a position, not a selection. Sized to the pill's own 36px row so the
+     card still reads as one column of controls. */
+  .dws-plugin-config-switch { position: relative; display: inline-flex; flex: none; align-items: center; width: 44px; height: 24px; border: 0; border-radius: 12px; padding: 0; background: var(--dsw-alias-bg-module-platform); cursor: pointer; transition: background-color .16s ease; }
+  .dws-plugin-config-switch[data-on="true"] { background: var(--dsw-alias-button-primary-fill); }
+  .dws-plugin-config-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-plugin-config-switch-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 1px 2px rgb(0 0 0 / 22%); transition: transform .16s ease; }
+  .dws-plugin-config-switch[data-on="true"] .dws-plugin-config-switch-knob { transform: translateX(20px); }
   /* Editing: the wrapper draws the box, not the input.
      The Host page styles inputs of its own and those rules are not in this plugin's layer,
      so an input cannot be trusted to be 36px tall here - it arrived visibly taller. The box
@@ -432,6 +440,10 @@
   .dws-checkbox:indeterminate::before { width: 8px; height: 2px; margin-top: 0; border: 0; border-radius: 1px; background: var(--dsw-alias-label-primary-foreground); transform: scale(1); }
   .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
   .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* A merge left standing is the next step rather than a casualty, so it reads in the
+     warning colour and names the files in the shape a path is easiest to copy from. */
+  .dws-finish-handoff { display: block; margin-top: 4px; color: var(--wt-warn); }
+  .dws-finish-files { display: block; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */

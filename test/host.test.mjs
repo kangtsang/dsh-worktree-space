@@ -271,6 +271,24 @@ describe("worktree RPC contract", () => {
     directory = "   "
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
   })
+
+  it("answers the two finish defaults, read live from the switches the settings card writes", async () => {
+    // Off until someone turns them on, and the same live-accessor shape as the two
+    // settings above: flipping a switch is what the next finish reads.
+    let autoCommit = false
+    let autoResolve = false
+    const handler = handleFor({}, {
+      autoCommitUncommitted: { get: () => autoCommit },
+      autoResolveConflicts: { get: () => autoResolve },
+    })
+    expect((await handler("task.preference")).value)
+      .toMatchObject({ autoCommitUncommitted: false, autoResolveConflicts: false })
+
+    autoCommit = true
+    autoResolve = true
+    expect((await handler("task.preference")).value)
+      .toMatchObject({ autoCommitUncommitted: true, autoResolveConflicts: true })
+  })
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
       "status --short --branch": "## feat/antest",

@@ -55,7 +55,16 @@ interface TextField {
   allowEmpty?: boolean
 }
 
-type Field = ChoiceField | TextField
+/** A row whose value is on or off. */
+interface BooleanField {
+  kind: "boolean"
+  field: string
+  label: string
+  fallback: string
+  hint?: string
+}
+
+type Field = ChoiceField | TextField | BooleanField
 
 /**
  * Copy for a key that may not exist yet.
@@ -136,6 +145,22 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     hint: copyOr(t, ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK),
     wide: true,
     allowEmpty: true,
+  },
+  {
+    // Both switches only decide what finishing does by itself. Neither overrides an
+    // explicit `autoCommit`/`autoResolve` on the call, and neither ever picks a side.
+    kind: "boolean",
+    field: "autoCommitUncommitted",
+    label: t("autoCommitUncommitted"),
+    fallback: "false",
+    hint: t("autoCommitUncommittedHint"),
+  },
+  {
+    kind: "boolean",
+    field: "autoResolveConflicts",
+    label: t("autoResolveConflicts"),
+    fallback: "false",
+    hint: t("autoResolveConflictsHint"),
   },
 ]
 
@@ -226,6 +251,57 @@ function TextFieldRow({ field, label, fallback, hint, wide, allowEmpty, form, no
   </div>
 }
 
+/**
+ * A row whose value is on or off.
+ *
+ * Shown the moment it is switched and settled when the Host answers, like the choices: a
+ * refusal puts the switch back, so the row never claims a setting that is not in force.
+ * The label carries the meaning — "commit uncommitted work" — because "on" alone does not.
+ */
+function BooleanFieldRow({ field, label, fallback, hint, form, notify }: {
+  field: string
+  label: string
+  fallback: string
+  hint?: string
+  form: ConfigFormLike
+  notify: (message: string | null) => void
+}) {
+  const t = useT()
+  const served = textOf(form.getSnapshot().value)[field] ?? fallback
+  const [chosen, setChosen] = useState(() => previewValue(field) ?? served)
+  useEffect(() => {
+    const read = () => setChosen(previewValue(field) ?? textOf(form.getSnapshot().value)[field] ?? fallback)
+    read()
+    const stopPreview = subscribePreview(read)
+    const stopForm = form.subscribe(read)
+    return () => {
+      stopPreview()
+      stopForm()
+    }
+  }, [field, fallback, form])
+  const on = chosen === "true"
+  const turn = () => {
+    const next = !on
+    setChosen(String(next))
+    setPreview(field, String(next))
+    notify(null)
+    void form.set(field, next).then((accepted) => {
+      if (accepted) return
+      setPreview(field, undefined)
+      setChosen(served)
+      notify(t("configNotSaved"))
+    })
+  }
+  return <div className="dws-plugin-config-row">
+    <span className="dws-plugin-config-label">{label}{hint === undefined ? null : <span className="dws-plugin-config-hint">{hint}</span>}</span>
+    <span className="dws-plugin-config-field">
+      <button type="button" role="switch" aria-checked={on} aria-label={label} className="dws-plugin-config-switch" data-on={on ? "true" : "false"} onClick={turn}>
+        <span className="dws-plugin-config-switch-knob" aria-hidden="true" />
+      </button>
+    </span>
+  </div>
+}
+
 interface PluginConfigCardProps {
   /** The form the Host serves for this plugin, or undefined when there is none. */
   form?: ConfigFormLike
@@ -234,7 +310,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory", "autoCommitUncommitted", "autoResolveConflicts"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -316,6 +392,9 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     {fieldsFor(t).map((field) => {
       if (field.kind === "text") {
         return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} wide={field.wide} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
+      }
+      if (field.kind === "boolean") {
+        return <BooleanFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} form={form} notify={setNotice} />
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
       const current = chosen[name] ?? served[name] ?? fallback

@@ -535,7 +535,7 @@ describe("finishTask", () => {
       "worktree remove": "",
       // A merge only lands on a branch that is checked out, so the merge has to be
       // the one run inside the worktree this plugin created for it.
-      "merge --no-ff --no-edit task/login": ({ cwd }) => (cwd.includes("dsh-worktree-space-merge-") ? "" : { exitCode: 1, stderr: "fatal: refusing to merge here\n" }),
+      "merge --no-ff --no-edit task/login": ({ cwd }) => (cwd.includes("dsh-worktree-space-merge") ? "" : { exitCode: 1, stderr: "fatal: refusing to merge here\n" }),
     })
     try {
       const result = await finishTask(subprocess, {
@@ -558,7 +558,7 @@ describe("finishTask", () => {
       const dropped = calls.filter((call) => call.args[1] === "remove" && call.args[2] === "--force")
       expect(dropped.map((call) => call.args[3])).toEqual(added.map((call) => call.args[2]))
       expect(keys().filter((key) => key.startsWith("checkout") || key.startsWith("switch"))).toEqual([])
-      expect(added.every((call) => call.args[2].includes("dsh-worktree-space-merge-"))).toBe(true)
+      expect(added.every((call) => call.args[2].includes("dsh-worktree-space-merge"))).toBe(true)
     } finally {
       await fixture.cleanup()
     }
@@ -573,7 +573,7 @@ describe("finishTask", () => {
       "worktree remove": "",
       "merge --abort": "",
       "merge --no-ff --no-edit task/login": ({ cwd }) =>
-        cwd.endsWith("alpha") || cwd.includes("dsh-worktree-space-merge-")
+        cwd.endsWith("alpha") || cwd.includes("dsh-worktree-space-merge")
           ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" }
           : "",
     })
@@ -592,6 +592,77 @@ describe("finishTask", () => {
       // made, so the branch is where it was and no scratch checkout is left behind.
       expect(keys()).toContain("merge --abort")
       expect(calls.filter((call) => call.args[1] === "remove")).toHaveLength(2)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("commits a worktree's uncommitted changes before merging, and only where there are any", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+      // alpha has work sitting in it and beta has none, so exactly one task branch
+      // gets a commit - the commit is per worktree, not a sweep of the container.
+      "status --short": ({ cwd }) => (basename(cwd) === "alpha" ? " M a.ts\n?? b.ts\n" : ""),
+      "add -A": "",
+      "commit -m chore(task): commit work in progress before finishing the task space": "",
+    })
+    try {
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+        autoCommit: true,
+      })
+
+      expect(result.failed).toBe(false)
+      expect(result.repositories.map((entry) => entry.autoCommitted)).toEqual([true, false])
+      expect(keys().filter((key) => key === "add -A")).toHaveLength(1)
+      expect(keys().filter((key) => key.startsWith("commit -m chore(task)"))).toHaveLength(1)
+      // The commit lands before the merge, which is the whole point of making it.
+      expect(keys().indexOf("add -A")).toBeLessThan(keys().indexOf("merge --no-ff --no-edit task/login"))
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves a conflicting merge standing, with its files, when the conflict is handed on", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixture.handlers,
+      "show-ref --verify --quiet refs/heads/develop": "",
+      "worktree add": "",
+      "worktree remove": "",
+      "merge --abort": "",
+      // The merge is still standing: git says so, and names what it could not settle.
+      "rev-parse --verify --quiet MERGE_HEAD": "",
+      "diff --name-only --diff-filter=U": () => "src/a.ts\nsrc/b.ts\n",
+      "merge --no-ff --no-edit task/login": ({ cwd }) =>
+        cwd.includes("dsh-worktree-space-merge") ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" } : "",
+    })
+    try {
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+        targets: { alpha: "develop", beta: "develop" },
+        autoResolve: true,
+      })
+
+      expect(result.failed).toBe(true)
+      // Nothing was thrown away for the agent to redo: the merge is where it was left.
+      expect(keys()).not.toContain("merge --abort")
+      const [alpha] = result.repositories
+      expect(alpha.mergeInProgress).toBe(true)
+      expect(alpha.mergeSite).toContain("dsh-worktree-space-merge")
+      expect(alpha.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
+      // The worktree and branch stay, because the merge still has to land.
+      expect(alpha.removed).toBe(false)
+      expect(alpha.branchDeleted).toBe(false)
     } finally {
       await fixture.cleanup()
     }

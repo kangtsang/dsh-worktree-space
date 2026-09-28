@@ -48,14 +48,16 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "" }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", autoCommit = false, autoResolve = false }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; autoCommit?: boolean; autoResolve?: boolean } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
     cachedScan: vi.fn().mockResolvedValue(null),
     // What the Host has configured: the archive destination is empty unless a test
-    // sets one, which is the same "not set" the real entry answers with.
-    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory }),
+    // sets one, which is the same "not set" the real entry answers with. The two
+    // finish defaults are off unless a test turns them on, and the dialog seeds its
+    // own boxes from them.
+    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory, autoCommitUncommitted: autoCommit, autoResolveConflicts: autoResolve }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),
@@ -208,7 +210,7 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", tasksRoot: root, merge: true, deleteBranch: true, force: false, cleanStray: true })
+    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", tasksRoot: root, merge: true, deleteBranch: true, force: false, cleanStray: true, autoCommit: false, autoResolve: false })
     await waitFor(() => expect(screen.getByText(t("finishDone"))).toBeTruthy())
     expect(screen.getAllByText(new RegExp(t("finishMerged").replace("{target}", "main")))).toHaveLength(2)
     expect(screen.getAllByText(new RegExp(t("finishRemoved"))).length).toBeGreaterThan(0)
@@ -217,6 +219,61 @@ describe("finishing a task", () => {
     // The report replaces the options: nothing left to confirm twice.
     expect(screen.queryByRole("button", { name: t("finishConfirmAction") })).toBeNull()
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("takes the two finish defaults from the plugin settings, and lets one task override them", async () => {
+    const user = userEvent.setup()
+    const next = setup({ autoCommit: true, autoResolve: true })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    // The settings are the plugin-wide default and the dialog is where a single task
+    // overrides them, so both arrive ticked when the Host has them on.
+    expect(option(t("finishAutoCommit"))).toHaveProperty("checked", true)
+    expect(option(t("finishAutoResolve"))).toHaveProperty("checked", true)
+
+    await user.click(option(t("finishAutoCommit")))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
+    expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ autoCommit: false, autoResolve: true }))
+  })
+
+  it("shows where a handed-on merge is standing, and the files it could not reconcile", async () => {
+    const user = userEvent.setup()
+    const site = `${root}\\kratos-vue-admin`
+    const next = setup({
+      // The Host left the merge in place instead of aborting it, which is what the
+      // agent that resolves it needs to be told: the checkout, and the files.
+      result: finishResult({
+        failed: true,
+        repositories: [
+          {
+            name: "kratos-vue-admin",
+            path: `${container}\\kratos-vue-admin`,
+            branch,
+            target: "main",
+            merged: false,
+            removed: false,
+            branchDeleted: false,
+            conflict: true,
+            mergeInProgress: true,
+            mergeSite: site,
+            conflictedFiles: ["src/a.ts", "src/b.ts"],
+            error: "CONFLICT (content): merge conflict in src/a.ts",
+          },
+        ],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    await waitFor(() => expect(screen.getByText(format(t("finishConflictHandoff"), { site: site.replace(/\\/g, "/") }))).toBeTruthy())
+    expect(screen.getByText(format(t("finishConflictFiles"), { files: "src/a.ts, src/b.ts" }))).toBeTruthy()
+    // Still standing, not aborted: the report says which of the two it is.
+    expect(screen.getAllByText(t("finishConflictKept")).length).toBeGreaterThan(0)
+    expect(screen.queryByText(t("finishConflicted"))).toBeNull()
   })
 
   it("names the task space by its directory, not by one repository's merge target", async () => {

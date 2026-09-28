@@ -15,6 +15,64 @@ import { assertIsolated, recommendTasksRoot } from './paths.js'
 import { TASK_OWNED_FILES, isLinkedWorktree } from './shared.js'
 
 /**
+ * The commit an automatic save makes.
+ *
+ * Written to be read by whoever finds it in the log: it says who committed the work
+ * and why nobody typed a message, because the person who wrote the changes is not
+ * the one who ran the command.
+ */
+const AUTO_COMMIT_MESSAGE = 'chore(task): commit work in progress before finishing the task space'
+
+/**
+ * Where a merge that needs a checkout of its own is performed.
+ *
+ * Deterministic rather than temporary, because a conflicting merge is deliberately
+ * left standing for an agent to resolve: the next attempt has to find that same
+ * checkout — and clear it — instead of colliding with the branch it still holds.
+ * The task and the repository name it between them, so two tasks never share one.
+ * @param task - the task name.
+ * @param name - the repository's directory name.
+ * @returns the directory the scratch checkout is created at.
+ */
+const scratchFor = (task, name) => join(tmpdir(), 'dsh-worktree-space-merge', task, name)
+
+/**
+ * Whether a merge is waiting to be concluded in a checkout.
+ *
+ * `MERGE_HEAD` exists exactly while a merge has been started and not committed, so
+ * this is what separates a conflict - which leaves work for someone - from every
+ * other reason a `git merge` fails, which leaves none.
+ * @param subprocess - the profile's subprocess service.
+ * @param site - the checkout the merge ran in.
+ * @returns true while the merge is unresolved.
+ */
+async function mergeInProgress(subprocess, site) {
+  return gitSucceeded(subprocess, site, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'])
+}
+
+/**
+ * The files a merge could not reconcile.
+ * @param subprocess - the profile's subprocess service.
+ * @param site - the checkout the merge is standing in.
+ * @returns their paths, relative to that checkout.
+ */
+async function conflictedFiles(subprocess, site) {
+  const output = await tryRunGit(subprocess, site, ['diff', '--name-only', '--diff-filter=U'])
+  return output.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
+}
+
+/**
+ * How many paths a worktree has changed but not committed.
+ * @param subprocess - the profile's subprocess service.
+ * @param worktreePath - the worktree to read.
+ * @returns the number of reported paths.
+ */
+async function uncommittedCount(subprocess, worktreePath) {
+  const status = await tryRunGit(subprocess, worktreePath, ['status', '--short'])
+  return status === '' ? 0 : status.split(/\r?\n/).filter((line) => line.trim() !== '').length
+}
+
+/**
  * The branch a finished task merges into.
  *
  * An explicitly named target wins, as long as it is a local branch: the merge
@@ -97,18 +155,40 @@ async function mergeCandidates(subprocess, mainRepo, listed, taskBranch, checked
  * @param target - the local branch to merge it into.
  * @throws Error from git, with the repository left as it was found.
  */
-async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
+async function mergeIntoBranch(subprocess, mainRepo, branch, target, { keepOnConflict = false, scratch = '' } = {}) {
   const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (target === checkedOut) {
-    await runGit(subprocess, mainRepo, ['merge', '--no-ff', '--no-edit', branch])
+    try {
+      await runGit(subprocess, mainRepo, ['merge', '--no-ff', '--no-edit', branch])
+    } catch (error) {
+      // Kept: the conflicted files are in this checkout, and the branch is untouched
+      // until someone commits the merge here.
+      if (keepOnConflict && await mergeInProgress(subprocess, mainRepo)) {
+        error.mergeSite = mainRepo
+        throw error
+      }
+      // The merge commit is what moves the branch, and it was never made, so
+      // aborting leaves the branch exactly as the merge found it.
+      await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
+      throw error
+    }
     return
   }
 
   // The holder is this process's own temporary directory, so the checkout cannot
-  // land inside the source tree, and the worktree path below it does not exist yet
-  // - which is what `git worktree add` requires.
-  const holder = await mkdtemp(join(tmpdir(), 'dsh-worktree-space-merge-'))
-  const worktree = join(holder, 'worktree')
+  // land inside the source tree. A named `scratch` is used as it stands: it is the
+  // second attempt at a merge that was left standing for someone to resolve, so
+  // whatever the previous attempt left there - including the worktree registration
+  // still holding the target branch - has to go before the branch can be checked
+  // out again.
+  const holder = scratch === '' ? await mkdtemp(join(tmpdir(), 'dsh-worktree-space-merge-')) : scratch
+  const worktree = scratch === '' ? join(holder, 'worktree') : scratch
+  if (scratch !== '') {
+    await gitSucceeded(subprocess, mainRepo, ['worktree', 'remove', '--force', worktree])
+    await gitSucceeded(subprocess, mainRepo, ['worktree', 'prune'])
+    await rm(worktree, { recursive: true, force: true })
+    await mkdir(dirname(worktree), { recursive: true })
+  }
   const drop = async ({ aborted }) => {
     // Best effort by design: a merge that succeeded must not be reported as failed
     // because its scratch checkout would not go away. A registration git will not
@@ -126,6 +206,12 @@ async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
     await runGit(subprocess, mainRepo, ['worktree', 'add', worktree, target])
     await runGit(subprocess, worktree, ['merge', '--no-ff', '--no-edit', branch])
   } catch (error) {
+    // Kept, unlike the other failures: the merge is standing in this checkout, and
+    // the target branch moves only when someone commits it there.
+    if (keepOnConflict && await mergeInProgress(subprocess, worktree)) {
+      error.mergeSite = worktree
+      throw error
+    }
     // The merge commit is what moves the target branch, and it was never made, so
     // aborting and dropping the checkout leaves the branch untouched.
     await drop({ aborted: true })
@@ -283,6 +369,22 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
 }
 
 
+/**
+ * Finish a task: merge each worktree's branch as asked, remove the worktrees, and
+ * file what the task left behind.
+ *
+ * Two options answer the two ways this stops halfway. `autoCommit` commits a
+ * worktree's uncommitted work on its own branch first, which is what lets a merge
+ * carry it and a removal proceed. `autoResolve` leaves a conflicting merge standing
+ * instead of aborting it, and reports the checkout and the files it could not
+ * reconcile on the affected repository, so a caller - an agent, in practice - can
+ * resolve them there and ask for the finish again.
+ * @param subprocess - the profile's subprocess service.
+ * @param options - the task, its root, what to do with branches, documents and
+ * worktrees, and whether to `autoCommit` or `autoResolve`.
+ * @returns what each repository's worktree, branch and merge ended up as.
+ * @throws Error when the task space is missing or the request contradicts itself.
+ */
 export async function finishTask(subprocess, options) {
   const {
     task,
@@ -296,6 +398,8 @@ export async function finishTask(subprocess, options) {
     keep = [],
     documentsDirectory,
     discardDocuments = false,
+    autoCommit = false,
+    autoResolve = false,
   } = options
 
   // Deleting a branch that was merged is routine; deleting one that was not throws
@@ -334,13 +438,32 @@ export async function finishTask(subprocess, options) {
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     // `git worktree list` always prints the main working tree first.
     const mainRepo = parseWorktrees(porcelain).find((row) => row.isMain)?.path ?? ''
+    const outcome = { name, path: worktreePath, branch, merged: false, removed: false, branchDeleted: false, autoCommitted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
     if (mainRepo === '') {
-      repositories.push({ name, path: worktreePath, branch, merged: false, removed: false, branchDeleted: false, error: 'cannot locate the source repository' })
+      outcome.error = 'cannot locate the source repository'
+      repositories.push(outcome)
       failed = true
       continue
     }
 
-    const outcome = { name, path: worktreePath, branch, merged: false, removed: false, branchDeleted: false }
+    // Work nobody committed is what a merge cannot carry and what a worktree removal
+    // refuses, so committing it first is what lets a finish complete. It is skipped
+    // when the branch it would land on is about to be deleted unmerged: that is an
+    // abandonment the caller asked for, and a commit there would only be deleted too.
+    if (autoCommit && (merge || !deleteBranch) && await uncommittedCount(subprocess, worktreePath) > 0) {
+      try {
+        await runGit(subprocess, worktreePath, ['add', '-A'])
+        await runGit(subprocess, worktreePath, ['commit', '-m', AUTO_COMMIT_MESSAGE])
+        outcome.autoCommitted = true
+      } catch (error) {
+        // Left alone rather than forced through: a commit the repository itself
+        // refused - a failing hook, a missing identity - is its owner's decision.
+        outcome.error = `could not commit the uncommitted changes: ${error.message}`
+        repositories.push(outcome)
+        failed = true
+        continue
+      }
+    }
 
     if (merge) {
       try {
@@ -348,7 +471,14 @@ export async function finishTask(subprocess, options) {
         // them, which is how the tool asks for a single branch across a task.
         const mergeTarget = await resolveMergeTarget(subprocess, mainRepo, targets?.[name] ?? target, branch)
         outcome.target = mergeTarget
-        await mergeIntoBranch(subprocess, mainRepo, branch, mergeTarget)
+        await mergeIntoBranch(subprocess, mainRepo, branch, mergeTarget, {
+          // Handed on rather than undone: the checkout a conflict stands in, and the
+          // files it could not reconcile, are what finishing it elsewhere needs.
+          keepOnConflict: autoResolve,
+          // A named scratch path exists so a kept conflict can be found and cleared on
+          // the next attempt; a merge nobody is handing on keeps the throwaway default.
+          scratch: autoResolve ? scratchFor(validateTaskName(task), name) : '',
+        })
         outcome.merged = true
       } catch (error) {
         // Leave the worktree and branch in place for manual handling. `error` stays
@@ -356,7 +486,15 @@ export async function finishTask(subprocess, options) {
         // shows this behind a disclosure, and the answer's `conflict` flag plus
         // `removed: false` tell a caller the worktree and branch are still there.
         outcome.conflict = true
-        await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
+        if (typeof error.mergeSite === 'string') {
+          // Deliberately still in progress, so nothing is aborted here: the site and
+          // the conflicted files are what the next attempt has to start from.
+          outcome.mergeSite = error.mergeSite
+          outcome.mergeInProgress = true
+          outcome.conflictedFiles = await conflictedFiles(subprocess, error.mergeSite)
+        } else {
+          await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
+        }
         outcome.error = error.message
         repositories.push(outcome)
         failed = true
