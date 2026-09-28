@@ -39,8 +39,10 @@ dsh plugin --profile evidence add dsh-worktree-space
 - 该命令把 pnpm 参数原样转发给 profile，首次使用会初始化这个 profile。
 - 通过标准：命令以 0 退出且无 `incompatible` 警告（若有版本警告，说明 `engines.dsh` 与实际宿主不符，
   应改声明而不是用 `allow-version --accept-risk` 掩盖）；`$DSH_HOME/profiles/evidence/node_modules/dsh-worktree-space/`
-  存在且其 `package.json` 的 `version` 等于本次提交的版本；`$DSH_HOME/profiles/evidence/cordis.patch.yml`
-  中出现插件的挂载行（`id: worktree-space` / `name: dsh-worktree-space`）。
+  存在且其 `package.json` 的 `version` 等于本次提交的版本；profile 的 `package.json` 把它写进
+  `dsh.profile.bundles`。**注意**：`cordis.patch.yml` 不会因此多出挂载行——`dsh plugin add` 只做 pnpm
+  安装并登记 bundle，`- id: worktree-space` 那一行是之后在插件页里改过设置（或从插件市场启用）时由插件
+  管理器写下的；本机日常 web profile 里那一行连同它的 `config` 就是这样来的。
 
   > 想从官方模板起步时，可用启动器的 `--from-default-profile web` 先把 `evidence` 按 web 模板初始化；
   > 具体用法以 `dsh --help` 在你所用 DSH 版本上的输出为准。
@@ -64,6 +66,15 @@ dsh --profile evidence --no-open --port 0
 - 通过标准：进程正常启动；在插件列表里能看到 **Worktree Space** 的名称、描述与 `icon.svg` 图标；
   能看到它自己的配置区（面板入口、侧边栏底部入口、扫描深度、最大遍历目录数、默认分支前缀、归档文档目录），
   改动立刻生效；侧边栏底部出现快捷入口，能打开管理页面；宿主 RPC 路由 `/api/dsh-worktree-space` 已注册。
+- **profile 必须带上 Web 应用的 bundle 层**：`dsh plugin` 初始化出来的空 profile 里没有
+  `@deepseek-ai/dsh-web-app`，插件会停在 `pending (waiting for service: connection)`，宿主打印
+  `warning: 1 entry did not activate`——这不是插件的问题，用 `dsh evidence --from-default-profile web`
+  从官方 web 模板建 profile 即可。
+- 「RPC 路由已注册」的机器可读验法：这些路由是 `POST /api/dsh-worktree-space/<endpoint>`（endpoint
+  见 `src/host/index.js` 的 `ENDPOINTS`），带会话 cookie 请求 `task.preference` 得 200 与
+  `{"ok":true,"value":{…}}`，随便编一个 endpoint 得 404。客户端 bundle 的地址在启动数据里
+  （`plugins/??dsh-worktree-space/client.js&rev=<rev>`），取回应得 200，字节数等于 `client/client.js`
+  加上宿主加载器补的那层包装。
 - **端到端功能验收**（一次性仓库，不要用真实项目）：在临时目录里 `git init` 一个仓库 → 新建任务空间 →
   确认 `<任务空间>/<任务名>/<仓库名>` 是 worktree、任务空间已注册为工作区并开了会话 → 改一个文件 →
   「结束任务」确认分支合并、worktree 移除、文档归档到 `archived-docs/<工作区名>-<时间戳>/`。
@@ -80,22 +91,45 @@ dsh --profile evidence --dump-config
   第二次 `--dump-config` 的条目树里不再有 `worktree-space`；启动后插件列表里不再出现该插件，侧边栏入口一并消失，
   且没有残留报错（宿主 RPC 路由注销，不留下需要手动清理的状态）。
 
-## 3. 当前证据状态（本提交，如实记录）
+## 3. 验收记录（2026-09-28，一次性 profile `evidence`）
 
-| 步骤 | 状态 | 现有证据 |
+环境：Windows、Node.js `v24.18.0`、DSH `0.1.7-rc.2`；被测包是 `npm pack` 出来的
+`dsh-worktree-space-1.0.5.tgz`（303232 字节，与 `pnpm check:package` 校验的 18 个文件同源）。`DSH_HOME`
+全程指向临时目录，没有碰日常 `profiles/`。
+
+| 步骤 | 状态 | 证据 |
 | --- | --- | --- |
-| 安装 | **已在本提交之前的历史版本上通过**；本提交（1.0.5）**待执行** | 作者本机的两个真实 profile 里存在安装目录：`<DSH_HOME>/profiles/web/node_modules/dsh-worktree-space/`（版本 `1.0.3`）与 `<DSH_HOME>/profiles/desktop/node_modules/dsh-worktree-space/`；`<DSH_HOME>/profiles/web/cordis.patch.yml` 里有 `id: worktree-space` / `name: dsh-worktree-space` 的挂载行 |
-| 配置组合 | **待执行** | 本提交没有 `--dump-config` 的输出记录 |
-| 启动与可见性 | **待执行** | 本体改动的上一版曾在 web profile 中随 DSH 启动加载；本提交未附截图 |
-| 卸载回滚 | **待执行** | — |
+| 安装 | **已通过** | `dsh plugin --profile evidence add <tarball>` 退出 0，输出 `+ dsh-worktree-space 1.0.5`；`incompatible` 一次都没出现；profile 的 `package.json` 增加该依赖并把它写进 `dsh.profile.bundles`；装出来的 `package.json` 是 `version 1.0.5`、`engines={"node":">=22.19.0","dsh":">=0.1.7-rc.1"}` |
+| 配置组合 | **已通过** | `dsh --profile evidence --dump-config` 退出 0（1249 行），组合树末尾出现 `# == dsh-worktree-space` / `- id: worktree-space` / `name: dsh-worktree-space` |
+| 启动与可见性 | **已通过** | 启动无警告（没有 `did not activate`）；启动数据里出现客户端条目 `{"id":"dsh-worktree-space","url":"plugins/??dsh-worktree-space/client.js&rev=1ea18b4cf4b3",…}`；该 bundle 取回 **200、203853 字节**（本地 `client/client.js` 203777 字节，外加宿主加载器补的 76 字节包装与 `sourceMappingURL`）；宿主 RPC 已注册并作答：`POST /api/dsh-worktree-space/task.preference` → 200 `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsDirectory":""}}`，未知 endpoint → 404 |
+| 卸载回滚 | **已通过** | `dsh plugin --profile evidence remove dsh-worktree-space` 退出 0，输出 `- dsh-worktree-space 1.0.5`；`profiles/evidence/node_modules/dsh-worktree-space/` 消失；`package.json` 的依赖与 `bundles` 里都不再有它；`--dump-config` 里 `worktree-space` 出现 **0** 次（1246 行）；再启动一次无报错，页面里 `dsh-worktree-space` 出现 **0** 次 |
 
-**为什么是「待执行」而不是「已完成」**：本次修复只改动了 `package.json`、文档与打包白名单校验脚本，
-没有改动 `src/`、`lib/index.js` 或 `client/client.js`，因此不需要重新构建；但**权威的一次性 Profile 验收
-必须在有 shell 的机器上跑完**，本提交的编辑环境里 `pwsh` 不可用，无法执行 `dsh`、`pnpm` 或 `git` 命令，
-所以这里只给出可复现的步骤与判定标准，不把「没有跑」写成「已通过」。
+### 3.1 端到端功能验收（一次性仓库）
 
-用第 1、2 节的命令跑完一次后，把输出与截图附在本文件下面，并把这四行状态改成「已通过（日期 + DSH 版本 +
-Node 版本 + profile 名）」。**严禁在没有执行的情况下填写通过记录。**
+同一个一次性 profile 里，用插件自己的 RPC 走完了创建 → 计划 → 结束：
+
+1. `task.create`（源根下只有一个 `repo-alpha`）→ 建出 `<tasksRoot>/evidence/repo-alpha`（worktree，分支
+   `task/evidence`）与 `worktree-space.json` / `worktree-space.md`。把 tasks root 指到源根**里面**时被
+   拒绝：`tasks root is inside the source root: … work and source must be isolated`（隔离规则有效）。
+2. 在 worktree 里改一个文件并提交 → `task.plan` 报 `mergeTarget: "main"`、`commits: 1`、
+   `changedFiles: 0`。
+3. `task.done`（`merge: true, deleteBranch: true`）→ `merged: true, removed: true, branchDeleted: true,
+   containerRemoved: true, failed: false, warnings: []`。
+4. 源仓库结果：`2b2952d Merge branch 'task/evidence'`（`--no-ff`），`feature.txt` 已出现在 main 检出里，
+   分支只剩 `main`，`git worktree list` 只剩主检出；任务目录已删除（`tasksRoot` 本身保留，因为它是用户
+   指定的根，插件只删自己建的那一层）。
+
+跑完后一次性 profile 与临时仓库都已删除，`remove` 之后 profile 回到 `@deepseek-ai/dsh-base` +
+`@deepseek-ai/dsh-web-app` 两个 bundle。
+
+### 3.2 两点如实说明
+
+- **GUI 截图未附**：headless Chrome 面对开着长连接的 GUI 不会自行退出（跑满两分钟仍不返回），所以这一轮
+  的可见性证据是上面那些机器可读输出（启动数据里的客户端条目、bundle 的实际字节数、RPC 的实际回答），
+  **不是**插件列表与配置区的截图。截图请在带图形界面的机器上按 2.3 节补一次。
+- **pnpm 的 peer 警告**：`add` 的输出里有 `[WARN] Issues with peer dependencies found`。这是 peer 依赖的
+  常规提示（`@deepseek-ai/cordis` 等由 DSH profile 提供），**不是**版本不兼容警告；`incompatible` 一次
+  都没有出现。
 
 ## 4. 与自动策略的关系
 
