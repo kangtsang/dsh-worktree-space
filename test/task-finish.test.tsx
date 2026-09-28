@@ -167,6 +167,27 @@ describe("task view", () => {
     expect(screen.queryByRole("heading", { name: "antest" })).toBeNull()
     expect(document.querySelector(".dws-summary")?.textContent).toContain("1 / 2")
   })
+
+  it("says what a bare count counts, in both views that show one", async () => {
+    const user = userEvent.setup()
+    setup()
+    await ready()
+
+    // A number with no noun beside it means nothing until it is hovered, and the two
+    // views ask the same question — how many worktrees hang under this row — so both
+    // carry the same hint. The repository rows had it and the task rows did not.
+    const taskCount = document.querySelector(".dws-task .dws-count")
+    expect(taskCount?.textContent).toBe("2")
+    expect(taskCount?.getAttribute("title")).toBe(format(t("worktreeCountHint"), { count: "2" }))
+
+    await user.click(screen.getByRole("button", { name: t("viewRepositories") }))
+    const repoCounts = [...document.querySelectorAll(".dws-repo .dws-count")]
+    expect(repoCounts.map((node) => node.textContent)).toEqual(["2", "1"])
+    expect(repoCounts.map((node) => node.getAttribute("title"))).toEqual([
+      format(t("worktreeCountHint"), { count: "2" }),
+      format(t("worktreeCountHint"), { count: "1" }),
+    ])
+  })
 })
 
 describe("finishing a task", () => {

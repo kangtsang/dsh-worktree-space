@@ -41,12 +41,16 @@
   .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
   .dws-nav svg { flex: none; }
   .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
-  .dws-panel-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+  /* The scroll container holds the height and passes it down; it does not scroll itself,
+     because the list inside is the only thing that should. Left at `overflow: auto` with
+     an unbounded child, the content grew to its natural height and this element scrolled
+     the heading and the toolbar away with the rows. */
+  .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
   /* Flush against the navigation, not centred in the leftover width: the two columns
      share one left inset, so their text lines up from the panel's edge inward.
      It is a column that fills its height, and the toolbar above the list is pinned
      inside it: the panel scrolls nothing itself, the list inside it does. */
-  .dws-panel-content { display: flex; flex-direction: column; min-height: 0; max-width: 960px; padding: 28px 32px 48px 24px; }
+  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 28px 32px 48px 24px; }
   .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
   .dws-panel-heading { margin-bottom: 20px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }

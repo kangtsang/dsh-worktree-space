@@ -286,7 +286,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             <span className="dws-task-title">
               <h3>{task.name}</h3>
               <span className="dws-branch-label" title={`${t("branch")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
-              <span className="dws-count">{task.repositories.length}</span>
+              {/* The same hint the repository rows carry: both numbers answer "how many
+                  worktrees", one under a repository and one under a task space. */}
+              <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(task.repositories.length) })}>{task.repositories.length}</span>
               {pendingBadge(task.commits)}
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>

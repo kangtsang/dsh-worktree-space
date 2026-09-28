@@ -209,4 +209,18 @@ describe("floating panel surface", () => {
     // And nothing else claims the border the boundary just took over.
     expect(rule(".dws-repo-list")).not.toContain("border-top")
   })
+
+  it("hands the panel's height down instead of letting the panel scroll", () => {
+    // The section was a column, but the frame above it was not: `.dws-panel-scroll` kept
+    // `overflow: auto` while its child grew to its natural height, so in the panel (and
+    // not in the dialog, which is bounded) the heading and the toolbar scrolled away with
+    // the rows. The chain has to be bounded at every link for the list to be the only
+    // scroller, which is what both hosts promise.
+    const scroll = rule(".dws-panel-scroll")
+    expect(scroll).toContain("display: flex")
+    expect(scroll).toContain("flex-direction: column")
+    expect(scroll).toContain("overflow: hidden")
+    expect(scroll).not.toContain("overflow: auto")
+    expect(rule(".dws-panel-content")).toContain("flex: 1 1 auto")
+  })
 })
