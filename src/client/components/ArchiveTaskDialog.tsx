@@ -3,7 +3,7 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, nameOf, parentOf, slashPath } from "../lib/paths"
+import { cleanPath, commonAncestor, nameOf, parentOf, slashPath } from "../lib/paths"
 import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
@@ -66,7 +66,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   // The sessions the conflict handoff opened, one per conflicting repository, and
   // whatever stopped one from being opened at all. Kept here rather than derived
   // from the report, because the sessions outlive the request that made them.
-  const [handoff, setHandoff] = useState<{ name: string; site: string; sessionId: HandoffSessionId }[]>([])
+  const [handoff, setHandoff] = useState<{ name: string; site: string; boundary: string; sessionId: HandoffSessionId }[]>([])
   const [authorizing, setAuthorizing] = useState(false)
   const [handoffError, setHandoffError] = useState("")
   // The sessions run outside this dialog, so the rows reporting on them have to
@@ -234,19 +234,25 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * between the two sides. It is told not to push, because finishing is still this
    * plugin's job: the branch has to be merged into its target and the worktrees
    * removed afterwards.
+   *
+   * It also names the session's own working directory, because that is its write
+   * boundary: an agent that takes the worktree for its working directory would go
+   * looking for the merge in the wrong tree.
    */
-  const promptFor = (entry: FinishTaskRepository, site: string) => format(t("finishHandoffPrompt"), {
+  const promptFor = (entry: FinishTaskRepository, site: string, boundary: string) => format(t("finishHandoffPrompt"), {
     task: plan?.task ?? "",
     name: entry.name,
     branch: entry.branch ?? "",
     target: entry.target ?? "",
     site: slashPath(site),
+    boundary: slashPath(boundary),
     files: (entry.conflictedFiles ?? []).join(", "),
   })
 
   /**
-   * Hand the conflicts on: one session per conflicting repository, opened in the
-   * worktree the merge is standing in, each told to resolve it and commit.
+   * Hand the conflicts on: one session per conflicting repository, opened on a
+   * working directory that reaches both the worktree and the repository's git
+   * metadata, each told to resolve the conflict and commit.
    *
    * The dialog stays the one that decides, either way. A session that fails, or is
    * stopped, leaves the conflict exactly where it was; and nothing here waits on the
@@ -258,19 +264,27 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const authorize = async () => {
     if (conflicts.length === 0 || authorizing) return
     setAuthorizing(true); setHandoffError("")
-    const opened: { name: string; site: string; sessionId: HandoffSessionId }[] = []
+    const opened: { name: string; site: string; boundary: string; sessionId: HandoffSessionId }[] = []
     const failures: string[] = []
     for (const entry of conflicts) {
       const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
+      // A session's working directory is its write boundary, and a linked worktree
+      // keeps its git metadata under the main repository. The common ancestor of the
+      // two is the narrowest directory that reaches both, so the agent commits
+      // without an approval; where they share only a volume root - or where the
+      // worktree already reaches the repository - the worktree itself is all there
+      // is to open on, passed on exactly as the Host named it.
+      const ancestor = commonAncestor(site, entry.path)
+      const boundary = ancestor === undefined || slashPath(site).toLowerCase() === ancestor.toLowerCase() ? site : ancestor
       try {
-        const sessionId = await sessions.create({ cwd: site })
+        const sessionId = await sessions.create({ cwd: boundary })
         // A session opens blank, so this is its first turn rather than a steer, and
         // the reference is a handle for the length of the call - not something to
         // keep: the session is followed through the Host's own list instead.
         await sessions.using(sessionId, { source: "controllerOperation" }, async (reference) => {
-          await reference.binding.session.prompt([{ type: "text", text: promptFor(entry, site) }], "queue")
+          await reference.binding.session.prompt([{ type: "text", text: promptFor(entry, site, boundary) }], "queue")
         })
-        opened.push({ name: entry.name, site, sessionId })
+        opened.push({ name: entry.name, site, boundary, sessionId })
       } catch (reason: any) {
         failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
       }
@@ -405,6 +419,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   <ul className="dws-finish-handoff-sessions">{handoff.map((opened) => <li key={opened.sessionId}>
                     <strong>{opened.name}</strong>
                     <code title={slashPath(opened.site)}>{slashPath(opened.site)}</code>
+                    {/* The write boundary, when it reaches wider than the worktree:
+                        that width is what saves the approval, so it is not a detail. */}
+                    {slashPath(opened.boundary) === slashPath(opened.site) ? null
+                      : <span className="dws-finish-handoff-boundary">{format(t("finishHandoffBoundary"), { path: slashPath(opened.boundary) })}</span>}
                     <span>{sessions.list.getSnapshot().byId[opened.sessionId]?.running === true ? t("finishHandoffRunning") : t("finishHandoffIdle")}</span>
                     {/* The agent works in its own session, not behind this button, so
                         the only useful thing this dialog can do is take the user there. */}

@@ -195,8 +195,12 @@ repositories may already be merged and removed). Every repository row reports
 `autoCommitted`, `mergeInProgress`, `mergeSite` (the directory the conflict stands in) and
 `conflictedFiles`. The dialog then shows the conflicting repositories, the site paths and
 the conflicted files, and offers **Hand the conflict to an agent**: clicking it opens a
-separate session for every conflicting repository — its working directory is that conflict
-site — with resolving the conflict and committing the merge as its first message. Once the
+separate session for every conflicting repository, working in the **common ancestor of the
+conflict site and the main repository** — a linked worktree keeps its git metadata under the
+main repository's `.git`, and a session's write boundary is its working directory, so the
+common ancestor is what lets the agent both edit the files and commit the merge without
+another approval (where the two share only a volume root, the site itself is used) — with
+resolving the conflict and committing the merge as its first message. Once the
 agent is done, **the user clicks Continue**, and the plugin finishes the task again with the
 same request: the merge is already written, so what is left is merging into the target
 branch, removing the worktrees, deleting the branches, archiving and cleaning up. The plugin

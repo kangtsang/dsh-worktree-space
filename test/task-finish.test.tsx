@@ -296,6 +296,39 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(2))
   })
 
+  it("opens the handoff session on the directory that reaches the worktree and the repository", async () => {
+    const user = userEvent.setup()
+    // A task space beside its repositories, as the demo lays them out: the session's
+    // working directory is its write boundary, so one opened on the worktree alone
+    // could edit the conflicted file but never commit it - a linked worktree keeps
+    // its git metadata under the main repository. Their common ancestor reaches both.
+    const repo = "E:\\wt-demo\\repos\\alpha"
+    const site = "E:\\wt-demo\\spaces\\demo\\alpha"
+    const next = setup({
+      result: finishResult({
+        failed: true,
+        repositories: [
+          { name: "alpha", path: repo, branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
+        ],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+
+    await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/wt-demo" }))
+    await waitFor(() => expect(next.created).toHaveLength(1))
+    // The message says which directory the session is in, since that is no longer the
+    // directory the work is in.
+    expect(next.prompts[0].text).toContain("E:/wt-demo")
+    // The boundary is wider than the worktree, and that width is what saves the
+    // approval, so the panel names it rather than leaving it to be discovered.
+    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/wt-demo" }))).toBeTruthy()
+    expect(screen.getByText(site.replace(/\\/g, "/"))).toBeTruthy()
+  })
+
   it("shows where a handed-on merge is standing, and the files it could not reconcile", async () => {
     const user = userEvent.setup()
     const site = `${root}\\kratos-vue-admin`
