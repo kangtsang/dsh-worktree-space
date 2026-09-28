@@ -36,9 +36,50 @@ interface TextField {
   label: string
   fallback: string
   hint?: string
+  /**
+   * Whether the value needs room for a path rather than a word.
+   *
+   * The narrow column fits the pill's own width — right for a branch prefix, whose
+   * values are short and whose row should read as one with the selects above it —
+   * but an absolute directory would be cut off there, and a path nobody can read to
+   * the end is not a setting anyone can check.
+   */
+  wide?: boolean
+  /**
+   * Whether saving may send an empty value.
+   *
+   * False for the branch prefix, whose emptiness is a mistake the Host would only
+   * catch after the round trip. True for the archive destination, where empty is the
+   * setting's own "not set" and therefore a value worth sending.
+   */
+  allowEmpty?: boolean
 }
 
 type Field = ChoiceField | TextField
+
+/**
+ * Copy for a key that may not exist yet.
+ *
+ * Two sessions share this repository, and the one that owns `src/client/lib/i18n.ts`
+ * carries the copy for this row. Until that lands, `t` answers with the key itself —
+ * so the key is what tells us the copy is missing, and the row falls back to a
+ * wording of its own rather than putting `archiveDocumentsDirectory` on screen.
+ * @param t - the translation function in force.
+ * @param key - the key this row would like.
+ * @param fallback - what to show while the key is not there.
+ * @returns the translation, or the fallback.
+ */
+const copyOr = (t: (key: string) => string, key: string, fallback: string): string => {
+  const translated = t(key)
+  return translated === key ? fallback : translated
+}
+
+/** The copy key the archive destination row prefers, and what it shows until that key exists. */
+export const ARCHIVE_DIRECTORY_LABEL = "archiveDocumentsDirectory"
+export const ARCHIVE_DIRECTORY_LABEL_FALLBACK = "Archive documents directory"
+/** The key for the note under it, and the wording shown until that key exists. */
+export const ARCHIVE_DIRECTORY_HINT = "archiveDocumentsDirectoryHint"
+export const ARCHIVE_DIRECTORY_HINT_FALLBACK = "Leave it empty to file documents under each workspace's own default directory."
 
 /**
  * The fields this plugin declares in its Host configuration.
@@ -84,6 +125,18 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     fallback: "task/",
     hint: t("defaultBranchPrefixHint"),
   },
+  {
+    // The destination an archived task's documents are filed into. Empty is the
+    // setting's "not set", so the field is allowed to be cleared as well as typed
+    // into - clearing it puts every task back on its own computed folder.
+    kind: "text",
+    field: "archiveDocumentsDirectory",
+    label: copyOr(t, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK),
+    fallback: "",
+    hint: copyOr(t, ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK),
+    wide: true,
+    allowEmpty: true,
+  },
 ]
 
 /** The slice of the Host configuration form this card reads and writes. */
@@ -94,20 +147,26 @@ export interface ConfigFormLike {
 }
 
 /**
- * The prefix row: the one setting that is text rather than a choice.
+ * A row whose value is text rather than a choice.
  *
  * Locked it wears the same pill every other row's value wears, so the card reads as one
  * list; Edit swaps that pill for a field and turns itself into Save. Two reasons for the
  * swap rather than a read-only input. The Host page styles inputs itself - a border there
  * is not the plugin's to keep, and the plain markup of a value is - and a value nobody may
- * type into is not an input: this is the default every later task space starts from, and a
- * stray keystroke would quietly change new branches.
+ * type into is not an input.
+ *
+ * Two rows use it now, and they differ on one point: the branch prefix refuses to be
+ * emptied (a branch is its prefix plus a name, so an empty one is not a setting but a
+ * mistake), while the archive destination is emptied on purpose - that is how the setting
+ * says "not set" and hands each task back its own computed folder.
  */
-function TextFieldRow({ field, label, fallback, hint, form, notify }: {
+function TextFieldRow({ field, label, fallback, hint, wide, allowEmpty, form, notify }: {
   field: string
   label: string
   fallback: string
   hint?: string
+  wide?: boolean
+  allowEmpty?: boolean
   form: ConfigFormLike
   notify: (message: string | null) => void
 }) {
@@ -128,7 +187,8 @@ function TextFieldRow({ field, label, fallback, hint, form, notify }: {
   }, [field, fallback, form])
   const save = () => {
     const value = draft.trim()
-    if (value === "") return
+    // A row that may be cleared sends its emptiness on, rather than refusing it.
+    if (value === "" && allowEmpty !== true) return
     setBusy(true)
     setPreview(field, value)
     notify(null)
@@ -147,7 +207,7 @@ function TextFieldRow({ field, label, fallback, hint, form, notify }: {
       notify(t("configNotSaved"))
     })
   }
-  return <div className="dws-plugin-config-row dws-plugin-config-prefix">
+  return <div className={"dws-plugin-config-row dws-plugin-config-prefix" + (wide === true ? " dws-plugin-config-wide" : "")}>
     <span className="dws-plugin-config-label">{label}
       {hint === undefined ? null : <span className="dws-plugin-config-hint">{editing ? t("configPrefixEditHint") : hint}</span>}
     </span>
@@ -174,7 +234,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -255,7 +315,7 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
     {fieldsFor(t).map((field) => {
       if (field.kind === "text") {
-        return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} form={form} notify={setNotice} />
+        return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} wide={field.wide} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
       const current = chosen[name] ?? served[name] ?? fallback

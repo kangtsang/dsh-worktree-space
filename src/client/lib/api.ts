@@ -78,7 +78,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      * user edits on the Plugins page, and the dialog starts from whatever is in
      * force. The write path is the configuration form itself.
      */
-    preferences: (signal?: AbortSignal) => read<{ defaultBranchPrefix: string }>("task.preference", {}, signal),
+    preferences: (signal?: AbortSignal) => read<{ defaultBranchPrefix: string; archiveDocumentsDirectory: string }>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
     /** Whether a directory is a task container, and what it holds. */

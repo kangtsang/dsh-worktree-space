@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { PluginConfigCard } from "../src/client/components/PluginConfigCard"
+import { ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK, PluginConfigCard } from "../src/client/components/PluginConfigCard"
 import { setPreview, settlePreview } from "../src/client/lib/configPreview"
 import { t } from "../src/client/lib/i18n"
 
@@ -10,13 +10,14 @@ import { t } from "../src/client/lib/i18n"
  * write that lands in that same snapshot, which is what the real form does after a
  * round trip.
  */
-function configForm(prefix = "task/", accepted = true) {
+function configForm(prefix = "task/", accepted = true, archiveDirectory = "") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
     scanDepth: 3,
     maxScanDirectories: 3000,
     defaultBranchPrefix: prefix,
+    archiveDocumentsDirectory: archiveDirectory,
   }
   const listeners = new Set<() => void>()
   return {
@@ -35,12 +36,25 @@ function configForm(prefix = "task/", accepted = true) {
 }
 
 /** The locked row shows the value as plain text, labelled; Edit swaps that for a field. */
-const lockedElement = () => document.querySelector(".dws-plugin-config-locked")
+const lockedElement = () => prefixRow().querySelector(".dws-plugin-config-locked")
 const lockedPrefix = () => lockedElement()?.textContent
+/** The row carrying a given label: two text rows now share the button copy. */
+const rowFor = (label: string) => screen.getByText(label).closest(".dws-plugin-config-row") as HTMLElement
+const prefixRow = () => rowFor(t("defaultBranchPrefixSettingsLabel"))
 const prefixInput = () => screen.getByRole("textbox", { name: t("defaultBranchPrefixSettingsLabel") }) as HTMLInputElement
-const saveButton = () => screen.getByRole("button", { name: t("configSave") }) as HTMLButtonElement
-const editButton = () => screen.getByRole("button", { name: t("configEdit") }) as HTMLButtonElement
+const saveButton = () => within(prefixRow()).getByRole("button", { name: t("configSave") }) as HTMLButtonElement
+const editButton = () => within(prefixRow()).getByRole("button", { name: t("configEdit") }) as HTMLButtonElement
 const hintIn = (label: string) => screen.getByText(label).closest(".dws-plugin-config-row")?.querySelector(".dws-plugin-config-hint")?.textContent
+
+/**
+ * The copy the archive destination row shows.
+ *
+ * Its keys belong to the session that owns the dictionaries and may not have landed
+ * yet, in which case the row falls back to wording of its own — so the test resolves
+ * the label the way the row does rather than assuming a dictionary entry.
+ */
+const ARCHIVE_LABEL = t(ARCHIVE_DIRECTORY_LABEL) === ARCHIVE_DIRECTORY_LABEL ? ARCHIVE_DIRECTORY_LABEL_FALLBACK : t(ARCHIVE_DIRECTORY_LABEL)
+const ARCHIVE_HINT = t(ARCHIVE_DIRECTORY_HINT) === ARCHIVE_DIRECTORY_HINT ? ARCHIVE_DIRECTORY_HINT_FALLBACK : t(ARCHIVE_DIRECTORY_HINT)
 
 afterEach(() => {
   cleanup()
@@ -124,5 +138,40 @@ describe("the configuration card's branch prefix row", () => {
     // Editing is the one moment the note changes, because what to do next has changed.
     fireEvent.click(editButton())
     expect(hintIn(t("defaultBranchPrefixSettingsLabel"))).toBe(t("configPrefixEditHint"))
+  })
+})
+
+describe("the configuration card's archive destination row", () => {
+  it("shows the destination the Host serves, with its own note under the label", () => {
+    const { form } = configForm("task/", true, "E:\\archived-docs")
+    render(<PluginConfigCard form={form} />)
+
+    // The row is the prefix row's shape: a label with a note beneath it, and the value
+    // locked behind Edit.
+    expect(hintIn(ARCHIVE_LABEL)).toBe(ARCHIVE_HINT)
+    expect(screen.getByLabelText(ARCHIVE_LABEL).textContent).toBe("E:\\archived-docs")
+  })
+
+  it("saves a destination, and lets it be cleared back to the computed one", async () => {
+    const { form, read } = configForm("task/", true, "E:\\archived-docs")
+    render(<PluginConfigCard form={form} />)
+
+    const row = rowFor(ARCHIVE_LABEL)
+    fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
+    const input = within(row).getByRole("textbox", { name: ARCHIVE_LABEL }) as HTMLInputElement
+    expect(input.value).toBe("E:\\archived-docs")
+
+    fireEvent.change(input, { target: { value: "E:\\docs" } })
+    fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", "E:\\docs"))
+    expect(read()).toMatchObject({ archiveDocumentsDirectory: "E:\\docs" })
+
+    // Empty is the setting's own "not set", so clearing the field is a value the row
+    // sends rather than one it refuses — the prefix row is the one that refuses.
+    fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
+    fireEvent.change(within(row).getByRole("textbox", { name: ARCHIVE_LABEL }), { target: { value: "   " } })
+    fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", ""))
+    expect(read()).toMatchObject({ archiveDocumentsDirectory: "" })
   })
 })

@@ -24,4 +24,17 @@ describe("archived documents naming", () => {
     expect(documentsDirectoryFor("/tasks/testb", undefined, moment))
       .toBe("/tasks/archived-docs/testb-20260926-020933")
   })
+
+  it("files into the configured destination when one is set, and computes its own when not", () => {
+    // Set: the whole path is the destination. The title and the moment are left out
+    // on purpose — adding them would scatter one destination into a folder per archive.
+    expect(documentsDirectoryFor("/tasks/testb", "kratos-admin/testb", moment, "E:\\archived-docs"))
+      .toBe("E:\\archived-docs")
+    // Empty is the setting's "not set": the per-task folder comes back.
+    expect(documentsDirectoryFor("/tasks/testb", "kratos-admin/testb", moment, ""))
+      .toBe("/tasks/archived-docs/kratos-admin-testb-20260926-020933")
+    // Whitespace is emptiness too, rather than a destination named "  ".
+    expect(documentsDirectoryFor("/tasks/testb", "kratos-admin/testb", moment, "   "))
+      .toBe("/tasks/archived-docs/kratos-admin-testb-20260926-020933")
+  })
 })

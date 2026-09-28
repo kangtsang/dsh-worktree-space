@@ -37,12 +37,21 @@ export function folderStamp(now: Date): string {
  * Workspace — which already carries the task, so `kratos-admin/testb` becomes
  * `kratos-admin-testb` — and the moment it was archived. The folder name has no
  * space, so it needs no quoting in a shell on any platform.
+ *
+ * A configured destination replaces the whole of that: it is where every task's
+ * documents go, so the per-task folder adding the title and the moment would
+ * scatter one destination into a new folder per archive. Empty is the setting's
+ * own "not set" and keeps the computed default, which is the behaviour of a Host
+ * that has never had the setting written to it.
  * @param path - the task container being archived.
  * @param title - the registered Workspace's title, when there is one.
  * @param now - the moment to name the folder after.
+ * @param configured - the destination from the configuration, when one is set.
  * @returns the absolute directory to file the documents into.
  */
-export function documentsDirectoryFor(path: string, title: string | undefined, now: Date): string {
+export function documentsDirectoryFor(path: string, title: string | undefined, now: Date, configured = ""): string {
+  const chosen = configured.trim()
+  if (chosen !== "") return chosen
   const task = nameOf(path)
   const named = title === undefined || title.trim() === "" ? task : title.trim()
   const folder = `${safeFolderName(named)}-${folderStamp(now)}`
