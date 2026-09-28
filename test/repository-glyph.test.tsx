@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { FolderGit2 } from "../src/client/components/icons"
+import { BrandGlyph, FolderGit2 } from "../src/client/components/icons"
 import { repositoryGlyphMask } from "../src/client/components/repositoryGlyph"
 
 const PREFIX = 'url("data:image/svg+xml,'
@@ -43,12 +43,22 @@ describe("repository glyph mask", () => {
     expect(count(decodeMask())).toBe(count(real))
   })
 
-  it("restates the mark this package ships as icon.svg", () => {
-    // The package's own icon, read from the package root vitest runs in.
+  it("draws the plugin's own glyph on the tile the plugin list shows it on", () => {
+    // The package's own mark, read from the package root vitest runs in.
     const shipped = readFileSync("icon.svg", "utf8")
     const shapes = (markup: string) => [...markup.matchAll(/ (d|cx|cy|r)="([^"]+)"/g)].map(([, name, value]) => `${name}=${value}`)
 
+    // The drawing `BrandGlyph` makes, which leads the panel list, the footer and the
+    // workspace selector: the plugin is recognised by this glyph wherever it appears.
     expect(shapes(shipped).length).toBeGreaterThan(0)
-    expect(shapes(decodeMask())).toEqual(shapes(shipped))
+    expect(shapes(shipped)).toEqual(shapes(renderToStaticMarkup(<BrandGlyph />)))
+
+    // Standing on the tile, which is the package's own and not the entries': square,
+    // radius 40, the three-stop gradient running corner to corner.
+    expect(shipped).toContain('width="510"')
+    expect(shipped).toContain('height="510"')
+    expect(shipped).toContain('rx="40"')
+    const stops = [...shipped.matchAll(/<stop offset="([^"]+)" stop-color="([^"]+)"/g)].map(([, offset, color]) => `${offset} ${color}`)
+    expect(stops).toEqual(["0.1 #fee7a8", "0.36 #ffeda0", "0.64 #efa5ff"])
   })
 })
