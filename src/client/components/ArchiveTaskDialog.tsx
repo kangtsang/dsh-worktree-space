@@ -4,12 +4,10 @@ import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
 import { cleanPath, commonAncestor, nameOf, parentOf, slashPath } from "../lib/paths"
-import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
+import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finishScene"
+import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService, WorktreeList } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
-
-/** The identity of a session this dialog opened: exactly what the Host answered with. */
-type HandoffSessionId = Awaited<ReturnType<ISessions["create"]>>
 
 interface ArchiveTaskDialogProps {
   /** Absolute path of the task container to archive. Either entry point knows it. */
@@ -56,7 +54,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   // reads is the folder they get.
   const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
   const [error, setError] = useState("")
-  const [result, setResult] = useState<FinishTaskResult | null>(null)
+  // A report the dialog left behind when it was unmounted is put straight back: the
+  // user is returning from the session it handed on, not opening a fresh finish.
+  const [result, setResult] = useState<FinishTaskResult | null>(() => readFinishScene(path)?.result ?? null)
   const [registrationError, setRegistrationError] = useState("")
   const [busy, setBusy] = useState(false)
   // The branch chosen per repository, once it differs from the default. Held here
@@ -66,7 +66,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   // The sessions the conflict handoff opened, one per conflicting repository, and
   // whatever stopped one from being opened at all. Kept here rather than derived
   // from the report, because the sessions outlive the request that made them.
-  const [handoff, setHandoff] = useState<{ name: string; site: string; boundary: string; sessionId: HandoffSessionId }[]>([])
+  const [handoff, setHandoff] = useState<FinishSceneSession[]>(() => readFinishScene(path)?.handoff ?? [])
   const [authorizing, setAuthorizing] = useState(false)
   const [handoffError, setHandoffError] = useState("")
   // The sessions run outside this dialog, so the rows reporting on them have to
@@ -100,6 +100,21 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     void loadPlan()
     return () => { planGeneration.current += 1 }
   }, [loadPlan])
+
+  /**
+   * Hold the report so it survives this dialog being unmounted.
+   *
+   * Opening a handed-off session takes over the view the dialog was drawn in, and the
+   * user has to come back to it to continue finishing: without this the panel they
+   * return to is empty, and the sessions it opened are forgotten rather than reported.
+   * Only an unfinished finish is held. One that went through has nothing left to offer,
+   * and a later visit to the page has to open on the task, not on its last report.
+   */
+  useEffect(() => {
+    if (result === null) return
+    if (result.failed) saveFinishScene(path, { result, handoff })
+    else clearFinishScene(path)
+  }, [path, result, handoff])
 
   /**
    * The configured destination, once the Host answers with it.
@@ -264,17 +279,29 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const authorize = async () => {
     if (conflicts.length === 0 || authorizing) return
     setAuthorizing(true); setHandoffError("")
-    const opened: { name: string; site: string; boundary: string; sessionId: HandoffSessionId }[] = []
+    const opened: FinishSceneSession[] = []
     const failures: string[] = []
+    // The Host names each repository by the worktree the task lives in, and a session's
+    // working directory is its write boundary - so the boundary has to reach the
+    // repository behind that worktree, which only the scan pairs with it. Asked for the
+    // registered workspaces and this task's own directory, and taken as best effort:
+    // with nothing to go on, the worktree itself is handed on, and costs an approval.
+    const roots = [...new Set([...workspaces.list.getSnapshot().items.map((item) => cleanPath(item.path)), cleanPath(path)])]
+    let scanned: WorktreeList[] = []
+    try {
+      const remembered = await api.cachedScan(roots)
+      scanned = remembered === null ? await api.scan(roots) : remembered.repositories
+    } catch { scanned = [] }
     for (const entry of conflicts) {
       const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
-      // A session's working directory is its write boundary, and a linked worktree
-      // keeps its git metadata under the main repository. The common ancestor of the
-      // two is the narrowest directory that reaches both, so the agent commits
-      // without an approval; where they share only a volume root - or where the
-      // worktree already reaches the repository - the worktree itself is all there
-      // is to open on, passed on exactly as the Host named it.
-      const ancestor = commonAncestor(site, entry.path)
+      // A linked worktree keeps its git metadata in the main repository, so the site
+      // alone cannot commit the merge it resolved: the common ancestor of the two is the
+      // narrowest directory that reaches both. Where they share only a volume root - or
+      // where the worktree already reaches the repository - the worktree itself is all
+      // there is to open on, passed on exactly as the Host named it.
+      const repository = scanned.find((list) => list.worktrees.some((row) => cleanPath(row.path).toLowerCase() === cleanPath(site).toLowerCase()))
+      const metadata = repository === undefined ? entry.path : repository.commonDir === "" ? repository.repoPath : repository.commonDir
+      const ancestor = commonAncestor(site, metadata)
       const boundary = ancestor === undefined || slashPath(site).toLowerCase() === ancestor.toLowerCase() ? site : ancestor
       try {
         const sessionId = await sessions.create({ cwd: boundary })

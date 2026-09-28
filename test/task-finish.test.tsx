@@ -3,6 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { clearFinishScenes } from "../src/client/lib/finishScene"
 import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
 
@@ -122,7 +123,9 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
 const option = (label: string) => screen.getByRole("checkbox", { name: new RegExp(`^${label}`) })
 const taskArticles = () => document.querySelectorAll(".dws-task")
 
-afterEach(cleanup)
+// The reports a finish leaves behind outlive the dialog, so a case that made one has to
+// clear it: otherwise the next case opens on the previous one's conflict.
+afterEach(() => { cleanup(); clearFinishScenes() })
 
 /** The page opens on tasks, so this only waits for the first scan to settle. */
 async function ready() {
@@ -301,14 +304,25 @@ describe("finishing a task", () => {
     // A task space beside its repositories, as the demo lays them out: the session's
     // working directory is its write boundary, so one opened on the worktree alone
     // could edit the conflicted file but never commit it - a linked worktree keeps
-    // its git metadata under the main repository. Their common ancestor reaches both.
-    const repo = "E:\\wt-demo\\repos\\alpha"
-    const site = "E:\\wt-demo\\spaces\\demo\\alpha"
+    // its git metadata under the main repository. The Host reports the worktree, not
+    // the repository, so the scan is what pairs the two, and their common ancestor is
+    // the narrowest boundary that still reaches the metadata.
+    const repo = "E:\\worktree-space\\repos\\alpha"
+    const site = `${container}\\alpha`
     const next = setup({
+      repos: [
+        ...scanned(),
+        {
+          repoPath: repo,
+          commonDir: `${repo}\\.git`,
+          currentBranch: "main",
+          worktrees: [{ ...worktree(repo, "main"), isMain: true }, worktree(site, "task/demo")],
+        },
+      ],
       result: finishResult({
         failed: true,
         repositories: [
-          { name: "alpha", path: repo, branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
+          { name: "alpha", path: site, branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
         ],
       }),
     })
@@ -318,15 +332,61 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
 
     await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
-    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/wt-demo" }))
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/worktree-space" }))
     await waitFor(() => expect(next.created).toHaveLength(1))
+    // The task's own directory is one of the places the pairing is looked for, since a
+    // task space is a worktree of the repository whose metadata the session needs.
+    expect(next.api.scan).toHaveBeenCalledWith(expect.arrayContaining([container]))
     // The message says which directory the session is in, since that is no longer the
     // directory the work is in.
-    expect(next.prompts[0].text).toContain("E:/wt-demo")
+    expect(next.prompts[0].text).toContain("E:/worktree-space")
     // The boundary is wider than the worktree, and that width is what saves the
     // approval, so the panel names it rather than leaving it to be discovered.
-    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/wt-demo" }))).toBeTruthy()
+    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/worktree-space" }))).toBeTruthy()
     expect(screen.getByText(site.replace(/\\/g, "/"))).toBeTruthy()
+  })
+
+  it("puts a standing conflict back when the dialog is reopened after approving a session", async () => {
+    const user = userEvent.setup()
+    const site = `${container}\\kratos-vue-admin`
+    const result = finishResult({
+      failed: true,
+      repositories: [
+        { name: "kratos-vue-admin", path: site, branch, target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/a.ts"], error: "CONFLICT (content): merge conflict in src/a.ts" },
+      ],
+      strays: [],
+      containerRemoved: false,
+    })
+    const first = setup({ result })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+    await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
+    await waitFor(() => expect(first.created).toHaveLength(1))
+
+    // Approving an approval happens in the session's own view, which replaces the view
+    // this dialog is drawn in. So the page comes back, and what it has to show is the
+    // report - not an empty dialog, and not a second session for the same worktree.
+    cleanup()
+    const second = setup({ result })
+    // The report is on screen from the start here: the dialog holds the page's view, so
+    // the page's own controls are behind it and the report is what to wait for.
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+    expect(second.sessions.create).not.toHaveBeenCalled()
+    expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", sessions: "kratos-vue-admin" }))).toBeTruthy()
+    // And the step it was left on is still the one on offer.
+    expect((screen.getByRole("button", { name: t("finishContinue") }) as HTMLButtonElement).disabled).toBe(false)
+
+    // A finish that has nothing left to do clears its report, so reopening the page
+    // does not bring back a conflict that has already been dealt with.
+    second.api.doneTask.mockResolvedValue(finishResult())
+    await user.click(screen.getByRole("button", { name: t("finishContinue") }))
+    await waitFor(() => expect(second.api.doneTask).toHaveBeenCalledTimes(1))
+    cleanup()
+    setup({ result: finishResult() })
+    await ready()
+    expect(screen.queryByText(t("finishHandoffTitle"))).toBeNull()
   })
 
   it("shows where a handed-on merge is standing, and the files it could not reconcile", async () => {

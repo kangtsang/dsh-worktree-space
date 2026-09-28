@@ -7,6 +7,7 @@ import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
 import type { RememberedScan, SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
+import { finishScenes } from "../lib/finishScene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 /** The three views this page has, in the order they are offered. */
@@ -84,6 +85,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   }, [view, api, workspaces])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
+  // A finish that stopped at a conflict left its report behind, and the session it
+  // handed on lives in a view of its own: coming back reopens that report, so the user
+  // continues from where they were instead of finding the task and starting over.
+  useEffect(() => {
+    setArchiving((current) => current ?? finishScenes()[0] ?? null)
+  }, [])
   const refreshController = useRef<AbortController | null>(null)
   // Whether a scan of this mount has already landed. The remembered answer is
   // painted only until then: once real rows exist, a late-arriving memory must not
