@@ -4,7 +4,7 @@ import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
 import { cleanPath, nameOf, parentOf, slashPath } from "../lib/paths"
-import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspacesService } from "../lib/types"
+import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
 
@@ -46,7 +46,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   // past uncommitted work are not, and are left for the user to ask for. Deleting a
   // branch that was never merged is how a task space is abandoned instead of
   // finished, and that costs the work on it — which is why it takes Force as well.
-  const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true, autoCommit: false, autoResolve: false })
+  const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true })
   // Named once, and used both for the preview and for the call, so what the user
   // reads is the folder they get.
   const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
@@ -58,6 +58,15 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   // rather than read back from the plan, so a choice keeps showing while the
   // preview of it — its commit count, its warnings — is still being fetched.
   const [targets, setTargets] = useState<Record<string, string>>({})
+  // The sessions the conflict handoff opened, one per conflicting repository, and
+  // whatever stopped one from being opened at all. Kept here rather than derived
+  // from the report, because the sessions outlive the request that made them.
+  const [handoff, setHandoff] = useState<{ name: string; site: string; sessionId: string }[]>([])
+  const [authorizing, setAuthorizing] = useState(false)
+  const [handoffError, setHandoffError] = useState("")
+  // The sessions run outside this dialog, so the rows reporting on them have to
+  // follow the Host's list rather than a value read once. The counter is the render.
+  const [, setSessionTick] = useState(0)
   const planGeneration = useRef(0)
   /** One read answers everything this dialog shows: each repository's branch, what
    * it would merge into, how many commits that is, and how much is uncommitted —
@@ -99,15 +108,18 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
-      // The two switches start where the plugin settings put them, and the user can
-      // still override either one for this task alone.
-      setOptions((current) => ({ ...current, autoCommit: served?.autoCommitUncommitted === true, autoResolve: served?.autoResolveConflicts === true }))
       const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
       if (configured.trim() === "") return
       setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))
     }).catch(() => { /* falls back to the computed folder */ })
     return () => { live = false }
   }, [api, path, workspace?.title])
+
+  /**
+   * Follow the sessions the handoff opened, so "working" turns into "stopped" on
+   * its own: an agent that is still resolving a conflict must not read as done.
+   */
+  useEffect(() => sessions.list.subscribe(() => setSessionTick((tick) => tick + 1)), [sessions])
 
   /** Preview this repository merging into the branch just chosen. */
   const chooseTarget = (name: string, branch: string) => {
@@ -123,6 +135,12 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   // else in there is the user's own, and cleaning would delete it.
   const contentStrays = (plan?.strays ?? []).filter((stray) => stray.kind === "content")
   const noiseStrays = (plan?.strays ?? []).filter((stray) => stray.kind !== "content")
+  /**
+   * The repositories whose merge is standing unresolved, which is what the report
+   * offers to hand on. Read from the answer rather than the plan: a conflict does not
+   * exist until the merge has been tried.
+   */
+  const conflicts = (result?.repositories ?? []).filter((entry) => entry.mergeInProgress === true)
   const strayName = (stray: { name: string; directory: boolean }) => stray.directory ? `${stray.name}/` : stray.name
   /**
    * The branches offered for a repository.
@@ -162,11 +180,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         // the pair the other way round.
         deleteBranch: options.deleteBranch && (options.merge || options.force),
         force: options.force,
-        // What finishing should do about work that is not committed yet, and about a
-        // merge that will not reconcile on its own. Both start at the settings'
-        // defaults and are overridable here for this task.
-        autoCommit: options.autoCommit,
-        autoResolve: options.autoResolve,
         // The container is cleared either way: archiving finishes a task, and a
         // task that is finished leaves nothing of its own behind. What is left to
         // decide is whether the user's writing is kept, and where.
@@ -199,6 +212,63 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
   }
 
   const optionsDisabled = busy || plan === null || running
+
+  /**
+   * What one conflicting repository's agent is asked to do.
+   *
+   * Everything it needs to act is in the message: which repository, which way the
+   * merge runs, where the conflict is standing, and which files could not be
+   * reconciled — plus the one thing this plugin will not do for it, which is choose
+   * between the two sides. It is told not to push, because finishing is still this
+   * plugin's job: the branch has to be merged into its target and the worktrees
+   * removed afterwards.
+   */
+  const promptFor = (entry: FinishTaskRepository, site: string) => format(t("finishHandoffPrompt"), {
+    task: plan?.task ?? "",
+    name: entry.name,
+    branch: entry.branch ?? "",
+    target: entry.target ?? "",
+    site: slashPath(site),
+    files: (entry.conflictedFiles ?? []).join(", "),
+  })
+
+  /**
+   * Hand the conflicts on: one session per conflicting repository, opened in the
+   * worktree the merge is standing in, each told to resolve it and commit.
+   *
+   * The dialog stays the one that decides, either way. A session that fails, or is
+   * stopped, leaves the conflict exactly where it was; and nothing here waits on the
+   * sessions, because this plugin cannot know whether what an agent did is what the
+   * user wanted. So the report says which sessions were opened and whether they are
+   * still working, and asking for the finish again is the user's move - that call
+   * reads the merge they committed and completes the rest.
+   */
+  const authorize = async () => {
+    if (conflicts.length === 0 || authorizing) return
+    setAuthorizing(true); setHandoffError("")
+    const opened: { name: string; site: string; sessionId: string }[] = []
+    const failures: string[] = []
+    for (const entry of conflicts) {
+      const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
+      try {
+        const sessionId = await sessions.create({ cwd: site })
+        // A session opens blank, so this is its first turn rather than a steer, and
+        // the reference is a handle for the length of the call - not something to
+        // keep: the session is followed through the Host's own list instead.
+        await sessions.using(sessionId, { source: "controllerOperation" }, async (reference) => {
+          await reference.binding.session.prompt([{ type: "text", text: promptFor(entry, site) }], "queue")
+        })
+        opened.push({ name: entry.name, site, sessionId })
+      } catch (reason: any) {
+        failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
+      }
+    }
+    // Named once each: asking twice for the same repository replaces its session
+    // rather than opening a second one for a conflict that is already spoken for.
+    setHandoff((current) => [...current.filter((previous) => !opened.some((one) => one.name === previous.name)), ...opened])
+    if (failures.length > 0) setHandoffError(failures.join("; "))
+    setAuthorizing(false)
+  }
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) close() }}>
@@ -306,6 +376,33 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
                   </>
                   : entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
             </li>)}</ul>
+            {/* The conflict is the step that is left rather than a casualty: it says
+                where it is standing, what it could not reconcile, and puts the choice
+                of who resolves it in front of the user. Nothing is started until the
+                button is pressed - an agent costs a session, and a session is the
+                user's to spend. */}
+            {conflicts.length > 0 ? <div className="dws-finish-handoff-panel">
+              <p className="dws-finish-handoff-title">{t("finishHandoffTitle")}</p>
+              <p>{t("finishHandoffExplain")}</p>
+              {handoff.length > 0
+                ? <>
+                  <p>{format(t("finishHandoffAuthorized"), {
+                    count: String(handoff.length),
+                    sessions: handoff.map((opened) => opened.name).join(", "),
+                  })}</p>
+                  <ul className="dws-finish-handoff-sessions">{handoff.map((opened) => <li key={opened.sessionId}>
+                    <strong>{opened.name}</strong>
+                    <code title={slashPath(opened.site)}>{slashPath(opened.site)}</code>
+                    <span>{sessions.list.getSnapshot().byId[opened.sessionId]?.running === true ? t("finishHandoffRunning") : t("finishHandoffIdle")}</span>
+                  </li>)}</ul>
+                </>
+                : <p className="dws-finish-handoff-hint">{t("finishHandoffHint")}</p>}
+              {handoff.length === 0 ? <Button className="dws-button-warn-solid" disabled={authorizing} onClick={() => void authorize()}>
+                {authorizing ? <Loader2 size={14} className="dws-spin" /> : null}
+                {authorizing ? t("finishHandoffAuthorizing") : t("finishHandoffAuthorize")}
+              </Button> : null}
+              {handoffError !== "" ? <p className="dws-finish-error">{format(t("finishHandoffFailed"), { error: handoffError })}</p> : null}
+            </div> : null}
             <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: slashPath(result.path) })}</p>
             {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: slashPath(documentsDirectory), names: result.archivedStrays.join(", ") })}</p> : null}
             {result.strays.length ? <p>{format(t("finishStrays"), { names: result.strays.join(", ") })}</p> : null}
@@ -325,11 +422,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.merge} onChange={(event) => setOptions((current) => ({ ...current, merge: event.target.checked, deleteBranch: event.target.checked || current.force ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishMerge")}</span><span className="dws-check-path">{t("finishMergeHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled || (!options.merge && !options.force)} checked={options.deleteBranch && (options.merge || options.force)} onChange={(event) => setOptions((current) => ({ ...current, deleteBranch: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishDeleteBranch")}</span><span className="dws-check-path">{t("finishDeleteBranchHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.force} onChange={(event) => setOptions((current) => ({ ...current, force: event.target.checked, deleteBranch: current.merge || event.target.checked ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishForce")}</span><span className="dws-check-path">{t("finishForceHint")}</span></span></label>
-            {/* Work that is not committed yet cannot survive its worktree, and a merge
-                that will not reconcile stops the finish. Both are opt-in, and both only
-                do what they say - neither picks a side in a conflict. */}
-            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.autoCommit} onChange={(event) => setOptions((current) => ({ ...current, autoCommit: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishAutoCommit")}</span><span className="dws-check-path">{t("finishAutoCommitHint")}</span></span></label>
-            <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.autoResolve} onChange={(event) => setOptions((current) => ({ ...current, autoResolve: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishAutoResolve")}</span><span className="dws-check-path">{t("finishAutoResolveHint")}</span></span></label>
+            {/* Nothing here decides what to do about uncommitted work or a conflict:
+                committing first, and stopping at a conflict instead of picking a side,
+                are what finishing does. A conflict is handed on after it happens —
+                from the report below — not agreed to beforehand. */}
             {/* The one choice about the container's own files: keep the writing,
                 or let everything in there go. Only offered when there is writing
                 to keep — otherwise there is nothing to decide. */}
@@ -353,7 +449,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
         </div>
         <div className="dws-dialog-footer">
           {result
-            ? <Button onClick={close}>{t("close")}</Button>
+            ? <>
+              {/* The same action as the first call, offered where the reason for it
+                  is: once the conflicts have been dealt with in their worktrees, the
+                  finish reads the merge they committed and does the rest. */}
+              {conflicts.length > 0 ? <Button className="dws-button-warn-solid" disabled={busy} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishContinue")}</Button> : null}
+              <Button onClick={close}>{t("close")}</Button>
+            </>
             : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className={discardsWork ? "dws-button-danger-solid" : "dws-button-warn-solid"} disabled={optionsDisabled} onClick={() => void archive()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}
         </div>
       </DialogContent>

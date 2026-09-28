@@ -107,8 +107,7 @@ data directory (as in the sample above), which needs a DSH restart.
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
-| Commit uncommitted work when finishing | on / off | **off** | Commit each worktree's uncommitted changes on its own task branch first, so a merge carries them and the worktree can be removed |
-| Hand merge conflicts to an agent | on / off | **off** | Leave a conflicting merge standing and report the checkout and the files it could not reconcile, so an agent resolves it there and finishes the task again |
+| Archive documents directory | any path | empty | Where a finished task's documents are filed; empty files them under each Workspace's own title directory |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
@@ -165,51 +164,68 @@ process only: nothing is written to disk, and it is gone when the instance exits
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu.
 The dialog spells out what is about to happen — uncommitted files, commits to merge, the
 branch to merge into, and the task space's own documents (the archive option only appears
-when there is something to archive). Merging back is on by default; deleting the branch and
-forcing past uncommitted work are not.
+when there is something to archive). Merging back is selected by default; deleting the
+branch and forcing are not.
 
-Deleting a branch normally needs the merge: untick the merge and the branch option goes
+Finishing a task space is one standard path, in three steps:
+
+**1. Commit.** Every repository worktree in the task space is walked: one that holds
+uncommitted changes gets `git add -A` and then
+`git commit -m "chore(task): commit work in progress before finishing the task space"`, on
+its own task branch. This step always runs, takes no parameter and needs no opt-in. The one
+exception is a deliberate delete-without-merge — abandoning the task space with
+`deleteBranch` and `force` — where that commit would be deleted along with the branch, so it
+is skipped. A worktree in the middle of an unfinished merge (it holds `MERGE_HEAD`) is
+skipped too and left to the merge. A commit that fails (a hook refusing, a missing
+`user.name`/`user.email`, gpg signing, `index.lock`, a file in use) affects that repository
+only: it is neither merged nor removed and keeps its state, the others carry on, and the
+result names each one.
+
+**2. Merge.** The task branch is merged into the target branch. Before that, the target is
+pre-merged into the task branch **inside the task space's own worktree**
+(`git merge --no-ff --no-edit <target>`): when that comes out clean, the pre-merge is undone
+again (`git reset --hard <the HEAD from before the pre-merge>`), and the task branch is then
+merged into the target branch as usual; when it conflicts, that merge is **not aborted and
+not reverted** — the conflict stays exactly where it stands, in that worktree, which keeps
+its `MERGE_HEAD` and its unresolved files.
+
+**3. Stop on a conflict and ask for the agent.** As soon as one repository stands on a
+conflict the whole finish is partial (`failed: true`, the container stays, and the other
+repositories may already be merged and removed). Every repository row reports
+`autoCommitted`, `mergeInProgress`, `mergeSite` (the directory the conflict stands in) and
+`conflictedFiles`. The dialog then shows the conflicting repositories, the site paths and
+the conflicted files, and offers **Hand the conflict to an agent**: clicking it opens a
+separate session for every conflicting repository — its working directory is that conflict
+site — with resolving the conflict and committing the merge as its first message. Once the
+agent is done, **the user clicks Continue**, and the plugin finishes the task again with the
+same request: the merge is already written, so what is left is merging into the target
+branch, removing the worktrees, deleting the branches, archiving and cleaning up. The plugin
+only opens the session; the agent does the resolving.
+
+Deleting a branch normally needs the merge: deselect the merge and the branch option goes
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and
-the commits on them discarded — tick **Force** as well, which is what allows deleting a
-branch that was never merged.
-
-Two further options, both off by default, cover the two ways a finish stalls:
-
-- **Commit uncommitted work**: each worktree's uncommitted changes are committed on its own
-  task branch before anything else happens. That is what unblocks both halves of the stall —
-  a merge cannot carry uncommitted work, and `worktree remove` refuses it. It is the
-  opposite of **Force**, which discards that work. A branch being deleted unmerged gets no
-  such commit, since it would be deleted with the branch.
-- **Hand merge conflicts to an agent**: a conflicting merge is left standing rather than
-  aborted, and the answer reports where it stands and which files it could not reconcile, so
-  an agent resolves them there, commits the merge, and finishes the task again. Unticked, a
-  conflict is aborted as before and the target branch is left exactly as the merge found it.
-
-Both can also be switched on for the whole plugin in its settings (see Configuration above);
-the dialog's ticks are per task and override that default.
+the commits on them discarded — select **Force** as well, which is what allows deleting a
+branch that was never merged; abandoning is also the one combination that skips the commit
+in step 1.
 
 #### What each combination does
 
 | Merge back | Delete branch | Force | What happens |
 | --- | --- | --- | --- |
-| ✓ | | | Every repository's branch is merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository whose merge conflicts is left as it is, the others still finish |
+| ✓ | | | Each repository's uncommitted changes are committed on its own task branch first, and its branch is then merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository standing on a conflict keeps its place, the others still finish |
 | ✓ | ✓ | | The same, and the branch is deleted once merged (`git branch -d`, so an unmerged branch cannot be deleted this way) |
-| ✓ | | ✓ | The same, and **uncommitted** changes in the worktrees are discarded (without it, a worktree with uncommitted changes fails `worktree remove` and is kept whole); the branches stay |
-| ✓ | ✓ | ✓ | Merge, discard uncommitted changes, force-delete the branch (`git branch -D`); the branch was merged, so nothing extra is lost |
-| | | | Nothing is merged: the worktrees and the task space go, **the branches stay** for you to merge by hand |
-| | | ✓ | Only the worktrees go, uncommitted changes and all; the branches stay |
-| | ✓ | ✓ | **Abandon**: nothing merged, the branch force-deleted, and **the commits it held are discarded with it** |
+| ✓ | | ✓ | The same as merging alone: the uncommitted changes were committed at step 1, so Force changes nothing further here; the branches stay |
+| ✓ | ✓ | ✓ | Merge and force-delete the branch (`git branch -D`); the branch was merged, so nothing extra is lost |
+| | | | Nothing is merged: the uncommitted changes are committed (they stay on the branch that stays), the worktrees and the task space go, **the branches stay** for you to merge by hand |
+| | | ✓ | The same: the commit leaves the worktree clean, so Force changes nothing further; the branches stay |
+| | ✓ | ✓ | **Abandon**: nothing merged and nothing committed, the branch force-deleted, and **the commits it held are discarded along with the uncommitted changes in the worktree** |
 
-Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unticked, it is discarded
-outright). **Without Force, a worktree that still holds uncommitted files cannot be removed
-at all** — `git worktree remove` refuses, so that repository is kept as it is and reported
-as unfinished while the others finish, which is also why the task space directory and its
-workspace registration stay: nothing uncommitted is ever lost unless Force says so. The
-directory and the registration are removed only once every repository really went and the
-container is empty, and its sessions then fall back to Ungrouped with their transcripts
+Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
+outright). **A repository whose commit failed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the container is empty, and its sessions then fall back to Ungrouped with their transcripts
 intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
 merge can be reverted and nothing is discarded), and it is **red** only where the dialog can
-name what will be lost — uncommitted files in the plan with Force ticked, or a branch with
-commits on it being deleted without a merge.
+name what will be lost — abandoning the task space (no merge, force-deleting the branches)
+while a worktree still holds uncommitted files, or while a branch still holds commits that
+were never merged.

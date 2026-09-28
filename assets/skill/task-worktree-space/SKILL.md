@@ -100,21 +100,25 @@ Confirm each destructive step with the user before passing it:
    the task's own starting point. Ask which branch to merge into when the user has
    another one in mind, and pass it as `target` (one branch for every repository);
    a branch that is checked out nowhere is merged in a temporary worktree, so no
-   source checkout is ever switched. A conflict leaves that repository's worktree
-   and branch in place and reports it; the other repositories still complete.
-2. **Work nobody committed?** A merge cannot carry uncommitted changes, and a
-   worktree holding them cannot be removed — which is how a finish stalls with the
-   work stranded in the task space. Pass `autoCommit: true` when the user wants that
-   work kept: `done` commits each worktree's uncommitted changes on its own task
-   branch first. It is skipped for a branch being deleted unmerged, because that
-   commit would be deleted with it.
-3. **A conflict an agent could resolve?** Pass `autoResolve: true` when the user
-   would rather have a conflict solved than undone: the conflicting merge is left
-   standing, and the answer reports `mergeSite` — the checkout it stands in — and
-   `conflictedFiles`. Resolve exactly those files in that checkout, commit the merge
-   there, then call `done` again with the same merge request. Never resolve a
-   conflict by picking a side the user has not picked. Without this parameter a
-   conflict is aborted and the branch is left as the merge found it.
+   source checkout is ever switched. Before merging into a target, the target is
+   pre-merged into the task branch inside the task space's own worktree: a clean
+   pre-merge is undone again, while a conflict is left standing there — the
+   worktree keeps its `MERGE_HEAD` and its unresolved files — and that repository's
+   worktree and branch stay in place; the other repositories still complete.
+2. **Work nobody committed?** Nothing to decide and nothing to pass: `done` always
+   commits each worktree's uncommitted changes on its own task branch first, before
+   it merges or removes anything, and the row answers `autoCommitted`. The commit is
+   skipped for a branch being deleted unmerged, because it would be deleted with the
+   branch. A commit that fails keeps that repository as it is — not merged, not
+   removed — while the others carry on.
+3. **A conflict an agent could resolve?** Whether a conflict is handed to another
+   agent is the user's decision, never one this caller makes on its own. The answer
+   for a repository left on a conflict reports `mergeInProgress`, `mergeSite` — the
+   checkout the conflict stands in, inside the task space — and `conflictedFiles`.
+   Resolve exactly those files in that checkout, commit the merge there, then call
+   `done` again with the same merge request: resolving it yourself does not end the
+   task, and only that second `done` finishes it. Never resolve a conflict by picking
+   a side the user has not picked.
 4. **Delete the branch?** After a merge, and only when the user asks: pass
    `deleteBranch: true` together with `merge: true`. When the user wants the task
    space gone without merging anything, that is the abandon path: pass
@@ -124,10 +128,9 @@ Confirm each destructive step with the user before passing it:
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.
 
-`autoCommit` and `autoResolve` are also plugin settings; omitting either parameter
-uses whatever the user configured there, so a session that never passes them still
-honours the setting. Each repository row answers `autoCommitted`, `mergeInProgress`,
-`mergeSite` and `conflictedFiles`, which is where the outcome of both is read.
+Each repository row answers `autoCommitted`, `mergeInProgress`, `mergeSite` and
+`conflictedFiles`; `mergeInProgress` is what marks a repository the finish left on a
+conflict, and `autoCommitted` records the commit made above.
 
 ## Failure modes worth knowing
 
@@ -136,9 +139,10 @@ honours the setting. Each repository row answers `autoCommitted`, `mergeInProgre
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
 - `create` refuses a base that any repository does not have.
-- Removing a worktree refuses when it has uncommitted changes; `done` reports
-  that and keeps the worktree so nothing is lost. Pass `force: true` only when
-  the user has deliberately decided to discard that work.
+- Removing a worktree refuses when it still has uncommitted changes; `done`
+  commits those first, so this is the exception rather than the rule. It reports
+  the refusal and keeps the worktree so nothing is lost. Pass `force: true` only
+  when the user has deliberately decided to discard that work.
 - `create` rolls back the worktrees and the task space when any repository fails,
   so a failed create leaves no half task behind.
 - A task name may not contain `/`, `\` or whitespace: it becomes the task space

@@ -106,41 +106,6 @@ export function configuredArchiveDirectory() {
 }
 
 /**
- * Whether finishing a task commits the work nobody committed.
- *
- * Volatile like the rest of this schema: the Plugins page serves it, the archive
- * dialog reads it as the default for the task in hand, and a write lands on the
- * running entry without a reload. False is the behaviour this plugin had before the
- * option existed.
- */
-let autoCommitReference
-
-/**
- * Whether a conflicting merge is left standing for an agent to resolve.
- *
- * False is the careful default: a finish that conflicts is undone, which is what
- * this plugin did before the option existed. True hands the conflict on instead.
- */
-let autoResolveReference
-
-/**
- * Whether a finish should commit a worktree's uncommitted work before merging or
- * removing it.
- * @returns the configured choice, false when nothing is configured.
- */
-export function configuredAutoCommit() {
-  return autoCommitReference?.get() === true
-}
-
-/**
- * Whether a conflicting merge should be handed on rather than aborted.
- * @returns the configured choice, false when nothing is configured.
- */
-export function configuredAutoResolve() {
-  return autoResolveReference?.get() === true
-}
-
-/**
  * Clamp a requested scan depth into the supported range.
  * @param value - the caller's depth, if it sent one.
  * @returns a whole number of levels between the bounds.
@@ -288,18 +253,6 @@ export const Config = z.object({
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
     .description('Where archived documents go. Empty files them under each workspace title, which is the default.'),
-  /**
-   * The two ways finishing a task stops halfway, and what to do about them.
-   *
-   * Uncommitted work is left out of a merge and blocks the removal of the worktree
-   * it is in; a merge that conflicts cannot be finished by this plugin at all. Both
-   * default to off, which is the behaviour this plugin had before they existed: the
-   * finish reports the obstacle and leaves the task space standing.
-   */
-  autoCommitUncommitted: z.boolean().default(false).volatile()
-    .description('Commit each worktree\'s uncommitted changes on its task branch before finishing, so a merge carries them and the worktree can be removed.'),
-  autoResolveConflicts: z.boolean().default(false).volatile()
-    .description('When a merge conflicts, leave the merge standing and report the checkout and the conflicted files, so an agent can resolve it and finish again.'),
 })
 
 export function apply(ctx, config = {}) {
@@ -315,24 +268,15 @@ export function apply(ctx, config = {}) {
   // Likewise for the archive destination: the settings card writes it and the
   // archive dialog reads it, both through this entry rather than its snapshot.
   archiveDirectoryReference = config.archiveDocumentsDirectory
-  // And for the two finish-time choices: the settings card writes them, the archive
-  // dialog defaults from them, and the tool falls back to them when a caller names
-  // neither.
-  autoCommitReference = config.autoCommitUncommitted
-  autoResolveReference = config.autoResolveConflicts
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
-  // The two finish-time choices travel as accessors rather than values: a setting
-  // saved while the entry is running has to reach the next tool call, and a caller
-  // that names neither choice gets the configured one.
-  const finishDefaults = { autoCommit: configuredAutoCommit, autoResolve: configuredAutoResolve }
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, finishDefaults))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx))
   } else {
-    registerTaskTool(ctx, finishDefaults)
+    registerTaskTool(ctx)
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -442,8 +386,6 @@ export function apply(ctx, config = {}) {
       return {
         defaultBranchPrefix: configuredBranchPrefix(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
-        autoCommitUncommitted: configuredAutoCommit(),
-        autoResolveConflicts: configuredAutoResolve(),
       }
     })
 
@@ -506,10 +448,6 @@ export function apply(ctx, config = {}) {
         keep: Array.isArray(payload.keep) ? payload.keep.filter((name) => typeof name === 'string') : [],
         documentsDirectory: typeof payload.documentsDirectory === 'string' ? payload.documentsDirectory : undefined,
         discardDocuments: payload.discardDocuments === true,
-        // A caller that names neither gets the configured default; the dialog names
-        // both, because the user may override the defaults for this one task.
-        autoCommit: typeof payload.autoCommit === 'boolean' ? payload.autoCommit : configuredAutoCommit(),
-        autoResolve: typeof payload.autoResolve === 'boolean' ? payload.autoResolve : configuredAutoResolve(),
       })
     })
 

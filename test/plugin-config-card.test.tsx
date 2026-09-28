@@ -18,8 +18,6 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "") {
     maxScanDirectories: 3000,
     defaultBranchPrefix: prefix,
     archiveDocumentsDirectory: archiveDirectory,
-    autoCommitUncommitted: false,
-    autoResolveConflicts: false,
   }
   const listeners = new Set<() => void>()
   return {
@@ -175,35 +173,5 @@ describe("the configuration card's archive destination row", () => {
     fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
     await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", ""))
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "" })
-  })
-})
-
-describe("the configuration card's finish switches", () => {
-  it("flips a switch at once, and lands the write in the same form", async () => {
-    const { form, read } = configForm("task/")
-    render(<PluginConfigCard form={form} />)
-
-    // Both finish defaults are settings a reader turns on and off, so the row is a
-    // switch: one click is the whole interaction, with no Edit and no Save.
-    const autoCommit = screen.getByRole("switch", { name: t("autoCommitUncommitted") })
-    expect(autoCommit.getAttribute("aria-checked")).toBe("false")
-
-    fireEvent.click(autoCommit)
-
-    await waitFor(() => expect(form.set).toHaveBeenCalledWith("autoCommitUncommitted", true))
-    await waitFor(() => expect(autoCommit.getAttribute("aria-checked")).toBe("true"))
-    expect(read()).toMatchObject({ autoCommitUncommitted: true })
-  })
-
-  it("puts the switch back, and says so, when the Host refuses the write", async () => {
-    const { form } = configForm("task/", false)
-    render(<PluginConfigCard form={form} />)
-
-    const autoResolve = screen.getByRole("switch", { name: t("autoResolveConflicts") })
-    fireEvent.click(autoResolve)
-
-    await waitFor(() => expect(form.set).toHaveBeenCalledWith("autoResolveConflicts", true))
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(t("configNotSaved")))
-    expect(autoResolve.getAttribute("aria-checked")).toBe("false")
   })
 })

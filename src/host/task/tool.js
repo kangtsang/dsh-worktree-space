@@ -20,7 +20,7 @@ const DESCRIPTION = [
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'Pass merge only when the user asked to merge, deleteBranch only after a merge or - with force - when the user asked to abandon the task, and force only when the user has decided to discard uncommitted work.',
-  'Pass autoCommit to commit a worktree\'s uncommitted changes on its own task branch first, and autoResolve to leave a merge that conflicts standing instead of aborting it. Both fall back to the plugin settings when omitted, and neither is a choice this tool makes on its own.',
+  'Finishing commits each worktree\'s uncommitted work on its own task branch first: a merge cannot carry it and removing the worktree refuses it.',
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
 ].join('\n')
@@ -184,18 +184,12 @@ function summarize(action, value) {
  * endpoints, and a bare context double (as the host tests build) has no service
  * lookup at all, so probing it must not throw.
  * @param ctx - the host plugin context.
- * @param finishDefaults - accessors for the configured `autoCommit` and `autoResolve`
- * choices. They are read when a call arrives, so a setting saved while the entry is
- * running is honoured by the next call rather than the next reload.
  * @returns the registration disposer, or undefined when tools are unavailable.
  */
-export function registerTaskTool(ctx, finishDefaults = {}) {
+export function registerTaskTool(ctx) {
   if (typeof ctx.get !== 'function') return undefined
   const tools = ctx.get('tools')
   if (tools === undefined || tools === null || typeof tools.register !== 'function') return undefined
-
-  const autoCommitDefault = typeof finishDefaults.autoCommit === 'function' ? finishDefaults.autoCommit : () => false
-  const autoResolveDefault = typeof finishDefaults.autoResolve === 'function' ? finishDefaults.autoResolve : () => false
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -219,8 +213,6 @@ export function registerTaskTool(ctx, finishDefaults = {}) {
       cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Off by default.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },
       force: { type: 'boolean', description: 'Discard uncommitted changes, force-delete branches (done). Only on the user decision.' },
-      autoCommit: { type: 'boolean', description: 'Commit each worktree\'s uncommitted changes on its task branch before finishing (done). Omit for the plugin setting.' },
-      autoResolve: { type: 'boolean', description: 'Leave a merge that conflicts standing, and report the checkout and files to resolve (done). Omit for the plugin setting.' },
     },
     output: {
       schema: OUTPUT_SCHEMA,
@@ -300,8 +292,6 @@ export function registerTaskTool(ctx, finishDefaults = {}) {
           force: args.force === true,
           cleanStray: args.cleanStray === true,
           keep: Array.isArray(args.keep) ? args.keep : [],
-          autoCommit: typeof args.autoCommit === 'boolean' ? args.autoCommit : autoCommitDefault(),
-          autoResolve: typeof args.autoResolve === 'boolean' ? args.autoResolve : autoResolveDefault(),
         })
         const value = envelope(action)
         value.task = task

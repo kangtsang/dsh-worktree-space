@@ -608,6 +608,9 @@ describe("finishTask", () => {
       // alpha has work sitting in it and beta has none, so exactly one task branch
       // gets a commit - the commit is per worktree, not a sweep of the container.
       "status --short": ({ cwd }) => (basename(cwd) === "alpha" ? " M a.ts\n?? b.ts\n" : ""),
+      // No merge is standing in either worktree, which is what makes committing the
+      // step that runs: with one in progress the conflicted files are not a commit.
+      "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
       "add -A": "",
       "commit -m chore(task): commit work in progress before finishing the task space": "",
     })
@@ -616,7 +619,6 @@ describe("finishTask", () => {
         task: "login",
         tasksRoot: fixture.container.root,
         merge: true,
-        autoCommit: true,
       })
 
       expect(result.failed).toBe(false)
@@ -630,19 +632,20 @@ describe("finishTask", () => {
     }
   })
 
-  it("leaves a conflicting merge standing, with its files, when the conflict is handed on", async () => {
+  it("leaves a conflicting merge standing in the task's own worktree, with its files", async () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({
       ...fixture.handlers,
       "show-ref --verify --quiet refs/heads/develop": "",
-      "worktree add": "",
-      "worktree remove": "",
-      "merge --abort": "",
+      // The rehearsal runs because the target is not contained in the task branch,
+      // and it is the rehearsal - inside the worktree being finished - that conflicts.
+      "merge-base --is-ancestor develop task/login": { exitCode: 1 },
+      "merge --no-ff --no-edit develop": ({ cwd }) =>
+        fixture.worktrees.has(cwd) ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" } : "",
       // The merge is still standing: git says so, and names what it could not settle.
       "rev-parse --verify --quiet MERGE_HEAD": "",
       "diff --name-only --diff-filter=U": () => "src/a.ts\nsrc/b.ts\n",
-      "merge --no-ff --no-edit task/login": ({ cwd }) =>
-        cwd.includes("dsh-worktree-space-merge") ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" } : "",
+      "worktree remove": "",
     })
     try {
       const result = await finishTask(subprocess, {
@@ -650,19 +653,23 @@ describe("finishTask", () => {
         tasksRoot: fixture.container.root,
         merge: true,
         targets: { alpha: "develop", beta: "develop" },
-        autoResolve: true,
       })
 
       expect(result.failed).toBe(true)
-      // Nothing was thrown away for the agent to redo: the merge is where it was left.
+      // Nothing was thrown away for the agent to redo: the conflict is where it was left.
       expect(keys()).not.toContain("merge --abort")
-      const [alpha] = result.repositories
-      expect(alpha.mergeInProgress).toBe(true)
-      expect(alpha.mergeSite).toContain("dsh-worktree-space-merge")
-      expect(alpha.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
-      // The worktree and branch stay, because the merge still has to land.
-      expect(alpha.removed).toBe(false)
-      expect(alpha.branchDeleted).toBe(false)
+      // And the real merge never ran: the conflict stopped the finish before it.
+      expect(keys()).not.toContain("merge --no-ff --no-edit task/login")
+      for (const entry of result.repositories) {
+        expect(entry.mergeInProgress).toBe(true)
+        // The checkout this plugin owns - the worktree being finished - rather than the
+        // user's own source checkout or a scratch one.
+        expect(entry.mergeSite).toBe(join(fixture.taskPath, entry.name))
+        expect(entry.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
+        // The worktree and branch stay, because the merge still has to land.
+        expect(entry.removed).toBe(false)
+        expect(entry.branchDeleted).toBe(false)
+      }
     } finally {
       await fixture.cleanup()
     }
