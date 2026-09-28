@@ -15,6 +15,12 @@ export interface WorktreesPageProps {
   sessions: ISessions
   /** Opens the create form; the host decides whether it covers the page or steps aside. */
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
+  /**
+   * The host's own way out of the page, for following a session out of the finish
+   * dialog. The panel leaves it out — its way back to the conversation says the same
+   * thing, so that stands in — and the dialog passes its own close.
+   */
+  onLeave?: () => void
 }
 
 /**
@@ -70,7 +76,7 @@ function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
  * keeps its heading and its way back above the two columns, the dialog puts the title in
  * the window's own header, and either way only the rows the view lists scroll.
  */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, variant, onBack }: WorktreesPageProps & {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, variant, onBack, onLeave }: WorktreesPageProps & {
   variant: "panel" | "dialog"
   /** Panel only: the way back to the conversation. */
   onBack?: () => void
@@ -87,6 +93,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     heading={false}
     onCreate={onCreate}
     control={{ view, onView: setView }}
+    onLeave={onLeave ?? onBack}
   />
   if (variant === "dialog") return <section className="dws-manage-page" aria-label={t("worktreesTitle")}>
     <WorktreesNav view={view} onView={setView} />

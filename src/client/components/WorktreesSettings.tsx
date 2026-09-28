@@ -40,6 +40,12 @@ interface Props {
    * Left out, the section holds the view and renders the switcher in its toolbar.
    */
   control?: { view: WorktreeView; onView: (view: WorktreeView) => void }
+  /**
+   * The host's own way out of the page, handed to the finish dialog: following a
+   * session there has to leave the page too, or it covers the conversation. The panel
+   * passes its way back to the conversation, the dialog passes its close.
+   */
+  onLeave?: () => void
 }
 type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
@@ -47,7 +53,7 @@ const FILTERS = [['all', 'filterAll'], ['attention', 'filterAttention']] as cons
 const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave }: Props) {
   const t = useT()
   const [ownView, setOwnView] = useState<WorktreeView>("tasks")
   const view = control?.view ?? ownView
@@ -360,6 +366,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       uiWorkspace={uiWorkspace}
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
+      onLeave={onLeave}
     /> : null}
   </section>
 }

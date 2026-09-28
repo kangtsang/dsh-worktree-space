@@ -486,6 +486,10 @@ describe("finishTask", () => {
       "rev-parse --abbrev-ref HEAD": ({ cwd }) => (worktrees.has(cwd) ? "task/login" : "main"),
       "worktree list --porcelain": ({ cwd }) => porcelain(basename(cwd)),
       "show-ref --verify --quiet refs/heads/main": "",
+      // No merge is standing in these worktrees, which is what Git answers too: the
+      // command succeeds only while `MERGE_HEAD` exists. Tests that leave a merge
+      // behind answer for themselves, per working directory.
+      "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
     }
     return { container, taskPath, handlers, worktrees, cleanup: () => container.cleanup() }
   }
@@ -597,7 +601,7 @@ describe("finishTask", () => {
     }
   })
 
-  it("commits a worktree's uncommitted changes before merging, and only where there are any", async () => {
+  it("stops at a worktree holding work nobody committed, and names it", async () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({
       ...fixture.handlers,
@@ -605,14 +609,12 @@ describe("finishTask", () => {
         rmSync(args[2], { recursive: true, force: true })
         return ""
       },
-      // alpha has work sitting in it and beta has none, so exactly one task branch
-      // gets a commit - the commit is per worktree, not a sweep of the container.
+      // alpha has work sitting in it and beta has none, so exactly one repository is
+      // stopped: the commit is per worktree, and this side does not make it.
       "status --short": ({ cwd }) => (basename(cwd) === "alpha" ? " M a.ts\n?? b.ts\n" : ""),
-      // No merge is standing in either worktree, which is what makes committing the
-      // step that runs: with one in progress the conflicted files are not a commit.
+      // No merge is standing in either worktree, so the uncommitted work is what stops
+      // alpha - not a resolution somebody was in the middle of.
       "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
-      "add -A": "",
-      "commit -m chore(task): commit work in progress before finishing the task space": "",
     })
     try {
       const result = await finishTask(subprocess, {
@@ -621,12 +623,25 @@ describe("finishTask", () => {
         merge: true,
       })
 
-      expect(result.failed).toBe(false)
-      expect(result.repositories.map((entry) => entry.autoCommitted)).toEqual([true, false])
-      expect(keys().filter((key) => key === "add -A")).toHaveLength(1)
-      expect(keys().filter((key) => key.startsWith("commit -m chore(task)"))).toHaveLength(1)
-      // The commit lands before the merge, which is the whole point of making it.
-      expect(keys().indexOf("add -A")).toBeLessThan(keys().indexOf("merge --no-ff --no-edit task/login"))
+      expect(result.failed).toBe(true)
+      const alpha = result.repositories.find((entry) => entry.name === "alpha")
+      expect(alpha.error).toContain("uncommitted work is waiting")
+      expect(alpha.error).toContain(join(fixture.taskPath, "alpha"))
+      // The refusal says what clears it, not who does it: the commit may be the caller's own
+      // or a session's they authorised, and the panel is where that is settled.
+      expect(alpha.error).toContain("commit it before the task can be finished")
+      expect(alpha.error).not.toContain("agent")
+      expect(alpha.merged).toBe(false)
+      expect(alpha.removed).toBe(false)
+      // Nothing was committed here: the message whoever commits writes after reading the work
+      // is the point, and a commit now would be swept away with the worktree.
+      expect(keys()).not.toContain("add -A")
+      expect(keys()).not.toContain("commit -m chore(task): commit work in progress before finishing the task space")
+      // beta held nothing back, so it went through in the same pass.
+      const beta = result.repositories.find((entry) => entry.name === "beta")
+      expect(beta.error ?? "").toBe("")
+      expect(beta.merged).toBe(true)
+      expect(keys().filter((key) => key === "merge --no-ff --no-edit task/login")).toHaveLength(1)
     } finally {
       await fixture.cleanup()
     }
@@ -672,9 +687,13 @@ describe("finishTask", () => {
         // The checkout this plugin owns - the worktree being finished - rather than the
         // user's own source checkout or a scratch one.
         expect(entry.mergeSite).toBe(join(fixture.taskPath, entry.name))
-        // Nothing was concluded either: the finish is waiting on a person or an agent,
-        // and only a later finish writes the merge commit.
-        expect(entry.mergeCommitted).toBe(false)
+        // The repository's own git directory is named too: a commit writes there, so the
+        // session an agent is opened in has to reach it.
+        expect(entry.mainRepo).toBe(join(tmpdir(), `multi-worktree-main-${entry.name}`))
+        // Nothing was concluded either: the merge commit is the agent's, made after it
+        // has resolved the files, and a later finish reads it.
+        expect(keys()).not.toContain("add -A")
+        expect(keys()).not.toContain("commit --no-edit")
         expect(entry.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
         // The worktree and branch stay, because the merge still has to land.
         expect(entry.removed).toBe(false)
@@ -685,15 +704,46 @@ describe("finishTask", () => {
     }
   })
 
-  it("concludes a merge someone resolved by committing it here, before the branch moves", async () => {
+  it("merges a branch whose conflicted merge an agent resolved and committed", async () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({
       ...fixture.handlers,
-      // alpha was handed on with a merge standing in it, and whoever took it wrote the
-      // resolution into the worktree: a merge is still in progress there, and the file
-      // it changed has no markers left.
+      // alpha was handed on with a merge standing in it, and the agent that resolved the
+      // files committed the merge itself: no merge is in progress any more, and the task
+      // branch now contains what the target had - which is what lets the real merge run.
+      "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
+      "worktree remove": "",
+    })
+    try {
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+      })
+
+      expect(result.failed).toBe(false)
+      const alpha = result.repositories.find((entry) => entry.name === "alpha")
+      expect(alpha.merged).toBe(true)
+      expect(alpha.mergeInProgress).toBe(false)
+      // Read, not written: the commit that concluded the merge was the agent's, and this
+      // pass only carried the branch into its target.
+      expect(keys()).not.toContain("add -A")
+      expect(keys()).not.toContain("commit --no-edit")
+      expect(keys()).toContain("merge --no-ff --no-edit task/login")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a merge that was resolved but never committed, instead of committing it here", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, calls, keys } = subprocessMock({
+      ...fixture.handlers,
+      // The files were edited - no markers left - but the merge was never committed, and
+      // writing that commit is the agent's job rather than something guessed at here.
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
       "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "diff --name-only --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
       "add -A": "",
       "commit --no-edit": "",
       "worktree remove": "",
@@ -708,15 +758,19 @@ describe("finishTask", () => {
         merge: true,
       })
 
-      expect(result.failed).toBe(false)
+      expect(result.failed).toBe(true)
       const alpha = result.repositories.find((entry) => entry.name === "alpha")
-      // The resolution is committed by this side, in the worktree it was written in, and
-      // reported as such - the task branch is what carries it into the target.
-      expect(alpha.mergeCommitted).toBe(true)
-      expect(alpha.mergeInProgress).toBe(false)
-      expect(keys()).toContain("add -A")
-      expect(keys()).toContain("commit --no-edit")
-      expect(keys().indexOf("commit --no-edit")).toBeLessThan(keys().indexOf("merge --no-ff --no-edit task/login"))
+      expect(alpha.mergeInProgress).toBe(true)
+      expect(alpha.mergeSite).toBe(join(fixture.taskPath, "alpha"))
+      expect(alpha.conflictedFiles).toEqual(["src/app.ts"])
+      expect(alpha.error).toContain("resolved but not committed")
+      // Read by working directory: the other repository merges normally, so what matters
+      // is that nothing wrote inside the one whose merge nobody committed. The index and
+      // the merge commit stay untouched there, and its branch does not move.
+      const inAlpha = calls.filter((call) => call.cwd === join(fixture.taskPath, "alpha")).map((call) => call.key)
+      expect(inAlpha).not.toContain("add -A")
+      expect(inAlpha).not.toContain("commit --no-edit")
+      expect(inAlpha).not.toContain("merge --no-ff --no-edit task/login")
     } finally {
       await fixture.cleanup()
     }
@@ -724,7 +778,7 @@ describe("finishTask", () => {
 
   it("refuses to conclude a merge whose files still carry conflict markers", async () => {
     const fixture = await taskFixture()
-    const { subprocess, keys } = subprocessMock({
+    const { subprocess, calls, keys } = subprocessMock({
       ...fixture.handlers,
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
       "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
@@ -746,12 +800,14 @@ describe("finishTask", () => {
       expect(result.failed).toBe(true)
       const alpha = result.repositories.find((entry) => entry.name === "alpha")
       expect(alpha.mergeInProgress).toBe(true)
-      expect(alpha.mergeCommitted).toBe(false)
       expect(alpha.conflictedFiles).toEqual(["src/app.ts"])
       expect(alpha.error).toContain("conflict markers")
       // An unfinished resolution is not committed on top of: the markers are the work.
-      expect(keys()).not.toContain("add -A")
-      expect(keys()).not.toContain("commit --no-edit")
+      // Scoped to that worktree, since the clean repository still merges its own branch.
+      const inAlpha = calls.filter((call) => call.cwd === join(fixture.taskPath, "alpha")).map((call) => call.key)
+      expect(inAlpha).not.toContain("add -A")
+      expect(inAlpha).not.toContain("commit --no-edit")
+      expect(inAlpha).not.toContain("merge --no-ff --no-edit task/login")
     } finally {
       await fixture.cleanup()
     }
@@ -1138,6 +1194,9 @@ describe("planTask", () => {
       expect(byName.alpha).toEqual({
         name: "alpha",
         path: join(fixtureUnderTest.taskPath, "alpha"),
+        // Where the source repository is: the dialog needs it to open a session whose
+        // working directory reaches the git directory a commit has to write into.
+        mainRepo: "E:/main-alpha",
         branch: "feat/login",
         target: "develop",
         checkedOut: "develop",

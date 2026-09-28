@@ -441,26 +441,51 @@
   .dws-finish-handoff { display: block; margin-top: 4px; color: var(--wt-warn); }
   .dws-finish-files { display: block; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
   /* The handoff is the step that is left rather than a casualty, so it is a boxed
-     block with the one action that can carry on from it - not another line of red
-     text. The sessions it opened are listed as data: name, checkout, still working. */
+     block with the sessions that carry on from it - not another line of red text. The
+     sessions are listed as data: repository, what it was asked to do, where its git
+     commands may write, and whether it is still working. */
   .dws-finish-handoff-panel { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--wt-line); border-radius: 10px; }
   .dws-finish-handoff-panel p { margin: 0; }
   .dws-finish-handoff-title { color: var(--wt-text); font-weight: 600; }
+  /* The commits are in, so the panel's headline is the good news rather than a question:
+     the light is the page's own green for a clean worktree, and the sentence keeps the
+     colour of the state it reports. Nothing here is asking to be acted on but the footer's
+     button, which is the only thing that reads the state again. */
+  .dws-finish-handoff-title.is-done { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-state-success-primary); }
+  /* The title and the one word this panel waits for: authorizing the commit. They share a
+     line while it fits, and the button drops under the title rather than squeezing it. */
+  .dws-finish-handoff-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+  .dws-finish-handoff-head button { flex: none; }
   .dws-finish-handoff-hint { color: var(--wt-muted); }
   .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
   .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
   .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* The session's write boundary rides in the sentence above the list, in that sentence's
+     own colour and size: it is what a commit in there depends on - the narrowest directory
+     reaching both the worktree and the repository's own gitdir - not a footnote to it. */
   /* Opening the session is the one thing this dialog can do about the agent's work, so
      it reads as a link rather than as a button of the dialog's own. */
   .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
   .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
-  .dws-finish-handoff-running { color: var(--wt-warn); }
-  .dws-finish-handoff-idle { color: var(--wt-muted); }
-  /* The beta notice: it belongs to handing a conflict to an agent, so it lives in the
-     report panel that offers to do it - not on the page that manages worktrees. */
+  /* The line under the list belongs to one session, not to one repository: it says what
+     the agent is on. It reads as a single amber sentence - the same amber as every other
+     pending state here - and goes quiet once it stops. */
+  .dws-finish-handoff-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--wt-warn); }
+  .dws-finish-handoff-state.is-idle { color: var(--wt-muted); }
+  /* The beta notice: it belongs to handing work to an agent, so it lives in the panel
+     that reports those sessions - not on the page that manages worktrees. */
   .dws-beta-notice { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
   .dws-beta-notice a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .dws-beta-badge { flex: none; padding: 0 6px; border: 1px solid var(--wt-warn); border-radius: 999px; color: var(--wt-warn); font-size: 11px; line-height: 16px; letter-spacing: .02em; }
+  /* The other half of that small print, in the same size: what opening a session does to
+     the dialog it was opened from. */
+  .dws-finish-handoff-note { display: flex; align-items: flex-start; gap: 6px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The glyph is the text's own grey rather than the notice's amber: it marks a
+     consequence to read, and nothing here is asking to be acted on. Baseline alignment
+     would sit its box on the text's baseline and leave the glyph riding high, so it is
+     dropped from the line's top edge by the same optical amount the notice above uses
+     for its larger glyph. */
+  .dws-finish-handoff-note > svg { flex: none; margin-top: 2px; color: inherit; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */

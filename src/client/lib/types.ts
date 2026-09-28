@@ -100,16 +100,14 @@ export interface CreateTaskResult {
 export interface FinishTaskRepository {
   name: string
   path: string
+  /** The source repository behind this worktree, as `task.plan` reports it. */
+  mainRepo?: string
   branch?: string
   /** The branch this repository was merged into, when a merge was attempted. */
   target?: string
   merged: boolean
   removed: boolean
   branchDeleted: boolean
-  /** The finish committed this repository's uncommitted work before merging it. */
-  autoCommitted?: boolean
-  /** The finish committed an agent's resolution, concluding the merge it left standing. */
-  mergeCommitted?: boolean
   /** Why this repository was left alone; the worktree and branch stay put. */
   error?: string
   /** The merge hit a conflict and left the worktree and branch in place. */
@@ -145,6 +143,13 @@ export interface TaskInspection {
 export interface TaskPlanRepository {
   name: string
   path: string
+  /**
+   * The source repository behind this worktree.
+   *
+   * The worktree's git directory lives in there, so this is half of what the
+   * narrowest write boundary for a session that commits here has to reach.
+   */
+  mainRepo?: string
   branch?: string
   /** The branch this repository's branch would merge into, as things stand. */
   target?: string

@@ -41,6 +41,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           sessions={sessions}
           onCreate={onCreate}
           variant="dialog"
+          onLeave={onClose}
         />
       </DialogContent>
     </Dialog>
