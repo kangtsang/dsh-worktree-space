@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "commit": "a05109007ab4a58777c1af409ceb9999ad8a5446",
+  "commit": "ae7bb4386069090f9f188937a4d4eeafaadc9407",
   "profile": "evidence",
   "host": { "dsh": "0.1.7-rc.2", "node": "v24.18.0", "os": "Windows" },
-  "artifact": { "name": "dsh-worktree-space-1.0.6.tgz", "bytes": 0, "packedFiles": 19 },
+  "artifact": { "name": "dsh-worktree-space-1.0.6.tgz", "bytes": 307740, "packedFiles": 19 },
   "hostAuthentication": {
     "api": "connection.requestRejection",
     "evidence": "not applicable: this plugin registers no webServer and no HTTP lifecycle surface of its own; its routes ride the host's authenticated /api carrier"
@@ -14,7 +14,7 @@
   },
   "isolatedRuntime": {
     "verified": true,
-    "evidence": "booted under a throwaway DSH_HOME: the page answers 200, the boot payload lists {\"id\":\"dsh-worktree-space\",...,\"rev\":\"12ca5c31c1f1\"}, that bundle is served 200 / 203853 bytes, and POST /api/dsh-worktree-space/task.preference answers 200 while an unknown endpoint answers 404"
+    "evidence": "booted under a throwaway DSH_HOME: the page answers 200, the boot payload lists {\"id\":\"dsh-worktree-space\",...,\"rev\":\"473ca4a5f860\"}, that bundle is served 200 / 203853 bytes, and POST /api/dsh-worktree-space/task.preference answers 200 while an unknown endpoint answers 404"
   },
   "realProfile": {
     "verified": true,
@@ -29,7 +29,7 @@
       "dsh": "0.1.7-rc.2",
       "node": "v24.18.0",
       "os": "Windows",
-      "install": "pass: dsh plugin --profile evidence add <tarball> exited 0 with '+ dsh-worktree-space 1.0.5' and no incompatible warning",
+      "install": "pass: dsh plugin --profile evidence add <tarball> exited 0 with '+ dsh-worktree-space 1.0.6' and no incompatible warning",
       "configuration": "pass: the profile's package.json gained the dependency and the bundle entry, and --dump-config composes the worktree-space row",
       "start": "pass: dsh --profile evidence --no-open --port 0 printed its URL with no 'did not activate' warning",
       "uninstall": "pass: dsh plugin --profile evidence remove dsh-worktree-space exited 0, node_modules/dsh-worktree-space is gone, and --dump-config mentions worktree-space 0 times",
@@ -50,5 +50,5 @@
     "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
     "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
   },
-  "publicRelease": "unverified: npm still carries 1.0.4; 1.0.5 is tagged and pushed on GitHub only"
+  "publicRelease": "1.0.5 is on npm, published from 88f8808ee66c6de733d718bd7588f96677a9da47 before the contract fixes; a version number cannot be reused, so those fixes ship as 1.0.6, whose tag is pushed for the trusted publish workflow and whose npm-side gitHead is read back after it lands"
 }

@@ -85,7 +85,7 @@ The compatibility range declared explicitly in the manifest (`package.json`):
 | `dsh.manifestVersion` | `1` | DSH manifest format version |
 | `dsh.compatibility.profiles` | `["web"]` | Verified profile |
 
-**Fixed commit**: this version (`v1.0.5`) is the commit `a05109007ab4a58777c1af409ceb9999ad8a5446` on GitHub —
+**Fixed commit**: this version (`v1.0.6`) is the commit `ae7bb4386069090f9f188937a4d4eeafaadc9407` on GitHub —
 the acceptance package was packed from that commit, byte for byte.
 
 `engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so declaring

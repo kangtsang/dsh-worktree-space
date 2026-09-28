@@ -68,7 +68,7 @@ manifest（`package.json`）里显式声明的兼容范围：
 | `dsh.manifestVersion` | `1` | DSH 清单格式版本 |
 | `dsh.compatibility.profiles` | `["web"]` | 已验证的 profile |
 
-**固定提交**：本版（`v1.0.5`）对应的源码提交是 `a05109007ab4a58777c1af409ceb9999ad8a5446`；验收用的包正是
+**固定提交**：本版（`v1.0.6`）对应的源码提交是 `ae7bb4386069090f9f188937a4d4eeafaadc9407`；验收用的包正是
 从这个提交打出来的，可逐字节核对。
 
 `engines.dsh` 是**声明**而非强制：当前 DSH 的安装器与加载器都不校验它，写一个范围不会拒绝不兼容的宿主，
