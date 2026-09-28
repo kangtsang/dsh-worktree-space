@@ -37,6 +37,7 @@ const expected = [
   "docs/img/new-session.png",
   "docs/img/new-worktree-space.png",
   "docs/store-evidence.md",
+  "docs/store-evidence.json",
   "icon.svg",
   "lib/index.js",
   "locale/en.json",

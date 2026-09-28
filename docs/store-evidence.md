@@ -94,14 +94,15 @@ dsh --profile evidence --dump-config
 ## 3. 验收记录（2026-09-28，一次性 profile `evidence`）
 
 环境：Windows、Node.js `v24.18.0`、DSH `0.1.7-rc.2`；被测包是 `npm pack` 出来的
-`dsh-worktree-space-1.0.5.tgz`（303232 字节，与 `pnpm check:package` 校验的 18 个文件同源）。`DSH_HOME`
-全程指向临时目录，没有碰日常 `profiles/`。
+`dsh-worktree-space-1.0.5.tgz`（**305952** 字节，与 `pnpm check:package` 校验的 18 个文件同源），对应
+固定提交 `a05109007ab4a58777c1af409ceb9999ad8a5446`。`DSH_HOME` 全程指向临时目录，没有碰日常
+`profiles/`。机器可读版本见 [`store-evidence.json`](store-evidence.json)。
 
 | 步骤 | 状态 | 证据 |
 | --- | --- | --- |
 | 安装 | **已通过** | `dsh plugin --profile evidence add <tarball>` 退出 0，输出 `+ dsh-worktree-space 1.0.5`；`incompatible` 一次都没出现；profile 的 `package.json` 增加该依赖并把它写进 `dsh.profile.bundles`；装出来的 `package.json` 是 `version 1.0.5`、`engines={"node":">=22.19.0","dsh":">=0.1.7-rc.1"}` |
 | 配置组合 | **已通过** | `dsh --profile evidence --dump-config` 退出 0（1249 行），组合树末尾出现 `# == dsh-worktree-space` / `- id: worktree-space` / `name: dsh-worktree-space` |
-| 启动与可见性 | **已通过** | 启动无警告（没有 `did not activate`）；启动数据里出现客户端条目 `{"id":"dsh-worktree-space","url":"plugins/??dsh-worktree-space/client.js&rev=1ea18b4cf4b3",…}`；该 bundle 取回 **200、203853 字节**（本地 `client/client.js` 203777 字节，外加宿主加载器补的 76 字节包装与 `sourceMappingURL`）；宿主 RPC 已注册并作答：`POST /api/dsh-worktree-space/task.preference` → 200 `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsDirectory":""}}`，未知 endpoint → 404 |
+| 启动与可见性 | **已通过** | 启动无警告（没有 `did not activate`）；启动数据里出现客户端条目 `{"id":"dsh-worktree-space","url":"plugins/??dsh-worktree-space/client.js&rev=12ca5c31c1f1",…}`；该 bundle 取回 **200、203853 字节**（本地 `client/client.js` 203777 字节，外加宿主加载器补的 76 字节包装与 `sourceMappingURL`）；宿主 RPC 已注册并作答：`POST /api/dsh-worktree-space/task.preference` → 200 `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsDirectory":""}}`，未知 endpoint → 404 |
 | 卸载回滚 | **已通过** | `dsh plugin --profile evidence remove dsh-worktree-space` 退出 0，输出 `- dsh-worktree-space 1.0.5`；`profiles/evidence/node_modules/dsh-worktree-space/` 消失；`package.json` 的依赖与 `bundles` 里都不再有它；`--dump-config` 里 `worktree-space` 出现 **0** 次（1246 行）；再启动一次无报错，页面里 `dsh-worktree-space` 出现 **0** 次 |
 
 ### 3.1 端到端功能验收（一次性仓库）
@@ -115,14 +116,27 @@ dsh --profile evidence --dump-config
    `changedFiles: 0`。
 3. `task.done`（`merge: true, deleteBranch: true`）→ `merged: true, removed: true, branchDeleted: true,
    containerRemoved: true, failed: false, warnings: []`。
-4. 源仓库结果：`2b2952d Merge branch 'task/evidence'`（`--no-ff`），`feature.txt` 已出现在 main 检出里，
+4. 源仓库结果：`f09ee78 Merge branch 'task/evidence'`（`--no-ff`），`feature.txt` 已出现在 main 检出里，
    分支只剩 `main`，`git worktree list` 只剩主检出；任务目录已删除（`tasksRoot` 本身保留，因为它是用户
    指定的根，插件只删自己建的那一层）。
+
+### 3.2 外部回读（固定提交就是发布内容）
+
+从 GitHub 按固定提交取回本仓库里的构建产物，与本地逐字节比对：
+
+```
+Invoke-WebRequest https://raw.githubusercontent.com/kangtsang/dsh-worktree-space/a051090…/client/client.js
+SHA-256  F626FF55266DDEC472F4CA496ED05811C7F503B56302748C5F7717CAFBDB8B62  203777 字节
+本地      同上                                                              203777 字节
+```
+
+两者一致，说明这次验收装的包与推上去的那个提交是同一份内容。npm 上的 `1.0.5` 尚未发布（当前仍是
+`1.0.4`），这一点在 `store-evidence.json` 的 `publicRelease` 里如实标为 `unverified`。
 
 跑完后一次性 profile 与临时仓库都已删除，`remove` 之后 profile 回到 `@deepseek-ai/dsh-base` +
 `@deepseek-ai/dsh-web-app` 两个 bundle。
 
-### 3.2 两点如实说明
+### 3.3 两点如实说明
 
 - **GUI 截图未附**：headless Chrome 面对开着长连接的 GUI 不会自行退出（跑满两分钟仍不返回），所以这一轮
   的可见性证据是上面那些机器可读输出（启动数据里的客户端条目、bundle 的实际字节数、RPC 的实际回答），

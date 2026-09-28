@@ -85,8 +85,8 @@ The compatibility range declared explicitly in the manifest (`package.json`):
 | `dsh.manifestVersion` | `1` | DSH manifest format version |
 | `dsh.compatibility.profiles` | `["web"]` | Verified profile |
 
-**Fixed commit**: this version (`v1.0.5`) is the commit `0c7eb6f1a0b4b69434ec48b52376c31c3b066670` on GitHub —
-that commit is this release, byte for byte.
+**Fixed commit**: this version (`v1.0.5`) is the commit `a05109007ab4a58777c1af409ceb9999ad8a5446` on GitHub —
+the acceptance package was packed from that commit, byte for byte.
 
 `engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so declaring
 a range does not reject an incompatible host — the range means no more than "`0.1.7-rc.1` and later

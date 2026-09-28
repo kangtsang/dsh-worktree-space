@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "commit": "a05109007ab4a58777c1af409ceb9999ad8a5446",
+  "profile": "evidence",
+  "host": { "dsh": "0.1.7-rc.2", "node": "v24.18.0", "os": "Windows" },
+  "artifact": { "name": "dsh-worktree-space-1.0.5.tgz", "bytes": 305952, "packedFiles": 18 },
+  "hostAuthentication": {
+    "api": "connection.requestRejection",
+    "evidence": "not applicable: this plugin registers no webServer and no HTTP lifecycle surface of its own; its routes ride the host's authenticated /api carrier"
+  },
+  "dumpConfig": {
+    "verified": true,
+    "evidence": "dsh --profile evidence --dump-config exited 0 (1249 lines) and its composed tree ends with '# == dsh-worktree-space' / '- id: worktree-space' / 'name: dsh-worktree-space'"
+  },
+  "isolatedRuntime": {
+    "verified": true,
+    "evidence": "booted under a throwaway DSH_HOME: the page answers 200, the boot payload lists {\"id\":\"dsh-worktree-space\",...,\"rev\":\"12ca5c31c1f1\"}, that bundle is served 200 / 203853 bytes, and POST /api/dsh-worktree-space/task.preference answers 200 while an unknown endpoint answers 404"
+  },
+  "realProfile": {
+    "verified": true,
+    "evidence": "every command ran with DSH_HOME pointed at a throwaway directory: profiles/web still holds 1.0.3 and profiles/desktop 1.0.2, and profiles/web/cordis.patch.yml still hashes 0793DF16616591A7"
+  },
+  "externalReadback": {
+    "verified": true,
+    "evidence": "client/client.js fetched from raw.githubusercontent.com at the fixed commit hashes F626FF55266DDEC472F4CA496ED05811C7F503B56302748C5F7717CAFBDB8B62 (203777 bytes), identical to the local file"
+  },
+  "matrix": [
+    {
+      "dsh": "0.1.7-rc.2",
+      "node": "v24.18.0",
+      "os": "Windows",
+      "install": "pass: dsh plugin --profile evidence add <tarball> exited 0 with '+ dsh-worktree-space 1.0.5' and no incompatible warning",
+      "configuration": "pass: the profile's package.json gained the dependency and the bundle entry, and --dump-config composes the worktree-space row",
+      "start": "pass: dsh --profile evidence --no-open --port 0 printed its URL with no 'did not activate' warning",
+      "uninstall": "pass: dsh plugin --profile evidence remove dsh-worktree-space exited 0, node_modules/dsh-worktree-space is gone, and --dump-config mentions worktree-space 0 times",
+      "rollback": "pass: booting again after the removal starts clean, and the page mentions dsh-worktree-space 0 times",
+      "endToEnd": "pass: task.create built the worktree and its metadata (a tasks root inside the source root was refused with 'work and source must be isolated'), task.plan reported mergeTarget main / commits 1 / changedFiles 0, task.done reported merged, removed, branchDeleted and containerRemoved true with failed false and no warnings, and the source repository ended on 'Merge branch task/evidence' with only main left"
+    }
+  ],
+  "requiredCases": {
+    "unauthenticated-401": "not applicable: no HTTP lifecycle surface of its own",
+    "cross-origin-403": "not applicable: no HTTP lifecycle surface of its own",
+    "missing-authority-503": "not applicable: no HTTP lifecycle surface of its own",
+    "post-not-replayed": "not applicable: no HTTP lifecycle surface of its own",
+    "crash-recovery": "not applicable: the plugin keeps no durable operation journal; each route call is one git pass, and a stopped finish is re-read from the repository's own state",
+    "windows-file-lock": "not applicable: nothing in this Windows run hit a lock, so no case produced one",
+    "rollback-failure": "not applicable: uninstall rollback is the uninstall row above",
+    "pnpm-10": "not run: this run used pnpm 12.6.0",
+    "pnpm-11": "not run: this run used pnpm 12.6.0",
+    "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
+    "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
+  },
+  "publicRelease": "unverified: npm still carries 1.0.4; 1.0.5 is tagged and pushed on GitHub only"
+}
