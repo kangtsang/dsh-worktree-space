@@ -100,12 +100,6 @@ export interface CreateTaskResult {
 export interface FinishTaskRepository {
   name: string
   path: string
-  /**
-   * The repository behind `path` — the checkout whose `.git` holds this worktree's
-   * metadata. A linked worktree stages and commits through it, so whoever has to
-   * finish a merge in `path` needs this one inside the same write boundary.
-   */
-  mainRepo?: string
   branch?: string
   /** The branch this repository was merged into, when a merge was attempted. */
   target?: string
@@ -114,6 +108,8 @@ export interface FinishTaskRepository {
   branchDeleted: boolean
   /** The finish committed this repository's uncommitted work before merging it. */
   autoCommitted?: boolean
+  /** The finish committed an agent's resolution, concluding the merge it left standing. */
+  mergeCommitted?: boolean
   /** Why this repository was left alone; the worktree and branch stay put. */
   error?: string
   /** The merge hit a conflict and left the worktree and branch in place. */

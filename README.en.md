@@ -11,7 +11,8 @@ registered as a DSH Workspace with its own sessions.
 
 [中文](README.md) · **English**
 
-> **Beta (experimental)**: behaviour may still change — please report problems in
+> **Beta (experimental)**: handing merge conflicts to an agent is the part that may still
+> change — please report problems in
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 ## Features
@@ -195,19 +196,20 @@ its `MERGE_HEAD` and its unresolved files.
 **3. Stop on a conflict and ask for the agent.** As soon as one repository stands on a
 conflict the whole finish is partial (`failed: true`, the container stays, and the other
 repositories may already be merged and removed). Every repository row reports
-`autoCommitted`, `mergeInProgress`, `mergeSite` (the directory the conflict stands in) and
-`conflictedFiles`. The dialog then shows the conflicting repositories, the site paths and
-the conflicted files, and offers **Hand the conflict to an agent**: clicking it opens a
-separate session for every conflicting repository, working in the **common ancestor of the
-conflict site and the main repository** — a linked worktree keeps its git metadata under the
-main repository's `.git`, and a session's write boundary is its working directory, so the
-common ancestor is what lets the agent both edit the files and commit the merge without
-another approval (where the two share only a volume root, the site itself is used) — with
-resolving the conflict and committing the merge as its first message. Once the
-agent is done, **the user clicks Continue**, and the plugin finishes the task again with the
-same request: the merge is already written, so what is left is merging into the target
-branch, removing the worktrees, deleting the branches, archiving and cleaning up. The plugin
-only opens the session; the agent does the resolving.
+`autoCommitted`, `mergeCommitted`, `mergeInProgress`, `mergeSite` (the directory the
+conflict stands in) and `conflictedFiles`. The dialog then shows the conflicting
+repositories, the site paths and the conflicted files, and offers **Hand the conflict to an
+agent**: clicking it opens a separate session for every conflicting repository, working in
+the **conflict site itself**, with a first message that only asks it to edit files there
+and remove the conflict markers. Resolving a conflict writes files inside the task space and
+nothing else, so the main repository's `.git` does not have to be inside its write boundary:
+the plugin makes the merge commit (this part is experimental). Once the agent is done, **the
+user clicks Continue**, and the plugin finishes the task again with the same request: it
+first checks that no conflict markers are left, then `git add -A` and `git commit
+--no-edit` conclude the merge on the plugin's side, where the worktree's git metadata is in
+reach, and what is left is merging into the target branch, removing the worktrees, deleting
+the branches, archiving and cleaning up. The plugin only opens the sessions and commits; the
+agent supplies the resolution.
 
 Deleting a branch normally needs the merge: deselect the merge and the branch option goes
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and

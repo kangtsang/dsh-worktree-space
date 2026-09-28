@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanPath, commonAncestor, nameOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
+import { cleanPath, nameOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
 
 describe("worktree path helpers", () => {
   it("normalizes trailing separators without changing root paths", () => {
@@ -29,25 +29,5 @@ describe("worktree path helpers", () => {
     expect(parentOf("repo")).toBe("repo")
     expect(nameOf("repo")).toBe("repo")
     expect(parentOf("/tasks")).toBe("/tasks")
-  })
-
-  it("finds the deepest directory that holds both paths", () => {
-    // A task space beside its repositories: the worktree and the repository meet one
-    // level up, which is the directory a handoff session has to be opened on.
-    expect(commonAncestor("C:\\wt\\spaces\\demo\\alpha", "C:\\wt\\repos\\alpha")).toBe("C:/wt")
-    expect(commonAncestor("/home/u/tasks/a", "/home/u/repos/a")).toBe("/home/u")
-    // Compared without case, and reported in the first path's own style: the two paths
-    // arrive from different sources.
-    expect(commonAncestor("C:\\WT\\repos\\a", "c:\\wt\\spaces\\a")).toBe("C:/WT")
-    // A path is its own ancestor, so nothing widens when there is nothing to reach.
-    expect(commonAncestor("C:\\wt\\spaces\\a", "C:\\wt\\spaces\\a")).toBe("C:/wt/spaces/a")
-    expect(commonAncestor("C:\\wt\\spaces\\a\\", "C:\\wt\\spaces\\a")).toBe("C:/wt/spaces/a")
-    // A volume root, a filesystem root, or another volume is no boundary to hand a
-    // session: the whole disk is worse than the approval it would avoid.
-    expect(commonAncestor("C:\\wt\\a", "C:\\other\\b")).toBeUndefined()
-    expect(commonAncestor("C:\\wt\\a", "D:\\wt\\b")).toBeUndefined()
-    expect(commonAncestor("/x", "/y")).toBeUndefined()
-    // Segment-wise, not by prefix: `wt` and `wtx` share nothing.
-    expect(commonAncestor("C:\\wt\\a", "C:\\wtx\\a")).toBeUndefined()
   })
 })

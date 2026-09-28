@@ -270,16 +270,16 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.created).toHaveLength(1))
     expect(next.prompts[0].text).toContain(site.replace(/\\/g, "/"))
     expect(next.prompts[0].text).toContain("src/a.ts")
-    // Opened on the worktree itself, the session cannot be told that the repository's
-    // git metadata is writable: it may be somewhere this boundary does not reach.
-    expect(next.prompts[0].text).toContain(t("finishHandoffScopeTight"))
-    expect(next.prompts[0].text).not.toContain(t("finishHandoffScopeWide"))
+    // Opened on the worktree itself, the session has everything resolving needs - the
+    // conflicted files are under its working directory. Every placeholder is filled, and
+    // the prompt no longer carries a boundary or a scope sentence at all.
+    expect(next.prompts[0].text).not.toMatch(/\{[a-z]+\}/)
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", sessions: "kratos-vue-admin" }))).toBeTruthy()
 
     // The dialog cannot see an approval and cannot do the agent's work, so it does the
     // two things it can: report where the session state comes from, and take the user
     // to the session itself.
-    expect(screen.getByText(t("finishHandoffApprove"))).toBeTruthy()
+    expect(screen.getByText(t("finishHandoffCommit"))).toBeTruthy()
     await user.click(screen.getByRole("button", { name: t("finishHandoffOpen") }))
     expect(next.uiWorkspace.openSession).toHaveBeenCalledWith("session-1")
 
@@ -303,20 +303,18 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(2))
   })
 
-  it("opens the handoff session on the ancestor of the worktree and the repository the Host named", async () => {
+  it("opens the handoff session in the worktree itself, whatever the Host says about the repository", async () => {
     const user = userEvent.setup()
-    // A task space beside its repositories, as the demo lays them out: the session's
-    // working directory is its write boundary, so one opened on the worktree alone
-    // could edit the conflicted file but never commit it - a linked worktree keeps
-    // its git metadata under the main repository. The Host names that repository with
-    // the conflict, and the two have nothing in common past the container, so the
-    // container is the narrowest boundary that reaches both.
+    // A task space beside its repositories, as the demo lays them out. The session only has
+    // to edit files inside the worktree - the plugin concludes the merge afterwards, from a
+    // side that can reach the repository's git metadata - so nothing here needs the
+    // repository, and nothing here walks the Workspaces looking for it.
     const site = "E:\\wt-demo\\spaces\\demo\\alpha"
     const next = setup({
       result: finishResult({
         failed: true,
         repositories: [
-          { name: "alpha", path: site, mainRepo: "E:\\wt-demo\\repos\\alpha", branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
+          { name: "alpha", path: site, branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
         ],
       }),
     })
@@ -326,26 +324,23 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
 
     // The page scans the Workspaces for its own view; what must not happen is the
-    // dialog scanning them again for an answer the Host already gave.
+    // dialog scanning them again for an answer it does not need.
     const scans = next.api.scan.mock.calls.length + next.api.cachedScan.mock.calls.length
     await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
-    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/wt-demo" }))
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: site }))
     expect(next.api.scan.mock.calls.length + next.api.cachedScan.mock.calls.length).toBe(scans)
-    // The message says which directory the session is in, since that is no longer the
-    // directory the work is in, and the panel names the boundary it bought.
-    expect(next.prompts[0].text).toContain("E:/wt-demo")
-    // A boundary that reaches the repository is what the agent is told it has, since
-    // that is what saves it from asking for a wider sandbox.
-    expect(next.prompts[0].text).toContain(t("finishHandoffScopeWide"))
-    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/wt-demo" }))).toBeTruthy()
+    // The message names the merge site, which is where the work is and where the session
+    // is, and carries no other directory the agent would have to reconcile with it.
+    expect(next.prompts[0].text).toContain("E:/wt-demo/spaces/demo/alpha")
+    expect(next.prompts[0].text).not.toContain("E:/wt-demo/repos")
   })
 
-  it("opens the handoff session on a scanned repository when the Host named none", async () => {
+  it("opens the handoff session in the worktree when the Host named no repository", async () => {
     const user = userEvent.setup()
-    // A Host that named no repository still has one: the scan pairs the worktree with
-    // the repository behind it, and their common ancestor is the narrowest boundary
-    // that reaches the metadata. The comparison has to read both spellings of a
-    // Windows path - the Host joins with backslashes, git prints forward slashes.
+    // A Host that names no repository is no reason to walk every Workspace: the session's
+    // working directory is the worktree either way, and the merge is the plugin's to
+    // conclude. The fixture still holds the repository and its main worktree, so a scan
+    // would find them - and must not be asked to.
     const repo = "E:\\worktree-space\\repos\\alpha"
     const site = `${container}\\alpha`
     const next = setup({
@@ -371,17 +366,11 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
 
     await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
-    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/worktree-space" }))
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: site }))
     await waitFor(() => expect(next.created).toHaveLength(1))
-    // The task's own directory is one of the places the pairing is looked for, since a
-    // task space is a worktree of the repository whose metadata the session needs.
-    expect(next.api.scan).toHaveBeenCalledWith(expect.arrayContaining([container]))
-    // The message says which directory the session is in, since that is no longer the
-    // directory the work is in.
-    expect(next.prompts[0].text).toContain("E:/worktree-space")
-    // The boundary is wider than the worktree, and that width is what saves the
-    // approval, so the panel names it rather than leaving it to be discovered.
-    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/worktree-space" }))).toBeTruthy()
+    // The message names the worktree, which is both where the work is and where the
+    // session is.
+    expect(next.prompts[0].text).toContain(site.replace(/\\/g, "/"))
     expect(screen.getByText(site.replace(/\\/g, "/"))).toBeTruthy()
   })
 

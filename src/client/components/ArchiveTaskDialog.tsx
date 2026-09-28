@@ -3,9 +3,10 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, commonAncestor, nameOf, parentOf, slashPath } from "../lib/paths"
+import { cleanPath, nameOf, parentOf, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finishScene"
-import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService, WorktreeList } from "../lib/types"
+import { BetaNotice } from "./BetaNotice"
+import type { FinishTaskRepository, FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
 
@@ -251,78 +252,53 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * plugin's job: the branch has to be merged into its target and the worktrees
    * removed afterwards.
    *
-   * It also names the session's own working directory, because that is its write
-   * boundary: an agent that takes the worktree for its working directory would go
-   * looking for the merge in the wrong tree.
+   * The worktree is the whole job, and the session is opened on it. Resolving means
+   * editing files inside the task space, which is all the sandbox has to allow; the
+   * index and the merge commit that conclude it are this side's, written when the user
+   * asks for the finish again. So the prompt tells the agent not to run git's writing
+   * commands rather than sending it after a wider sandbox - a refusal is expected, and
+   * needs no approval.
    */
-  const promptFor = (entry: FinishTaskRepository, site: string, boundary: string) => format(t("finishHandoffPrompt"), {
+  const promptFor = (entry: FinishTaskRepository, site: string) => format(t("finishHandoffPrompt"), {
     task: plan?.task ?? "",
     name: entry.name,
     branch: entry.branch ?? "",
     target: entry.target ?? "",
     site: slashPath(site),
-    boundary: slashPath(boundary),
-    // Only a boundary that reaches wider than the worktree can promise that the
-    // repository's git metadata is writable. When it is the worktree itself, saying
-    // so would be a claim the sandbox is about to contradict.
-    scope: slashPath(boundary) === slashPath(site) ? t("finishHandoffScopeTight") : t("finishHandoffScopeWide"),
     files: (entry.conflictedFiles ?? []).join(", "),
   })
 
   /**
-   * Hand the conflicts on: one session per conflicting repository, opened on a
-   * working directory that reaches both the worktree and the repository's git
-   * metadata, each told to resolve the conflict and commit.
+   * Hand the conflicts on: one session per conflicting repository, opened in the
+   * worktree the merge is standing in, each told to resolve it by editing files there.
    *
    * The dialog stays the one that decides, either way. A session that fails, or is
    * stopped, leaves the conflict exactly where it was; and nothing here waits on the
    * sessions, because this plugin cannot know whether what an agent did is what the
    * user wanted. So the report says which sessions were opened and whether they are
    * still working, and asking for the finish again is the user's move - that call
-   * reads the merge they committed and completes the rest.
+   * commits the resolution and completes the rest.
    */
   const authorize = async () => {
     if (conflicts.length === 0 || authorizing) return
     setAuthorizing(true); setHandoffError("")
     const opened: FinishSceneSession[] = []
     const failures: string[] = []
-    // The Host names each repository by the worktree the task lives in, and a session's
-    // working directory is its write boundary - so the boundary has to reach the
-    // repository behind that worktree, whose `.git` is what a commit writes. The Host
-    // reports that repository with the conflict. Only a Host that reported none is worth
-    // a scan of every registered Workspace, which walks real directory trees and can hit
-    // its own budget; with neither answer, the worktree is handed on and costs an approval.
-    let scanned: WorktreeList[] = []
-    if (conflicts.some((entry) => entry.mainRepo === undefined || entry.mainRepo === "")) {
-      const roots = [...new Set([...workspaces.list.getSnapshot().items.map((item) => cleanPath(item.path)), cleanPath(path)])]
-      try {
-        const remembered = await api.cachedScan(roots)
-        scanned = remembered === null ? await api.scan(roots) : remembered.repositories
-      } catch { scanned = [] }
-    }
+    // The worktree is the whole job: resolving a conflict means editing files inside the
+    // task space, which the session's own working directory already covers. So the
+    // session is opened on the merge site itself, and nothing here has to reach for the
+    // repository's `.git` - the finish commits the merge after the agent has edited.
     for (const entry of conflicts) {
       const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
-      // A linked worktree keeps its git metadata in the main repository, so the site
-      // alone cannot commit the merge it resolved: the common ancestor of the two is the
-      // narrowest directory that reaches both. The Host's own answer comes first; the
-      // scan is the fallback, and reads both spellings of a Windows path because the Host
-      // joins with backslashes while git prints forward slashes. Where they share only a
-      // volume root - or where the worktree already reaches the repository - the worktree
-      // itself is all there is to open on, passed on exactly as the Host named it.
-      const repository = scanned.find((list) => list.worktrees.some((row) => slashPath(row.path).toLowerCase() === slashPath(site).toLowerCase()))
-      const fromScan = repository === undefined ? "" : repository.commonDir === "" ? repository.repoPath : repository.commonDir
-      const metadata = entry.mainRepo || fromScan || entry.path
-      const ancestor = commonAncestor(site, metadata)
-      const boundary = ancestor === undefined || slashPath(site).toLowerCase() === ancestor.toLowerCase() ? site : ancestor
       try {
-        const sessionId = await sessions.create({ cwd: boundary })
+        const sessionId = await sessions.create({ cwd: site })
         // A session opens blank, so this is its first turn rather than a steer, and
         // the reference is a handle for the length of the call - not something to
         // keep: the session is followed through the Host's own list instead.
         await sessions.using(sessionId, { source: "controllerOperation" }, async (reference) => {
-          await reference.binding.session.prompt([{ type: "text", text: promptFor(entry, site, boundary) }], "queue")
+          await reference.binding.session.prompt([{ type: "text", text: promptFor(entry, site) }], "queue")
         })
-        opened.push({ name: entry.name, site, boundary, sessionId })
+        opened.push({ name: entry.name, site, sessionId })
       } catch (reason: any) {
         failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
       }
@@ -418,7 +394,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   : t("finishDoneKept")}</p>
             <ul className="dws-finish-repos">{result.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
-              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null, entry.autoCommitted ? t("finishAutoCommitted") : null].filter(Boolean).join(" · ") || (entry.mergeInProgress ? t("finishConflictKept") : entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
+              <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null, entry.autoCommitted ? t("finishAutoCommitted") : null, entry.mergeCommitted ? t("finishMergeCommitted") : null].filter(Boolean).join(" · ") || (entry.mergeInProgress ? t("finishConflictKept") : entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
               {/* One explanation, never two. A merge left standing is not a failure to
                   explain away but the step that is left, so it names the checkout and the
                   files to reconcile; a merge that was aborted says so. The two cannot both
@@ -459,10 +435,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     return <li key={opened.sessionId}>
                     <strong>{opened.name}</strong>
                     <code title={slashPath(opened.site)}>{slashPath(opened.site)}</code>
-                    {/* The write boundary, when it reaches wider than the worktree:
-                        that width is what saves the approval, so it is not a detail. */}
-                    {slashPath(opened.boundary) === slashPath(opened.site) ? null
-                      : <span className="dws-finish-handoff-boundary">{format(t("finishHandoffBoundary"), { path: slashPath(opened.boundary) })}</span>}
                     {/* While the agent works the state is the thing to notice, so it
                         carries the same amber as every other pending state here; once
                         it stops, the row goes quiet. */}
@@ -472,11 +444,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     <button type="button" className="dws-finish-handoff-open" onClick={() => uiWorkspace.openSession(opened.sessionId)}>{t("finishHandoffOpen")}</button>
                   </li>
                   })}</ul>
-                  {/* What the agent asks for is approved in that session: approvals never
-                      reach this dialog, so saying where they are is the whole of the help. */}
-                  <p className="dws-finish-handoff-hint">{t("finishHandoffApprove")}</p>
+                  {/* The agent edits files and stops; the commit is the plugin's, so the
+                      hint says what to press rather than where an approval would appear. */}
+                  <p className="dws-finish-handoff-hint">{t("finishHandoffCommit")}</p>
                 </>
                 : <p className="dws-finish-handoff-hint">{t("finishHandoffHint")}</p>}
+              {/* Handing a conflict to an agent is the part of this that is still being
+                  worked out, and the panel is where that is said rather than the page. */}
+              <BetaNotice />
               {handoff.length === 0 ? <Button className="dws-button-warn-solid" disabled={authorizing} onClick={() => void authorize()}>
                 {authorizing ? <Loader2 size={14} className="dws-spin" /> : null}
                 {authorizing ? t("finishHandoffAuthorizing") : t("finishHandoffAuthorize")}

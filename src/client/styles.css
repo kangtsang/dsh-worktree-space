@@ -454,12 +454,10 @@
      it reads as a link rather than as a button of the dialog's own. */
   .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
   .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
-  /* The session's write boundary when it reaches wider than the worktree. */
-  .dws-finish-handoff-boundary { color: var(--wt-muted); font-size: 12px; }
   .dws-finish-handoff-running { color: var(--wt-warn); }
   .dws-finish-handoff-idle { color: var(--wt-muted); }
-  /* The beta notice: one shape for the panel heading, the dialog header and the
-     settings card, so the sentence never reads differently in two places. */
+  /* The beta notice: it belongs to handing a conflict to an agent, so it lives in the
+     report panel that offers to do it - not on the page that manages worktrees. */
   .dws-beta-notice { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
   .dws-beta-notice a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .dws-beta-badge { flex: none; padding: 0 6px; border: 1px solid var(--wt-warn); border-radius: 999px; color: var(--wt-warn); font-size: 11px; line-height: 16px; letter-spacing: .02em; }

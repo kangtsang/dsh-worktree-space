@@ -5,10 +5,8 @@ import type { FinishTaskResult } from "./types"
 /** One session a finish opened, as the report remembers it. */
 export interface FinishSceneSession {
   name: string
-  /** The worktree the merge is standing in. */
+  /** The worktree the merge is standing in, and the session's working directory. */
   site: string
-  /** The session's working directory, which is its write boundary. */
-  boundary: string
   sessionId: Awaited<ReturnType<ISessions["create"]>>
 }
 

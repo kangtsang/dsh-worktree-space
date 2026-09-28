@@ -634,17 +634,24 @@ describe("finishTask", () => {
 
   it("leaves a conflicting merge standing in the task's own worktree, with its files", async () => {
     const fixture = await taskFixture()
+    // A merge only starts to exist when the rehearsal runs and fails, which is why each
+    // answer is keyed to the worktree instead of fixed up front: every worktree has to
+    // look ordinary going in, and carry a standing merge coming out of its own rehearsal.
+    const standing = new Set()
     const { subprocess, keys } = subprocessMock({
       ...fixture.handlers,
       "show-ref --verify --quiet refs/heads/develop": "",
       // The rehearsal runs because the target is not contained in the task branch,
       // and it is the rehearsal - inside the worktree being finished - that conflicts.
       "merge-base --is-ancestor develop task/login": { exitCode: 1 },
-      "merge --no-ff --no-edit develop": ({ cwd }) =>
-        fixture.worktrees.has(cwd) ? { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" } : "",
+      "merge --no-ff --no-edit develop": ({ cwd }) => {
+        if (!fixture.worktrees.has(cwd)) return ""
+        standing.add(cwd)
+        return { exitCode: 1, stderr: "CONFLICT (content): merge conflict\n" }
+      },
       // The merge is still standing: git says so, and names what it could not settle.
-      "rev-parse --verify --quiet MERGE_HEAD": "",
-      "diff --name-only --diff-filter=U": () => "src/a.ts\nsrc/b.ts\n",
+      "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (standing.has(cwd) ? "" : { exitCode: 1 }),
+      "diff --name-only --diff-filter=U": ({ cwd }) => (standing.has(cwd) ? "src/a.ts\nsrc/b.ts\n" : ""),
       "worktree remove": "",
     })
     try {
@@ -665,14 +672,86 @@ describe("finishTask", () => {
         // The checkout this plugin owns - the worktree being finished - rather than the
         // user's own source checkout or a scratch one.
         expect(entry.mergeSite).toBe(join(fixture.taskPath, entry.name))
-        // And the repository it belongs to, which is where its git metadata is and what
-        // whoever resolves the conflict has to be able to write.
-        expect(entry.mainRepo).toBe(join(tmpdir(), `multi-worktree-main-${entry.name}`))
+        // Nothing was concluded either: the finish is waiting on a person or an agent,
+        // and only a later finish writes the merge commit.
+        expect(entry.mergeCommitted).toBe(false)
         expect(entry.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
         // The worktree and branch stay, because the merge still has to land.
         expect(entry.removed).toBe(false)
         expect(entry.branchDeleted).toBe(false)
       }
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("concludes a merge someone resolved by committing it here, before the branch moves", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixture.handlers,
+      // alpha was handed on with a merge standing in it, and whoever took it wrote the
+      // resolution into the worktree: a merge is still in progress there, and the file
+      // it changed has no markers left.
+      "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
+      "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "add -A": "",
+      "commit --no-edit": "",
+      "worktree remove": "",
+    })
+    try {
+      await mkdir(join(fixture.taskPath, "alpha", "src"), { recursive: true })
+      await writeFile(join(fixture.taskPath, "alpha", "src", "app.ts"), 'export const version = "1.0.0-task+main"\n')
+
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+      })
+
+      expect(result.failed).toBe(false)
+      const alpha = result.repositories.find((entry) => entry.name === "alpha")
+      // The resolution is committed by this side, in the worktree it was written in, and
+      // reported as such - the task branch is what carries it into the target.
+      expect(alpha.mergeCommitted).toBe(true)
+      expect(alpha.mergeInProgress).toBe(false)
+      expect(keys()).toContain("add -A")
+      expect(keys()).toContain("commit --no-edit")
+      expect(keys().indexOf("commit --no-edit")).toBeLessThan(keys().indexOf("merge --no-ff --no-edit task/login"))
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses to conclude a merge whose files still carry conflict markers", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixture.handlers,
+      "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
+      "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "diff --name-only --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "add -A": "",
+      "commit --no-edit": "",
+      "worktree remove": "",
+    })
+    try {
+      await mkdir(join(fixture.taskPath, "alpha", "src"), { recursive: true })
+      await writeFile(join(fixture.taskPath, "alpha", "src", "app.ts"), 'export const version = "1.0.0"\n<<<<<<< HEAD\n')
+
+      const result = await finishTask(subprocess, {
+        task: "login",
+        tasksRoot: fixture.container.root,
+        merge: true,
+      })
+
+      expect(result.failed).toBe(true)
+      const alpha = result.repositories.find((entry) => entry.name === "alpha")
+      expect(alpha.mergeInProgress).toBe(true)
+      expect(alpha.mergeCommitted).toBe(false)
+      expect(alpha.conflictedFiles).toEqual(["src/app.ts"])
+      expect(alpha.error).toContain("conflict markers")
+      // An unfinished resolution is not committed on top of: the markers are the work.
+      expect(keys()).not.toContain("add -A")
+      expect(keys()).not.toContain("commit --no-edit")
     } finally {
       await fixture.cleanup()
     }

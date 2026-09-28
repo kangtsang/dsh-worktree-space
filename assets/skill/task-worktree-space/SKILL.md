@@ -14,9 +14,9 @@ repositories stay untouched.
 Drive the whole workflow through the `task_worktree_space` tool. Do not run
 `git worktree` commands by hand for it.
 
-> **Beta (experimental)**: the plugin's behaviour may still change, so tell the user
-> that reports belong at https://github.com/kangtsang/dsh-worktree-space/issues when
-> something goes wrong.
+> **Beta (experimental)**: handing a merge conflict to an agent is the part of this plugin
+> that may still change, so tell the user that reports belong at
+> https://github.com/kangtsang/dsh-worktree-space/issues when something goes wrong.
 
 ## The model
 

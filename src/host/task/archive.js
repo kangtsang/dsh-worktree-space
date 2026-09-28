@@ -49,6 +49,38 @@ async function conflictedFiles(subprocess, site) {
 }
 
 /**
+ * The paths an unfinished merge still has conflict markers in.
+ *
+ * Resolving a conflict means editing files under the worktree, and this is what says
+ * whether that is done: every path the merge has changed is read back - staged or not,
+ * since a resolution may have been staged already - and a line beginning `<<<<<<<`,
+ * `=======` or `>>>>>>>` marks the merge as unfinished. Nothing else about the file's
+ * contents is judged here.
+ * @param subprocess - the profile's subprocess service.
+ * @param site - the checkout the merge is standing in.
+ * @returns the paths that still carry markers, relative to that checkout.
+ */
+async function conflictMarkers(subprocess, site) {
+  const changed = await tryRunGit(subprocess, site, ['diff', '--name-only', 'HEAD'])
+  const listed = [...new Set([...changed.split(/\r?\n/), ...await conflictedFiles(subprocess, site)])]
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  const marked = []
+  for (const file of listed) {
+    let text = ''
+    try {
+      text = await readFile(join(site, file), 'utf8')
+    } catch {
+      // A path git lists that cannot be read - a submodule, a directory - carries no
+      // markers this could find, and is not a reason to refuse the finish.
+      continue
+    }
+    if (/^(<{7}|={7}|>{7})(\s|$)/m.test(text)) marked.push(file)
+  }
+  return marked
+}
+
+/**
  * How many paths a worktree has changed but not committed.
  * @param subprocess - the profile's subprocess service.
  * @param worktreePath - the worktree to read.
@@ -346,8 +378,11 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
  * inside the task's own worktree - a rehearsal that either proves the real merge
  * clean, in which case it is undone and the merge proceeds, or leaves the conflict
  * standing there, with `mergeSite` and `conflictedFiles` on that repository for
- * whoever resolves it to commit and ask for the finish again. Nothing is aborted
- * there and no side is ever picked.
+ * whoever resolves it by editing files in the worktree - the whole of that job is
+ * inside the task space, so the agent never needs the repository's git directory.
+ * What concludes the merge is this side's: the index and the merge commit are written
+ * on the next finish, outside the session's sandbox. Nothing is aborted there and no
+ * side is ever picked.
  * @param subprocess - the profile's subprocess service.
  * @param options - the task, its root, and what to do with branches, documents and worktrees.
  * @returns what each repository's worktree, branch and merge ended up as.
@@ -404,10 +439,7 @@ export async function finishTask(subprocess, options) {
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     // `git worktree list` always prints the main working tree first.
     const mainRepo = parseWorktrees(porcelain).find((row) => row.isMain)?.path ?? ''
-    // The repository is reported with the worktree because the worktree alone cannot be
-    // committed in: its metadata lives under the main checkout, and whoever resolves a
-    // conflict here has to reach both.
-    const outcome = { name, path: worktreePath, mainRepo, branch, merged: false, removed: false, branchDeleted: false, autoCommitted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
+    const outcome = { name, path: worktreePath, branch, merged: false, removed: false, branchDeleted: false, autoCommitted: false, mergeCommitted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
     if (mainRepo === '') {
       outcome.error = 'cannot locate the source repository'
       repositories.push(outcome)
@@ -419,7 +451,7 @@ export async function finishTask(subprocess, options) {
     // refuses, so committing it first is what lets a finish complete. It is skipped
     // when the branch it would land on is about to be deleted unmerged - an abandonment
     // the caller asked for, where a commit would be deleted with it - and while a merge
-    // is still in progress, whose conflicted files are nobody's commit to make.
+    // is still in progress, which the step after this one concludes instead.
     const midMerge = await mergeInProgress(subprocess, worktreePath)
     if ((merge || !deleteBranch) && !midMerge && await uncommittedCount(subprocess, worktreePath) > 0) {
       try {
@@ -430,6 +462,41 @@ export async function finishTask(subprocess, options) {
         // Left alone rather than forced through: a commit the repository itself
         // refused - a failing hook, a missing identity - is its owner's decision.
         outcome.error = `could not commit the uncommitted changes: ${error.message}`
+        repositories.push(outcome)
+        failed = true
+        continue
+      }
+    }
+
+    // A merge standing in the worktree is one somebody has resolved by editing files in
+    // the task space - the only thing resolving a conflict needs, and all of it inside
+    // the session's own write boundary. Concluding it is this side's job instead: the
+    // index and the merge commit are written here, where git's directory is in reach,
+    // and `--no-edit` takes the message the rehearsal already wrote. Markers still left
+    // in a file mean the resolution is unfinished, and are reported rather than
+    // committed over.
+    if (merge && midMerge) {
+      const pending = await conflictMarkers(subprocess, worktreePath)
+      if (pending.length > 0) {
+        outcome.conflict = true
+        outcome.mergeSite = worktreePath
+        outcome.mergeInProgress = true
+        outcome.conflictedFiles = pending
+        outcome.error = `the resolved merge still has conflict markers in ${pending.join(', ')}`
+        repositories.push(outcome)
+        failed = true
+        continue
+      }
+      try {
+        await runGit(subprocess, worktreePath, ['add', '-A'])
+        await runGit(subprocess, worktreePath, ['commit', '--no-edit'])
+        outcome.mergeCommitted = true
+      } catch (error) {
+        outcome.conflict = true
+        outcome.mergeSite = worktreePath
+        outcome.mergeInProgress = true
+        outcome.conflictedFiles = await conflictedFiles(subprocess, worktreePath)
+        outcome.error = `could not commit the resolved merge: ${error.message}`
         repositories.push(outcome)
         failed = true
         continue
