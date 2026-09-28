@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { worktreeNavItems, WorktreesSettings } from "./WorktreesSettings"
+import { BetaNotice } from "./BetaNotice"
 import type { WorktreeView } from "./WorktreesSettings"
 import { BrandGlyph, ChevronLeft } from "./icons"
 import type { createWorktreeApi } from "../lib/api"
@@ -103,6 +104,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
       <header className="dws-panel-heading">
         <h1>{t("worktreesTitle")}</h1>
         <p>{t("panelDescription")}</p>
+        <BetaNotice />
       </header>
     </div>
     <div className="dws-panel-body">

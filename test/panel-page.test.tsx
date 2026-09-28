@@ -50,6 +50,20 @@ describe("the management page as a main panel", () => {
     expect(screen.getByRole("button", { name: t("refresh") }).textContent).toBe(t("refresh"))
   })
 
+  it("says what the page is: a beta, and where to report a problem", async () => {
+    mount(vi.fn())
+    await settle()
+
+    // This plugin moves branches, worktrees and commits, so a wrong answer costs more than
+    // a redraw. The heading says so where the page opens, and links the one place to
+    // complain - the same sentence the dialog and the settings card carry.
+    const notice = document.querySelector(".dws-beta-notice")
+    expect(notice?.textContent).toContain(t("betaBadge"))
+    expect(notice?.textContent).toContain(t("betaNotice"))
+    expect(screen.getByRole("link", { name: t("betaNoticeLink") }).getAttribute("href"))
+      .toBe("https://github.com/kangtsang/dsh-worktree-space/issues")
+  })
+
   it("starts the view tabs on the toolbar's line, in the panel's second band", async () => {
     mount(vi.fn())
     await settle()

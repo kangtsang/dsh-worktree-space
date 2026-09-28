@@ -10,6 +10,9 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
 **简体中文** · [English](README.en.md)
 
+> **Beta（实验性）**：这是实验性功能，行为可能继续调整；遇到问题请在
+> [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 里反馈。
+
 ## 功能
 
 - **从会话里建任务。** 选源码根、给任务起名、选分支前缀、勾选要横跨的仓库、指定任务空间放哪。每个仓库都会得到

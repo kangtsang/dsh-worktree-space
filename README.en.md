@@ -11,6 +11,9 @@ registered as a DSH Workspace with its own sessions.
 
 [中文](README.md) · **English**
 
+> **Beta (experimental)**: behaviour may still change — please report problems in
+> [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
+
 ## Features
 
 - **Create a task from a session.** Pick a source root, name the task, choose the branch prefix,

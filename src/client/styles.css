@@ -458,6 +458,11 @@
   .dws-finish-handoff-boundary { color: var(--wt-muted); font-size: 12px; }
   .dws-finish-handoff-running { color: var(--wt-warn); }
   .dws-finish-handoff-idle { color: var(--wt-muted); }
+  /* The beta notice: one shape for the panel heading, the dialog header and the
+     settings card, so the sentence never reads differently in two places. */
+  .dws-beta-notice { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-beta-notice a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .dws-beta-badge { flex: none; padding: 0 6px; border: 1px solid var(--wt-warn); border-radius: 999px; color: var(--wt-warn); font-size: 11px; line-height: 16px; letter-spacing: .02em; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */

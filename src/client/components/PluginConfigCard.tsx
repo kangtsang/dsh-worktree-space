@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, ChevronDown } from "./icons"
 import { Button, Input } from "./ui"
+import { BetaNotice } from "./BetaNotice"
 import { format, useT } from "../lib/i18n"
 import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/configPreview"
 
@@ -302,6 +303,7 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
   if (notice !== null) window.setTimeout(() => setNotice(null), 2400)
   return <div className="dws-plugin-config" ref={card}>
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
+    <BetaNotice />
     {fieldsFor(t).map((field) => {
       if (field.kind === "text") {
         return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />

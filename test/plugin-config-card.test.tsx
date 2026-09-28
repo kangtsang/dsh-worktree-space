@@ -175,3 +175,18 @@ describe("the configuration card's archive destination row", () => {
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "" })
   })
 })
+
+describe("the configuration card's beta notice", () => {
+  it("says the plugin is experimental, and links where to report a problem", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // The card is where the plugin's own settings live, so it is where a user learns what
+    // they are setting up: a beta, with one place to complain about it.
+    const notice = document.querySelector(".dws-beta-notice")
+    expect(notice?.textContent).toContain(t("betaBadge"))
+    expect(notice?.textContent).toContain(t("betaNotice"))
+    expect(screen.getByRole("link", { name: t("betaNoticeLink") }).getAttribute("href"))
+      .toBe("https://github.com/kangtsang/dsh-worktree-space/issues")
+  })
+})

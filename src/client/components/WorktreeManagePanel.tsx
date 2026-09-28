@@ -1,4 +1,5 @@
 import { useT } from "../lib/i18n"
+import { BetaNotice } from "./BetaNotice"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { WorktreesPage } from "./WorktreePanel"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
@@ -33,6 +34,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
         <header className="dws-manage-heading">
           <DialogTitle className="dws-dialog-title">{t("worktreesTitle")}</DialogTitle>
           <DialogDescription className="dws-form-note">{t("panelDescription")}</DialogDescription>
+          <BetaNotice />
         </header>
         <WorktreesPage
           api={api}
