@@ -285,24 +285,26 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, onArchived,
             <ul className="dws-finish-repos">{result.repositories.map((entry) => <li key={entry.path}>
               <strong>{entry.name}</strong>
               <span>{[entry.merged ? format(t("finishMerged"), { target: entry.target ?? "" }) : null, entry.removed ? t("finishRemoved") : null, entry.branchDeleted ? t("finishBranchDeleted") : null, entry.autoCommitted ? t("finishAutoCommitted") : null].filter(Boolean).join(" · ") || (entry.mergeInProgress ? t("finishConflictKept") : entry.conflict ? t("finishConflicted") : t("finishUntouched"))}</span>
-              {/* A conflicted merge is explained in the user's language; git's own
-                  output stays one click away, where the conflict itself is legible. */}
-              {entry.conflict
-                ? <>
-                  <span className="dws-finish-conflict">{t("finishConflict")}</span>
-                  <details className="dws-finish-log"><summary>{t("finishGitOutput")}</summary><pre>{entry.error}</pre></details>
-                </>
-                : entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
-              {/* A merge left standing is not a failure to explain away: it is the step
-                  that is left, so this names the checkout and the files to reconcile. */}
+              {/* One explanation, never two. A merge left standing is not a failure to
+                  explain away but the step that is left, so it names the checkout and the
+                  files to reconcile; a merge that was aborted says so. The two cannot both
+                  be true — an aborted merge leaves no MERGE_HEAD behind — so a kept merge
+                  must not also be described as aborted. Git's own output stays one click
+                  away in either case, where the conflict itself is legible. */}
               {entry.mergeInProgress
                 ? <>
                   <span className="dws-finish-conflict dws-finish-handoff" role="status">{format(t("finishConflictHandoff"), { site: slashPath(entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite) })}</span>
                   {(entry.conflictedFiles ?? []).length > 0
                     ? <span className="dws-finish-files">{format(t("finishConflictFiles"), { files: (entry.conflictedFiles ?? []).join(", ") })}</span>
                     : null}
+                  <details className="dws-finish-log"><summary>{t("finishGitOutput")}</summary><pre>{entry.error}</pre></details>
                 </>
-                : null}
+                : entry.conflict
+                  ? <>
+                    <span className="dws-finish-conflict">{t("finishConflict")}</span>
+                    <details className="dws-finish-log"><summary>{t("finishGitOutput")}</summary><pre>{entry.error}</pre></details>
+                  </>
+                  : entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
             </li>)}</ul>
             <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: slashPath(result.path) })}</p>
             {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: slashPath(documentsDirectory), names: result.archivedStrays.join(", ") })}</p> : null}
