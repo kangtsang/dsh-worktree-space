@@ -43,7 +43,7 @@ describe("repository glyph mask", () => {
     expect(count(decodeMask())).toBe(count(real))
   })
 
-  it("draws the plugin's own glyph on the tile the plugin list shows it on", () => {
+  it("draws the plugin's own glyph, in the list's blue, with nothing behind it", () => {
     // The package's own mark, read from the package root vitest runs in.
     const shipped = readFileSync("icon.svg", "utf8")
     const shapes = (markup: string) => [...markup.matchAll(/ (d|cx|cy|r)="([^"]+)"/g)].map(([, name, value]) => `${name}=${value}`)
@@ -53,12 +53,9 @@ describe("repository glyph mask", () => {
     expect(shapes(shipped).length).toBeGreaterThan(0)
     expect(shapes(shipped)).toEqual(shapes(renderToStaticMarkup(<BrandGlyph />)))
 
-    // Standing on the tile, which is the package's own and not the entries': square,
-    // radius 40, the three-stop gradient running corner to corner.
-    expect(shipped).toContain('width="510"')
-    expect(shipped).toContain('height="510"')
-    expect(shipped).toContain('rx="40"')
-    const stops = [...shipped.matchAll(/<stop offset="([^"]+)" stop-color="([^"]+)"/g)].map(([, offset, color]) => `${offset} ${color}`)
-    expect(stops).toEqual(["0.1 #fee7a8", "0.36 #ffeda0", "0.64 #efa5ff"])
+    // The mark is the glyph and nothing else: the list's blue on the line, and no tile
+    // drawn behind it — a background was tried and taken back out.
+    expect(shipped).toContain('stroke="#4d6bfe"')
+    expect([...shipped.matchAll(/<(rect|linearGradient|stop)\b/g)]).toHaveLength(0)
   })
 })
