@@ -4,7 +4,7 @@
  * Looking at a workspace or a task: what it is, what it holds, and whether it is a source root or a task container.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
@@ -12,7 +12,7 @@ import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTas
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 import { breadcrumb } from './create.js'
-import { BREADCRUMB, isLinkedWorktree, listTaskWorktrees, resolveTasksRoot } from './shared.js'
+import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot } from './shared.js'
 
 export async function classifySourceRoot(sourceRoot) {
   const repositories = await discoverSourceRepos(sourceRoot)
@@ -100,9 +100,11 @@ export async function inspectTask(taskPath) {
     if (!entry.isDirectory()) continue
     if (await isLinkedWorktree(join(path, entry.name))) repositories.push(entry.name)
   }
-  const details = parseBreadcrumb(await readFile(join(path, BREADCRUMB), 'utf8').catch(() => ''))
-  // Either signal is enough: a container whose breadcrumb was deleted is still a
-  // task, and a breadcrumb with no worktrees left is a task mid-archive.
+  // The JSON record is the identity now; a container made before it existed
+  // still answers through its Markdown note. Either signal is enough: a
+  // container whose metadata was deleted is still a task, and metadata with no
+  // worktrees left is a task mid-archive.
+  const details = await readTaskMetadata(path)
   if (details === undefined && repositories.length === 0) return notATask
   return {
     path,
@@ -111,6 +113,8 @@ export async function inspectTask(taskPath) {
     tasksRoot: dirname(path),
     ...(details?.branch === undefined ? {} : { branch: details.branch }),
     ...(details?.sourceRoot === undefined ? {} : { sourceRoot: details.sourceRoot }),
+    ...(details?.baseRef === undefined || details.baseRef === null ? {} : { baseRef: details.baseRef }),
+    ...(details?.createdAt === undefined ? {} : { createdAt: details.createdAt }),
     repositories: repositories.sort(),
   }
 }

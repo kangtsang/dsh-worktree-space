@@ -4,7 +4,7 @@
  * What more than one of those needs: the layout a task container follows, and the worktrees it holds.
  */
 
-import { breadcrumb, createTask } from './create.js'
+import { createTask } from './create.js'
 import { DOCUMENT_EXTENSIONS, finishTask } from './archive.js'
 
 import { existsSync } from 'node:fs'
@@ -18,6 +18,32 @@ import { assertIsolated, recommendTasksRoot } from './paths.js'
 /** File a task container carries so a session finds the task's own rules. */
 
 export const BREADCRUMB = 'README.en.md'
+
+/**
+ * The task's metadata, as data.
+ *
+ * The container used to carry only {@link BREADCRUMB}, a Markdown note written
+ * for a session to read. It is read back with a regular expression and, of the
+ * five facts it records, only three were ever parsed again — the base and the
+ * creation time were written and then lost. The JSON file is the record now:
+ * every field below is either the task's identity or a fact captured once, at
+ * create time, that cannot be recomputed later. Live state (the branch a
+ * worktree is on now, its dirty files, the commits it has not merged) is
+ * deliberately absent: it is a git question, and a copy here would rot.
+ */
+export const TASK_METADATA = 'worktree-space.json'
+
+/**
+ * The same metadata rendered for a reader.
+ *
+ * Generated from {@link TASK_METADATA} every time the JSON is written, so the
+ * two cannot disagree; this is the file a session finds when it opens the task
+ * space, replacing the note the old extension used to hold.
+ */
+export const TASK_README = 'README.md'
+
+/** Files this plugin writes into a container and therefore owns. */
+export const TASK_OWNED_FILES = [TASK_METADATA, TASK_README, BREADCRUMB]
 
 
 /**
@@ -135,14 +161,120 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  */
 
 /**
- * Undo a partial create: remove the worktrees this call added and the container
- * it made. Only what this call created is touched, so a failure never removes
- * anything the caller already had.
- * @param subprocess - the profile's subprocess service.
- * @param taskPath - the task directory being rolled back.
- * @param created - the repositories whose worktrees were created.
- * @returns the names that could not be rolled back.
+ * Build the metadata a container records for itself.
+ *
+ * `startCommit` is read once per repository, before the branch is created, so
+ * the answer belongs to the source checkout rather than to the worktree that
+ * was just made from it.
+ * @param details - `task`, `tasksRoot`, `sourceRoot`, the shared `branch`, the
+ * optional `baseRef`, and the created repositories with their source paths,
+ * source branches and starting commits.
+ * @returns the document to write as JSON.
  */
+export function taskMetadata(details) {
+  const { task, tasksRoot, sourceRoot, branch, baseRef, repositories = [] } = details
+  return {
+    version: 1,
+    task,
+    tasksRoot,
+    sourceRoot,
+    branch,
+    baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? null : `${baseRef}`,
+    createdAt: new Date().toISOString(),
+    repositories: repositories.map((entry) => ({
+      name: entry.name,
+      sourcePath: entry.sourcePath,
+      ...(entry.sourceBranch === undefined ? {} : { sourceBranch: entry.sourceBranch }),
+      ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
+      branch: entry.branch ?? branch,
+    })),
+  }
+}
+
+/**
+ * Read a container's metadata, from JSON when it has one.
+ *
+ * Containers made before this file existed hold only the Markdown note, so the
+ * note is still parsed and its three facts are returned as the identity. The
+ * richer fields are then simply absent, which every reader treats as "unknown"
+ * rather than as failure — a space is never demoted for being old.
+ * @param taskPath - the container directory.
+ * @returns the metadata, or undefined when the directory is not one of ours.
+ */
+export async function readTaskMetadata(taskPath) {
+  const text = await readFile(join(taskPath, TASK_METADATA), 'utf8').catch(() => '')
+  if (text.trim() !== '') {
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed !== null && typeof parsed === 'object' && typeof parsed.task === 'string' && parsed.task !== '') {
+        return parsed
+      }
+    } catch {
+      // A half-written or hand-edited file falls through to the note below
+      // rather than turning a task into a stranger.
+    }
+  }
+  const legacy = await parseLegacyBreadcrumb(taskPath)
+  return legacy === undefined ? undefined : { version: 0, ...legacy }
+}
+
+/**
+ * Read the legacy Markdown note, when the container has one.
+ * @param taskPath - the container directory.
+ * @returns its three facts, or undefined.
+ */
+async function parseLegacyBreadcrumb(taskPath) {
+  const text = await readFile(join(taskPath, BREADCRUMB), 'utf8').catch(() => '')
+  if (text.trim() === '') return undefined
+  const task = /^#\s*Task:\s*(.+)$/m.exec(text)?.[1]?.trim()
+  if (task === undefined || task === '') return undefined
+  const branch = /^-\s*Branch:\s*`([^`]+)`/m.exec(text)?.[1]?.trim()
+  const sourceRoot = /^-\s*Source root:\s*`([^`]+)`/m.exec(text)?.[1]?.trim()
+  return {
+    task,
+    ...(branch === undefined || branch === '' ? {} : { branch }),
+    ...(sourceRoot === undefined || sourceRoot === '' ? {} : { sourceRoot }),
+  }
+}
+
+/**
+ * Render the metadata as the note a session reads.
+ * @param metadata - the document {@link taskMetadata} built.
+ * @returns the Markdown contents.
+ */
+export function renderTaskMetadata(metadata) {
+  const { task, branch, baseRef, createdAt, sourceRoot, repositories = [] } = metadata
+  const lines = [
+    `# Task: ${task}`,
+    '',
+    `- Branch: \`${branch}\` (one branch per repository below)`,
+    `- Base: ${baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '' ? "each repository's current HEAD" : `\`${baseRef}\``}`,
+    ...(typeof createdAt === 'string' && createdAt !== '' ? [`- Created: ${createdAt}`] : []),
+    `- Source root: \`${sourceRoot}\``,
+    '- This folder is the agent session working directory.',
+    '- The facts above are stored in `worktree-space.json`; this file is generated from it.',
+    '',
+    '## Repositories',
+    ...repositories.map((entry) => `- \`${entry.name}\``),
+    '',
+    '## Conventions',
+    '- Commit in each repository separately (the same branch name everywhere).',
+    '- Source repositories are read-only: never edit or commit there.',
+    '- Merging back to the main branch is the user\'s action, not the agent\'s.',
+    '',
+  ]
+  return lines.join('\n')
+}
+
+/**
+ * Write a container's metadata: the JSON record and the note rendered from it.
+ * @param taskPath - the container directory.
+ * @param metadata - the document {@link taskMetadata} built.
+ */
+export async function writeTaskMetadata(taskPath, metadata) {
+  await writeFile(join(taskPath, TASK_METADATA), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
+  await writeFile(join(taskPath, TASK_README), renderTaskMetadata(metadata), 'utf8')
+}
 
 /**
  * Create a task space: one container outside the source tree holding a
