@@ -191,8 +191,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const visibleWorkspaces = workspaceItems.filter(workspace => {
     const state = classifications[workspace.path]
     const ready = state !== undefined && state !== "checking" && state !== "failed"
-    // What needs attention here is a Workspace a task space cannot start in.
-    if (filter === "attention" && ready && state.isSourceRoot) return false
+    // The filter keeps the Workspaces that hold a repository, which is exactly the
+    // question the row's own badge answers: how many repositories the Workspace spans.
+    // One that has not answered yet stays visible rather than disappearing for the
+    // length of a scan.
+    if (filter === "attention" && ready && state.repositoryCount === 0) return false
     const needle = query.trim().toLowerCase()
     if (needle === "") return true
     return workspace.title.toLowerCase().includes(needle) || workspace.path.toLowerCase().includes(needle)
@@ -207,34 +210,49 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
 
   // The toolbar's pieces, in the two orders the two hosts read them in.
   const viewButtons = WORKTREE_VIEWS.map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)
-  const filterButtons = FILTERS.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(label)}</button>)
+  // What narrows the list is what the list holds. A task and a repository are filtered
+  // by what needs attention, because both can be in that state; a Workspace is not a
+  // place work happens, it is a place a task space starts from, so the one thing there
+  // is to narrow is whether it holds a repository at all.
+  const filterButtons = FILTERS.map(([value, label]) => {
+    const text = view === "spaces" && value === "attention" ? t("filterWithWorktrees") : t(label)
+    return <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{text}</button>
+  })
   const foldButton = <button type="button" className="dws-filter-fold" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button>
   const divider = <span className="dws-filter-divider" aria-hidden="true">|</span>
   /** Between two runs rather than inside one, so it gets air on both sides. */
   const separator = <span className="dws-filter-divider dws-filter-separator" aria-hidden="true">|</span>
 
+  // The list is the only thing that scrolls: one reading column holds the heading,
+  // the toolbar and the filters, and the rows move under them. The dialog says the
+  // first half for both hosts and borrows the toolbar for the switcher it owns; the
+  // panel's own frame draws the heading, because it has one.
+  const listBody = view === "repos" || view === "tasks" || view === "spaces"
   return <section className="dws-settings" aria-label={t("worktrees")}>
-    {heading ? <header className="dws-settings-header">
-      <div><h2>{t("worktreesTitle")}</h2><p>{t("panelDescription")}</p></div>
-    </header> : null}
-    <div className="dws-toolbar">
-      <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
-      <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
+    <div className="dws-settings-pinned">
+      {heading ? <header className="dws-settings-header">
+        <div><h2>{t("worktreesTitle")}</h2><p>{t("panelDescription")}</p></div>
+      </header> : null}
+      <div className="dws-toolbar">
+        <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
+        <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
+      </div>
+      <div className="dws-list-controls">
+        {/* The dialog form offers the three views here, as it always has, set off from
+            the run that follows by the same `|` the filters and the fold button share. */}
+        {control === undefined
+          ? <><div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{viewButtons}</div>{separator}</>
+          : null}
+        <div className="dws-filters" role="group" aria-label={t("filters")}>{filterButtons}{divider}{foldButton}</div>
+        <span className="dws-summary" {...(view === "tasks" ? { title: format(t("summaryTasksHint"), { tasks: String(tasks.length), worktrees: String(taskRepositoryCount) }) } : {})}>{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("worktreeCount")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
+      </div>
+      {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
+      {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{repos.length > 0 ? t("refreshing") : t("scanning")}</span></div> : null}
+      {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
+      {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}
     </div>
-    <div className="dws-list-controls">
-      {/* The dialog form offers the three views here, as it always has, set off from
-          the run that follows by the same `|` the filters and the fold button share. */}
-      {control === undefined
-        ? <><div className="dws-filters" role="group" aria-label={t("viewSwitch")}>{viewButtons}</div>{separator}</>
-        : null}
-      <div className="dws-filters" role="group" aria-label={t("filters")}>{filterButtons}{divider}{foldButton}</div>
-      <span className="dws-summary">{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("repositories")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
-    </div>
-    {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
-    {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{repos.length > 0 ? t("refreshing") : t("scanning")}</span></div> : null}
+    {listBody ? <div className="dws-list-body">
     {busy && repos.length === 0 ? <div className="dws-skeleton-list" aria-hidden="true">{[0, 1, 2].map(index => <div className="dws-skeleton-row" key={index}><span /><div><span /><span /></div></div>)}</div> : null}
-    {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
-    {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}
     {view === "repos" ? <div className="dws-repo-list">
       {visibleRepos.map(repo => {
         const canExpand = repo.worktrees.length > 0
@@ -243,7 +261,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           <header className="dws-repo-header">
             <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(repo.repoPath)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>
               {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit size={24} className="dws-repo-icon" />
-              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count">{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
+              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(repo.worktrees.length) })}>{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             </button>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
@@ -323,6 +341,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           </header>
         </article>
       })}
+    </div> : null}
     </div> : null}
     {archiving ? <ArchiveTaskDialog
       path={archiving}

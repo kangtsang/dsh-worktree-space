@@ -185,4 +185,28 @@ describe("floating panel surface", () => {
     // because the Host styles inputs outside this plugin's cascade layer.
     expect(rule(".dws-plugin-config-edit .dws-input")).toContain("min-height: 0 !important")
   })
+
+  it("keeps the toolbar out of the scroller and the rows inside it", () => {
+    // The list used to be the whole page in one scroller, so a search box and a set of
+    // filters left the screen as soon as the rows got long. The section is a column now:
+    // one pinned block above, and one element below it that scrolls, so both hosts pin
+    // the same things without either of them knowing about it.
+    expect(rule(".dws-settings")).toContain("min-height: 0")
+    expect(rule(".dws-settings")).toContain("overflow: hidden")
+    expect(rule(".dws-settings-pinned")).toContain("flex: none")
+    const body = rule(".dws-list-body")
+    expect(body).toContain("flex: 1 1 auto")
+    expect(body).toContain("min-height: 0")
+    expect(body).toContain("overflow: auto")
+    // The hairline that separates the toolbar from the rows belongs to the boundary
+    // between them, so it stays where the rows start rather than riding the first row.
+    expect(body).toContain("border-top: 1px solid var(--wt-line)")
+    // The two frames let the section fill them: the panel's column and the dialog's,
+    // each of which now hands its height down instead of scrolling by itself.
+    expect(rule(".dws-panel-content")).toContain("display: flex")
+    expect(rule(".dws-panel-content > .dws-settings")).toContain("flex: 1 1 auto")
+    expect(rule(".dws-manage-page-content")).toContain("overflow: hidden")
+    // And nothing else claims the border the boundary just took over.
+    expect(rule(".dws-repo-list")).not.toContain("border-top")
+  })
 })

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { format, t } from "../src/client/lib/i18n"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 
@@ -61,5 +61,40 @@ describe("WorktreesSettings workspace view", () => {
     expect(create).toHaveLength(2)
     fireEvent.click(create[1])
     expect(next.onCreate).toHaveBeenCalledWith({ path: "/projects", title: "Projects" })
+  })
+
+  it("keeps the Workspaces that hold a repository when the filter asks for them", async () => {
+    // The filter used to keep the ones it excluded and named itself after something
+    // else entirely. It says what it keeps now, and what it keeps is a Workspace with
+    // at least one repository under it - the same number its own badge reports.
+    const next = setup((path) => {
+      if (path === "/projects") return { path, isRepository: false, isSourceRoot: true, repositoryCount: 3, repositories: [] }
+      if (path === "/projects/alpha") return { path, isRepository: true, isSourceRoot: true, repositoryCount: 1, repositories: [] }
+      return { path, isRepository: false, isSourceRoot: false, repositoryCount: 0, repositories: [] }
+    })
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+    // Wait for every classification to land: until then a row is still "checking",
+    // and the filter deliberately keeps those visible rather than blinking them out.
+    await waitFor(() => expect(screen.queryByText(t("workspaceChecking"))).toBeNull())
+    expect(document.querySelectorAll(".dws-repo")).toHaveLength(3)
+
+    fireEvent.click(screen.getByRole("button", { name: t("filterWithWorktrees") }))
+
+    // Alpha's one repository and Projects' three keep their rows; Notes has none and goes.
+    expect(document.querySelectorAll(".dws-repo")).toHaveLength(2)
+    expect(screen.getByText("Alpha")).toBeTruthy()
+    expect(screen.getByText("Projects")).toBeTruthy()
+    expect(screen.queryByText("Notes")).toBeNull()
+    // The summary counts what is shown against what there is, so the filter is visible.
+    expect(document.querySelector(".dws-summary")?.textContent).toBe(`2 / 3 ${t("workspaceCount")}`)
+
+    // 全部 puts them back: the pair of buttons is one choice, not two filters. It is
+    // picked out of the filter group by name, because the toolbar above it holds the
+    // view switcher too when the host brings no navigation of its own.
+    const group = screen.getByRole("group", { name: t("filters") })
+    fireEvent.click(within(group).getByRole("button", { name: t("filterAll") }))
+    expect(document.querySelectorAll(".dws-repo")).toHaveLength(3)
+    expect(screen.queryByText("Notes")).toBeTruthy()
   })
 })
