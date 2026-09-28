@@ -3,7 +3,7 @@
   "commit": "a05109007ab4a58777c1af409ceb9999ad8a5446",
   "profile": "evidence",
   "host": { "dsh": "0.1.7-rc.2", "node": "v24.18.0", "os": "Windows" },
-  "artifact": { "name": "dsh-worktree-space-1.0.5.tgz", "bytes": 305952, "packedFiles": 18 },
+  "artifact": { "name": "dsh-worktree-space-1.0.6.tgz", "bytes": 0, "packedFiles": 19 },
   "hostAuthentication": {
     "api": "connection.requestRejection",
     "evidence": "not applicable: this plugin registers no webServer and no HTTP lifecycle surface of its own; its routes ride the host's authenticated /api carrier"

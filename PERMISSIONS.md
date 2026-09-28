@@ -2,7 +2,7 @@
 
 本文件供 DSH STORE 自动审查与人工复核使用，如实描述插件在运行时做什么、不做什么，以及失败边界。
 
-声明基线：`dsh-worktree-space@1.0.5`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
+声明基线：`dsh-worktree-space@1.0.6`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
 
 ## 运行时行为
 

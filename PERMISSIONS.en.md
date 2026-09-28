@@ -3,7 +3,7 @@
 This file exists for DSH STORE's automated review and for human re-review: it states plainly what this
 plugin does at runtime, what it does not do, and where it stops.
 
-Declared baseline: `dsh-worktree-space@1.0.5`, at the fixed commit on this repository's default branch. The
+Declared baseline: `dsh-worktree-space@1.0.6`, at the fixed commit on this repository's default branch. The
 plugin version, its `engines` and its `dsh` fields are in `package.json`.
 
 ## Runtime behaviour

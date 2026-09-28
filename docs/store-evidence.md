@@ -4,7 +4,7 @@
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。
 配套的权限与失败边界声明见 [`PERMISSIONS.md`](../PERMISSIONS.md)。
 
-声明基线：`dsh-worktree-space@1.0.5`。
+声明基线：`dsh-worktree-space@1.0.6`。
 
 ---
 
