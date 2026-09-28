@@ -19,7 +19,7 @@ export interface TaskRepository {
 }
 
 /**
- * A task container: one directory outside the source tree holding one worktree
+ * A task container: one directory beside the repositories' directory holding one worktree
  * per repository, all on one branch.
  *
  * The page derives these from the worktrees it already scanned rather than

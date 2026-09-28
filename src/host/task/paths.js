@@ -3,7 +3,7 @@
  *
  * Ported from the source skill's `lib.sh`. Two rules carry over unchanged:
  * work and source must never nest inside one another, and the recommended task
- * container sits outside the source tree. Where it sits is decided by
+ * container sits beside the repositories' directory. Where it sits is decided by
  * {@link recommendTasksRoot}: in the source root's first directory below its
  * volume root, which keeps the two under one common ancestor without widening
  * the recommendation to the volume root itself. What it is called is decided by
@@ -63,24 +63,24 @@ export class IsolationError extends Error {
 }
 
 /**
- * Reject a task container that is the source root, sits inside it, or contains
- * it: work and source must stay isolated.
+ * Reject a task container that is the repositories' directory, sits inside it, or
+ * contains it: work and source must stay isolated.
  * @param sourceRoot - the directory holding the source repositories.
  * @param tasksRoot - the proposed task container root.
  * @throws IsolationError when the two layouts nest.
  */
 export function assertIsolated(sourceRoot, tasksRoot) {
   if (samePathLocation(sourceRoot, tasksRoot)) {
-    throw new IsolationError(`tasks root must not be the source root itself: ${sourceRoot}`)
+    throw new IsolationError(`the tasks root must not be the repositories' directory itself: ${sourceRoot}`)
   }
   if (isInside(sourceRoot, tasksRoot)) {
     throw new IsolationError(
-      `tasks root is inside the source root: ${tasksRoot}\n  work and source must be isolated; pick a location outside the source tree`,
+      `the tasks root ${tasksRoot} is inside the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
   }
   if (isInside(tasksRoot, sourceRoot)) {
     throw new IsolationError(
-      `source root is inside the tasks root: ${tasksRoot}\n  work and source must be isolated; pick a location outside the source tree`,
+      `the tasks root ${tasksRoot} contains the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
   }
 }

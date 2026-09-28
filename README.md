@@ -1,7 +1,8 @@
 # Worktree Space
 
 DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓库，每个仓库用 Git worktree 各开一份，
-共用同一个分支，放在源码树之外的任务空间里，并注册成一个 DSH 工作区，自带独立会话。
+共用同一个分支，放在仓库目录之外的任务空间里（与它平级或更外层，不在它里面、也不是它的上层），并注册成
+一个 DSH 工作区，自带独立会话。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)

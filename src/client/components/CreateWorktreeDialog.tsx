@@ -49,7 +49,7 @@ interface CreateWorktreeDialogProps {
 
 /**
  * Create a task space: one worktree per selected repository, all on one
- * branch, in a container outside the source tree.
+ * branch, in a container beside the repositories' directory.
  *
  * The dialog drives the same host operations the `task_worktree_space` tool uses, so
  * a single repository and a directory holding repositories take one path — the

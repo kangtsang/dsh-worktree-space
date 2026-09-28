@@ -294,7 +294,7 @@ export async function writeTaskMetadata(taskPath, metadata) {
 }
 
 /**
- * Create a task space: one container outside the source tree holding a
+ * Create a task space: one container beside the repositories' directory holding a
  * worktree of every selected repository on a shared branch.
  * @param subprocess - the profile's subprocess service.
  * @param options - `sourceRoot`, `task`, and the optional `tasksRoot`, `repos`

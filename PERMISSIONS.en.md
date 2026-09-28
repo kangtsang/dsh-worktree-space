@@ -8,7 +8,8 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 
 ## Runtime behaviour
 
-- **Purpose**: make "one task spanning several repositories" a Workspace outside the source tree. Every
+- **Purpose**: make "one task spanning several repositories" a Workspace beside the repositories'
+  directory — never inside it, never above it. Every
   selected repository gets its own `git worktree` at `<task space root>/<task>/<repository>`, all on the same
   task branch; that directory is registered as a DSH Workspace and opened with a session whose working
   directory is the task space.

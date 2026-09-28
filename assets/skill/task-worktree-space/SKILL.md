@@ -6,7 +6,7 @@ description: Use when the user starts a task or feature spanning one or more rep
 # Task Worktree Space
 
 Isolate work per task using git worktrees, in a source root that holds one or
-more git repositories. One task is one directory outside the source tree holding
+more git repositories. One task is one directory beside the repositories' directory holding
 a worktree of every selected repository, all on the same branch, so a single
 session can edit across repositories while other sessions and the source
 repositories stay untouched.
@@ -25,7 +25,7 @@ E:\workspace\public\projects\      ← source root: the repositories, stay on ma
 ├── project_a\
 └── project_b\
 
-E:\worktree-space\                 ← task space: outside the source tree
+E:\worktree-space\                 ← task space: beside the repositories' directory
 └── fix-login\                     ← the task directory — the session's cwd
     ├── project_a\                 ← worktree, branch task/fix-login
     └── project_b\
@@ -42,8 +42,9 @@ Why this shape:
   different tasks never interleave on one branch.
 - **Cross-repo coherence** — every repository in a task shares the branch name;
   that is what links the task's commits across repositories.
-- **Source/work separation** — the task space is a directory of its own, never
-  inside the source root; the tool refuses a nested layout.
+- **Source/work separation** — the task space is a directory of its own: never
+  inside the repositories' directory, and never a parent of it; the tool refuses
+  both.
 
 ## Starting a task (ask first, then create)
 
@@ -64,7 +65,8 @@ Follow this order. Never create a workspace with a guessed location.
    worktrees, so a session there has to be approved in by the user.
 4. **Ask the user where the task space should live**, offering the recommendation
    first and one or two alternatives. Skip the question only when the user
-   already stated the location. Never offer a location inside the source root.
+   already stated the location. Never offer a location inside the repositories'
+   directory, and never one that would hold it.
 5. **Ask which repositories** to include when the source root holds several and
    the user did not say; pass the chosen directory names as `repos`.
 6. **Ask which commit to start from** — recommend each repository's current HEAD
@@ -183,8 +185,8 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
 
 ## Failure modes worth knowing
 
-- A task space inside the source root, or a source root inside the task space, is
-  refused: work and source must stay isolated.
+- A task space inside the repositories' directory, or a directory that holds them,
+  is refused: work and source must stay isolated.
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
 - `create` refuses a base that any repository does not have.

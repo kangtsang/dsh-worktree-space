@@ -111,7 +111,8 @@ dsh --profile evidence --dump-config
 
 1. `task.create`（源根下只有一个 `repo-alpha`）→ 建出 `<tasksRoot>/evidence/repo-alpha`（worktree，分支
    `task/evidence`）与 `worktree-space.json` / `worktree-space.md`。把 tasks root 指到源根**里面**时被
-   拒绝：`tasks root is inside the source root: … work and source must be isolated`（隔离规则有效）。
+   拒绝：`tasks root is inside the source root: … work and source must be isolated`（这是 1.0.6 的原话；
+   1.0.7 起同一拒绝改说 `the tasks root … is inside the repositories' directory …`，规则本身未变）。
 2. 在 worktree 里改一个文件并提交 → `task.plan` 报 `mergeTarget: "main"`、`commits: 1`、
    `changedFiles: 0`。
 3. `task.done`（`merge: true, deleteBranch: true`）→ `merged: true, removed: true, branchDeleted: true,

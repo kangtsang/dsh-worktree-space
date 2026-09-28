@@ -15,7 +15,7 @@ import { createTask, finishTask, listTasks, suggestTaskRoot } from './operations
  * carries only what a caller needs before that.
  */
 const DESCRIPTION = [
-  'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: one directory outside the source tree holding a worktree of every selected repository, all on one branch.',
+  'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: one directory beside the repositories\' directory holding a worktree of every selected repository, all on one branch.',
   '',
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
@@ -253,7 +253,7 @@ export function registerTaskTool(ctx) {
       },
       task: { type: 'string', description: 'Name (create, done): the task space directory and branch suffix, with no separators or spaces.' },
       sourceRoot: { type: 'string', description: 'Directory of the repositories. Required for suggest-root and create.' },
-      tasksRoot: { type: 'string', description: 'Container root, outside the source tree. Omit for the recommendation.' },
+      tasksRoot: { type: 'string', description: 'Container for task spaces: beside the repositories\' directory, never inside it or a parent of it. Omit for the recommendation.' },
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository names (create). Omit for all discovered.' },
       baseRef: { type: 'string', description: 'Start point (create). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },

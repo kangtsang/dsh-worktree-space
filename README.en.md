@@ -1,8 +1,9 @@
 # Worktree Space
 
 Worktree Space for DeepSeek Harness: one task can span several repositories. Each one gets
-its own Git worktree on the same branch, kept in a task space outside the source tree and
-registered as a DSH Workspace with its own sessions.
+its own Git worktree on the same branch, kept in a task space outside the repositories'
+directory (beside it or further out, never inside it or above it) and registered as a DSH
+Workspace with its own sessions.
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)

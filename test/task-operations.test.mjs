@@ -188,11 +188,11 @@ describe("suggestTaskRoot", () => {
     }
   })
 
-  it("refuses a container inside the source tree", async () => {
+  it("refuses a container inside the repositories' directory", async () => {
     const source = await sourceFixture()
     try {
       await expect(suggestTaskRoot(subprocessMock().subprocess, source.root, { tasksRoot: join(source.root, "tasks") })).rejects.toThrow(
-        /inside the source root/,
+        /is inside the repositories' directory/,
       )
     } finally {
       await source.cleanup()

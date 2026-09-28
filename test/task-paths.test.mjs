@@ -57,12 +57,16 @@ describe("assertIsolated", () => {
     expect(() => assertIsolated("/src", "/src")).toThrow(IsolationError)
   })
 
-  it("rejects a container inside the source tree", () => {
-    expect(() => assertIsolated("/src", "/src/tasks")).toThrow(/inside the source root/)
+  it("rejects a container inside the repositories' directory", () => {
+    expect(() => assertIsolated("/src", "/src/tasks")).toThrow(
+      /the tasks root \/src\/tasks is inside the repositories' directory \/src[\s\S]*put the container beside that directory/,
+    )
   })
 
-  it("rejects a source root inside the container", () => {
-    expect(() => assertIsolated("/src/projects", "/src")).toThrow(/source root is inside/)
+  it("rejects a container that would hold the repositories' directory", () => {
+    expect(() => assertIsolated("/src/projects", "/src")).toThrow(
+      /the tasks root \/src contains the repositories' directory \/src\/projects/,
+    )
   })
 
   it("accepts a layout beside the source root", () => {
@@ -70,7 +74,7 @@ describe("assertIsolated", () => {
   })
 
   it("sees through separator and trailing-slash differences", () => {
-    expect(() => assertIsolated("E:\\work\\projects", "E:/work/projects/tasks/")).toThrow(/inside the source root/)
+    expect(() => assertIsolated("E:\\work\\projects", "E:/work/projects/tasks/")).toThrow(/inside the repositories' directory/)
   })
 })
 
