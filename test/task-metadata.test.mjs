@@ -146,7 +146,10 @@ describe('task metadata', () => {
     }
   })
 
+  // README.md is deliberately NOT owned: in a space old enough to hold one the
+  // plugin wrote, the name is now as likely to be the user's own.
   it('owns exactly the three files it writes, the legacy name included', () => {
-    expect(TASK_OWNED_FILES).toEqual(['worktree-space.json', 'README.md', 'README.en.md'])
+    expect(TASK_OWNED_FILES).toEqual(['worktree-space.json', 'worktree-space.md', 'README.en.md'])
+    expect(TASK_OWNED_FILES).not.toContain('README.md')
   })
 })

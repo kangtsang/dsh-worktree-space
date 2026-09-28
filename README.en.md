@@ -25,7 +25,7 @@ registered as a DSH Workspace with its own sessions.
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
     each one has;
-  - **Code repositories** lists every Git repository found and the worktrees linked to it.
+  - **Git repositories** lists every Git repository found and the worktrees linked to it.
 
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
@@ -51,7 +51,8 @@ registered as a DSH Workspace with its own sessions.
 ```text
 <task space root>/
 ├── <task>/                        the task space — also the session's working directory
-│   ├── README.md                  the task's branch, base and conventions
+│   ├── worktree-space.json        the task's record: branch, base, repositories, created
+│   ├── worktree-space.md          rendered from that record — branch, base and conventions
 │   ├── <repository A>/            a worktree on <branch prefix><task>
 │   └── <repository B>/            a worktree on the same branch name
 └── archived-docs/
@@ -182,8 +183,7 @@ branch that was never merged.
 | | | ✓ | Only the worktrees go, uncommitted changes and all; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged, the branch force-deleted, and **the commits it held are discarded with it** |
 
-Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `README.md` generated from it (an older space may still hold `README.en.md`) — is always cleared, and
-anything else in the task space follows the archive choice (unticked, it is discarded
+Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unticked, it is discarded
 outright). **Without Force, a worktree that still holds uncommitted files cannot be removed
 at all** — `git worktree remove` refuses, so that repository is kept as it is and reported
 as unfinished while the others finish, which is also why the task space directory and its

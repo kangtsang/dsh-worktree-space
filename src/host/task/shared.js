@@ -39,10 +39,27 @@ export const TASK_METADATA = 'worktree-space.json'
  * Generated from {@link TASK_METADATA} every time the JSON is written, so the
  * two cannot disagree; this is the file a session finds when it opens the task
  * space, replacing the note the old extension used to hold.
+ *
+ * Named after the record it renders rather than `README.md`. A task space is a
+ * directory the user opens and puts their own files in, and `README.md` is the
+ * first name anyone reaches for: a space that once carried the plugin's note
+ * could not also hold the user's own without one overwriting the other. The
+ * shared prefix makes the pair self-evident — the `.json` is the record, this
+ * is the same record for a reader — and leaves every conventional name to the
+ * user.
  */
-export const TASK_README = 'README.md'
+export const TASK_README = 'worktree-space.md'
 
-/** Files this plugin writes into a container and therefore owns. */
+/**
+ * Files this plugin writes into a container and therefore owns.
+ *
+ * {@link BREADCRUMB} is here as a legacy name: versions before the JSON wrote
+ * that note instead, and a space created then is still this plugin's to clear.
+ * `README.md` is deliberately absent even though such a space may hold one the
+ * plugin itself wrote — by the time a space is archived, a file with that name
+ * is as likely to be the user's own, and deleting the user's notes is worse
+ * than leaving one stale file behind.
+ */
 export const TASK_OWNED_FILES = [TASK_METADATA, TASK_README, BREADCRUMB]
 
 

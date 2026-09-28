@@ -83,8 +83,9 @@ worktrees of different repositories:
 - **Never merge by hand** from a session: not the task branch, and not into any
   branch of the source repositories. Finishing a task is the user's action, and it
   merges into whichever branch each source repository has checked out.
-- Read the task's `README.md` for its branch, base and repositories rather than
-  guessing; if another session created the workspace, follow that file.
+- Read the task's `worktree-space.md` for its branch, base and repositories rather
+  than guessing (the same facts as data live in `worktree-space.json`); if another
+  session created the workspace, follow that file.
 
 ## Finishing a task
 

@@ -35,7 +35,7 @@ function metadataFiles(task) {
   }
   return {
     "worktree-space.json": JSON.stringify(metadata, null, 2) + "\n",
-    "README.md": "# Task: " + task + "\n",
+    "worktree-space.md": "# Task: " + task + "\n",
   }
 }
 
@@ -231,7 +231,7 @@ describe("createTask", () => {
       expect(typeof metadata.createdAt).toBe("string")
       // The note a session reads is generated from that record, so the two cannot
       // disagree; it says where its own facts come from.
-      const note = await readFile(join(result.path, "README.md"), "utf8")
+      const note = await readFile(join(result.path, "worktree-space.md"), "utf8")
       expect(note).toContain("# Task: fix-login")
       expect(note).toContain("- Branch: `task/fix-login` (one branch per repository below)")
       expect(note).toContain("each repository's current HEAD")
@@ -1017,13 +1017,20 @@ describe("planTask", () => {
 
   it("separates the user's own leftovers from build output and editor state", async () => {
     const fixtureUnderTest = await fixture()
+    // A README.md is the user's: versions up to 1.0.4 wrote one themselves, so
+    // the name cannot be claimed back without also claiming a file they wrote.
+    await writeFile(join(fixtureUnderTest.taskPath, "README.md"), "# my own notes\n")
     const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
     try {
       const plan = await planTask(subprocess, { task: "login", tasksRoot: fixtureUnderTest.root })
       const byName = Object.fromEntries(plan.strays.map((stray) => [stray.name, stray]))
 
-      // The breadcrumb is this plugin's own, always cleared, never a surprise.
-      expect(byName["README.md"]).toBeUndefined()
+      // The files this plugin writes are its own, always cleared, never a surprise.
+      expect(byName["worktree-space.md"]).toBeUndefined()
+      expect(byName["worktree-space.json"]).toBeUndefined()
+      expect(byName["README.en.md"]).toBeUndefined()
+      // A README.md is not among them, even though an older version wrote one.
+      expect(byName["README.md"]).toEqual({ name: "README.md", directory: false, documents: 1, kind: "content" })
       // Build output and editor state are expected in a working directory.
       expect(byName.dist).toEqual({ name: "dist", directory: true, documents: 0, kind: "build" })
       expect(byName[".idea"]).toEqual({ name: ".idea", directory: true, documents: 0, kind: "editor" })

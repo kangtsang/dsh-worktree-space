@@ -125,7 +125,7 @@ describe("preview build", () => {
   it("writes the repository view", async () => {
     render(<WorktreePanelPage {...services()} onCreate={vi.fn()} onBack={vi.fn()} />)
     await settle()
-    fireEvent.click(screen.getByRole("button", { name: "代码仓库视图" }))
+    fireEvent.click(screen.getByRole("button", { name: "Git 仓库视图" }))
     await new Promise((done) => setTimeout(done, 0))
     write("repos", document.body.innerHTML)
     cleanup()
@@ -150,7 +150,7 @@ describe("preview build", () => {
   })
 
   it("writes the empty task and repository lists", async () => {
-    for (const [name, label] of [["empty-tasks", "任务空间视图"], ["empty-repos", "代码仓库视图"]] as const) {
+    for (const [name, label] of [["empty-tasks", "任务空间视图"], ["empty-repos", "Git 仓库视图"]] as const) {
       render(<WorktreePanelPage {...services([], true)} onCreate={vi.fn()} onBack={vi.fn()} />)
       await settle()
       fireEvent.click(screen.getByRole("button", { name: label }))
