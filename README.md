@@ -60,6 +60,64 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 `0.1.7-rc.1`、以及当前安装并实际使用的 `0.1.7-rc.2` 上验证：宿主 RPC 路由能注册，客户端 bundle
 不用改就能加载，插件列表里的名称、描述、图标和配置区都正常显示。
 
+manifest（`package.json`）里显式声明的兼容范围：
+
+| 字段 | 声明值 | 含义 |
+| --- | --- | --- |
+| `engines.node` | `>=22.19.0` | 需要的 Node.js 版本 |
+| `engines.dsh` | `>=0.1.7-rc.1` | 兼容的 DSH 版本（只设下界，无上限） |
+| `dsh.manifestVersion` | `1` | DSH 清单格式版本 |
+| `dsh.compatibility.profiles` | `["web"]` | 已验证的 profile |
+
+`engines.dsh` 是**声明**而非强制：当前 DSH 的安装器和加载器都不会校验它，声明一个范围不会拒绝不兼容的
+宿主。这个范围只设下界、不设上限，含义是「`0.1.7-rc.1` 及之后都按兼容处理」，但实际只逐一验证过
+`0.1.7-rc.1`（当前宿主是 `0.1.7-rc.2`，未单独验证）。如果后续 DSH 版本改动了客户端契约并导致插件失效，
+会把下界往上收，或在 `dsh.compatibility` 里如实标记；遇到版本相关问题请先退回 `0.1.7-rc.1`，或到
+[Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
+
+## 权限、依赖与失败边界
+
+本插件在运行时会读写文件、并调用 `git`；这两类权限就是它的功能本身，无法裁剪为零。完整清单（逐条说明
+读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](PERMISSIONS.md)；一次性 Profile 的
+安装 / 启动 / 卸载验收证据见 [docs/store-evidence.md](docs/store-evidence.md)。
+
+**权限一览：**
+
+| 权限 | 范围 |
+| --- | --- |
+| 文件读取 | 你选择的工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间里的 `worktree-space.json`、`worktree-space.md`；各 worktree 的 `.git` 标记文件；插件自带的 `assets/skill/task-worktree-space/SKILL.md` |
+| 文件写入 | 只写任务空间容器：`<任务空间>/<任务名>/` 及其中的 worktree、`worktree-space.json`、`worktree-space.md`、归档时的 `archived-docs/`。结束任务时删除的是插件自己创建的 worktree、任务目录与文档。**不写** DSH 数据目录，也**不写**配置文件（配置由 DSH 的插件配置服务保存） |
+| 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。查询类：`rev-parse`、`worktree list`、`status`、`rev-list`、`for-each-ref`、`show-ref`、`symbolic-ref`、`merge-base`；变更类：`worktree add / remove / prune`、`add`、`commit`、`merge`、`merge --abort`、`reset --hard`、`branch -d / -D` |
+| 网络 | 只有 `git push -u origin <分支>`，且仅在你于新建面板或工具里显式选择推送时才执行；插件自身不发任何 HTTP 请求、不下载任何东西 |
+| 凭据 | 不读取、不保存、不转发任何凭据。推送时用的是你本机 Git 已配置的凭据（credential helper / SSH），插件不接触密钥，也不读环境变量 |
+| 全局资源 | 不装全局包、不起常驻进程与服务、不写系统目录 |
+
+**依赖：**
+
+| 依赖 | 用途 | 由谁提供 |
+| --- | --- | --- |
+| Node.js `>=22.19.0` | 运行宿主代码 | 你安装的 DSH |
+| DSH `>=0.1.7-rc.1` | 客户端契约、RPC 与工作区 API | 你安装的 DSH |
+| `@deepseek-ai/cordis`、`@deepseek-ai/schemastery` | 插件框架与配置 schema | DSH profile 提供的 peer 依赖 |
+| `@deepseek-ai/dsh-client-connection`、`@deepseek-ai/dsh-tools` | 宿主 RPC 注册、工具定义 | DSH profile 提供的 peer 依赖 |
+| React 18 | 管理页面 UI | DSH web 运行时提供 |
+| `git` | 全部 worktree 与分支操作 | 你本机已装的 Git（不随插件分发，PATH 上找不到就会报错） |
+| `@hugeicons/*`、`@radix-ui/react-dialog` | 图标与对话框组件，**仅构建期**使用，构建时已内联进 `client/client.js` | 不随插件安装运行期包；安装本插件不会引入新的运行期第三方依赖 |
+
+**外部服务：** 无。插件不连接任何第三方服务，也不上报遥测。
+
+**失败边界（绝不静默）：**
+
+| 情形 | 行为 |
+| --- | --- |
+| 扫描目录数超过上限 | 抛错并提示 `Worktree scan limit reached; choose a more specific Workspace.`，请换一个更具体的工作区 |
+| 任一 `git` 命令失败 | 抛出 `git <参数> failed (exit N): <stderr>`，把 Git 自己的诊断原样带出 |
+| 某仓库自动提交失败 | 只影响该仓库，其余仓库继续；失败仓库保留现场并在结果里报告 |
+| 合并冲突 | 不自动 `merge --abort`，保留合并现场（`mergeSite` 与 `conflictedFiles`），等你授权后再处理 |
+| worktree 删除失败 | 保留该 worktree 并报告，可用 `git worktree prune` 清理 |
+| 任务目录非空 | 保留目录与工作区注册，不强行删除 |
+| 无法确认的事实 | 在文档里写「未知」，不把「没有搜到」推断成「不访问」 |
+
 ## 使用
 
 ### 安装

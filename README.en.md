@@ -77,6 +77,68 @@ declared as `0.1.7-rc.1`). Verified on `0.1.7-rc.1` and on the `0.1.7-rc.2` that
 in use here: the host RPC routes register, the client bundle loads without changes, and the plugin
 list shows the name, description, icon and configuration section correctly.
 
+The compatibility range declared explicitly in the manifest (`package.json`):
+
+| Field | Declared value | Meaning |
+| --- | --- | --- |
+| `engines.node` | `>=22.19.0` | Required Node.js version |
+| `engines.dsh` | `>=0.1.7-rc.1` | Compatible DSH versions (lower bound only, no upper bound) |
+| `dsh.manifestVersion` | `1` | DSH manifest format version |
+| `dsh.compatibility.profiles` | `["web"]` | Verified profile |
+
+`engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so
+declaring a range does not reject an incompatible host. The range sets a lower bound only, meaning
+"`0.1.7-rc.1` and later are treated as compatible" — in practice only `0.1.7-rc.1` was verified
+(the current host is `0.1.7-rc.2`, not verified separately). If a later DSH release changes the
+client contract and breaks the plugin, this lower bound will be raised, or the state recorded
+honestly in `dsh.compatibility`; if you hit a version-specific problem, go back to `0.1.7-rc.1` or
+open an [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
+
+## Permissions, dependencies and failure boundaries
+
+At runtime this plugin reads and writes files and runs `git`. Those two permissions *are* its
+function; they cannot be reduced to zero. The full account — what it reads, what it writes, which
+subcommands it runs and what happens when things fail — is in
+[PERMISSIONS.en.md](PERMISSIONS.en.md); the disposable-Profile install / start / uninstall
+acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
+
+**Permissions at a glance:**
+
+| Permission | Scope |
+| --- | --- |
+| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md` |
+| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, and `archived-docs/` when filing documents. Finishing a task removes only worktrees, task directories and documents the plugin itself created. It does **not** write the DSH data directory and does **not** write config files (DSH's own plugin configuration service stores your settings) |
+| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse`, `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`. Mutations: `worktree add / remove / prune`, `add`, `commit`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D` |
+| Network | Only `git push -u origin <branch>`, and only when you explicitly ask for a push in the create dialog or the tool; the plugin itself makes no HTTP requests and downloads nothing |
+| Credentials | Reads, stores and forwards none. A push uses whatever credentials your local Git is already configured with (credential helper / SSH); the plugin never touches keys and never reads environment variables |
+| Global resources | No global installs, no daemon or resident service, no writes to system directories |
+
+**Dependencies:**
+
+| Dependency | Purpose | Provided by |
+| --- | --- | --- |
+| Node.js `>=22.19.0` | Runs the host code | Your DSH installation |
+| DSH `>=0.1.7-rc.1` | Client contract, RPC and the Workspace API | Your DSH installation |
+| `@deepseek-ai/cordis`, `@deepseek-ai/schemastery` | Plugin framework and config schema | peer dependencies supplied by the DSH profile |
+| `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-tools` | Host RPC registration and tool definitions | peer dependencies supplied by the DSH profile |
+| React 18 | Management-page UI | Supplied by the DSH web runtime |
+| `git` | Every worktree and branch operation | The Git already installed on your machine (not shipped with the plugin; a missing `git` on `PATH` is an error) |
+| `@hugeicons/*`, `@radix-ui/react-dialog` | Icons and dialog primitives, **build-time only**; inlined into `client/client.js` when building | Not installed as runtime packages — installing this plugin brings in no new runtime third-party dependency |
+
+**External services:** none. The plugin contacts no third-party service and reports no telemetry.
+
+**Failure boundaries (never silent):**
+
+| Situation | Behaviour |
+| --- | --- |
+| Directory scan hits its limit | Throws with `Worktree scan limit reached; choose a more specific Workspace.` — pick a narrower Workspace |
+| Any `git` command fails | Throws `git <args> failed (exit N): <stderr>`, surfacing Git's own diagnosis verbatim |
+| An automatic commit fails in one repository | Affects that repository only; the others continue, and the failed one keeps its working tree and is reported |
+| Merge conflict | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until you authorise the next step |
+| Worktree removal fails | The worktree is kept and reported; `git worktree prune` is the remedy |
+| A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
+| A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
+
 ## Usage
 
 ### Install
