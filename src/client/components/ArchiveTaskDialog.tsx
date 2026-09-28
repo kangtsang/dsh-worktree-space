@@ -283,24 +283,30 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     const failures: string[] = []
     // The Host names each repository by the worktree the task lives in, and a session's
     // working directory is its write boundary - so the boundary has to reach the
-    // repository behind that worktree, which only the scan pairs with it. Asked for the
-    // registered workspaces and this task's own directory, and taken as best effort:
-    // with nothing to go on, the worktree itself is handed on, and costs an approval.
-    const roots = [...new Set([...workspaces.list.getSnapshot().items.map((item) => cleanPath(item.path)), cleanPath(path)])]
+    // repository behind that worktree, whose `.git` is what a commit writes. The Host
+    // reports that repository with the conflict. Only a Host that reported none is worth
+    // a scan of every registered Workspace, which walks real directory trees and can hit
+    // its own budget; with neither answer, the worktree is handed on and costs an approval.
     let scanned: WorktreeList[] = []
-    try {
-      const remembered = await api.cachedScan(roots)
-      scanned = remembered === null ? await api.scan(roots) : remembered.repositories
-    } catch { scanned = [] }
+    if (conflicts.some((entry) => entry.mainRepo === undefined || entry.mainRepo === "")) {
+      const roots = [...new Set([...workspaces.list.getSnapshot().items.map((item) => cleanPath(item.path)), cleanPath(path)])]
+      try {
+        const remembered = await api.cachedScan(roots)
+        scanned = remembered === null ? await api.scan(roots) : remembered.repositories
+      } catch { scanned = [] }
+    }
     for (const entry of conflicts) {
       const site = entry.mergeSite === undefined || entry.mergeSite === "" ? entry.path : entry.mergeSite
       // A linked worktree keeps its git metadata in the main repository, so the site
       // alone cannot commit the merge it resolved: the common ancestor of the two is the
-      // narrowest directory that reaches both. Where they share only a volume root - or
-      // where the worktree already reaches the repository - the worktree itself is all
-      // there is to open on, passed on exactly as the Host named it.
-      const repository = scanned.find((list) => list.worktrees.some((row) => cleanPath(row.path).toLowerCase() === cleanPath(site).toLowerCase()))
-      const metadata = repository === undefined ? entry.path : repository.commonDir === "" ? repository.repoPath : repository.commonDir
+      // narrowest directory that reaches both. The Host's own answer comes first; the
+      // scan is the fallback, and reads both spellings of a Windows path because the Host
+      // joins with backslashes while git prints forward slashes. Where they share only a
+      // volume root - or where the worktree already reaches the repository - the worktree
+      // itself is all there is to open on, passed on exactly as the Host named it.
+      const repository = scanned.find((list) => list.worktrees.some((row) => slashPath(row.path).toLowerCase() === slashPath(site).toLowerCase()))
+      const fromScan = repository === undefined ? "" : repository.commonDir === "" ? repository.repoPath : repository.commonDir
+      const metadata = entry.mainRepo || fromScan || entry.path
       const ancestor = commonAncestor(site, metadata)
       const boundary = ancestor === undefined || slashPath(site).toLowerCase() === ancestor.toLowerCase() ? site : ancestor
       try {

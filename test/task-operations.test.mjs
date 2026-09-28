@@ -665,6 +665,9 @@ describe("finishTask", () => {
         // The checkout this plugin owns - the worktree being finished - rather than the
         // user's own source checkout or a scratch one.
         expect(entry.mergeSite).toBe(join(fixture.taskPath, entry.name))
+        // And the repository it belongs to, which is where its git metadata is and what
+        // whoever resolves the conflict has to be able to write.
+        expect(entry.mainRepo).toBe(join(tmpdir(), `multi-worktree-main-${entry.name}`))
         expect(entry.conflictedFiles).toEqual(["src/a.ts", "src/b.ts"])
         // The worktree and branch stay, because the merge still has to land.
         expect(entry.removed).toBe(false)

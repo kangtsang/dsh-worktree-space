@@ -404,7 +404,10 @@ export async function finishTask(subprocess, options) {
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     // `git worktree list` always prints the main working tree first.
     const mainRepo = parseWorktrees(porcelain).find((row) => row.isMain)?.path ?? ''
-    const outcome = { name, path: worktreePath, branch, merged: false, removed: false, branchDeleted: false, autoCommitted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
+    // The repository is reported with the worktree because the worktree alone cannot be
+    // committed in: its metadata lives under the main checkout, and whoever resolves a
+    // conflict here has to reach both.
+    const outcome = { name, path: worktreePath, mainRepo, branch, merged: false, removed: false, branchDeleted: false, autoCommitted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
     if (mainRepo === '') {
       outcome.error = 'cannot locate the source repository'
       repositories.push(outcome)

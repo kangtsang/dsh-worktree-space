@@ -100,6 +100,12 @@ export interface CreateTaskResult {
 export interface FinishTaskRepository {
   name: string
   path: string
+  /**
+   * The repository behind `path` — the checkout whose `.git` holds this worktree's
+   * metadata. A linked worktree stages and commits through it, so whoever has to
+   * finish a merge in `path` needs this one inside the same write boundary.
+   */
+  mainRepo?: string
   branch?: string
   /** The branch this repository was merged into, when a merge was attempted. */
   target?: string

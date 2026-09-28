@@ -299,14 +299,46 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(2))
   })
 
-  it("opens the handoff session on the directory that reaches the worktree and the repository", async () => {
+  it("opens the handoff session on the ancestor of the worktree and the repository the Host named", async () => {
     const user = userEvent.setup()
     // A task space beside its repositories, as the demo lays them out: the session's
     // working directory is its write boundary, so one opened on the worktree alone
     // could edit the conflicted file but never commit it - a linked worktree keeps
-    // its git metadata under the main repository. The Host reports the worktree, not
-    // the repository, so the scan is what pairs the two, and their common ancestor is
-    // the narrowest boundary that still reaches the metadata.
+    // its git metadata under the main repository. The Host names that repository with
+    // the conflict, and the two have nothing in common past the container, so the
+    // container is the narrowest boundary that reaches both.
+    const site = "E:\\wt-demo\\spaces\\demo\\alpha"
+    const next = setup({
+      result: finishResult({
+        failed: true,
+        repositories: [
+          { name: "alpha", path: site, mainRepo: "E:\\wt-demo\\repos\\alpha", branch: "task/demo", target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/app.ts"], error: "CONFLICT (content): Merge conflict in src/app.ts" },
+        ],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+
+    // The page scans the Workspaces for its own view; what must not happen is the
+    // dialog scanning them again for an answer the Host already gave.
+    const scans = next.api.scan.mock.calls.length + next.api.cachedScan.mock.calls.length
+    await user.click(screen.getByRole("button", { name: t("finishHandoffAuthorize") }))
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledWith({ cwd: "E:/wt-demo" }))
+    expect(next.api.scan.mock.calls.length + next.api.cachedScan.mock.calls.length).toBe(scans)
+    // The message says which directory the session is in, since that is no longer the
+    // directory the work is in, and the panel names the boundary it bought.
+    expect(next.prompts[0].text).toContain("E:/wt-demo")
+    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/wt-demo" }))).toBeTruthy()
+  })
+
+  it("opens the handoff session on a scanned repository when the Host named none", async () => {
+    const user = userEvent.setup()
+    // A Host that named no repository still has one: the scan pairs the worktree with
+    // the repository behind it, and their common ancestor is the narrowest boundary
+    // that reaches the metadata. The comparison has to read both spellings of a
+    // Windows path - the Host joins with backslashes, git prints forward slashes.
     const repo = "E:\\worktree-space\\repos\\alpha"
     const site = `${container}\\alpha`
     const next = setup({
