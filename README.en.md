@@ -13,9 +13,10 @@ Workspace with its own sessions.
 [中文](README.md) · **English**
 
 > **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
-> in an experimental validation phase, and its behaviour may still change (see the experimental
-> section at the end); the rest of this document describes the flow without an agent. Please
-> report problems in
+> in an experimental validation phase and is **off by default** - set the plugin's agent handoff
+> entry to show and the finish dialog offers it; its behaviour may still change (see the
+> experimental section at the end). The rest of this document describes the flow without an
+> agent. Please report problems in
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 ## Features
@@ -179,6 +180,7 @@ data directory (as in the sample above), which needs a DSH restart.
 | --- | --- | --- | --- |
 | Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
+| Agent handoff entry (experimental) | show / hide | **hide** | The finish dialog's two experimental entries, **Authorize the agent to commit** and **Authorize the agent to resolve it**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
@@ -375,6 +377,12 @@ while a worktree still holds uncommitted files, or while a branch still holds co
 were never merged.
 
 ## Experimental: handing the commits and the conflicts to an agent
+
+What this section describes is **off by default**: set the plugin's agent handoff entry to show and the
+finish dialog offers the two entries below. Hidden, the finish takes the standard route - the plugin
+writes nobody's commit and picks no side of a conflict. It stops and says where things stand instead:
+uncommitted work is yours to commit in each worktree, and a resolved conflict is committed and then
+carried on with **Continue finishing**, which is what the line under the panel says.
 
 When finishing a task, the plugin can open a DSH agent session to do two jobs for you: commit the
 uncommitted changes, and resolve a merge that stands on a conflict.

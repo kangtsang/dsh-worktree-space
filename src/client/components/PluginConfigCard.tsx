@@ -94,6 +94,16 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
   },
   {
+    // The experimental part of the finish: the two entries that hand uncommitted work,
+    // and a merge conflict, to an agent. Hidden is the default, so a profile that never
+    // touches this shows the standard flow.
+    field: "handoffEntry",
+    label: t("entryHandoffLabel"),
+    fallback: "hide",
+    hint: t("entryHandoffHint"),
+    choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
+  },
+  {
     field: "scanDepth",
     label: t("scanDepth"),
     fallback: "3",
@@ -223,7 +233,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }

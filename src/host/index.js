@@ -101,6 +101,16 @@ let branchPrefixReference
 let archiveDirectoryReference
 
 /**
+ * Whether the agent handoff entries are offered, as the running entry carries it.
+ *
+ * Hidden unless the setting says otherwise: what it governs is the plugin's
+ * experimental part, and the finish works without it - the commit and the conflict
+ * resolution are the user's own then. Volatile for the same reason as the two
+ * settings above.
+ */
+let handoffEntryReference
+
+/**
  * The branch prefix a request that names none should use.
  * @returns the configured prefix, or the built-in default when none is set.
  */
@@ -122,6 +132,14 @@ export function configuredBranchPrefix() {
 export function configuredArchiveDirectory() {
   const value = archiveDirectoryReference?.get()
   return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * Whether the configuration offers the agent handoff entries.
+ * @returns `'show'` when the entries are asked for, `'hide'` for anything else.
+ */
+export function configuredHandoffEntry() {
+  return handoffEntryReference?.get() === 'show' ? 'show' : 'hide'
 }
 
 /**
@@ -242,6 +260,16 @@ export const Config = z.object({
     .description('Also show the management page as a row in the sidebar panel list, under New session. Hidden by default: the footer shortcut is the one way in.'),
   sidebarEntry: z.union(['show', 'hide']).default('show').loose().volatile()
     .description('Show the Worktree Space shortcut in the sidebar footer.'),
+  /**
+   * Whether the two entries that hand work to an agent are offered.
+   *
+   * Hidden is the default: the standard finish is the user's own commit and their own
+   * conflict resolution, and this is the part of the plugin still being worked out.
+   * The dialogs read it from `task.preference` rather than from this form, because
+   * that is where the other setting they default from already arrives.
+   */
+  handoffEntry: z.union(['show', 'hide']).default('hide').loose().volatile()
+    .description('Offer the two experimental entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
   /** The Web UI's control is gone: this is the one place the depth is chosen. */
   scanDepth: z.number().min(MIN_SCAN_DEPTH).max(MAX_SCAN_DEPTH).step(1).default(DEFAULT_SCAN_DEPTH).volatile()
     .description('How many directory levels a scan descends from a Workspace root.'),
@@ -287,6 +315,9 @@ export function apply(ctx, config = {}) {
   // Likewise for the archive destination: the settings card writes it and the
   // archive dialog reads it, both through this entry rather than its snapshot.
   archiveDirectoryReference = config.archiveDocumentsDirectory
+  // And for the agent handoff entries: the settings card writes this one, the finish
+  // dialog reads it, and hidden is what anything but an explicit `show` means.
+  handoffEntryReference = config.handoffEntry
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
@@ -405,6 +436,7 @@ export function apply(ctx, config = {}) {
       return {
         defaultBranchPrefix: configuredBranchPrefix(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
+        handoffEntry: configuredHandoffEntry(),
       }
     })
 

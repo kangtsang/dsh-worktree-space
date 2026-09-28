@@ -14,6 +14,7 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
+    handoffEntry: "hide",
     scanDepth: 3,
     maxScanDirectories: 3000,
     defaultBranchPrefix: prefix,
@@ -138,6 +139,33 @@ describe("the configuration card's branch prefix row", () => {
     // Editing is the one moment the note changes, because what to do next has changed.
     fireEvent.click(editButton())
     expect(hintIn(t("defaultBranchPrefixSettingsLabel"))).toBe(t("configPrefixEditHint"))
+  })
+})
+
+describe("the configuration card's agent handoff row", () => {
+  it("offers the finish's experimental entries as a display choice, with a note of its own", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // The row is the shape the two entry rows already have: a label, a note beneath it,
+    // and the value on the trailing side - hidden until a profile asks otherwise.
+    expect(hintIn(t("entryHandoffLabel"))).toBe(t("entryHandoffHint"))
+    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configHide"))
+  })
+
+  it("saves the choice through the form the other display choices use", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("entryHandoffLabel")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("configShow") }))
+
+    // Shown at once, then settled into the served value: the same optimistic store the
+    // sidebar reads, so a dialog opened straight afterwards agrees with the card.
+    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("handoffEntry", "show"))
+    expect(read()).toMatchObject({ handoffEntry: "show" })
+    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
   })
 })
 

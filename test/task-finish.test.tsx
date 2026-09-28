@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
-import { clearFinishScenes, readFinishScene } from "../src/client/lib/finishScene"
+import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finishScene"
 import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
 
@@ -49,14 +49,16 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
     cachedScan: vi.fn().mockResolvedValue(null),
     // What the Host has configured: the archive destination is empty unless a test
-    // sets one, which is the same "not set" the real entry answers with.
-    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory }),
+    // sets one, which is the same "not set" the real entry answers with, and the agent
+    // entries are offered unless a test hides them, which is what a case about the
+    // standard flow does.
+    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory, handoffEntry }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),
@@ -322,6 +324,100 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole("button", { name: t("finishContinue") }))
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(2))
+  })
+
+  it("keeps the conflict on screen without the entries a Host does not offer", async () => {
+    const user = userEvent.setup()
+    const site = `${container}\\kratos-vue-admin`
+    const next = setup({
+      handoffEntry: "hide",
+      result: finishResult({
+        failed: true,
+        repositories: [
+          { name: "kratos-vue-admin", path: site, branch, target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/a.ts"], error: "CONFLICT (content): merge conflict in src/a.ts" },
+          { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, target: "main", merged: true, removed: true, branchDeleted: true },
+        ],
+        strays: [],
+        containerRemoved: false,
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+    // What the finish stopped on is still the panel's subject: why the conflict is there,
+    // and the press that carries the finish on once it is committed by hand. The setting
+    // governs the offer to put an agent on it, not the situation itself.
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+    expect(screen.getByText(t("finishHandoffExplain"))).toBeTruthy()
+    expect(screen.getByText(t("finishHandoffHint"))).toBeTruthy()
+    // Both entries are gone, and so is the notice that explains them - and nothing opened
+    // a session on its own.
+    expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
+    expect(document.querySelector(".dws-beta-notice")).toBeNull()
+    expect(next.sessions.create).not.toHaveBeenCalled()
+  })
+
+  it("says how to commit work nobody committed when the agent entry is hidden", async () => {
+    const user = userEvent.setup()
+    const next = setup({
+      handoffEntry: "hide",
+      changedFiles: 1,
+      result: finishResult({
+        failed: true,
+        repositories: [
+          { name: "kratos-vue-admin", path: `${container}\\kratos-vue-admin`, branch, target: "main", merged: false, removed: false, branchDeleted: false, error: "uncommitted changes" },
+          { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, target: "main", merged: false, removed: false, branchDeleted: false, error: "uncommitted changes" },
+        ],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await waitFor(() => expect(screen.getByText(t("finishCommitTitle"))).toBeTruthy())
+
+    // The finish stops on that work either way, so the line under the title says what is
+    // left to do about it - the standard flow's own sentence rather than the escalation
+    // an agent's commit needs - and confirming stays out of reach until it is done.
+    expect(screen.getByText(t("finishCommitManual"))).toBeTruthy()
+    expect(screen.queryByText(t("finishCommitEscalation"))).toBeNull()
+    expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
+    expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(true)
+    expect(next.sessions.create).not.toHaveBeenCalled()
+  })
+
+  it("keeps a session it already opened on screen when the entries are hidden", async () => {
+    // The setting governs the offer, not the work: a repository handed to an agent stays
+    // that agent's until its merge is committed, so the way back to that conversation
+    // cannot disappear because a profile changed its mind about the entries.
+    const site = `${container}\\kratos-vue-admin`
+    saveFinishScene(container, {
+      result: finishResult({
+        failed: true,
+        repositories: [
+          { name: "kratos-vue-admin", path: site, branch, target: "main", merged: false, removed: false, branchDeleted: false, conflict: true, mergeInProgress: true, mergeSite: site, conflictedFiles: ["src/a.ts"], error: "CONFLICT (content): merge conflict in src/a.ts" },
+          { name: "kratos-vue-admin-web", path: `${container}\\kratos-vue-admin-web`, branch, target: "main", merged: true, removed: true, branchDeleted: true },
+        ],
+        strays: [],
+        containerRemoved: false,
+      }),
+      handoff: [{ name: "kratos-vue-admin", site, boundary: site, wide: false, kind: "conflict", sessionId: "session-1" as FinishSceneSession["sessionId"] }],
+    })
+    setup({ handoffEntry: "hide" })
+    // A task with a report left behind reopens its dialog with the page, so the panel is
+    // what to wait for rather than the page's own controls: the report is on screen from
+    // the start here.
+    await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
+
+    // The session that is already on the work stays reported, with the way back to it:
+    // hiding the entries cannot strand a conversation the panel itself opened.
+    expect(document.querySelector(".dws-finish-handoff-sessions li")?.textContent).toBe(`kratos-vue-admin${site.replace(/\\/g, "/")}`)
+    expect(screen.getByRole("button", { name: t("finishHandoffOpen") })).toBeTruthy()
+    expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", job: t("finishHandoffJobConflict") }))).toBeTruthy()
+    // What the switch does govern is the notice that explains the entries, and the
+    // entries themselves.
+    expect(document.querySelector(".dws-beta-notice")).toBeNull()
+    expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull()
   })
 
   it("closes the dialog when the user follows the session the finish handed work to", async () => {

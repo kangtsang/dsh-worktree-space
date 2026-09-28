@@ -272,6 +272,18 @@ describe("worktree RPC contract", () => {
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
   })
 
+  it("answers whether the agent entries are offered, and hides them by default", async () => {
+    // Hidden is what anything but an explicit show means, so a profile that never touches
+    // the setting cannot grow the experimental entries - or their notice - by accident.
+    let entry
+    const handler = handleFor({}, { handoffEntry: { get: () => entry } })
+    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "hide" })
+    entry = "show"
+    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "show" })
+    entry = "hide"
+    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "hide" })
+  })
+
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
       "status --short --branch": "## feat/antest",

@@ -214,6 +214,8 @@ export interface FinishTaskResult {
 export interface TaskPreference {
   defaultBranchPrefix: string
   archiveDocumentsDirectory: string
+  /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
+  handoffEntry: string
 }
 
 /** The sessions service face (`ctx.sessions`). */

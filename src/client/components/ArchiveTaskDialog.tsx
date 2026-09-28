@@ -98,6 +98,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const [handoff, setHandoff] = useState<FinishSceneSession[]>(() => readFinishScene(path)?.handoff ?? [])
   const [authorizing, setAuthorizing] = useState(false)
   const [handoffError, setHandoffError] = useState("")
+  /**
+   * Whether the Host's configuration offers the two agent entries.
+   *
+   * Hidden until the Host says otherwise, which is the setting's own default: the
+   * standard finish is the user's own commit and their own conflict resolution. It
+   * governs the entries and the notice that explains them, and nothing else - a
+   * session that was already opened stays on screen, because that is the state of the
+   * work rather than an offer.
+   */
+  const [handoffEntry, setHandoffEntry] = useState(false)
   // The sessions run outside this dialog, so the rows reporting on them have to
   // follow the Host's list rather than a value read once. The counter is the render.
   const [, setSessionTick] = useState(0)
@@ -212,21 +222,24 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   }, [path, result, handoff])
 
   /**
-   * The configured destination, once the Host answers with it.
+   * What the Host has configured, once it answers: the destination archived documents
+   * are filed into, and whether the agent entries are offered at all.
    *
    * Read rather than assumed, and it arrives after the first paint: the computed
    * folder is on screen until then, so the row never shows an empty path while it
    * waits. A Host that answers nothing leaves the computed folder in place — which
-   * is exactly what an empty setting means.
+   * is exactly what an empty setting means — and leaves the entries hidden, which is
+   * what the setting defaults to.
    */
   useEffect(() => {
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
+      setHandoffEntry(served?.handoffEntry === "show")
       const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
       if (configured.trim() === "") return
       setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))
-    }).catch(() => { /* falls back to the computed folder */ })
+    }).catch(() => { /* falls back to the computed folder and to hidden entries */ })
     return () => { live = false }
   }, [api, path, workspace?.title])
 
@@ -829,10 +842,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   than beside the rows it already produced. It is a plain button, without the
                   warning colour or a glyph of its own: handing the work over is not a hazard,
                   and the title above it already says what is waiting. */}
-              {phase === "commit" && needsCommit.length > 0
+              {handoffEntry && phase === "commit" && needsCommit.length > 0
                 ? <Button disabled={authorizing || busy || running} onClick={() => void authorizeCommit()}>{t("finishAuthorizeCommit")}</Button>
                 : null}
-              {phase === "conflict" && needsConflict.length > 0
+              {handoffEntry && phase === "conflict" && needsConflict.length > 0
                 ? <Button disabled={authorizing || busy || running} onClick={() => void authorizeConflict()}>{t("finishAuthorizeConflict")}</Button>
                 : null}
             </div>
@@ -844,8 +857,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 rather than left to be discovered. */}
             {phase === "conflict" ? <p className="dws-finish-handoff-hint">{t("finishHandoffHint")}</p> : null}
             {/* Said before the session exists, because it is what the user has to do once
-                it does: the approval a commit may need is not this dialog's to give. */}
-            {phase === "commit" ? <p className="dws-finish-handoff-hint">{t("finishCommitEscalation")}</p> : null}
+                it does: the approval a commit may need is not this dialog's to give. A
+                Host that offers no such entry says the same thing about doing it by hand
+                here, so the line is there either way - the finish stops on this work
+                whether or not an agent may be put on it. */}
+            {phase === "commit"
+              ? <p className="dws-finish-handoff-hint">{t(handoffEntry ? "finishCommitEscalation" : "finishCommitManual")}</p>
+              : null}
             {shownHandoff.length > 0 ? <>
               {/* What the sessions are for is said once, not on every row: the job is the
                   same for all of them, the rows below name the repositories themselves, and
@@ -885,8 +903,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             </> : null}
             {authorizing ? <p className="dws-finish-handoff-hint" role="status"><Loader2 size={14} className="dws-spin" aria-hidden="true" /> {t("finishHandoffAuthorizing")}</p> : null}
             {/* Handing work to an agent is the part of this that is still being worked
-                out, and this panel is where that is said rather than the page. */}
-            <BetaNotice />
+                out, and this panel is where that is said rather than the page. It is said
+                only where the entries it describes are offered: the notice explains them,
+                so it has nothing to explain on a Host that hides them. */}
+            {handoffEntry ? <BetaNotice /> : null}
             {handoffError !== "" ? <p className="dws-finish-error">{format(t("finishHandoffFailed"), { error: handoffError })}</p> : null}
           </div> : null}
           {result === null && plan === null && loadError === "" ? <div className="dws-dialog-loading" role="status">
