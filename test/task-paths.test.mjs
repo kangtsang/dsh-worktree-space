@@ -3,7 +3,7 @@ import { dirname, join, parse, resolve } from "node:path"
 import {
   assertIsolated,
   canonicalPath,
-  chooseTasksRoot,
+  containerIn,
   isInside,
   IsolationError,
   recommendTasksRoot,
@@ -74,26 +74,31 @@ describe("assertIsolated", () => {
   })
 })
 
-describe("chooseTasksRoot", () => {
-  it("prefers <drive>:\\workspace while that name is free", () => {
-    expect(chooseTasksRoot("E:\\", "E:\\fallback", () => false)).toBe(join("E:\\", "workspace"))
-  })
-
-  it("falls back to <drive>:\\worktree-space once the name is taken", () => {
-    expect(chooseTasksRoot("E:\\", "E:\\fallback", () => true)).toBe(join("E:\\", "worktree-space"))
-  })
-
-  it("falls back to a sibling when the path has no drive", () => {
-    expect(chooseTasksRoot(undefined, "/home/me/projects", () => false)).toBe(
+describe("containerIn", () => {
+  it("names the container worktree-space under any parent", () => {
+    expect(containerIn("E:\\", "E:\\repo")).toBe(join("E:\\", "worktree-space"))
+    expect(containerIn("/home/me/projects", "/home/me/projects/repo")).toBe(
       join("/home/me/projects", "worktree-space"),
     )
+  })
+
+  it("takes dsh-worktree-space only where its own name would land on the source root", () => {
+    expect(containerIn("E:\\", join("E:\\", "worktree-space"))).toBe(join("E:\\", "dsh-worktree-space"))
+    expect(containerIn("E:\\", join("E:\\", "worktree-space", "public", "repo"))).toBe(
+      join("E:\\", "dsh-worktree-space"),
+    )
+  })
+
+  it("keeps worktree-space for a source root that merely sits beside it", () => {
+    expect(containerIn("E:\\", join("E:\\", "worktree-space-notes"))).toBe(join("E:\\", "worktree-space"))
+    expect(containerIn("E:\\", join("E:\\", "repo"))).toBe(join("E:\\", "worktree-space"))
   })
 })
 
 describe("recommendTasksRoot", () => {
   it("never recommends a location that nests with the source root", () => {
     const sourceRoot = join(process.cwd(), "scratch-source")
-    const recommended = recommendTasksRoot(sourceRoot, { exists: () => false })
+    const recommended = recommendTasksRoot(sourceRoot)
     expect(recommended.length).toBeGreaterThan(0)
     expect(isInside(sourceRoot, recommended)).toBe(false)
     expect(isInside(recommended, sourceRoot)).toBe(false)
@@ -111,25 +116,31 @@ describe("recommendTasksRoot", () => {
     const first = /^[A-Za-z]:[\\/]$/.test(root)
       ? join(root, absolute.slice(root.length).split(/[\\/]+/)[0])
       : undefined
-    const recommended = recommendTasksRoot(sourceRoot, { exists: () => false })
+    const recommended = recommendTasksRoot(sourceRoot)
     expect(recommended).toBe(first === undefined ? join(dirname(absolute), "worktree-space") : join(first, "worktree-space"))
     expect(() => assertIsolated(absolute, recommended)).not.toThrow()
   })
 
   it("falls back when the source root is itself that first directory", () => {
-    // Nothing sits beside `<drive>:\repo` below the volume root, so the older
-    // candidates answer, and they never nest with the source root.
+    // Nothing sits beside `<drive>:\repo` below the volume root, so the volume root
+    // answers, and the container keeps the name every other scenario uses.
     const { root } = parse(resolve(process.cwd()))
     const sourceRoot = join(root, "repo")
-    const recommended = recommendTasksRoot(sourceRoot, { exists: () => false })
+    const recommended = recommendTasksRoot(sourceRoot)
     const drive = /^[A-Za-z]:[\\/]$/.test(root)
-    expect(recommended).toBe(drive ? join(root, "workspace") : join(dirname(sourceRoot), "worktree-space"))
+    expect(recommended).toBe(drive ? join(root, "worktree-space") : join(dirname(sourceRoot), "worktree-space"))
     expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 
-  it("keeps <drive>:\\worktree-space once the drive already has a workspace folder", () => {
-    // The drive branch only engages on a path that carries one, so assert the
-    // decision itself; the wrapper's guard is covered above.
-    expect(chooseTasksRoot("E:\\", "unused", () => true).endsWith("worktree-space")).toBe(true)
+  it("uses the backup name only when the container's own path is the source root", () => {
+    // `<parent>\worktree-space` is the answer everywhere else; this is the one
+    // layout where that name would be the source root itself.
+    const { root } = parse(resolve(process.cwd()))
+    const drive = /^[A-Za-z]:[\\/]$/.test(root)
+    const parent = drive ? root : dirname(join(root, "worktree-space"))
+    const sourceRoot = join(parent, "worktree-space")
+    const recommended = recommendTasksRoot(sourceRoot)
+    expect(recommended).toBe(join(parent, "dsh-worktree-space"))
+    expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 })
