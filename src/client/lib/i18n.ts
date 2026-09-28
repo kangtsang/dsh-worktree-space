@@ -5,6 +5,7 @@ type Dict = Record<string, string>
 
 const zh: Dict = {
   createTask: "新建任务空间",
+  newWorktreeSpace: "新建 Worktree Space",
   createDescription: "为一个任务创建独立空间：每个选中的仓库各一份 Worktree，共用同一个分支，空间位于源码树之外。",
   containerLocation: "空间根目录",
   containerHint: "每个任务空间建在此目录下，且必须位于源码树之外。",
@@ -180,6 +181,7 @@ const zh: Dict = {
 
 const en: Dict = {
   createTask: "New task space",
+  newWorktreeSpace: "New Worktree Space",
   createDescription: "Create an isolated space for a task: one Worktree per selected repository, all on one branch, outside the source tree.",
   containerLocation: "Space root",
   containerHint: "Task spaces are created under this directory, and must stay outside the source tree.",

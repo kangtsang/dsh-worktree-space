@@ -389,6 +389,14 @@
   .dws-new-session-action { display: inline-flex; flex: none; align-items: center; margin: 0; padding: 0; }
   .dws-new-session-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--wt-secondary); }
   .dws-new-session-button > svg { width: 16px; height: 16px; }
+  /* The hint on that entry. The shell's composer clips and stacks over anything
+     positioned inside it, so the bubble is portalled to the document body (see
+     `HoverHint`) and reads the same tokens and shape as the shell's own tooltips: fixed,
+     shrink-to-fit, and out of the pointer's way so it never eats the click under it. */
+  .dws-hint { display: inline-flex; align-items: center; position: fixed; z-index: 1100; width: max-content; max-width: 50vw; padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg, #2c2c2e); color: var(--dsw-static-neutral-bluish-00, #ffffff); font-size: 13px; line-height: 20px; white-space: pre-line; overflow-wrap: break-word; pointer-events: none; transform: translate(-50%, -100%); animation: dws-hint-in 150ms ease-in-out; }
+  .dws-hint-below { transform: translate(-50%, 0); }
+  @keyframes dws-hint-in { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .dws-hint { animation: none; } }
   .dws-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   /* Everything the source root holds, two to a row, with no inner scrollbar:
      the dialog's body scrolls instead when the whole form outgrows the screen. */
