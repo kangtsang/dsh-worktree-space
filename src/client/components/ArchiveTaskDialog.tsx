@@ -167,7 +167,8 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * for them rather than racing them - and only the Host's own list can say when they
    * stopped.
    */
-  const working = handoff.filter((opened) => sessions.list.getSnapshot().byId[opened.sessionId]?.running === true)
+  const sessionRunning = (sessionId: FinishSceneSession["sessionId"]) => sessions.list.getSnapshot().byId[sessionId]?.running === true
+  const working = handoff.filter((opened) => sessionRunning(opened.sessionId))
   const strayName = (stray: { name: string; directory: boolean }) => stray.directory ? `${stray.name}/` : stray.name
   /**
    * The branches offered for a repository.
@@ -449,18 +450,24 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     count: String(handoff.length),
                     sessions: handoff.map((opened) => opened.name).join(", "),
                   })}</p>
-                  <ul className="dws-finish-handoff-sessions">{handoff.map((opened) => <li key={opened.sessionId}>
+                  <ul className="dws-finish-handoff-sessions">{handoff.map((opened) => {
+                    const solving = sessionRunning(opened.sessionId)
+                    return <li key={opened.sessionId}>
                     <strong>{opened.name}</strong>
                     <code title={slashPath(opened.site)}>{slashPath(opened.site)}</code>
                     {/* The write boundary, when it reaches wider than the worktree:
                         that width is what saves the approval, so it is not a detail. */}
                     {slashPath(opened.boundary) === slashPath(opened.site) ? null
                       : <span className="dws-finish-handoff-boundary">{format(t("finishHandoffBoundary"), { path: slashPath(opened.boundary) })}</span>}
-                    <span>{sessions.list.getSnapshot().byId[opened.sessionId]?.running === true ? t("finishHandoffRunning") : t("finishHandoffIdle")}</span>
+                    {/* While the agent works the state is the thing to notice, so it
+                        carries the same amber as every other pending state here; once
+                        it stops, the row goes quiet. */}
+                    <span className={solving ? "dws-finish-handoff-running" : "dws-finish-handoff-idle"}>{solving ? t("finishHandoffRunning") : t("finishHandoffIdle")}</span>
                     {/* The agent works in its own session, not behind this button, so
                         the only useful thing this dialog can do is take the user there. */}
                     <button type="button" className="dws-finish-handoff-open" onClick={() => uiWorkspace.openSession(opened.sessionId)}>{t("finishHandoffOpen")}</button>
-                  </li>)}</ul>
+                  </li>
+                  })}</ul>
                   {/* What the agent asks for is approved in that session: approvals never
                       reach this dialog, so saying where they are is the whole of the help. */}
                   <p className="dws-finish-handoff-hint">{t("finishHandoffApprove")}</p>

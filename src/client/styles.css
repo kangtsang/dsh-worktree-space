@@ -456,6 +456,8 @@
   .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   /* The session's write boundary when it reaches wider than the worktree. */
   .dws-finish-handoff-boundary { color: var(--wt-muted); font-size: 12px; }
+  .dws-finish-handoff-running { color: var(--wt-warn); }
+  .dws-finish-handoff-idle { color: var(--wt-muted); }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */
