@@ -147,6 +147,7 @@ executable artifact.
   signals. The point of this file is to declare those signals completely and honestly for human re-review and
   for the listing details — the correct state for a high-capability project is "declared high capability",
   not "apparently no capability".
+- **Fixed commit**: `v1.0.5` is the commit `0c7eb6f1a0b4b69434ec48b52376c31c3b066670` on GitHub.
 - **Lifecycle**: the disposable-profile install, start and uninstall steps, with the evidence available today,
   are in `docs/store-evidence.md`.
 
