@@ -122,6 +122,44 @@ describe("the management page as a main panel", () => {
     expect(screen.queryByRole("navigation", { name: t("worktreesTitle") })).toBeNull()
   })
 
+  it("pins the toolbar and scrolls only the rows, in both hosts", async () => {
+    // One frame for both: the section is a reading column whose toolbar sits above
+    // the one element that scrolls, so the search box and the filters stay put
+    // however long the list of rows becomes. jsdom lays nothing out, so what is
+    // checked here is the structure the stylesheet's rules are written against.
+    mount(vi.fn())
+    await settle()
+    const pinned = document.querySelector(".dws-settings-pinned")
+    const body = document.querySelector(".dws-list-body")
+    expect(pinned).toBeTruthy()
+    expect(body).toBeTruthy()
+    expect(pinned?.querySelector(".dws-toolbar")).toBeTruthy()
+    expect(pinned?.querySelector(".dws-list-controls")).toBeTruthy()
+    // The rows are inside the scroller and the toolbar is not, which is the whole
+    // difference between pinned and scrolled content.
+    expect(pinned?.contains(body as Node)).toBe(false)
+    expect(body?.querySelector(".dws-repo-list")).toBeTruthy()
+    // The panel draws its heading, and the heading is pinned with the toolbar: a
+    // heading that scrolled away would leave the page unlabelled.
+    expect(pinned?.querySelector(".dws-panel-heading")).toBeNull()
+    expect(document.querySelector(".dws-panel-content")?.contains(pinned as Node)).toBe(true)
+
+    cleanup()
+    // The dialog is the same page, so it must not grow a second scroll area that
+    // moves the toolbar with the rows.
+    render(<WorktreeManagePanel
+      api={{ scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() } as any}
+      workspaces={{ list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() } as any}
+      uiWorkspace={{ openWorkspace: vi.fn() } as any}
+      sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
+      onCreate={vi.fn()}
+      onClose={vi.fn()}
+    />)
+    await settle()
+    expect(document.querySelector(".dws-manage-page-content")?.querySelector(".dws-settings-pinned")).toBeTruthy()
+    expect(document.querySelector(".dws-manage-page-content")?.querySelector(".dws-list-body")).toBeTruthy()
+  })
+
   it("renders a repository's worktrees as one set the parent owns", async () => {
     const api: any = {
       scan: vi.fn().mockResolvedValue([{ repoPath: "/projects/alpha", currentBranch: "main", worktrees: [{ path: "/projects/alpha", branch: "main", isMain: true, locked: false, prunable: false }, { path: "/spaces/task/alpha", branch: "task/task", isMain: false, locked: false, prunable: false }] }]),

@@ -43,12 +43,20 @@
   .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
   .dws-panel-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
   /* Flush against the navigation, not centred in the leftover width: the two columns
-     share one left inset, so their text lines up from the panel's edge inward. */
-  .dws-panel-content { max-width: 960px; padding: 28px 32px 48px 24px; }
+     share one left inset, so their text lines up from the panel's edge inward.
+     It is a column that fills its height, and the toolbar above the list is pinned
+     inside it: the panel scrolls nothing itself, the list inside it does. */
+  .dws-panel-content { display: flex; flex-direction: column; min-height: 0; max-width: 960px; padding: 28px 32px 48px 24px; }
+  .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
   .dws-panel-heading { margin-bottom: 20px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
-  .dws-settings { min-width: 0; padding: 2px 0 16px; }
+  /* The section is a column that fills the frame it is given: everything above the rows
+     is pinned in one block, and the list below it is the only thing that scrolls, so the
+     search box and the filters stay where the eye left them however long the list grows. */
+  .dws-settings { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 2px 0 16px; }
+  .dws-settings-pinned { flex: none; }
+  .dws-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--wt-line); }
   .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }
   .dws-settings-header { margin-bottom: 20px; }
   .dws-settings-header h2 { font-size: 16px; font-weight: 500; line-height: 24px; }
@@ -101,7 +109,7 @@
   .dws-filters button[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); font-weight: 500; }
   /* The entry switches sit at the end of the toolbar, where the panel is managed. */
   .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; margin-left: auto; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
-  .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; border-top: 1px solid var(--wt-line); }
+  .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; }
   .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
   /* The list's vertical rhythm. Rows are separated by their own padding, kept
      just wide enough that two rows still read as two rows: a branch line and the
@@ -267,8 +275,11 @@
   .dws-manage-page { display: flex; flex: 1; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
   .dws-manage-page .dws-nav { --dws-nav-width: 196px; --dws-nav-pad: 16px 12px; border-right: 0; }
   /* The column the lists scroll in: flush against the navigation on its left, the same
-     measure the panel's own content keeps, so both surfaces put their text on one line. */
-  .dws-manage-page-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 16px 24px 18px; }
+     measure the panel's own content keeps, so both surfaces put their text on one line.
+     It is the frame, not the scroller: the section inside it owns the pinned toolbar and
+     the one list that scrolls, which is what keeps the two hosts' toolbars in the same
+     place, so this column never scrolls a second time on its own. */
+  .dws-manage-page-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 16px 24px 18px; }
   .dws-manage-page .dws-settings { padding: 0; }
   /* The panel keeps the heading it draws for the shell's column; the dialog's own heading
      already said all of it. */
