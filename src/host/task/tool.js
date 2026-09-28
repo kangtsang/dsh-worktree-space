@@ -177,6 +177,56 @@ function summarize(action, value) {
   return `${headline}${failed}${attention}${handoff}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
 }
 
+/** How many repository rows a result card carries. */
+const CARD_ROW_LIMIT = 20
+
+/** How many warnings a result card carries. */
+const CARD_WARNING_LIMIT = 3
+
+/** How much text a result card carries, in characters. */
+const CARD_TEXT_LIMIT = 4000
+
+/**
+ * The text of a completed call's card.
+ *
+ * Built from the durable projection when the Host passed one, and from the
+ * model-facing content when it did not (a nested or otherwise projection-less
+ * call), so a UI without the projection still gets something true. It is pure —
+ * the same result gives the same text on the live path and on a session-log
+ * replay — never longer than {@link CARD_TEXT_LIMIT}, and it says so when it cuts.
+ * @param result - the completed call as the Host hands it to a presenter.
+ * @returns the card's text.
+ */
+function cardText(result) {
+  const meta = result !== null && typeof result === 'object'
+    && result.meta !== null && typeof result.meta === 'object' && !Array.isArray(result.meta)
+    ? result.meta
+    : null
+  const parts = []
+  if (meta !== null) {
+    if (typeof meta.summary === 'string' && meta.summary !== '') parts.push(meta.summary)
+    const rows = Array.isArray(meta.repositories) ? meta.repositories : []
+    const lines = rows.map((row) => {
+      const name = typeof row?.name === 'string' ? row.name : '?'
+      const state = row?.error ? `failed: ${String(row.error)}` : row?.merged === true ? 'merged' : 'not merged'
+      return `${name}: ${state}${row?.removed === true ? ', worktree removed' : ''}`
+    })
+    const total = typeof meta.total === 'number' && Number.isFinite(meta.total) ? meta.total : rows.length
+    if (total > rows.length) lines.push(`... and ${total - rows.length} more repositories`)
+    if (lines.length > 0) parts.push(lines.join('\n'))
+    const warnings = Array.isArray(meta.warnings) ? meta.warnings.filter((one) => typeof one === 'string') : []
+    if (warnings.length > 0) parts.push(`warnings: ${warnings.join('; ')}`)
+  } else if (Array.isArray(result?.content)) {
+    const text = result.content
+      .map((block) => (block?.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+      .filter((one) => one !== '')
+      .join('\n\n')
+    if (text !== '') parts.push(text)
+  }
+  const text = parts.join('\n\n')
+  return text.length > CARD_TEXT_LIMIT ? `${text.slice(0, CARD_TEXT_LIMIT)}\n... (truncated)` : text
+}
+
 /**
  * Register the `task_worktree_space` tool when the deployment serves tools.
  *
@@ -217,6 +267,21 @@ export function registerTaskTool(ctx) {
     output: {
       schema: OUTPUT_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: value.summary }],
+      // The card's own projection, bounded here as well as at the card: a
+      // hundred-repository task must neither bloat the session log nor a card.
+      // `total` stays in place, so a capped list can never be read as the whole
+      // answer.
+      presentationMeta: (_args, value) => ({
+        summary: value.summary,
+        total: value.repositories.length,
+        repositories: value.repositories.slice(0, CARD_ROW_LIMIT).map((row) => ({
+          name: row.name,
+          merged: row.merged,
+          removed: row.removed,
+          error: row.error,
+        })),
+        warnings: value.warnings.slice(0, CARD_WARNING_LIMIT),
+      }),
     },
     async execute(args) {
       const action = args.action
@@ -318,11 +383,21 @@ export function registerTaskTool(ctx) {
 
       throw new Error(`unknown action: ${action}`)
     },
+    // Both presenters are pure: the same arguments and the same result give the
+    // same view on the live path and on a session-log replay. Neither reads a
+    // session, the clock, the environment or anything else outside its inputs.
     presentCall: (args) => ({
       card: 'generic',
       title: `task_worktree_space: ${args.action}`,
       kind: 'other',
-      rawInput: args,
+      // The task name is the one input a reader wants while the call runs; the
+      // whole args object (paths, flags, an archive directory) is not.
+      rawInput: typeof args?.task === 'string' && args.task !== '' ? args.task : undefined,
+    }),
+    presentResult: (args, result) => ({
+      card: 'generic',
+      title: `task_worktree_space: ${args?.action ?? 'call'}`,
+      content: [{ type: 'text', text: cardText(result) }],
     }),
   }))
 }

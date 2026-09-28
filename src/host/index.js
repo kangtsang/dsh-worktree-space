@@ -1,5 +1,4 @@
 import z from '@deepseek-ai/schemastery'
-import { clientRequestSchema } from '@deepseek-ai/dsh-client-connection'
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,6 +17,26 @@ const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
 const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.preference']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
+
+/**
+ * Read the client-request envelope a route accepts.
+ *
+ * Four fields, checked here rather than with the Connection package's own schema:
+ * the built host bundle carries the whole host, Tool presenters included, and a
+ * Tool presenter that imports Client/UI code is a store-contract blocker. Keeping
+ * the check local also leaves the host half with no Client dependency at all.
+ * @param body - the parsed JSON body of an authenticated route call.
+ * @returns the envelope, or null when the body is not one.
+ */
+export function readClientRequest(body) {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return null
+  const { type, rpcId, method, payload } = body
+  if (type !== 'client-request') return null
+  if (typeof rpcId !== 'string' || rpcId === '') return null
+  if (typeof method !== 'string' || method === '') return null
+  const carried = payload !== null && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}
+  return { type, rpcId, method, payload: carried }
+}
 
 export const ok = (value) => ({ ok: true, value })
 const PUBLIC_ERROR_CODES = new Set([
@@ -470,9 +489,8 @@ export function apply(ctx, config = {}) {
         try { body = await request.json() } catch {
           return new Response('body is not JSON', { status: 400 })
         }
-        const parsed = clientRequestSchema.safeParse(body)
-        if (!parsed.success) return new Response('invalid client-request message', { status: 400 })
-        const message = parsed.data
+        const message = readClientRequest(body)
+        if (message === null) return new Response('invalid client-request message', { status: 400 })
         const result = message.method === `dsh-worktree-space/${endpoint}`
           ? await handle(endpoint, message.payload, request.signal)
           : fail('bad-request', 'RPC method does not match endpoint.')
