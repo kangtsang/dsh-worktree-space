@@ -254,15 +254,11 @@
   .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }
   /* The one row whose value is typed rather than picked. */
   .dws-plugin-config-field:has(.dws-plugin-config-text) { flex: 1; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
-  /* One width for both states, the pill's own: the value of every other row is the shell's
-     select, which is sized to its content rather than to the column, so the field a reader
-     types into is given that same width - 92px, measured off a screenshot of the card -
-     instead of stretching across the row. */
-  .dws-plugin-config-text { display: grid; grid-template-columns: auto 92px; justify-content: end; align-items: center; gap: 10px; }
-  /* The one row whose value is a path: an absolute path does not fit 92px, so this row
-     takes the rest of the line. The hook comes from the row, not from the field, because
-     which value needs the room is a property of the setting, not of the shape. */
-  .dws-plugin-config-wide .dws-plugin-config-text { grid-template-columns: auto minmax(0, 1fr); }
+  /* Both typed rows wear one length - half of what the path row used to stretch to (472px
+     measured off a screenshot of the card) - because the prefix and the archive directory
+     are the two values a reader types: one field width for both, rather than one stretching
+     across the line and one not. The picked rows keep their own size. */
+  .dws-plugin-config-text { display: grid; grid-template-columns: auto 236px; justify-content: end; align-items: center; gap: 10px; }
   /* Locked wears the same pill as every other row's value, so the card reads as one list. */
   .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* A standing setting, so it wears a switch rather than the tick a list of choices

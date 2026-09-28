@@ -176,12 +176,14 @@ describe("floating panel surface", () => {
     expect(rule(".dws-status-clean .dws-status-dot")).toContain("color: var(--dsw-alias-state-success-primary)")
   })
 
-  it("gives the typed setting the width of the controls beside it, in both states", () => {
-    // A field that stretches across the row reads as a different kind of control than the
-    // selects it sits among. The number is the select's own rendered width, measured off a
-    // screenshot of the card rather than guessed: the first attempt at this was wider than
-    // the pill beside it and the row had to be re-measured.
-    expect(rule(".dws-plugin-config-text")).toContain("92px")
+  it("gives both typed settings one length, in both states", () => {
+    // Two rows a reader types into, so one length for both - half of what the path row used
+    // to stretch to (472px, measured off a screenshot of the card). One field stretching
+    // across the line while the other sat narrow beside it read as two kinds of control.
+    expect(rule(".dws-plugin-config-text")).toContain("236px")
+    // Nothing gives either typed row a width of its own any more: a second rule here would
+    // put the two back out of line, which is the whole point of the shared column.
+    expect(rule(".dws-plugin-config-wide .dws-plugin-config-text")).toBe("")
     // Locked and editing occupy that same column, at the select's height, so the row does
     // not move when the field appears - the bug that made this two elements instead of one.
     expect(rule(".dws-plugin-config-locked")).toContain("36px")
