@@ -101,13 +101,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   /**
    * Whether the Host's configuration offers the two agent entries.
    *
-   * Hidden until the Host says otherwise, which is the setting's own default: the
-   * standard finish is the user's own commit and their own conflict resolution. It
-   * governs the entries and the notice that explains them, and nothing else - a
-   * session that was already opened stays on screen, because that is the state of the
-   * work rather than an offer.
+   * Shown until the Host says otherwise, which is the setting's own default: the entries
+   * are the finish this plugin has been shipping, and a profile that would rather do the
+   * commit and the conflict resolution itself turns them off. It governs the entries and
+   * the notice that explains them, and nothing else - a session that was already opened
+   * stays on screen, because that is the state of the work rather than an offer.
    */
-  const [handoffEntry, setHandoffEntry] = useState(false)
+  const [handoffEntry, setHandoffEntry] = useState(true)
   // The sessions run outside this dialog, so the rows reporting on them have to
   // follow the Host's list rather than a value read once. The counter is the render.
   const [, setSessionTick] = useState(0)
@@ -228,14 +228,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * Read rather than assumed, and it arrives after the first paint: the computed
    * folder is on screen until then, so the row never shows an empty path while it
    * waits. A Host that answers nothing leaves the computed folder in place — which
-   * is exactly what an empty setting means — and leaves the entries hidden, which is
+   * is exactly what an empty setting means — and leaves the entries shown, which is
    * what the setting defaults to.
    */
   useEffect(() => {
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
-      setHandoffEntry(served?.handoffEntry === "show")
+      setHandoffEntry(served?.handoffEntry !== "hide")
       const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
       if (configured.trim() === "") return
       setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))

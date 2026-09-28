@@ -10,11 +10,15 @@ import { t } from "../src/client/lib/i18n"
  * write that lands in that same snapshot, which is what the real form does after a
  * round trip.
  */
-function configForm(prefix = "task/", accepted = true, archiveDirectory = "") {
+function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
-    handoffEntry: "hide",
+    // The agent entry row is served unless a case is asking what the card does without
+    // it: the Host always has this key, and the fallback is what a card opened on a
+    // Host that does not would show. `null` rather than `undefined`, which would fall
+    // back to this parameter's own default.
+    ...(handoffEntry === null ? {} : { handoffEntry }),
     scanDepth: 3,
     maxScanDirectories: 3000,
     defaultBranchPrefix: prefix,
@@ -151,6 +155,13 @@ describe("the configuration card's agent handoff row", () => {
     // and the value on the trailing side - hidden until a profile asks otherwise.
     expect(hintIn(t("entryHandoffLabel"))).toBe(t("entryHandoffHint"))
     expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configHide"))
+  })
+
+  it("offers the entries as shown when the Host serves no such key, which is the default", () => {
+    const { form } = configForm("task/", true, "", null)
+    render(<PluginConfigCard form={form} />)
+
+    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
   })
 
   it("saves the choice through the form the other display choices use", async () => {

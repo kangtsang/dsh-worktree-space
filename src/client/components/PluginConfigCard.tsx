@@ -95,11 +95,11 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
   },
   {
     // The experimental part of the finish: the two entries that hand uncommitted work,
-    // and a merge conflict, to an agent. Hidden is the default, so a profile that never
-    // touches this shows the standard flow.
+    // and a merge conflict, to an agent. Shown is the default, so the row reads as a way
+    // to turn it off rather than as something to discover.
     field: "handoffEntry",
     label: t("entryHandoffLabel"),
-    fallback: "hide",
+    fallback: "show",
     hint: t("entryHandoffHint"),
     choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
   },

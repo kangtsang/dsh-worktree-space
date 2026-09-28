@@ -15,9 +15,9 @@ Drive the whole workflow through the `task_worktree_space` tool. Do not run
 `git worktree` commands by hand for it.
 
 > **Beta (experimental)**: handing a merge conflict to an agent is the part of this plugin
-> that may still change, and the plugin's own configuration hides the two entries that offer
-> it unless a profile asks for them - so never promise the user a button that may not be on
-> screen. Tell them that reports belong at
+> that may still change, and the plugin's own configuration can hide the two entries that
+> offer it - so never promise the user a button that may not be on screen. Tell them that
+> reports belong at
 > https://github.com/kangtsang/dsh-worktree-space/issues when something goes wrong.
 
 ## The model

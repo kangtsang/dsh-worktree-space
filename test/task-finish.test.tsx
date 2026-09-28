@@ -353,7 +353,7 @@ describe("finishing a task", () => {
     expect(screen.getByText(t("finishHandoffHint"))).toBeTruthy()
     // Both entries are gone, and so is the notice that explains them - and nothing opened
     // a session on its own.
-    expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull())
     expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
     expect(document.querySelector(".dws-beta-notice")).toBeNull()
     expect(next.sessions.create).not.toHaveBeenCalled()
@@ -381,7 +381,7 @@ describe("finishing a task", () => {
     // an agent's commit needs - and confirming stays out of reach until it is done.
     expect(screen.getByText(t("finishCommitManual"))).toBeTruthy()
     expect(screen.queryByText(t("finishCommitEscalation"))).toBeNull()
-    expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull())
     expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(true)
     expect(next.sessions.create).not.toHaveBeenCalled()
   })
@@ -416,7 +416,7 @@ describe("finishing a task", () => {
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", job: t("finishHandoffJobConflict") }))).toBeTruthy()
     // What the switch does govern is the notice that explains the entries, and the
     // entries themselves.
-    expect(document.querySelector(".dws-beta-notice")).toBeNull()
+    await waitFor(() => expect(document.querySelector(".dws-beta-notice")).toBeNull())
     expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull()
   })
 

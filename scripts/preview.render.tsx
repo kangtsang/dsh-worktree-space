@@ -81,7 +81,7 @@ function services(workspaces: Array<{ workspaceId: string; path: string; title: 
 
 /** The configuration form the create dialog reads its default prefix from. */
 function configForm(defaultBranchPrefix = "task/") {
-  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "hide", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix }
+  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix }
   return { getSnapshot: () => ({ status: "ready", value }), subscribe: () => () => {}, set: vi.fn(async () => true) }
 }
 
