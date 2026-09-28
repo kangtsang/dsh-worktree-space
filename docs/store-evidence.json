@@ -50,5 +50,5 @@
     "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
     "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
   },
-  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47 before the contract fixes, and a version number cannot be reused, so the fixes shipped as 1.0.6: registry.npmjs.org serves it as latest with gitHead 5774c5f760790dbee99e24bd2b75f731eb779236 and shasum 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7. No version carries a deprecation: 1.0.0-1.0.5 briefly did, and it was cleared, which a readback of every version's deprecated field confirms"
+  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6, which registry.npmjs.org serves as latest with gitHead 5774c5f760790dbee99e24bd2b75f731eb779236 and shasum 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7, its tarball byte-identical to npm pack here"
 }
