@@ -43,7 +43,7 @@ describe("repository glyph mask", () => {
     expect(count(decodeMask())).toBe(count(real))
   })
 
-  it("draws the plugin's own glyph, in the list's blue, with nothing behind it", () => {
+  it("draws the plugin's own glyph, inset, in the list's blue, with nothing behind it", () => {
     // The package's own mark, read from the package root vitest runs in.
     const shipped = readFileSync("icon.svg", "utf8")
     const shapes = (markup: string) => [...markup.matchAll(/ (d|cx|cy|r)="([^"]+)"/g)].map(([, name, value]) => `${name}=${value}`)
@@ -52,6 +52,11 @@ describe("repository glyph mask", () => {
     // workspace selector: the plugin is recognised by this glyph wherever it appears.
     expect(shapes(shipped).length).toBeGreaterThan(0)
     expect(shapes(shipped)).toEqual(shapes(renderToStaticMarkup(<BrandGlyph />)))
+
+    // One difference from the component, and only one: the glyph is drawn at 0.8 of the
+    // box — 20 of the 24 units — so the mark the list shows does not overfill its square.
+    // The scale is the whole of the size: change it, and the drawing shrinks or grows.
+    expect(shipped).toContain('transform="translate(2.4 2.4) scale(0.8)"')
 
     // The mark is the glyph and nothing else: the list's blue on the line, and no tile
     // drawn behind it — a background was tried and taken back out.

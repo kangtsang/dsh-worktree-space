@@ -17,8 +17,8 @@ import FolderGit2Icon from "@hugeicons/core-free-icons/FolderGit2Icon"
  *
  * The package's `icon.svg` — what the plugin list and the plugin's own page show — is a
  * different mark, and deliberately so: the plugin's own `BrandGlyph`, in the blue the list
- * draws it and with nothing behind it. The test pins it to that pairing rather than to this
- * one.
+ * draws it, with nothing behind it, inset to 0.8 of its box so it sits beside the marks
+ * that leave a margin. The test pins it to that pairing rather than to this one.
  *
  * TODO(DSH): the row is not ours to paint yet. As of DSH 0.1.7-rc.1 the
  * `settings.section` registrant options are `id`, `order` and `label` only, and the
