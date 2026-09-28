@@ -19,21 +19,39 @@
     `<worktree>/.git` 标记文件（用于判断该 worktree 是否已经失效）。
   - 本插件自己包内的 `assets/skill/task-worktree-space/SKILL.md`（作为内置技能注册，只读，不复制到别处）。
   - 用户自己指定的路径（源码根、任务空间根、归档目录）。
+  - 结束任务时，某个 worktree 里被 `git diff --name-only HEAD` 与 `git diff --name-only --diff-filter=U`
+    列出（合并中还有 `ls-files -u` 一类的未解决条目）的那些文件的**内容**：逐个读回，只为判断一个合并是否
+    还留着冲突标记（逐行匹配以 `<<<<<<<`、`=======`、`>>>>>>>` 开头的行）；列出来却读不出的路径（子模块、
+    目录）跳过。除冲突标记外不判断文件内容，也不把内容写进日志或响应。
 
-- **写入**：只写用户选定的**任务空间目录**、其**归档目录**，以及被识别为「已失效的 worktree」的那一个目录；
-  **绝不写源码仓库的工作树**，也不写 DSH 安装目录或配置文件。
+- **写入**：只写用户选定的**任务空间目录**、其**归档目录**、被识别为「已失效的 worktree」的那一个目录，
+  以及**系统临时目录**下自建的一处合并检出（见下）；**绝不写源码仓库检出里的文件**，也不写 DSH 安装目录
+  或配置文件。
   - 创建：`mkdir` 任务空间目录；`git worktree add` 生成各仓库检出（由 git 自己落盘）；写
     `worktree-space.json` 与由它渲染出的 `worktree-space.md`。
   - 归档：把任务空间里的文档 `cp` 到 `archived-docs/<工作区名>-<YYYYMMDD-HHMMSS>/`（或配置里指定的归档目录）。
   - 清理：`git worktree remove --force` 移除检出；对 `.git` 指向的 gitdir 已不存在的**孤儿 worktree**，
     用 `fs.rm(directory, { recursive: true })` 删掉那个目录；最后，只有当任务空间目录确实空了，才删除该目录
     并注销工作区。
+  - 合并：目标分支正是源仓库当前检出的那个分支时，就在源仓库原地 `git merge`（写的是它自己的分支与工作树）；
+    其余情况先 `mkdtemp` 出 `os.tmpdir()/dsh-worktree-space-merge-<随机>/`，在其中 `git worktree add`
+    一份目标分支的临时检出、完成合并，随后 `worktree remove --force`（失败再 `worktree prune`）
+    并 `rm` 掉整个临时目录——合并已经成功时，不因为这个目录删不掉而报失败。
+  - 试合并：带合并的结束任务会先在**任务空间里该仓库自己的 worktree** 中试合并一次；冲突就原样留在那里，
+    试合并干净则 `reset --hard` 回到试合并前记录的提交，再由上面那一步在目标分支上记录合并提交。
+  - git 自己的登记：`git worktree add/remove` 会写 `<源仓库>/.git/worktrees/<名字>/` 下 git 自己的登记与索引
+    （`.git` 标记、`HEAD`、`index` 等）。这是 git 的行为，插件不去编辑源仓库检出里的文件。
   - 配置项（入口开关、扫描深度、默认分支前缀、归档目录）由 DSH 自己的插件配置服务（Plugins 页面的实时表单）
     保存，**插件不写任何配置文件**；`task.preference` 端点只读。
 
 - **命令执行**：通过宿主注入的 `subprocess` 服务以**固定 argv** 调用 `git`
   （`argv: ['git', '-C', <cwd>, ...args]`）：**不经过 shell**，没有字符串拼接，不接受用户提供的命令，
   不调用 `git` 以外的任何可执行文件。全部子命令见下表。
+
+- **插件自己不提交**：`git add` 与 `git commit` **都不在本插件的命令表里**。结束任务时某个 worktree 还有
+  未提交的改动，该仓库就停下并点名（见失败边界），插件不会替它写一笔提交。「把提交交给 agent」是插件
+  **另开一个会话**、由**宿主里的 agent** 在那个会话中执行 `git add` / `git commit`——那些命令不是本插件
+  发出的，也不属于本插件的权限信号。
 
 - **网络**：插件自身**不发任何 HTTP 请求**。唯一的网络行为是用户在创建对话框中显式勾选「推送」时的
   `git push -u origin <分支>`（默认不勾选、不执行；`task.create` 只在 `push === true` 时才带上它）。
@@ -52,9 +70,9 @@
 
 | 分类 | 子命令 |
 | --- | --- |
-| 查询（只读） | `rev-parse --show-toplevel`、`rev-parse --git-common-dir`、`rev-parse --abbrev-ref HEAD`、`rev-parse HEAD`、`rev-parse --verify --quiet <ref>^{commit}`、`symbolic-ref --quiet --short refs/remotes/origin/HEAD`、`for-each-ref --format=%(refname:short)`、`show-ref --verify --quiet`、`status --short`、`status --porcelain`、`status --short --branch`、`worktree list --porcelain`、`rev-list --count`、`merge-base --is-ancestor`、`diff --name-only --diff-filter=U` |
-| 工作树 | `worktree add`、`worktree remove --force`、`worktree prune` |
-| 分支与提交 | `branch -d`、`branch -D`、`add -A`、`commit -m "<固定模板消息>"`、`merge --no-ff --no-edit <ref>`、`merge --abort`、`reset --hard <sha>` |
+| 查询（只读） | `rev-parse --show-toplevel`、`rev-parse --git-common-dir`、`rev-parse --abbrev-ref HEAD`、`rev-parse HEAD`、`rev-parse --verify --quiet <ref>^{commit}`、`rev-parse --verify --quiet MERGE_HEAD`、`symbolic-ref --quiet --short refs/remotes/origin/HEAD`、`for-each-ref --format=%(refname:short) <refs>`、`show-ref --verify --quiet`、`status --short`、`status --porcelain`、`status --short --branch`、`worktree list --porcelain`、`rev-list --count`、`merge-base --is-ancestor`、`diff --name-only HEAD`、`diff --name-only --diff-filter=U` |
+| 工作树 | `worktree add`、`worktree remove [--force]`、`worktree prune` |
+| 分支与合并 | `branch -d`、`branch -D`、`merge --no-ff --no-edit <ref>`、`merge --abort`、`reset --hard <sha>` |
 | 网络（需显式勾选） | `push -u origin <分支>` |
 
 ## 依赖
@@ -62,7 +80,7 @@
 | 依赖 | 用途 | 提供方 |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | 运行时（`package.json` 的 `engines.node`） | 用户环境 |
-| DSH `>=0.1.7-rc.1` | 宿主：客户端契约与服务注入（`engines.dsh`，只设下界） | 用户环境 |
+| DSH `>=0.1.7-rc.1` | 宿主：客户端契约与服务注入（`engines.dsh`） | 用户环境 |
 | `@deepseek-ai/cordis` `^4.0.2` | 插件框架 | DSH profile（`peerDependencies`） |
 | `@deepseek-ai/dsh-client-connection` `^0.1.7-rc.1` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`） | DSH profile（`peerDependencies`） |
 | `@deepseek-ai/dsh-tools` `^0.1.7-rc.1` | 宿主工具定义 `defineTool` | DSH profile（`peerDependencies`） |
@@ -91,9 +109,11 @@
 | `git` 不存在或无法启动 | `subprocess.spawn` 的错误向上抛出，该请求以失败结束，界面显示 git 的诊断原文 |
 | 任何 `git` 子命令非零退出 | 抛出 `git <args> failed (exit N): <stderr>`，保留 git 原文；查询类调用（`tryRunGit`/`gitSucceeded`）把失败降级为「未知 / 否」，但不改动仓库状态 |
 | 创建时某个仓库开 worktree 失败 | 该仓库记为失败，其余仓库照常创建；已建成的部分如实报告，不静默回滚 |
-| 提交失败（钩子拒绝、缺 `user.name`/`user.email`、gpg 签名、`index.lock`、文件被占用） | 只影响该仓库：不合并、不移除、保留现场，其余仓库继续，结果里逐条报出 |
+| 结束任务时某个 worktree 还有未提交的改动 | 停下该仓库（`force` 表示调用方说「这些改动不要了」）：报 `uncommitted work is waiting in <worktree>; commit it before the task can be finished`，**不代写提交**；其余仓库继续，结果里逐条报出 |
+| 合并已解决但还没有提交 | 不代为提交：报 `the merge in <worktree> is resolved but not committed`，现场原样保留，等它的解决者提交 |
+| 解决后的文件里还留着冲突标记 | 报 `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
 | 合并冲突 | 不中止、不还原，冲突现场原样留在对应 worktree（保留 `MERGE_HEAD` 与未解决文件）；整体记为部分完成（`failed: true`），返回 `mergeSite` 与 `conflictedFiles`，等用户授权后交给 agent 解决 |
-| 移除 worktree 失败 | 返回失败（并用 `worktree prune` 作为补救），任务空间目录与工作区注册保留，绝不强行删除目录 |
+| 移除 worktree 失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`（并用 `worktree prune` 作为补救），任务空间目录与工作区注册保留，绝不强行删除目录 |
 | 归档复制失败 | 报错并保留源文件，不删除任务空间 |
 | 工作区里仍有会话在运行 | 拒绝结束任务，等该会话结束或被停掉后重试 |
 | 任务空间目录里还有内容 | 不删除任务空间目录、不注销工作区 |

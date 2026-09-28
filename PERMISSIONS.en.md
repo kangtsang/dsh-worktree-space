@@ -24,10 +24,16 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
   - `assets/skill/task-worktree-space/SKILL.md` inside this package (registered as a bundled skill, read
     only, never copied anywhere).
   - The paths the user chooses (source root, task space root, archive directory).
+  - On finish, the **contents** of the files git lists in a worktree through `git diff --name-only HEAD` and
+    `git diff --name-only --diff-filter=U`: each is read back only to decide whether a merge still carries
+    conflict markers (line by line, for lines starting with `<<<<<<<`, `=======` or `>>>>>>>`). A listed path
+    that cannot be read (a submodule, a directory) is skipped. Nothing but those markers is inspected, and no
+    content is written to a log or a response.
 
-- **Writes**: only inside the task space directory the user chose, its archive directory, and the one
-  directory identified as a stale worktree; **never** into a source repository's working tree, and never into
-  the DSH installation or a configuration file.
+- **Writes**: only inside the task space directory the user chose, its archive directory, the one directory
+  identified as a stale worktree, and one merge checkout the plugin creates under the **system temporary
+  directory** (below); **never** into the files of a source repository's checkout, and never into the DSH
+  installation or a configuration file.
   - Create: `mkdir` the task space directory; `git worktree add` creates each checkout (git writes it); write
     `worktree-space.json` and the `worktree-space.md` rendered from it.
   - Archive: `cp` the task space's documents to `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>/` (or the
@@ -36,6 +42,18 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
     gitdir that no longer exists has that one directory removed with `fs.rm(directory, { recursive: true })`;
     the task space directory itself is deleted and its Workspace registration removed only once it really is
     empty.
+  - Merge: when the target branch is the one the source repository has checked out, the merge runs in place
+    there (`git merge`, which writes that repository's own branch and working tree). Otherwise the plugin
+    `mkdtemp`s `os.tmpdir()/dsh-worktree-space-merge-<random>/`, runs `git worktree add` for a temporary
+    checkout of the target branch inside it, merges there, then `worktree remove --force` (falling back to
+    `worktree prune`) and `rm`s the whole temporary directory — a merge that already succeeded is not reported
+    as failed because that directory would not delete.
+  - Rehearsal: a finishing run that has to merge first rehearses the merge inside **that repository's own
+    worktree in the task space**. A conflict is left there as it stands; a clean rehearsal is `reset --hard`
+    back to the commit recorded before it, after which the step above records the merge on the target branch.
+  - git's own bookkeeping: `git worktree add/remove` writes git's own registration and index under
+    `<source repo>/.git/worktrees/<name>/` (the `.git` marker, `HEAD`, `index`, …). That is git's doing; the
+    plugin never edits files in a source repository's checkout.
   - Configuration (the entry switches, scan depth, default branch prefix, archive directory) is stored by
     DSH's own plugin configuration service (the Plugins page's live form); **the plugin writes no
     configuration file**, and its `task.preference` endpoint is read-only.
@@ -43,6 +61,12 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,
   and no executable other than `git`. Every subcommand is listed in the table below.
+
+- **The plugin does not commit**: `git add` and `git commit` are **not in this plugin's command table**. When
+  a worktree still holds uncommitted work at finish, that repository stops and is named (see the failure
+  boundaries) — the plugin writes no commit for it. "Hand the commit to an agent" means the plugin **opens a
+  separate session**, in which the **host's agent** runs `git add` / `git commit`: those commands are not
+  issued by this plugin and are not part of its permission signals.
 
 - **Network**: the plugin itself issues **no HTTP request at all**. Its only network activity is
   `git push -u origin <branch>` when the user explicitly ticks Push in the create dialog (unticked and not run
@@ -62,9 +86,9 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 
 | Kind | Subcommands |
 | --- | --- |
-| Queries (read-only) | `rev-parse --show-toplevel`, `rev-parse --git-common-dir`, `rev-parse --abbrev-ref HEAD`, `rev-parse HEAD`, `rev-parse --verify --quiet <ref>^{commit}`, `symbolic-ref --quiet --short refs/remotes/origin/HEAD`, `for-each-ref --format=%(refname:short)`, `show-ref --verify --quiet`, `status --short`, `status --porcelain`, `status --short --branch`, `worktree list --porcelain`, `rev-list --count`, `merge-base --is-ancestor`, `diff --name-only --diff-filter=U` |
-| Worktrees | `worktree add`, `worktree remove --force`, `worktree prune` |
-| Branches and commits | `branch -d`, `branch -D`, `add -A`, `commit -m "<fixed template message>"`, `merge --no-ff --no-edit <ref>`, `merge --abort`, `reset --hard <sha>` |
+| Queries (read-only) | `rev-parse --show-toplevel`, `rev-parse --git-common-dir`, `rev-parse --abbrev-ref HEAD`, `rev-parse HEAD`, `rev-parse --verify --quiet <ref>^{commit}`, `rev-parse --verify --quiet MERGE_HEAD`, `symbolic-ref --quiet --short refs/remotes/origin/HEAD`, `for-each-ref --format=%(refname:short) <refs>`, `show-ref --verify --quiet`, `status --short`, `status --porcelain`, `status --short --branch`, `worktree list --porcelain`, `rev-list --count`, `merge-base --is-ancestor`, `diff --name-only HEAD`, `diff --name-only --diff-filter=U` |
+| Worktrees | `worktree add`, `worktree remove [--force]`, `worktree prune` |
+| Branches and merges | `branch -d`, `branch -D`, `merge --no-ff --no-edit <ref>`, `merge --abort`, `reset --hard <sha>` |
 | Network (explicit opt-in) | `push -u origin <branch>` |
 
 ## Dependencies
@@ -72,7 +96,7 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 | Dependency | Purpose | Provided by |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | Runtime (`engines.node` in `package.json`) | The user's environment |
-| DSH `>=0.1.7-rc.1` | Host: client contract and service injection (`engines.dsh`, lower bound only) | The user's environment |
+| DSH `>=0.1.7-rc.1` | Host: client contract and service injection (`engines.dsh`) | The user's environment |
 | `@deepseek-ai/cordis` `^4.0.2` | Plugin framework | DSH profile (`peerDependencies`) |
 | `@deepseek-ai/dsh-client-connection` `^0.1.7-rc.1` | Client connection and host RPC (`/api/dsh-worktree-space`) | DSH profile (`peerDependencies`) |
 | `@deepseek-ai/dsh-tools` `^0.1.7-rc.1` | Host tool definition, `defineTool` | DSH profile (`peerDependencies`) |
@@ -102,9 +126,11 @@ executable artifact.
 | `git` missing or cannot be started | The `subprocess.spawn` error is thrown up; the request fails and the UI shows git's own diagnostic |
 | Any `git` subcommand exits non-zero | Throws `git <args> failed (exit N): <stderr>` with git's text preserved; the query helpers (`tryRunGit`/`gitSucceeded`) degrade a failure to "unknown/no" without changing repository state |
 | One repository's worktree fails during create | That repository is reported failed, the others are still created, and what was built is reported as it stands — no silent rollback |
-| A commit fails (hook refusing, missing `user.name`/`user.email`, gpg signing, `index.lock`, a file in use) | Affects that repository only: it is neither merged nor removed and keeps its state, the others carry on, and the result names each one |
+| A worktree still holds uncommitted work at finish | That repository stops (`force` is the caller saying "these changes can go"): it reports `uncommitted work is waiting in <worktree>; commit it before the task can be finished` and **writes no commit**; the others carry on and the result names each one |
+| A merge is resolved but not committed | Not committed for you: reports `the merge in <worktree> is resolved but not committed` and keeps the state as it stands until whoever resolved it commits |
+| The resolved files still carry conflict markers | Reports `the resolved merge still has conflict markers in <files>` and keeps them as they stand — it takes no side |
 | A merge conflicts | Not aborted and not reverted — the conflict stays in that worktree (keeping `MERGE_HEAD` and its unresolved files); the finish reports partial success (`failed: true`) with `mergeSite` and `conflictedFiles` and waits for the user to authorise an agent |
-| Removing a worktree fails | Reported as a failure (with `worktree prune` as the remedy); the task space directory and the Workspace registration stay, and the directory is never force-deleted |
+| Removing a worktree fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)` (with `worktree prune` as the remedy); the task space directory and the Workspace registration stay, and the directory is never force-deleted |
 | Archiving fails to copy | Reports the error and keeps the source files; the task space is not deleted |
 | A session in that Workspace is still running | Finishing is refused until that session ends or is stopped |
 | The task space directory still holds anything | The directory is not deleted and the Workspace stays registered |

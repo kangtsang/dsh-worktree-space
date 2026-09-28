@@ -56,8 +56,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
 ## 兼容性
 
-基于 DSH **0.1.7-rc.1** 的客户端契约开发（web profile；依赖仍按 `0.1.7-rc.1` 声明）。已在
-`0.1.7-rc.1`、以及当前安装并实际使用的 `0.1.7-rc.2` 上验证：宿主 RPC 路由能注册，客户端 bundle
+基于 DSH **0.1.7-rc.1** 的客户端契约开发。已在 `0.1.7-rc.1`、`0.1.7-rc.2` 上验证：宿主 RPC 路由能注册，客户端 bundle
 不用改就能加载，插件列表里的名称、描述、图标和配置区都正常显示。
 
 manifest（`package.json`）里显式声明的兼容范围：
@@ -65,14 +64,14 @@ manifest（`package.json`）里显式声明的兼容范围：
 | 字段 | 声明值 | 含义 |
 | --- | --- | --- |
 | `engines.node` | `>=22.19.0` | 需要的 Node.js 版本 |
-| `engines.dsh` | `>=0.1.7-rc.1` | 兼容的 DSH 版本（只设下界，无上限） |
+| `engines.dsh` | `>=0.1.7-rc.1` | 兼容的 DSH 版本 |
 | `dsh.manifestVersion` | `1` | DSH 清单格式版本 |
 | `dsh.compatibility.profiles` | `["web"]` | 已验证的 profile |
 
-`engines.dsh` 是**声明**而非强制：当前 DSH 的安装器和加载器都不会校验它，声明一个范围不会拒绝不兼容的
-宿主。这个范围只设下界、不设上限，含义是「`0.1.7-rc.1` 及之后都按兼容处理」，但实际只逐一验证过
-`0.1.7-rc.1`（当前宿主是 `0.1.7-rc.2`，未单独验证）。如果后续 DSH 版本改动了客户端契约并导致插件失效，
-会把下界往上收，或在 `dsh.compatibility` 里如实标记；遇到版本相关问题请先退回 `0.1.7-rc.1`，或到
+`engines.dsh` 是**声明**而非强制：当前 DSH 的安装器与加载器都不校验它，写一个范围不会拒绝不兼容的宿主，
+因此这个范围的含义只是「`0.1.7-rc.1` 及之后都按兼容处理」；其中真正逐一验证过的是 `0.1.7-rc.1` 与
+`0.1.7-rc.2`。如果后续 DSH 版本改动了客户端契约、让插件失效，会把下界往上收，或在 `dsh.compatibility`
+里如实标记；遇到版本相关的问题，请到
 [Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
 
 ## 权限、依赖与失败边界
@@ -85,9 +84,9 @@ manifest（`package.json`）里显式声明的兼容范围：
 
 | 权限 | 范围 |
 | --- | --- |
-| 文件读取 | 你选择的工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间里的 `worktree-space.json`、`worktree-space.md`；各 worktree 的 `.git` 标记文件；插件自带的 `assets/skill/task-worktree-space/SKILL.md` |
-| 文件写入 | 只写任务空间容器：`<任务空间>/<任务名>/` 及其中的 worktree、`worktree-space.json`、`worktree-space.md`、归档时的 `archived-docs/`。结束任务时删除的是插件自己创建的 worktree、任务目录与文档。**不写** DSH 数据目录，也**不写**配置文件（配置由 DSH 的插件配置服务保存） |
-| 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。查询类：`rev-parse`、`worktree list`、`status`、`rev-list`、`for-each-ref`、`show-ref`、`symbolic-ref`、`merge-base`；变更类：`worktree add / remove / prune`、`add`、`commit`、`merge`、`merge --abort`、`reset --hard`、`branch -d / -D` |
+| 文件读取 | 你选择的工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间里的 `worktree-space.json`、`worktree-space.md`；各 worktree 的 `.git` 标记文件；插件自带的 `assets/skill/task-worktree-space/SKILL.md`；结束任务时按 `git diff --name-only HEAD` / `--diff-filter=U` 读回那些文件的内容，只为判断合并是否还留着冲突标记 |
+| 文件写入 | 只写任务空间容器：`<任务空间>/<任务名>/` 及其中的 worktree、`worktree-space.json`、`worktree-space.md`、归档时的 `archived-docs/`。结束任务时删除的是插件自己创建的 worktree、任务目录与文档；合并时另在**系统临时目录**里建一份临时检出（`git worktree add` → 合并 → `worktree remove --force` → 删除该目录）。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录与配置文件（配置由 DSH 的插件配置服务保存） |
+| 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。查询类：`rev-parse`（含 `rev-parse --verify --quiet MERGE_HEAD`）、`worktree list`、`status`、`rev-list`、`for-each-ref`、`show-ref`、`symbolic-ref`、`merge-base`、`diff --name-only`（含 `--diff-filter=U`）；变更类：`worktree add / remove / prune`、`merge`、`merge --abort`、`reset --hard`、`branch -d / -D`。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下；交给 agent 的提交由**宿主里的 agent** 在那个会话里执行（见失败边界） |
 | 网络 | 只有 `git push -u origin <分支>`，且仅在你于新建面板或工具里显式选择推送时才执行；插件自身不发任何 HTTP 请求、不下载任何东西 |
 | 凭据 | 不读取、不保存、不转发任何凭据。推送时用的是你本机 Git 已配置的凭据（credential helper / SSH），插件不接触密钥，也不读环境变量 |
 | 全局资源 | 不装全局包、不起常驻进程与服务、不写系统目录 |
@@ -112,9 +111,11 @@ manifest（`package.json`）里显式声明的兼容范围：
 | --- | --- |
 | 扫描目录数超过上限 | 抛错并提示 `Worktree scan limit reached; choose a more specific Workspace.`，请换一个更具体的工作区 |
 | 任一 `git` 命令失败 | 抛出 `git <参数> failed (exit N): <stderr>`，把 Git 自己的诊断原样带出 |
-| 某仓库自动提交失败 | 只影响该仓库，其余仓库继续；失败仓库保留现场并在结果里报告 |
+| 结束任务时某仓库还有未提交的改动 | 停下该仓库（`force` 才丢弃）：`uncommitted work is waiting in <worktree>; commit it before the task can be finished`；插件**不代写提交**，其余仓库继续，结果里逐条报出 |
+| 合并已解决但没有提交 | `the merge in <worktree> is resolved but not committed`，现场原样保留 |
+| 解决后的文件里仍有冲突标记 | `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
 | 合并冲突 | 不自动 `merge --abort`，保留合并现场（`mergeSite` 与 `conflictedFiles`），等你授权后再处理 |
-| worktree 删除失败 | 保留该 worktree 并报告，可用 `git worktree prune` 清理 |
+| worktree 删除失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`，保留该 worktree 并报告，可用 `git worktree prune` 清理 |
 | 任务目录非空 | 保留目录与工作区注册，不强行删除 |
 | 无法确认的事实 | 在文档里写「未知」，不把「没有搜到」推断成「不访问」 |
 

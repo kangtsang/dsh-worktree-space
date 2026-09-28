@@ -72,9 +72,8 @@ before the worktree goes.
 
 ## Compatibility
 
-Built against the DSH **0.1.7-rc.1** client contract (web profile; the dependencies are still
-declared as `0.1.7-rc.1`). Verified on `0.1.7-rc.1` and on the `0.1.7-rc.2` that is installed and
-in use here: the host RPC routes register, the client bundle loads without changes, and the plugin
+Built against the DSH **0.1.7-rc.1** client contract. Verified on `0.1.7-rc.1` and `0.1.7-rc.2`: the
+host RPC routes register, the client bundle loads without changes, and the plugin
 list shows the name, description, icon and configuration section correctly.
 
 The compatibility range declared explicitly in the manifest (`package.json`):
@@ -82,16 +81,15 @@ The compatibility range declared explicitly in the manifest (`package.json`):
 | Field | Declared value | Meaning |
 | --- | --- | --- |
 | `engines.node` | `>=22.19.0` | Required Node.js version |
-| `engines.dsh` | `>=0.1.7-rc.1` | Compatible DSH versions (lower bound only, no upper bound) |
+| `engines.dsh` | `>=0.1.7-rc.1` | Compatible DSH versions |
 | `dsh.manifestVersion` | `1` | DSH manifest format version |
 | `dsh.compatibility.profiles` | `["web"]` | Verified profile |
 
-`engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so
-declaring a range does not reject an incompatible host. The range sets a lower bound only, meaning
-"`0.1.7-rc.1` and later are treated as compatible" — in practice only `0.1.7-rc.1` was verified
-(the current host is `0.1.7-rc.2`, not verified separately). If a later DSH release changes the
-client contract and breaks the plugin, this lower bound will be raised, or the state recorded
-honestly in `dsh.compatibility`; if you hit a version-specific problem, go back to `0.1.7-rc.1` or
+`engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so declaring
+a range does not reject an incompatible host — the range means no more than "`0.1.7-rc.1` and later
+are treated as compatible", and what has actually been verified is `0.1.7-rc.1` and `0.1.7-rc.2`. If
+a later DSH release changes the client contract and breaks the plugin, this lower bound will be
+raised, or the state recorded honestly in `dsh.compatibility`; if you hit a version-specific problem,
 open an [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 ## Permissions, dependencies and failure boundaries
@@ -106,9 +104,9 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 
 | Permission | Scope |
 | --- | --- |
-| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md` |
-| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, and `archived-docs/` when filing documents. Finishing a task removes only worktrees, task directories and documents the plugin itself created. It does **not** write the DSH data directory and does **not** write config files (DSH's own plugin configuration service stores your settings) |
-| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse`, `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`. Mutations: `worktree add / remove / prune`, `add`, `commit`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D` |
+| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md`; and, at finish, the contents of the files git lists through `git diff --name-only HEAD` / `--diff-filter=U`, read only to decide whether a merge still carries conflict markers |
+| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, and `archived-docs/` when filing documents. Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
+| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse` (including `rev-parse --verify --quiet MERGE_HEAD`), `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`, `diff --name-only` (including `--diff-filter=U`). Mutations: `worktree add / remove / prune`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D`. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository, and a commit handed to an agent is run by the **host's agent** in that session (see the failure boundaries) |
 | Network | Only `git push -u origin <branch>`, and only when you explicitly ask for a push in the create dialog or the tool; the plugin itself makes no HTTP requests and downloads nothing |
 | Credentials | Reads, stores and forwards none. A push uses whatever credentials your local Git is already configured with (credential helper / SSH); the plugin never touches keys and never reads environment variables |
 | Global resources | No global installs, no daemon or resident service, no writes to system directories |
@@ -133,9 +131,11 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 | --- | --- |
 | Directory scan hits its limit | Throws with `Worktree scan limit reached; choose a more specific Workspace.` — pick a narrower Workspace |
 | Any `git` command fails | Throws `git <args> failed (exit N): <stderr>`, surfacing Git's own diagnosis verbatim |
-| An automatic commit fails in one repository | Affects that repository only; the others continue, and the failed one keeps its working tree and is reported |
+| A repository still holds uncommitted work at finish | That repository stops (`force` is what discards it): `uncommitted work is waiting in <worktree>; commit it before the task can be finished`; the plugin **writes no commit**, the others carry on, and the result names each one |
+| A merge is resolved but not committed | `the merge in <worktree> is resolved but not committed` — the state is kept as it stands |
+| The resolved files still carry conflict markers | `the resolved merge still has conflict markers in <files>` — kept as they stand, no side is taken |
 | Merge conflict | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until you authorise the next step |
-| Worktree removal fails | The worktree is kept and reported; `git worktree prune` is the remedy |
+| Worktree removal fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)`; the worktree is kept and reported, and `git worktree prune` is the remedy |
 | A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
 | A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
 
