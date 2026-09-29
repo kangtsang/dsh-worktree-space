@@ -123,22 +123,37 @@ before the worktree goes.
 
 ## Compatibility
 
-Built against the DSH **0.1.7-rc.1** client contract. Verified on `0.1.7-alpha.2`, `0.1.7-rc.1` and
-`0.1.7-rc.2`: the host RPC routes register, the client bundle loads without changes, and the plugin
-list shows the name, description, icon and configuration section correctly.
+Built against the DSH **0.2.0-rc.2** client contract, while keeping the 0.1.7 line working. All
+**five** releases of the current official window — `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`,
+`0.2.0-rc.1` and `0.2.0-rc.2` — were verified one by one: the host RPC routes register, the client
+bundle loads without changes, and the plugin list shows the name, description, icon and configuration
+section correctly.
 
 The compatibility range declared explicitly in the manifest (`package.json`):
 
 | Field | Declared value | Meaning |
 | --- | --- | --- |
 | `engines.node` | `>=22.19.0` | Required Node.js version |
-| `engines.dsh` | `>=0.1.7-alpha.2` | Compatible DSH versions (declarative lower bound) |
+| `engines.dsh` | `>=0.1.7-alpha.2 <0.3.0-0` | Compatible DSH versions (the 0.1.7 line and 0.2.x, declarative) |
 | `dsh.manifestVersion` | `1` | DSH manifest format version |
-| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.2.0` | Compatible DSH range (0.1.x) |
+| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.3.0-0` | Compatible DSH range (the 0.1.7 line and 0.2.x) |
 | `dsh.compatibility.node` | `>=22.19.0` | Compatible Node.js range |
 | `dsh.compatibility.profiles` | `["web"]` | Verified profile |
 | `dsh.compatibility.dshReleases` | per-release verdicts (below) | Each official full DSH release |
 | `dsh.compatibility.dshOperations` | per-release operation verdicts (below) | Measured install / start / uninstall / rollback |
+| `peerDependencies` | `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-client-connection`, each `>=0.1.7-alpha.2 <0.3.0-0` | The one DSH **enforces**, see below |
+
+**The DSH range in `peerDependencies` is enforced.** From DSH 0.2.0 on, installing a plugin and
+starting a profile compare the runtime's `dsh --version` against every `@deepseek-ai/dsh` /
+`@deepseek-ai/dsh-*` peer the manifest declares (SemVer, with prereleases participating): a peer it
+does not satisfy rejects the install before pnpm runs (`installation rejected: … incompatible with
+dsh …`) or refuses to load it at startup, and the exact-version exemption (`dsh plugin allow-version`)
+is offered instead. DSH 0.1.7 and earlier only looked at declarative fields such as
+`dsh.compatibility`, which is why writing a declaration without touching the peers looked fine then —
+1.0.7 being rejected on 0.2.0 is exactly its two peers still reading `^0.1.7-rc.1`. This version
+declares `>=0.1.7-alpha.2 <0.3.0-0` — the same single range as `engines.dsh` and
+`dsh.compatibility.dsh`, so the three declarations no longer disagree: both lines covered, with
+0.3.0's prereleases kept out too.
 
 `dsh.compatibility.dshReleases` declares only the DSH releases that were actually tested; a release that
 has not been tested stays undeclared, which reads as `unknown`. A broad range is not used to
@@ -150,6 +165,8 @@ install → compose → cold start → uninstall → rollback — which is what 
 | `0.1.7-alpha.2` | compatible | passed | passed | passed | passed |
 | `0.1.7-rc.1` | compatible | passed | passed | passed | passed |
 | `0.1.7-rc.2` | compatible | passed | passed | passed | passed |
+| `0.2.0-rc.1` | compatible | passed | passed | passed | passed |
+| `0.2.0-rc.2` | compatible | passed | passed | passed | passed |
 
 Each release ran against **its own** `@deepseek-ai/dsh` CLI: a disposable profile built from the official
 web template under a throwaway `$DSH_HOME`, the `npm pack` tarball installed into it, the composed tree
@@ -161,11 +178,12 @@ occurrences and a clean restart. The full record is in [`docs/store-evidence.md`
 [`docs/store-evidence.md`](docs/store-evidence.md) — section 6 there says which parts have been
 verified against 1.0.8 and which still stand at 1.0.7.
 
-`engines.dsh` / `dsh.compatibility.dsh` is **declarative**: today's DSH installers and loaders do not
-enforce it, so declaring a range does not reject an incompatible host — the range means no more than
-"`0.1.7-alpha.2` and later `0.1.x` are treated as compatible", and what has actually been verified is
-the three releases in the table above; every other release stays undeclared. If a later DSH release
-changes the client contract and breaks the plugin, this lower bound will be raised, or the state
+`engines.dsh` / `dsh.compatibility.dsh` is **declarative**: DSH's installers and loaders do not enforce
+it, so declaring a range does not reject an incompatible host — the peer range above is what actually
+blocks. These two therefore mean no more than "`0.1.7-alpha.2` up to and including `0.2.x` are treated
+as compatible", and what has actually been verified is the five releases in the table above; every
+other release stays undeclared. If a later DSH release
+changes the client contract and breaks the plugin, this upper bound will be pulled in, or the state
 recorded honestly in `dsh.compatibility`; if you hit a version-specific problem, open an
 [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
@@ -193,7 +211,7 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 | Dependency | Purpose | Provided by |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | Runs the host code | Your DSH installation |
-| DSH `>=0.1.7-rc.1` | Client contract, RPC and the Workspace API | Your DSH installation |
+| DSH `>=0.1.7-alpha.2 <0.3.0-0` | Client contract, RPC and the Workspace API | Your DSH installation |
 | `@deepseek-ai/cordis`, `@deepseek-ai/schemastery` | Plugin framework and config schema | peer dependencies supplied by the DSH profile |
 | `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-tools` | Host RPC registration and tool definitions | peer dependencies supplied by the DSH profile |
 | React 18 | Management-page UI | Supplied by the DSH web runtime |

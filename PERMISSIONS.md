@@ -87,10 +87,10 @@
 | 依赖 | 用途 | 提供方 |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | 运行时（`package.json` 的 `engines.node`） | 用户环境 |
-| DSH `>=0.1.7-rc.1` | 宿主：客户端契约与服务注入（`engines.dsh`） | 用户环境 |
+| DSH `>=0.1.7-alpha.2 <0.3.0-0` | 宿主：客户端契约与服务注入（`engines.dsh` / `dsh.compatibility.dsh`，声明式） | 用户环境 |
 | `@deepseek-ai/cordis` `^4.0.2` | 插件框架 | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-client-connection` `^0.1.7-rc.1` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`） | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-tools` `^0.1.7-rc.1` | 宿主工具定义 `defineTool` | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-client-connection` `>=0.1.7-alpha.2 <0.3.0-0` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`）；DSH 0.2.0 起安装与启动会强制校验这个范围 | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-tools` `>=0.1.7-alpha.2 <0.3.0-0` | 宿主工具定义 `defineTool`；同样被 DSH 强制校验 | DSH profile（`peerDependencies`） |
 | `@deepseek-ai/schemastery` `^3.18.2` | 配置模式校验 | DSH profile（`peerDependencies`） |
 | `react` / `react-dom` 18 | 客户端界面，打包时按 external 处理 | DSH web 运行时 |
 | `git` | 全部仓库操作 | 用户环境（须在 `PATH`，版本随系统） |

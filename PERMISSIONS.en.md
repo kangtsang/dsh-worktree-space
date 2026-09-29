@@ -107,10 +107,10 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 | Dependency | Purpose | Provided by |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | Runtime (`engines.node` in `package.json`) | The user's environment |
-| DSH `>=0.1.7-rc.1` | Host: client contract and service injection (`engines.dsh`) | The user's environment |
+| DSH `>=0.1.7-alpha.2 <0.3.0-0` | Host: client contract and service injection (`engines.dsh` / `dsh.compatibility.dsh`, declarative) | The user's environment |
 | `@deepseek-ai/cordis` `^4.0.2` | Plugin framework | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-client-connection` `^0.1.7-rc.1` | Client connection and host RPC (`/api/dsh-worktree-space`) | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-tools` `^0.1.7-rc.1` | Host tool definition, `defineTool` | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-client-connection` `>=0.1.7-alpha.2 <0.3.0-0` | Client connection and host RPC (`/api/dsh-worktree-space`); from DSH 0.2.0 on, install and startup enforce this range | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-tools` `>=0.1.7-alpha.2 <0.3.0-0` | Host tool definition, `defineTool`; enforced by DSH the same way | DSH profile (`peerDependencies`) |
 | `@deepseek-ai/schemastery` `^3.18.2` | Configuration schema validation | DSH profile (`peerDependencies`) |
 | `react` / `react-dom` 18 | Client UI, marked external at bundle time | The DSH web runtime |
 | `git` | Every repository operation | The user's environment (must be on `PATH`; version follows the system) |

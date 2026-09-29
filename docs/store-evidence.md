@@ -337,19 +337,174 @@ entry ID；manifest 无安装期生命周期脚本。
   仍是那个字段），变的只是它为空的语义上多了一层配置兜底，所以 6.3 不改自家协议 —— 与 6.2 的破坏性
   改动不是一回事。新增的配置字段只有两个，加上归档那一对，配置区一共多出四项。
 - **第 5 节那些数字属于 1.0.7，不能顺延到 1.0.8。** `lib/index.js` 与 `client/client.js` 又一次逐字节变化；
-  `--dump-config` 的行数也可能因为多出这几个配置字段而变化，必须重新测，不能沿用 1237 / 1249。
+  `--dump-config` 的行数也可能因为多出这几个配置字段而变化，不能沿用 1237 / 1249。第 7.4 节给出的
+  五组数就是为 1.0.8 重新测的（与第 5.1 节数值相同，但那是两次独立的测量）。
 - **第 3 节的端到端功能证据属于 1.0.6，而且当时是扁平布局。** 那一节建的路径是
   `<容器根>/<任务名>/<仓库名>`，比现在少一层项目目录，所以它既不能当作 1.0.8 归档策略的证据，
   也不能当作项目层的证据。
-- **一次性 Profile 的四步矩阵尚未对 1.0.8 复跑。** 目前两档归档只被单元测试（`test/documents.test.ts`）
-  与结束对话框的测试（`test/task-finish.test.tsx`）覆盖；项目层、容器根 README 与「容器根是 git 仓库
-  就拒绝」只被宿主侧单元测试（`test/task-operations.test.mjs`、`test/task-paths.test.mjs`、
-  `test/task-naming.test.mjs`、`test/task-tool.test.mjs`）覆盖；任务空间位置被
-  `test/host.test.mjs`（访问器与 `task.suggest-root` 端点）、`test/task-operations.test.mjs`
-  （`suggestTaskRoot` / `createTask` 的兜底与拒绝）、`test/task-tool.test.mjs`、
-  `test/plugin-config-card.test.tsx` 与 `test/create-flow.test.tsx`（配置区两行与面板勾选框的两笔写入）
-  覆盖 —— 这几批都**没有**运行期证据。在把 1.0.8 交给 Catalog 之前，应按第 5.1 节同样的方法，对窗口内
-  三个版本各复跑一遍 install → start → uninstall → rollback（端到端那一步再加验收 2.3 的容器根校验与
-  任务空间位置那一档回写），确认 `dshOperations` 的结论仍然成立，并把新的 `--dump-config` 行数记下来。
+- **一次性 Profile 的四步矩阵已在本文件第 7 节对 1.0.8 复跑**（窗口五个版本各一遍，
+  install → start → uninstall → rollback 的结论与行数都在那里），但**四步之外的端到端功能验收
+  仍然缺运行期证据**：两档归档只被单元测试（`test/documents.test.ts`）与结束对话框的测试
+  （`test/task-finish.test.tsx`）覆盖；项目层、容器根 README 与「容器根是 git 仓库就拒绝」只被宿主侧
+  单元测试（`test/task-operations.test.mjs`、`test/task-paths.test.mjs`、`test/task-naming.test.mjs`、
+  `test/task-tool.test.mjs`）覆盖；任务空间位置被 `test/host.test.mjs`（访问器与 `task.suggest-root`
+  端点）、`test/task-operations.test.mjs`（`suggestTaskRoot` / `createTask` 的兜底与拒绝）、
+  `test/task-tool.test.mjs`、`test/plugin-config-card.test.tsx` 与 `test/create-flow.test.tsx`
+  （配置区两行与面板勾选框的两笔写入）覆盖。要把这几批也升成运行期证据，应按第 2.3 节的方法在一次性
+  Profile 里走一遍验收（容器根校验、任务空间位置那一档回写），本节不做这个声明。
 - `docs/store-evidence.json` 的 `archiveStrategyRelease`、`projectLayerRelease` 与
   `tasksRootStrategyRelease` 里记着同样这几点。
+
+## 7. v1.0.8 兼容 DSH 0.2.0 线：peer 范围放宽，窗口五个版本逐版复跑（2026-09-29）
+
+### 7.1 现象：0.2.0 上被标成「异常」
+
+把 DSH 升到 `0.2.0-rc.1` 后，插件列表里本插件被标为不兼容，原文：
+
+> 原因: dsh-worktree-space@1.0.8 与 DSH 0.2.0-rc.1 不兼容（要求 @deepseek-ai/dsh-client-connection
+> ^0.1.7-rc.1, @deepseek-ai/dsh-tools ^0.1.7-rc.1），运行它可能导致崩溃或数据丢失。请安装与当前 DSH
+> 兼容的插件版本。
+
+在一次性 Profile 里用 0.2.0 线自己的 CLI 复现，`dsh plugin add` 被拒，而且**什么都没装**：
+
+> dsh: installation rejected: Plugin dsh-worktree-space@1.0.7 is incompatible with dsh 0.2.0-rc.1:
+> peerDependencies {"@deepseek-ai/dsh-tools":"^0.1.7-rc.1","@deepseek-ai/dsh-client-connection":"^0.1.7-rc.1"}.
+> Running it may cause crashes or data loss. … Exact-version exemption: not active.
+> dsh: nothing was installed.
+> dsh: to accept the risk, run: dsh plugin --profile acceptance allow-version dsh-worktree-space@1.0.7
+> --dsh-version 0.2.0-rc.1 --accept-risk
+
+复现用的是**线上已发布的 1.0.7**，不是 1.0.8 —— 1.0.8 还没发布，装不到 profile 里；两者的
+`peerDependencies`、`engines.dsh` 与 `dsh.compatibility.dsh` 在这一轮之前逐字相同，所以被拒的原因
+完全一样，0.2.0-rc.2 上也复现了同一段（运行时版本换成 `0.2.0-rc.2`）。
+
+### 7.2 根因：peer 范围在 0.2.0 上从「声明」变成了「闸门」
+
+判定逻辑在 `@deepseek-ai/dsh-app-boot` 的
+`evaluatePluginCompatibility(manifest, exemptions, runtimeVersion)`：它遍历 `peerDependencies`，
+只看名字等于 `@deepseek-ai/dsh` 或以 `@deepseek-ai/dsh-` 开头的项，对每一项执行
+
+```
+semver.satisfies(runtimeVersion, range, { includePrerelease: true })
+```
+
+不满足即记为不兼容，并给出精确版本豁免 `dsh plugin allow-version <pkg@ver> --dsh-version <runtime>
+--accept-risk`。`@deepseek-ai/cordis` 与 `@deepseek-ai/schemastery` 不在这条判定的名字里，所以它们
+照旧只是声明。
+
+这条判定在 DSH 0.2.0 上有两个落点（下面第一点在本轮实测，第二点是读 DSH 自身实现得到的）：
+
+- `@deepseek-ai/dsh-plugin-manager` 在**装一个带名字的 spec**（如 `dsh-worktree-space@1.0.7`）时，
+  先取那个 spec 自己的 manifest 做校验，不通过就 `return rejected(preflight, "nothing was installed")`
+  —— 这一句在它 `execa("pnpm", …)` **之前**，所以 pnpm 根本没被拉起来，profile 不会有任何改动。
+  实测输出正是 `installation rejected: …` 加 `nothing was installed.`（原文见 7.1）。
+- profile 里**已经装着**一个不兼容的包时，启动的 preflight 会把那一行 `disabled` 掉并打出
+  `disabling profile plugin <label>: <reason>`，即启动时跳过加载；插件列表里那条「异常」提示
+  对应的是同一个判定。
+
+本插件的两个 DSH peer 一直写的是 `^0.1.7-rc.1`，它的 SemVer 上界是 `<0.2.0`，0.2.0 线任何一个
+prerelease 都不满足。0.1.7 及更早的 DSH 只看 `dsh.compatibility` 这类纯声明字段，所以这个坑到
+0.2.0 才现形 —— **插件代码没有跟着过期，是声明的口径过期了**：`lib/index.js` 与 `client/client.js`
+一行都没改。用户截图里那句「运行它可能导致崩溃或数据丢失」是校验失败的固定话术，不是对产物
+兼容性的实测结论。
+
+### 7.3 改动：三处范围合成一处，上界收在 0.3.0 之前
+
+| 字段 | 改动前 | 现在 |
+| --- | --- | --- |
+| `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `^0.1.7-rc.1` | `>=0.1.7-alpha.2 <0.3.0-0` |
+| `peerDependencies["@deepseek-ai/dsh-tools"]` | `^0.1.7-rc.1` | `>=0.1.7-alpha.2 <0.3.0-0` |
+| `engines.dsh` | `>=0.1.7-alpha.2` | `>=0.1.7-alpha.2 <0.3.0-0` |
+| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.2.0` | `>=0.1.7-alpha.2 <0.3.0-0` |
+| `dsh.compatibility.dshReleases` | 三个 0.1.7 版本 | 加上 `0.2.0-rc.1`、`0.2.0-rc.2`，共五个 |
+| `dsh.compatibility.dshOperations` | 三个 0.1.7 版本 | 加上 `0.2.0-rc.1`、`0.2.0-rc.2` 的四项，共五块 |
+| `devDependencies` 里 13 个 `@deepseek-ai/dsh-*` | 钉 `0.1.7-rc.1` | 钉 `0.2.0-rc.2` |
+
+- **上界写 `<0.3.0-0` 而不是 `<0.3.0`**：`includePrerelease` 打开时 `<0.3.0` 会连 `0.3.0-alpha.1`
+  一起放行；`-0` 这个 prerelease 下界把 0.3.0 线的 prerelease 一并挡住。用与 DSH 同一条
+  `semver.satisfies(..., { includePrerelease: true })` 逐版本核过：`0.1.7-alpha.2`、`0.1.7-rc.1`、
+  `0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.0`、`0.2.9` 为真；`0.1.6`、`0.3.0-0`、
+  `0.3.0-alpha.1`、`0.3.0` 为假。
+- **三处范围合并成同一个 `>=0.1.7-alpha.2 <0.3.0-0`**：改前 peer 的下界是 `0.1.7-rc.1`，比另两处窄，
+  于是会出现「`dshReleases` 说 alpha.2 兼容、peer 又说至少要 rc.1」这种自相矛盾。窗口里的
+  alpha.2 是实测过的（见 7.4），下界就跟着实测走，三处声明不再各说各的。
+- **开发依赖钉到 `0.2.0-rc.2`**：类型定义与客户端契约按最新线编译，`tsc --noEmit` 与 415 个单元测试
+  在它上面全绿。运行期代码没有跟着改：`defineTool` 仍在 `@deepseek-ai/dsh-tools` 的导出里，客户端模块
+  注册契约 `window.__ModuleLoader__.load({ id, factory })` 未变，本插件的客户端产物只 `require`
+  react 三件套（`@deepseek-ai/*` 都是类型导入，构建时擦除），所以 `dsh.client.external` 不需要列。
+- **旧布局、旧协议与本轮无关**：6.2 的项目层与 6.3 的任务空间位置是 1.0.8 自己的改动，与本轮的
+  兼容性修复互不影响；本轮只动声明（与 `package.json` 的 `devDependencies`），`src/` 无改动。
+
+### 7.4 复跑的实测矩阵
+
+五个版本各自用**该版本自己的** `@deepseek-ai/dsh` CLI，在全新的 `$DSH_HOME` 里从官方 web 模板建
+一次性 profile，装本版 `npm pack` 出来的 `dsh-worktree-space-1.0.8.tgz`（以 `file:` 依赖进 profile），
+再走 装机 → `--dump-config` → 冷启动 → 取页面与客户端产物 → 探 RPC → 卸载 → 再冷启动。
+`--dump-config` 的行数（装前 → 装后 → 卸载后），插件行每次正好多 3 行：
+
+| DSH | dump 行数 | install | start | uninstall | rollback |
+| --- | --- | --- | --- | --- | --- |
+| `0.1.7-alpha.2` | `1234 → 1237 → 1234` | passed | passed | passed | passed |
+| `0.1.7-rc.1` | `1234 → 1237 → 1234` | passed | passed | passed | passed |
+| `0.1.7-rc.2` | `1246 → 1249 → 1246` | passed | passed | passed | passed |
+| `0.2.0-rc.1` | `1259 → 1262 → 1259` | passed | passed | passed | passed |
+| `0.2.0-rc.2` | `1259 → 1262 → 1259` | passed | passed | passed | passed |
+
+逐版本的运行期观察：
+
+| 观察 | `0.1.7-alpha.2` | `0.1.7-rc.1` | `0.1.7-rc.2` | `0.2.0-rc.1` | `0.2.0-rc.2` |
+| --- | --- | --- | --- | --- | --- |
+| 冷启动输出 | 一行 URL，无警告 | 同左 | 同左 | 同左 | 同左 |
+| 首页 | 200 / 33544 B | 200 / 33544 B | 200 / 34825 B | 200 / 35333 B | 200 / 35367 B |
+| 首页里点到 `dsh-worktree-space/client.js` | 是 | 是 | 是 | 是 | 是 |
+| 取回该模块组 | 200 / 5675475 B | 200 / 5712782 B | 200 / 490488 B | 200 / 600806 B | 200 / 600749 B |
+| 组里含 `id: "dsh-worktree-space"` | 是 | 是 | 是 | 是 | 是 |
+| `POST /api/dsh-worktree-space/task.preference` | 200 | 200 | 200 | 200 | 200 |
+| 返回 | `ok:true` + 偏好值 | 同左 | 同左 | 同左 | 同左 |
+| 未知端点 | 404 | 404 | 404 | 404 | 404 |
+| 卸载后 dump 里 worktree-space | 0 次 | 0 次 | 0 次 | 0 次 | 0 次 |
+| 卸载后再冷启动 | 干净，首页 0 次 | 同左 | 同左 | 同左 | 同左 |
+
+（`task.preference` 在五个版本上都答
+`{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show"}}`。）
+
+本节自己也在这份 tarball 里，所以文档定稿后又重打包复跑过：`0.1.7-alpha.2` 与 `0.2.0-rc.1` 各跑过一遍
+完整四步，`0.2.0-rc.1` 另跑过两次 —— 行数（1234 / 1237 / 1234 与 1259 / 1262 / 1259）、冷启动、
+页面模块组、`id: "dsh-worktree-space"`、RPC 200/404、卸载归零、二次冷启动，以及 0.2.0-rc.1 上的
+1.0.7 拒绝，每次都与上表逐条相同（0.2.0-rc.1 的首页 35333 字节、模块组 600806 字节也每次都一样）——
+DSH 在安装与启动时只读 `package.json`、`cordis.patch.yml` 与两个 bundle，包里的文档正文动不了这些
+结果。被测产物按名字与版本记（`dsh-worktree-space-1.0.8.tgz`），不记字节数：它自己的文档就在包里。
+
+**0.2.0 线上的回滚那一步用的是「换一个版本装」这个方向**：在已经卸载干净的 profile 里执行
+`dsh plugin add dsh-worktree-space@1.0.7`，`0.2.0-rc.1` 与 `0.2.0-rc.2` 都在 pnpm 之前拒绝；逐字比对
+before/after，profile 的 `dependencies` 与 `dsh.profile.bundles` 一个字没变
+（`["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]`），`node_modules/dsh-worktree-space` 不存在，
+随后的冷启动干净、首页 0 次命中 —— 拒绝是**干净**的，不留半截状态。7.1 引的那段报错就出自这里。
+**0.1.7 线没有这道闸门**（这正是 0.1.7 那一轮漏掉这个问题的原因），所以那三个版本上不跑这个探针；
+它们的回滚证据是「卸载 → 再冷启动干净」。
+
+### 7.5 0.2.0 上「产物逐字节相等」这条判据不再适用
+
+第 3 节的端到端证据里记过「取回的 bundle 字节数 = 本地 `client/client.js` + 包装字节数」。0.2.0 线起
+这条不成立：客户端的承载端一次返回**一组**模块，URL 形如
+`plugins/??<a>/client.js,<b>/client.js,…&rev=<hash>`，本插件的 `client.js` 只占其中一段，而且这一段
+在 0.1.7 线上也不总是第一个（alpha.2 与 rc.1 上那一组以 `@deepseek-ai/dsh-client-ui-open-in-app`
+打头，整组 5.6–5.7 MB，而 rc.2 与 0.2.0 线的组只有 0.49–0.6 MB）。所以这一轮的判据换成两条：
+**页面的模块组里点名了 `dsh-worktree-space/client.js`**，且**取回的那组里能找到
+`id: "dsh-worktree-space"`** —— 这是判据随 DSH 变化，不是产物退化；`build.mjs` 的包装与 external
+清单一个字没动。
+
+### 7.6 仍未覆盖的
+
+- **第 2.3 节的端到端功能验收没有在这五次运行里做。** 容器根 README、容器根是 git 仓库就拒绝、
+  任务空间位置那一档回写，仍然只有单元测试覆盖（见 6.2、6.3 的结尾）—— 本轮的矩阵只回答
+  「装得上、起得来、卸得干净、回滚干净」。
+- **`--dump-config` 的行数与宿主版本相关，也不能跨版本顺延。** 上表五组数是本轮的实测；
+  第 5.1 节那些（1.0.7：装后 1237 / 1237 / 1249，卸载后 1234 / 1234 / 1246）属于 1.0.7 那一轮，
+  数值与本轮相同但是两次独立的测量 —— 换 DSH 版本或再改配置字段都要重量。
+- **`pnpm install` 每次都会打 `[WARN] Issues with peer dependencies found`**；`pnpm peers check` 给出的
+  四条是「缺 peer」而不是版本冲突（这四个 peer 由 profile 自己提供），与 1.0.7 那一轮记的是同一条。
+- **`0.2.0-rc.2` 是当前窗口上界。** 本节覆盖的是 npm 上最新的五个已发布版本
+  （`npm view @deepseek-ai/dsh versions` 的尾部五个，`dist-tags.latest` = `0.2.0-rc.2`，
+  `alpha` 仍指向 `0.1.7-alpha.2`）。官方一发新版，窗口就不再是这五个，本节结论不自动顺延。
+- `docs/store-evidence.json` 的 `dsh020CompatibilityRelease` 里记着同样这几点。
