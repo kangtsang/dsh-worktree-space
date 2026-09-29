@@ -4,6 +4,7 @@ import {
   assertIsolated,
   canonicalPath,
   containerIn,
+  containerParentFor,
   isInside,
   IsolationError,
   recommendTasksRoot,
@@ -126,11 +127,19 @@ describe("recommendTasksRoot", () => {
     // The point of the rule. A project sitting directly under the root workspace
     // and one sitting three levels deeper both reach one container, so a deep
     // project does not get a second copy of it beside itself.
-    const rootWorkspace = rootWorkspaceOf(resolve(process.cwd()))
+    //
+    // Asked of the decision itself, with the paths spelled out: the rule is about
+    // a drive-letter path, and recommendTasksRoot resolves its argument first —
+    // resolving one of those is Windows-only, so on any other runner the same
+    // assertion would be made about a path the platform had already rewritten.
+    const rootWorkspace = join("E:\\", "workspace")
+    expect(containerParentFor(join(rootWorkspace, "project1"), "E:\\")).toBe(rootWorkspace)
+    expect(containerParentFor(join(rootWorkspace, "deep-path", "nested", "project2"), "E:\\")).toBe(rootWorkspace)
+
+    // Through the real entry point too, on whatever platform this runs: neither
+    // project ends up nested with the container recommended for it.
     const shallow = join(process.cwd(), "project1")
     const deep = join(process.cwd(), "deep-path", "nested", "project2")
-    expect(recommendTasksRoot(shallow)).toBe(join(rootWorkspace, "worktree-space"))
-    expect(recommendTasksRoot(deep)).toBe(recommendTasksRoot(shallow))
     for (const sourceRoot of [shallow, deep]) {
       expect(() => assertIsolated(resolve(sourceRoot), recommendTasksRoot(sourceRoot))).not.toThrow()
     }

@@ -131,7 +131,7 @@ function firstDirectoryBelowRoot(absolute, root) {
 }
 
 /**
- * Recommend where the task container should live for a source root.
+ * Which directory the task container is placed in, for an absolute source root.
  *
  * The parent is the source root's own first directory below its volume root -
  * `E:\workspace` for `E:\workspace\public\repo` - because the container then
@@ -146,15 +146,31 @@ function firstDirectoryBelowRoot(absolute, root) {
  * beside it that is still below the volume root, so the volume root answers; a
  * path without a drive has no meaningful first directory at all, and its own
  * parent answers.
- * {@link containerIn} names the container under whichever parent won.
+ *
+ * The path and its volume root are arguments rather than something resolved here,
+ * so the drive-letter rule can be checked from any platform: resolving is the one
+ * step of it that belongs to the platform the caller runs on.
+ * @param absolute - an absolute source root.
+ * @param root - that path's volume root (`E:\`, `/`); parsed when omitted.
+ * @returns the directory to place the container in, in native separators.
+ */
+export function containerParentFor(absolute, root = parse(absolute).root) {
+  const driveRoot = /^[A-Za-z]:[\\/]$/.test(root) ? root : undefined
+  const first = driveRoot === undefined ? undefined : firstDirectoryBelowRoot(absolute, root)
+  if (first !== undefined) return first
+  return driveRoot === undefined ? dirname(absolute) : driveRoot
+}
+
+/**
+ * Recommend where the task container should live for a source root.
+ *
+ * {@link containerParentFor} decides where it goes and says why; this resolves the
+ * path first, which is the only part of the rule that depends on the platform, and
+ * {@link containerIn} names the container under the directory that won.
  * @param sourceRoot - the directory holding the source repositories.
  * @returns the recommended container root, in native separators.
  */
 export function recommendTasksRoot(sourceRoot) {
   const absolute = resolve(sourceRoot)
-  const { root } = parse(absolute)
-  const driveRoot = /^[A-Za-z]:[\\/]$/.test(root) ? root : undefined
-  const first = driveRoot === undefined ? undefined : firstDirectoryBelowRoot(absolute, root)
-  const parent = first === undefined ? (driveRoot === undefined ? dirname(absolute) : driveRoot) : first
-  return containerIn(parent, absolute)
+  return containerIn(containerParentFor(absolute), absolute)
 }
