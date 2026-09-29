@@ -84,9 +84,15 @@ export function createWorktreeApi(connection: ConnectionService) {
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
-    /** What archiving a task would do, before doing any of it. */
-    planTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
+    /**
+     * What archiving a task would do, before doing any of it.
+     *
+     * `project` is the layer the task is filed under, one directory below the
+     * container root; the three together name the task space exactly, which is
+     * what keeps a raw path out of the protocol.
+     */
+    planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
   }
 }

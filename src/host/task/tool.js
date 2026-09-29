@@ -6,6 +6,7 @@
  * it drives exactly the same operations the `/api` endpoints do.
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { projectNameFor } from './naming.js'
 import { createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
 
 /**
@@ -15,7 +16,7 @@ import { createTask, finishTask, listTasks, suggestTaskRoot } from './operations
  * carries only what a caller needs before that.
  */
 const DESCRIPTION = [
-  'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: one directory beside the repositories\' directory holding a worktree of every selected repository, all on one branch.',
+  'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: inside the task space container, one directory per project (the source root\'s own directory name) holding one directory per task, and under that a worktree of every selected repository, all on one branch.',
   '',
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the task space location before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
@@ -62,6 +63,7 @@ const OUTPUT_SCHEMA = {
     action: { type: 'string', required: true },
     summary: { type: 'string', required: true },
     task: { type: 'string', required: true },
+    project: { type: 'string', required: true },
     branch: { type: 'string', required: true },
     container: { type: 'string', required: true },
     tasksRoot: { type: 'string', required: true },
@@ -103,6 +105,7 @@ function envelope(action) {
     action,
     summary: '',
     task: '',
+    project: '',
     branch: '',
     container: '',
     tasksRoot: '',
@@ -127,20 +130,46 @@ function required(value, name) {
 }
 
 /**
- * Resolve the task space root a list or done action should read: an explicit
- * root, else the recommendation for the given source root.
+ * Resolve the container root a list or done action should read: an explicit root,
+ * else whatever the configuration names, else the recommendation for the source root.
+ *
+ * The middle answer is here for the same reason it is in `create`: a list or a
+ * done that names only a source root has to read the container the creates have
+ * been landing in, or it would report on a directory nobody uses.
  * @param subprocess - the profile's subprocess service.
- * @param tasksRoot - the explicit task space root, if any.
+ * @param tasksRoot - the explicit container root, if any.
  * @param sourceRoot - the source root, if any.
- * @returns the task space root to use.
+ * @param configuredRoot - the container root the configuration names, possibly empty.
+ * @returns the container root to use.
  * @throws Error when neither is available.
  */
-async function containerFor(subprocess, tasksRoot, sourceRoot) {
+async function containerFor(subprocess, tasksRoot, sourceRoot, configuredRoot = '') {
   const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
   if (source === '') throw new Error('tasksRoot is required (or sourceRoot, to use its recommended task space)')
-  return (await suggestTaskRoot(subprocess, source)).suggested
+  return (await suggestTaskRoot(subprocess, source, { configuredRoot })).suggested
+}
+
+/**
+ * Resolve the project layer a list or done action should read.
+ *
+ * The layout puts one directory layer between the container root and a task name,
+ * and that layer is the source root's own directory name - the same rule
+ * `createTask` derives it by. A caller that knows the source root does not have to
+ * name it; one that does not has to say it, because the container root alone
+ * cannot tell which project's task of that name was meant.
+ * @param project - the explicit project name, if any.
+ * @param sourceRoot - the source root, if any.
+ * @returns the project name to use.
+ * @throws Error when neither is available.
+ */
+function projectFor(project, sourceRoot) {
+  const explicit = typeof project === 'string' ? project.trim() : ''
+  if (explicit !== '') return explicit
+  const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
+  if (source === '') throw new Error('project is required (or sourceRoot, whose directory name it is)')
+  return projectNameFor(source)
 }
 
 /**
@@ -234,12 +263,18 @@ function cardText(result) {
  * endpoints, and a bare context double (as the host tests build) has no service
  * lookup at all, so probing it must not throw.
  * @param ctx - the host plugin context.
+ * @param options - `configuredRoot` answers the container root the plugin's own
+ * configuration names, read when an action needs one. A deployment that passes
+ * nothing leaves every action on the recommendation.
  * @returns the registration disposer, or undefined when tools are unavailable.
  */
-export function registerTaskTool(ctx) {
+export function registerTaskTool(ctx, options = {}) {
   if (typeof ctx.get !== 'function') return undefined
   const tools = ctx.get('tools')
   if (tools === undefined || tools === null || typeof tools.register !== 'function') return undefined
+  // Read per call rather than captured once: the setting can change while a
+  // session is running, and the next create should follow it.
+  const configuredRoot = () => typeof options.configuredRoot === 'function' ? options.configuredRoot() : ''
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -252,6 +287,7 @@ export function registerTaskTool(ctx) {
         description: 'suggest-root, create, list, or done.',
       },
       task: { type: 'string', description: 'Name (create, done): the task space directory and branch suffix, with no separators or spaces.' },
+      project: { type: 'string', description: 'Project layer (list, done): the source root\'s own directory name. Omit when sourceRoot is given, since it is derived from it.' },
       sourceRoot: { type: 'string', description: 'Directory of the repositories. Required for suggest-root and create.' },
       tasksRoot: { type: 'string', description: 'Container for task spaces: beside the repositories\' directory, never inside it or a parent of it. Omit for the recommendation.' },
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository names (create). Omit for all discovered.' },
@@ -291,6 +327,9 @@ export function registerTaskTool(ctx) {
         const result = await suggestTaskRoot(ctx.subprocess, sourceRoot, {
           tasksRoot: args.tasksRoot,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
+          // The plugin's own setting outranks the recommendation: it is the user's
+          // standing answer to where task spaces go, so the model proposes it too.
+          configuredRoot: configuredRoot(),
         })
         const value = envelope(action)
         value.tasksRoot = result.sourceRoot
@@ -309,10 +348,12 @@ export function registerTaskTool(ctx) {
           repos: Array.isArray(args.repos) ? args.repos : undefined,
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
+          configuredRoot: configuredRoot(),
           push: false,
         })
         const value = envelope(action)
         value.task = result.task
+        value.project = result.project
         value.branch = result.branch
         value.container = result.path
         value.tasksRoot = result.tasksRoot
@@ -323,18 +364,21 @@ export function registerTaskTool(ctx) {
       }
 
       if (action === 'list') {
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
         const result = await listTasks(ctx.subprocess, { tasksRoot })
         const value = envelope(action)
         value.tasksRoot = result.tasksRoot
         for (const task of result.tasks) {
+          // Named the way the layout reads - project, task, repository - so two
+          // projects' tasks of the same name cannot be read as one.
+          const label = `${task.project}/${task.name}`
           if (task.repositories.length === 0) {
-            value.repositories.push({ ...emptyRow(task.name), path: task.path })
+            value.repositories.push({ ...emptyRow(label), path: task.path })
             continue
           }
           for (const repository of task.repositories) {
             value.repositories.push({
-              ...emptyRow(`${task.name}/${repository.name}`),
+              ...emptyRow(`${label}/${repository.name}`),
               path: repository.path,
               branch: repository.branch ?? '',
               changedFiles: repository.changedFiles,
@@ -347,9 +391,11 @@ export function registerTaskTool(ctx) {
 
       if (action === 'done') {
         const task = required(args.task, 'task')
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot)
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
+        const project = projectFor(args.project, args.sourceRoot)
         const result = await finishTask(ctx.subprocess, {
           task,
+          project,
           tasksRoot,
           merge: args.merge === true,
           target: typeof args.target === 'string' ? args.target : undefined,
@@ -360,6 +406,7 @@ export function registerTaskTool(ctx) {
         })
         const value = envelope(action)
         value.task = task
+        value.project = project
         value.container = result.containerRemoved ? '' : result.path
         value.tasksRoot = tasksRoot
         value.failed = result.failed

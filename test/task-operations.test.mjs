@@ -80,11 +80,33 @@ function subprocessMock(handlers = {}) {
   return { subprocess, calls, keys: () => calls.map((call) => call.key) }
 }
 
-/** A source root holding two repositories, as real `.git` directories. */
+/**
+ * The project layer a hand-built task space is filed under.
+ *
+ * A real create derives it from the source root's own directory name; the
+ * fixtures below build their container by hand and name it instead.
+ */
+const PROJECT = "kratos-admin"
+
+/**
+ * A source root holding two repositories, as real `.git` directories.
+ *
+ * The root is a named directory inside the temporary one rather than the
+ * temporary directory itself: a create files the task space under the source
+ * root's own name, so a random name would make every expected path random too.
+ */
 async function sourceFixture() {
-  const root = await mkdtemp(join(tmpdir(), "multi-worktree-ops-"))
+  const base = await mkdtemp(join(tmpdir(), "multi-worktree-ops-"))
+  const root = join(base, PROJECT)
   for (const name of ["alpha", "beta"]) await mkdir(join(root, name, ".git"), { recursive: true })
-  return { root, alpha: join(root, "alpha"), beta: join(root, "beta"), cleanup: () => rm(root, { recursive: true, force: true }) }
+  return {
+    root,
+    base,
+    project: PROJECT,
+    alpha: join(root, "alpha"),
+    beta: join(root, "beta"),
+    cleanup: () => rm(base, { recursive: true, force: true }),
+  }
 }
 
 /** A container root outside any source tree. */
@@ -198,6 +220,39 @@ describe("suggestTaskRoot", () => {
       await source.cleanup()
     }
   })
+
+  it("opens on the configured container root when the caller names none", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    try {
+      // The suggestion is what the create dialog shows, so a configured location
+      // the suggestion ignored would make the dialog show one root and create
+      // under another.
+      const configured = await suggestTaskRoot(subprocessMock().subprocess, source.root, { configuredRoot: container.root })
+      expect(configured).toMatchObject({ suggested: container.root, explicit: false })
+
+      // A caller who names one still wins: the setting is a default, not a rule.
+      const named = join(container.root, "named")
+      const asked = await suggestTaskRoot(subprocessMock().subprocess, source.root, { tasksRoot: named, configuredRoot: container.root })
+      expect(asked).toMatchObject({ suggested: named, explicit: true })
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a configured container that sits inside the repositories' directory", async () => {
+    const source = await sourceFixture()
+    try {
+      // The configured location is judged by the same rule as a typed-in one, so a
+      // setting that would nest task spaces inside the source is refused rather
+      // than quietly overridden.
+      await expect(suggestTaskRoot(subprocessMock().subprocess, source.root, { configuredRoot: join(source.root, "tasks") }))
+        .rejects.toThrow(/is inside the repositories' directory/)
+    } finally {
+      await source.cleanup()
+    }
+  })
 })
 
 describe("createTask", () => {
@@ -213,17 +268,21 @@ describe("createTask", () => {
       })
 
       expect(result.branch).toBe("task/fix-login")
-      expect(result.path).toBe(join(container.root, "fix-login"))
+      // The project layer is the source root's own directory name, so the task
+      // space is `<container root>/<project>/<task>`.
+      expect(result.project).toBe(source.project)
+      expect(result.path).toBe(join(container.root, source.project, "fix-login"))
       expect(result.repositories.map((entry) => entry.name)).toEqual(["alpha", "beta"])
 
       const adds = keys().filter((key) => key.startsWith("worktree add"))
       expect(adds).toEqual([
-        `worktree add ${join(container.root, "fix-login", "alpha")} -b task/fix-login`,
-        `worktree add ${join(container.root, "fix-login", "beta")} -b task/fix-login`,
+        `worktree add ${join(container.root, source.project, "fix-login", "alpha")} -b task/fix-login`,
+        `worktree add ${join(container.root, source.project, "fix-login", "beta")} -b task/fix-login`,
       ])
 
       const metadata = JSON.parse(await readFile(join(result.path, "worktree-space.json"), "utf8"))
       expect(metadata.task).toBe("fix-login")
+      expect(metadata.project).toBe(source.project)
       expect(metadata.branch).toBe("task/fix-login")
       expect(metadata.baseRef).toBe(null)
       expect(metadata.sourceRoot).toBe(source.root)
@@ -233,6 +292,7 @@ describe("createTask", () => {
       // disagree; it says where its own facts come from.
       const note = await readFile(join(result.path, "worktree-space.md"), "utf8")
       expect(note).toContain("# Task: fix-login")
+      expect(note).toContain(`- Project: \`${source.project}\``)
       expect(note).toContain("- Branch: `task/fix-login` (one branch per repository below)")
       expect(note).toContain("each repository's current HEAD")
       expect(note).toContain("- `alpha`")
@@ -262,8 +322,8 @@ describe("createTask", () => {
       expect(result.branch).toBe("hotfix/login")
       expect(result.baseRef).toBe("main")
       expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([
-        `worktree add ${join(container.root, "login", "alpha")} -b hotfix/login main`,
-        `worktree add ${join(container.root, "login", "beta")} -b hotfix/login main`,
+        `worktree add ${join(container.root, source.project, "login", "alpha")} -b hotfix/login main`,
+        `worktree add ${join(container.root, source.project, "login", "beta")} -b hotfix/login main`,
       ])
     } finally {
       await source.cleanup()
@@ -349,7 +409,7 @@ describe("createTask", () => {
   it("refuses an existing task directory", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
-    await mkdir(join(container.root, "login"), { recursive: true })
+    await mkdir(join(container.root, source.project, "login"), { recursive: true })
     const { subprocess } = subprocessMock(branchIsNew("task/login"))
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
@@ -394,14 +454,14 @@ describe("createTask", () => {
     const container = await containerFixture()
     const { subprocess, keys } = subprocessMock({
       ...branchIsNew("task/login"),
-      [`worktree add ${join(container.root, "login", "beta")} -b task/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
+      [`worktree add ${join(container.root, source.project, "login", "beta")} -b task/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
     })
     try {
       await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
         .rejects.toThrow(/cannot create/)
 
-      expect(keys()).toContain(`worktree remove --force ${join(container.root, "login", "alpha")}`)
-      expect(existsSync(join(container.root, "login"))).toBe(false)
+      expect(keys()).toContain(`worktree remove --force ${join(container.root, source.project, "login", "alpha")}`)
+      expect(existsSync(join(container.root, source.project, "login"))).toBe(false)
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -427,10 +487,166 @@ describe("createTask", () => {
   })
 })
 
+describe("the container root", () => {
+  it("writes its own note the first time, and never over one already there", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const notice = join(container.root, "README.md")
+    try {
+      await createTask(subprocessMock(branchIsNew("task/login")).subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+      })
+      const written = await readFile(notice, "utf8")
+      expect(written).toContain("git init")
+      expect(written).toContain("Worktree Space")
+
+      // A `README.md` in the container root is as likely to be the user's own, so
+      // the note is written only where there is nothing to overwrite.
+      await writeFile(notice, "# my own notes\n")
+      await createTask(subprocessMock(branchIsNew("task/second")).subprocess, {
+        sourceRoot: source.root,
+        task: "second",
+        tasksRoot: container.root,
+      })
+      expect(await readFile(notice, "utf8")).toBe("# my own notes\n")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("lands in the configured root when the request names none, and in the named one when it does", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    try {
+      // The request the dialog sends carries whatever root its field holds, so the
+      // configured location has to be reachable through the request alone.
+      const configured = await createTask(subprocessMock(branchIsNew("task/login")).subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        configuredRoot: container.root,
+      })
+      expect(configured.path).toBe(join(container.root, source.project, "login"))
+
+      // A root the request does name wins, and a configured one is not a rule: an
+      // agent or a user who points a task somewhere else is obeyed.
+      const elsewhere = join(container.root, "elsewhere")
+      const named = await createTask(subprocessMock(branchIsNew("task/second")).subprocess, {
+        sourceRoot: source.root,
+        task: "second",
+        tasksRoot: elsewhere,
+        configuredRoot: container.root,
+      })
+      expect(named.path).toBe(join(elsewhere, source.project, "second"))
+      expect(existsSync(join(container.root, source.project, "second"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a configured root that nests inside the source, before touching anything", async () => {
+    const source = await sourceFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
+    try {
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        configuredRoot: join(source.root, "tasks"),
+      })).rejects.toThrow(/is inside the repositories' directory/)
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([])
+    } finally {
+      await source.cleanup()
+    }
+  })
+
+  it("refuses a container root that is a git repository, before touching anything", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    // The one mistake this layout invites: a checkout at the root would make every
+    // task space below it part of one.
+    await mkdir(join(container.root, ".git"), { recursive: true })
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
+    try {
+      await expect(createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root }))
+        .rejects.toThrow(/is a git repository/)
+      // The two git reads a create makes before it writes anything are the branch
+      // and base checks, and they come first; what the check prevents is every
+      // write, so a refusal leaves the user's filesystem as it was - no project
+      // directory, no worktree, and no note either.
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+      expect(existsSync(join(container.root, "README.md"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("files two projects under one root without mixing their same-named tasks", async () => {
+    const source = await sourceFixture()
+    const other = join(source.base, "kratos-api")
+    // A second source root, so both projects file a task called `login` into the
+    // same container root: the project layer is what keeps them apart.
+    await mkdir(join(other, "alpha", ".git"), { recursive: true })
+    const container = await containerFixture()
+    try {
+      const first = await createTask(subprocessMock(branchIsNew("task/login")).subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+      })
+      const second = await createTask(subprocessMock(branchIsNew("task/login")).subprocess, {
+        sourceRoot: other,
+        task: "login",
+        tasksRoot: container.root,
+      })
+
+      expect(first.project).toBe("kratos-admin")
+      expect(second.project).toBe("kratos-api")
+      expect(first.path).toBe(join(container.root, "kratos-admin", "login"))
+      expect(second.path).toBe(join(container.root, "kratos-api", "login"))
+      expect(existsSync(first.path)).toBe(true)
+      expect(existsSync(second.path)).toBe(true)
+
+      const listed = await listTasks(subprocessMock({
+        "rev-parse --abbrev-ref HEAD": () => "task/login",
+        "status --porcelain": "",
+      }).subprocess, { tasksRoot: container.root })
+      expect(listed.tasks.map((task) => `${task.project}/${task.name}`)).toEqual(["kratos-admin/login", "kratos-api/login"])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("files a source root that is itself a repository under its own name", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
+    try {
+      // `alpha` is a repository root rather than a directory of repositories, so it
+      // is both the project and the one repository inside it - the name repeats,
+      // which is what one directory being both things honestly looks like.
+      const result = await createTask(subprocess, { sourceRoot: source.alpha, task: "login", tasksRoot: container.root })
+      expect(result.project).toBe("alpha")
+      expect(result.path).toBe(join(container.root, "alpha", "login"))
+      expect(result.repositories.map((entry) => entry.name)).toEqual(["alpha"])
+      expect(keys().filter((key) => key.startsWith("worktree add")))
+        .toEqual([`worktree add ${join(container.root, "alpha", "login", "alpha")} -b task/login`])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+})
+
 describe("listTasks", () => {
   it("reports each task's worktrees with branch and dirty count, skipping strays", async () => {
     const container = await containerFixture()
-    const taskPath = join(container.root, "login")
+    const taskPath = join(container.root, PROJECT, "login")
     for (const name of ["alpha", "beta"]) {
       await mkdir(join(taskPath, name), { recursive: true })
       await writeFile(join(taskPath, name, ".git"), "gitdir: /elsewhere\n")
@@ -444,10 +660,38 @@ describe("listTasks", () => {
       const result = await listTasks(subprocess, { tasksRoot: container.root })
       expect(result.tasks).toHaveLength(1)
       expect(result.tasks[0].name).toBe("login")
+      expect(result.tasks[0].project).toBe(PROJECT)
       expect(result.tasks[0].repositories).toEqual([
         { name: "alpha", path: join(taskPath, "alpha"), branch: "task/login", changedFiles: 2 },
         { name: "beta", path: join(taskPath, "beta"), branch: "task/login", changedFiles: 0 },
       ])
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("walks one level per project and leaves the archive folder out", async () => {
+    const container = await containerFixture()
+    const taskPath = join(container.root, "kratos-admin", "login")
+    await mkdir(join(taskPath, "alpha"), { recursive: true })
+    await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
+    // A project whose tasks have all been finished: it holds no task, so it holds
+    // no row. The project directory itself stays on disk.
+    await mkdir(join(container.root, "kratos-api"), { recursive: true })
+    // The `container` archive strategy files documents here, and names each folder
+    // after the task it came from - so this directory would otherwise read as a
+    // project holding one task per archived document folder.
+    await mkdir(join(container.root, "archived-docs", "login-2026-09-26-14-30-05"), { recursive: true })
+    // A loose file at the root is not a project either.
+    await writeFile(join(container.root, "README.md"), "# Worktree Space\n")
+    const { subprocess } = subprocessMock({
+      "rev-parse --abbrev-ref HEAD": () => "task/login",
+      "status --porcelain": "",
+    })
+    try {
+      const result = await listTasks(subprocess, { tasksRoot: container.root })
+      expect(result.tasks.map((task) => `${task.project}/${task.name}`)).toEqual(["kratos-admin/login"])
+      expect(result.tasks[0].path).toBe(taskPath)
     } finally {
       await container.cleanup()
     }
@@ -469,7 +713,7 @@ describe("finishTask", () => {
   /** A task container holding two worktrees, plus replies for their git reads. */
   async function taskFixture() {
     const container = await containerFixture()
-    const taskPath = join(container.root, "login")
+    const taskPath = join(container.root, PROJECT, "login")
     const mainRepos = {}
     const worktrees = new Set()
     for (const name of ["alpha", "beta"]) {
@@ -491,7 +735,18 @@ describe("finishTask", () => {
       // behind answer for themselves, per working directory.
       "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
     }
-    return { container, taskPath, handlers, worktrees, cleanup: () => container.cleanup() }
+    return {
+      container,
+      taskPath,
+      handlers,
+      worktrees,
+      /**
+       * `finishTask` with the two coordinates this fixture filed the task under,
+       * so each test states only the options it is actually about.
+       */
+      finish: (subprocess, options = {}) => finishTask(subprocess, { project: PROJECT, tasksRoot: container.root, ...options }),
+      cleanup: () => container.cleanup(),
+    }
   }
 
   it("merges, removes every worktree, deletes the branches and clears the container", async () => {
@@ -506,9 +761,8 @@ describe("finishTask", () => {
       },
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
         target: "main",
         deleteBranch: true,
@@ -542,9 +796,8 @@ describe("finishTask", () => {
       "merge --no-ff --no-edit task/login": ({ cwd }) => (cwd.includes("dsh-worktree-space-merge") ? "" : { exitCode: 1, stderr: "fatal: refusing to merge here\n" }),
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
         targets: { alpha: "develop", beta: "develop" },
       })
@@ -582,9 +835,8 @@ describe("finishTask", () => {
           : "",
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
         targets: { alpha: "develop", beta: "develop" },
       })
@@ -617,9 +869,8 @@ describe("finishTask", () => {
       "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
       })
 
@@ -670,9 +921,8 @@ describe("finishTask", () => {
       "worktree remove": "",
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
         targets: { alpha: "develop", beta: "develop" },
       })
@@ -715,9 +965,8 @@ describe("finishTask", () => {
       "worktree remove": "",
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
       })
 
@@ -752,9 +1001,8 @@ describe("finishTask", () => {
       await mkdir(join(fixture.taskPath, "alpha", "src"), { recursive: true })
       await writeFile(join(fixture.taskPath, "alpha", "src", "app.ts"), 'export const version = "1.0.0-task+main"\n')
 
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
       })
 
@@ -791,9 +1039,8 @@ describe("finishTask", () => {
       await mkdir(join(fixture.taskPath, "alpha", "src"), { recursive: true })
       await writeFile(join(fixture.taskPath, "alpha", "src", "app.ts"), 'export const version = "1.0.0"\n<<<<<<< HEAD\n')
 
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
       })
 
@@ -823,9 +1070,8 @@ describe("finishTask", () => {
       "worktree remove": "",
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         merge: true,
         targets: { alpha: "develop", beta: "develop" },
       })
@@ -854,7 +1100,7 @@ describe("finishTask", () => {
       },
     })
     try {
-      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, merge: true, target: "main" })
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
 
       expect(result.failed).toBe(true)
       const conflicted = result.repositories.find((entry) => entry.name === "alpha")
@@ -880,9 +1126,8 @@ describe("finishTask", () => {
       },
     })
     try {
-      const result = await finishTask(subprocess, {
+      const result = await fixture.finish(subprocess, {
         task: "login",
-        tasksRoot: fixture.container.root,
         cleanStray: true,
         keep: ["plan.md"],
       })
@@ -899,12 +1144,12 @@ describe("finishTask", () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock(fixture.handlers)
     try {
-      await expect(finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, deleteBranch: true }))
+      await expect(fixture.finish(subprocess, { task: "login", deleteBranch: true }))
         .rejects.toThrow(/requires force/)
 
       // Forced, and still not merging: this is how a task space is abandoned rather
       // than finished - the worktrees go, and the branches go with their commits.
-      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root, deleteBranch: true, force: true })
+      const result = await fixture.finish(subprocess, { task: "login", deleteBranch: true, force: true })
       expect(result.failed).toBe(false)
       expect(result.repositories.map((entry) => ({ merged: entry.merged, removed: entry.removed, branchDeleted: entry.branchDeleted })))
         .toEqual([
@@ -929,7 +1174,7 @@ describe("finishTask", () => {
         : "",
     })
     try {
-      const result = await finishTask(subprocess, { task: "login", tasksRoot: fixture.container.root })
+      const result = await fixture.finish(subprocess, { task: "login" })
 
       expect(result.failed).toBe(true)
       const kept = result.repositories.find((entry) => entry.name === "alpha")
@@ -948,7 +1193,7 @@ describe("finishTask", () => {
     const fixture = await taskFixture()
     const { subprocess } = subprocessMock(fixture.handlers)
     try {
-      await expect(finishTask(subprocess, { task: "absent", tasksRoot: fixture.container.root }))
+      await expect(fixture.finish(subprocess, { task: "absent" }))
         .rejects.toThrow(/no such task space/)
     } finally {
       await fixture.cleanup()
@@ -960,7 +1205,7 @@ describe("finishTask documents", () => {
   /** A task with one worktree, writing of the user's own, and build output. */
   async function fixture() {
     const root = await mkdtemp(join(tmpdir(), "dsh-task-documents-"))
-    const taskPath = join(root, "login")
+    const taskPath = join(root, PROJECT, "login")
     await mkdir(join(taskPath, "alpha"), { recursive: true })
     await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
@@ -989,6 +1234,7 @@ describe("finishTask documents", () => {
     try {
       const result = await finishTask(subprocess, {
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         documentsDirectory: documents,
       })
@@ -1016,6 +1262,7 @@ describe("finishTask documents", () => {
     try {
       const result = await finishTask(subprocess, {
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         discardDocuments: true,
       })
@@ -1036,6 +1283,7 @@ describe("finishTask documents", () => {
     try {
       await expect(finishTask(subprocess, {
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         documentsDirectory: join(fixtureUnderTest.taskPath, "archived-docs", "login"),
       })).rejects.toThrow()
@@ -1061,6 +1309,7 @@ describe("finishTask documents", () => {
 
       const result = await finishTask(subprocess, {
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         documentsDirectory: documents,
         cleanStray: true,
@@ -1139,7 +1388,7 @@ describe("planTask", () => {
   /** Two worktrees of one task, with git replies for everything a plan asks. */
   async function fixture() {
     const root = await mkdtemp(join(tmpdir(), "dsh-task-plan-"))
-    const taskPath = join(root, "login")
+    const taskPath = join(root, PROJECT, "login")
     for (const name of ["alpha", "beta"]) {
       await mkdir(join(taskPath, name), { recursive: true })
       await writeFile(join(taskPath, name, ".git"), "gitdir: /elsewhere\n")
@@ -1185,11 +1434,11 @@ describe("planTask", () => {
     const fixtureUnderTest = await fixture()
     const { subprocess, keys } = subprocessMock(fixtureUnderTest.handlers)
     try {
-      const plan = await planTask(subprocess, { task: "login", tasksRoot: fixtureUnderTest.root })
+      const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
 
       // The target is the branch the source repository has checked out, even though
       // `origin/HEAD` and a local `main` both exist to be found.
-      expect(plan).toMatchObject({ task: "login", path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "develop", changedFiles: 2, commits: 4 })
+      expect(plan).toMatchObject({ task: "login", project: PROJECT, path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "develop", changedFiles: 2, commits: 4 })
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
       expect(byName.alpha).toEqual({
         name: "alpha",
@@ -1221,7 +1470,7 @@ describe("planTask", () => {
       "rev-list --count main..HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "7\n" : "2\n",
     })
     try {
-      const plan = await planTask(subprocess, { task: "login", tasksRoot: fixtureUnderTest.root, targets: { alpha: "main" } })
+      const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root, targets: { alpha: "main" } })
 
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
       // The chosen branch, the count that goes with it, and the note that it is not
@@ -1241,7 +1490,7 @@ describe("planTask", () => {
     await writeFile(join(fixtureUnderTest.taskPath, "README.md"), "# my own notes\n")
     const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
     try {
-      const plan = await planTask(subprocess, { task: "login", tasksRoot: fixtureUnderTest.root })
+      const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
       const byName = Object.fromEntries(plan.strays.map((stray) => [stray.name, stray]))
 
       // The files this plugin writes are its own, always cleared, never a surprise.
@@ -1266,9 +1515,9 @@ describe("planTask", () => {
     const fixtureUnderTest = await fixture()
     const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
     try {
-      await expect(planTask(subprocess, { task: "absent", tasksRoot: fixtureUnderTest.root }))
+      await expect(planTask(subprocess, { task: "absent", project: PROJECT, tasksRoot: fixtureUnderTest.root }))
         .rejects.toThrow(/no such task space/)
-      await expect(planTask(subprocess, { task: "login", tasksRoot: "" }))
+      await expect(planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: "" }))
         .rejects.toThrow(/tasks root is required/)
     } finally {
       await fixtureUnderTest.cleanup()
@@ -1280,7 +1529,7 @@ describe("inspectTask", () => {
   /** A container with two linked worktrees and the breadcrumb createTask writes. */
   async function fixture({ breadcrumb: keepBreadcrumb = true } = {}) {
     const root = await mkdtemp(join(tmpdir(), "dsh-task-inspect-"))
-    const taskPath = join(root, "login")
+    const taskPath = join(root, PROJECT, "login")
     await mkdir(taskPath, { recursive: true })
     for (const name of ["alpha", "beta"]) {
       await mkdir(join(taskPath, name), { recursive: true })
@@ -1336,6 +1585,7 @@ describe("inspectTask", () => {
         path: fixtureUnderTest.taskPath,
         isTask: true,
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         branch: "task/login",
         sourceRoot: "E:\\workspace\\public\\kratos-admin",
@@ -1349,7 +1599,7 @@ describe("inspectTask", () => {
 
   it("still recognizes and reads a container that only has the legacy note", async () => {
     const root = await mkdtemp(join(tmpdir(), "dsh-task-legacy-"))
-    const taskPath = join(root, "login")
+    const taskPath = join(root, PROJECT, "login")
     try {
       await mkdir(join(taskPath, "alpha"), { recursive: true })
       await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
@@ -1362,15 +1612,40 @@ describe("inspectTask", () => {
       ].join("\n"))
       // No worktree-space.json: an older space keeps its identity through the
       // note, and the fields the JSON would add are simply absent rather than
-      // making the space a stranger.
+      // making the space a stranger. The two coordinates the JSON would carry are
+      // read back from the path's depth instead.
       expect(await inspectTask(taskPath)).toEqual({
         path: taskPath,
         isTask: true,
         task: "login",
+        project: PROJECT,
         tasksRoot: root,
         branch: "task/login",
         sourceRoot: "E:\\workspace\\public\\kratos-admin",
         repositories: ["alpha"],
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("reads a space filed flat by an earlier version by its depth, not by its note", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-task-flat-"))
+    // `<container root>/<task>`, the layout used before the project layer. Nothing
+    // migrates it: the reader takes the two levels the path is supposed to have, so
+    // the task's own directory comes back as its project and the task is named
+    // after the container root. Pinned here because it is a decision - a space
+    // from an earlier version reads as coordinates that describe a layout this
+    // plugin no longer writes - rather than something to be surprised by.
+    const flat = join(root, "login")
+    try {
+      await mkdir(join(flat, "alpha"), { recursive: true })
+      await writeFile(join(flat, "alpha", ".git"), "gitdir: /elsewhere\n")
+      expect(await inspectTask(flat)).toMatchObject({
+        isTask: true,
+        task: "login",
+        project: basename(root),
+        tasksRoot: tmpdir(),
       })
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -1384,6 +1659,7 @@ describe("inspectTask", () => {
         isTask: true,
         // Without the breadcrumb the folder name is all there is to go on.
         task: "login",
+        project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         repositories: ["alpha", "beta"],
       })

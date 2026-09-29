@@ -1,9 +1,10 @@
 # Worktree Space
 
-Worktree Space for DeepSeek Harness: one task can span several repositories. Each one gets
-its own Git worktree on the same branch, kept in a task space outside the repositories'
-directory (beside it or further out, never inside it or above it) and registered as a DSH
-Workspace with its own sessions.
+Worktree Space for DeepSeek Harness: one task covering a single Git repository or several — under
+one shared task space directory, every repository gets a worktree on a branch of the same name, and
+the task space is registered as an agent Workspace that can open its own sessions to carry the task
+out. Tasks run in parallel without interfering with one another, and finishing one merges it back
+into the main branch and deletes the worktree branches and the task space.
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
@@ -44,11 +45,11 @@ Workspace with its own sessions.
   branch instead, which is then merged in a temporary worktree without touching your checkout.
   Uncommitted changes in a worktree have to be committed by you first (the plugin writes no
   commit; see Finish a task), and then the worktrees are removed, the task space's own documents
-  are filed under `<archive root>/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option
+  are filed under `<archive root>/<project>/<task>-<YYYYMMDD-HHMMSS>` (leave the archive option
   unticked and they are deleted along with everything else), and the Workspace registration is
-  removed. The archive root defaults to `<volume>:\worktree-space\archived-docs` on the volume
-  the task space sits on, so the documents do not scatter after every task space; Configuration
-  can point it beside the task space, or at a directory of your own. It will not finish while a
+  removed. The archive root defaults to the **container root's own** `archived-docs`, so every
+  project shares one and the archive keeps the container's shape; Configuration can point it at a
+  directory of your own instead. It will not finish while a
   session in that Workspace is still running — stop it or let it end, then try again.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
@@ -61,20 +62,61 @@ Workspace with its own sessions.
 ## Layout of a task
 
 ```text
-<task space root>/                       the container follows the repositories: you choose where
-├── <task>/                              the task space — also the session's working directory
-│   ├── worktree-space.json              the task's record: branch, base, repositories, created
-│   ├── worktree-space.md                rendered from that record — branch, base and conventions
-│   ├── <repository A>/                  a worktree on <branch prefix><task>
-│   └── <repository B>/                  a worktree on the same branch name
-└── archived-docs/                       the archive root the "beside the task space" strategy uses
+~/workspace/                            the root workspace: projects hang off this level, and the container root lives here too
+├── repo-x/                             project x's main Workspace (a repository itself)
+├── project1/                           project 1's main Workspace (several repositories)
+│   ├── repo-a/
+│   └── repo-b/
+├── deep-path/project2/                 project 2's main Workspace, filed under a deeper directory
+│   ├── repo-c/
+│   └── repo-d/
+└── worktree-space/                     the container root: the plugin's own zone
+    ├── repo-x/                         the project layer, named after the source Workspace directory
+    │   └── task-x/                     the task space — also the session's working directory
+    │       ├── worktree-space.json     the task's record: branch, base, project, repositories, created
+    │       ├── worktree-space.md       rendered from that record — branch, base and conventions
+    │       └── repo-x/                 a worktree on <branch prefix>task-x
+    ├── project1/
+    │   ├── hotfix/
+    │   │   ├── repo-a/                 both on a worktree named <branch prefix>hotfix
+    │   │   └── repo-b/
+    │   └── task-a/
+    │       ├── repo-a/
+    │       └── repo-b/
+    ├── project2/                       filed under a deeper directory, and still the same container
+    │   └── task-b/
+    │       ├── repo-c/
+    │       └── repo-d/
+    ├── archived-docs/                  the archive root (default): non-Git output lands here
+    │   └── project1/                   filed by project
+    │       └── hotfix-20260926-020933/   `<task>-<stamp>`, one folder per task
+    └── README.md                       written once, on first use: this is the worktree-only area
 
-<volume>:\worktree-space\archived-docs\   the archive root the default strategy uses
-└── <parent>-<task>-20260926-020933/      one folder per task, filed here when it is finished
+~/my-archive/                           an archive root of your own, chosen in the plugin's settings
+└── project2/                           same shape: a project layer, then a task-stamp layer
+    └── task-b-20260926-020933/
 ```
 
-Every strategy adds that per-task `<workspace>-<stamp>` folder under its root: the default collects
-every task on a volume into one directory, and the folder is what keeps them apart.
+The container root is recommended **one level below the root workspace** (`~/workspace/worktree-space`),
+and where that is depends only on the first directory below the volume root: `~/workspace/project1` and
+`~/workspace/deep-path/project2` are both offered the **same** container however deep their own project
+sits. You can still point it somewhere else when you create a task space.
+
+The project name is the **source Workspace's directory name**; the plugin layers by itself, so there is
+nothing to fill in. Two projects in one container can each hold a task called `hotfix` without crowding
+each other. When the Workspace directory *is* a repository (`~/workspace/repo-x`), the project and
+repository layers end up with the same name — `repo-x/task-x/repo-x`. That repeat is deliberate: the
+layout is three levels deep either way, so neither the plugin nor the client needs to be told which
+level is which.
+
+The container root is the plugin's zone: the first task space created under it writes a `README.md`
+saying this is a worktree-only area and that `git init` / `clone` do not belong there (an existing one is
+never overwritten). Conversely, if the container root is itself a Git repository — it has a `.git` —
+creation is **refused**, and not a single directory is made.
+
+The archive root splits two levels further, `<project>/<task>-<stamp>/`, so its shape mirrors the
+container's and a project's documents stay in that project's own folder. By default it sits in the
+container root, adding exactly one directory — `archived-docs` — to the whole volume.
 
 Removing a worktree never deletes its Git branch; finishing a task merges the branch back
 before the worktree goes.
@@ -139,8 +181,8 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 
 | Permission | Scope |
 | --- | --- |
-| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md`; and, at finish, the contents of the files git lists through `git diff --name-only HEAD` / `--diff-filter=U`, read only to decide whether a merge still carries conflict markers |
-| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`; when filing documents it also writes the per-task `<workspace>-<stamp>/` folder under the **archive root** the configuration names (by default `<volume>:\worktree-space\archived-docs`, see Configuration). Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
+| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; the container root's `.git` and `README.md` (to tell whether it is a Git repository, and whether to write the notice); each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md`; and, at finish, the contents of the files git lists through `git diff --name-only HEAD` / `--diff-filter=U`, read only to decide whether a merge still carries conflict markers |
+| File writes | Only inside the task-space container: `<container root>/<project>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, plus the container root's own `README.md` (written only when absent, never over what you wrote); when filing documents it also writes the per-task `<project>/<task>-<stamp>/` folder under the **archive root** the configuration names (by default the container root's own `archived-docs`, see Configuration). Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
 | Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse` (including `rev-parse --verify --quiet MERGE_HEAD`), `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`, `diff --name-only` (including `--diff-filter=U`). Mutations: `worktree add / remove / prune`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D`. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository, and a commit handed to an agent is run by the **host's agent** in that session (see the failure boundaries) |
 | Network | Only `git push -u origin <branch>`, and only when you explicitly ask for a push in the create dialog or the tool; the plugin itself makes no HTTP requests and downloads nothing |
 | Credentials | Reads, stores and forwards none. A push uses whatever credentials your local Git is already configured with (credential helper / SSH); the plugin never touches keys and never reads environment variables |
@@ -214,8 +256,10 @@ data directory (as in the sample above), which needs a DSH restart.
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
-| Archive documents location | fixed directory on the drive / beside the task space / custom directory | **fixed directory on the drive** | The root the archive is filed under; every strategy adds a `<workspace>-<stamp>` folder beneath it. The default is fixed at `<volume>:\worktree-space\archived-docs` on the task space's own volume, wherever the task space was made |
-| Custom archive directory | any path | empty | Used only by the custom strategy; empty falls back to the fixed directory on the drive |
+| Task space location | default / custom directory | **default** | Where new task spaces go. **The default is the best practice**: it is derived from the source Workspace by the rule below. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
+| Custom task space root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the container root in the create dialog and ticking Set as the default task space root writes both back when you create |
+| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<stamp>` folder beneath it. The default files them in the container root's own `archived-docs`, wherever the task space was made |
+| Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the container root's `archived-docs` |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
@@ -237,17 +281,32 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
    The line under the field always names the default it would use. Tick **Set as the default
    branch prefix** — offered only when what you typed differs from the configured default — to
    write it back to the plugin's settings when you create.
-4. Say where the task space goes. This directory has to sit beside the **repositories' directory** — not inside
-   it, and not above it. A recommended path is filled in for you: `worktree-space` inside the **first directory
-   below the volume root** that the source root sits in (source root `E:\workspace\public\dsh-worktree-space`
-   recommends `E:\workspace\worktree-space`). At that depth the task space and the source tree
-   sit in one common ancestor below the volume root, and the recommendation itself is not
-   widened to the volume root. The container is named `worktree-space` in every case: a source
-   root sitting directly under the volume root (`E:\repo`) recommends
-   `<volume root>\worktree-space`, which shares nothing but that root with its worktree (an
-   agent handed the commits or the conflict then has to authorise itself in that session — see
-   the experimental section at the end); only where that name would land on the source root
-   itself does the recommendation take `dsh-worktree-space`. Another location still works.
+4. Say where the task space goes — the **container root**. This directory has to sit beside the
+   **repositories' directory** — not inside it, and not above it. A recommended path is filled in for
+   you: `worktree-space` **one level below the root workspace** (or the directory the Task space
+   location setting names, when it is on the custom strategy — see Configuration). The root workspace is the first
+   directory a path sits in below its volume root: source root `~/workspace/project1` recommends
+   `~/workspace/worktree-space`, and a source root filed deeper (`~/workspace/deep-path/project2`)
+   recommends the **same** one. The container lands one level up, so the task space and the source tree
+   share a common ancestor: a commit writes into the source repository's git directory as well as the
+   worktree, and the session's working directory has to reach both. The level above the volume root is
+   not available — a volume root cannot be a working directory; and a source root directly under the
+   volume root (`~/repo`) has nothing else to share, so it recommends `<volume root>/worktree-space`
+   (an agent handed the commits or the conflict then has to authorise itself in that session — see the
+   experimental section at the end). The container is named
+   `worktree-space` in every case; only where that name would land on the source root itself does the
+   recommendation take `dsh-worktree-space`. Another location still works. Point the container root
+   somewhere else and **Set as the default task space root** appears under the field: ticking it
+   writes that path back to the plugin's settings when you create (the Custom task space root
+   setting, switched to the custom strategy), so the next task space opens there by default. The
+   note beside it names what that choice costs — a directory sharing no common ancestor with the
+   project's directory makes the session that hands commits and conflicts to an agent ask for
+   authorisation by hand.
+
+   The plugin layers the rest itself, so the container's location is the only thing to choose: a task
+   space is `<container root>/<project>/<task>`, with the project named after the source Workspace
+   directory (see Layout of a task). If the container root is itself a Git repository, creation is
+   refused; the first use writes a `README.md` there declaring it the worktree-only area.
 5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
    choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
@@ -311,7 +370,7 @@ holds `MERGE_HEAD`), which step 3 takes over.
 branch into the target branch** (by default the branch the source repository has checked out), and
 it lands in the **source repository**. Before the target is touched, the target is merged into the
 task branch **inside the task space's own worktree** — the opposite direction — with
-`git merge --no-ff --no-edit <target>`, run in `<task space>\<repository>`. Two outcomes:
+`git merge --no-ff --no-edit <target>`, run in `<task space>/<repository>`. Two outcomes:
 
 - **Clean**: that rehearsal is undone again (`git reset --hard <the HEAD from before the
   rehearsal>`, the worktree back where it started), and the task branch is then merged into the
@@ -321,7 +380,7 @@ task branch **inside the task space's own worktree** — the opposite direction 
 - **Conflicted**: that merge is **not aborted and not reverted** — the rehearsal simply stays
   where it stands, in the task branch's worktree, which keeps its `MERGE_HEAD` and the conflicted
   files with their markers sitting in its working tree (for instance
-  `E:\wt-demo\spaces\demo\alpha\src\app.ts`). The **target branch is untouched**, and so is the
+  `~/wt-demo/spaces/demo/alpha/src/app.ts`). The **target branch is untouched**, and so is the
   source repository's checkout.
 
 Why rehearse the other way round: a conflict in the real merge lands in your source repository and
@@ -337,7 +396,7 @@ dialog then shows **A merge conflicted: deal with it, then finish the task again
 direction and the site explained above; the way on is **Continue finishing** at the foot of the
 panel.
 
-The site is the task branch's own worktree (for instance `E:\wt-demo\spaces\demo\alpha`), standing
+The site is the task branch's own worktree (for instance `~/wt-demo/spaces/demo/alpha`), standing
 in an unfinished merge: `git -C <site> status` lists the `both modified:` files, and
 `git -C <site> rev-parse MERGE_HEAD` has a value. Resolve the conflict there, `git add`, and one
 `git commit` that says how you reconciled the two sides concludes the merge — the target branch and

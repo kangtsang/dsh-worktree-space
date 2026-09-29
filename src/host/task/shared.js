@@ -12,7 +12,7 @@ import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:f
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
 /** File a task container carries so a session finds the task's own rules. */
@@ -83,14 +83,43 @@ export async function isLinkedWorktree(directory) {
 
 /**
  * Resolve the container root to use, preferring an explicit request.
+ *
+ * Three answers, in the order they win: what the caller named, what the
+ * configuration names, and the recommendation derived from the source root. The
+ * configured directory sits in the middle because it is a default rather than a
+ * rule - a task that names its own container root still goes where it was told -
+ * and because it is the user's standing answer to "where do task spaces go",
+ * which is what both the create dialog and the tool's own `suggest-root` report.
  * @param sourceRoot - the directory holding the source repositories.
  * @param requestedRoot - a caller-supplied container root, possibly empty.
+ * @param configuredRoot - the container root the configuration names, possibly empty.
  * @returns the container root, in native separators.
  */
 
-export function resolveTasksRoot(sourceRoot, requestedRoot) {
+export function resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot) {
   const requested = typeof requestedRoot === 'string' ? requestedRoot.trim() : ''
-  return requested === '' ? recommendTasksRoot(sourceRoot) : requested
+  if (requested !== '') return requested
+  const configured = typeof configuredRoot === 'string' ? configuredRoot.trim() : ''
+  return configured === '' ? recommendTasksRoot(sourceRoot) : configured
+}
+
+
+/**
+ * The task space directory: the one place the host spells out the layout.
+ *
+ * `<container root>/<project>/<task>`, with each segment validated as the name it
+ * is - the task by the rule a branch suffix also obeys, the project by the
+ * weaker rule a directory name obeys. Both are validated here rather than at the
+ * call sites so that a path this plugin writes and a path it later reads back
+ * can never disagree, and so the two relative names a caller could send cannot
+ * walk out of the container root.
+ * @param tasksRoot - the container root.
+ * @param project - the project layer's name.
+ * @param task - the task name.
+ * @returns the task space directory.
+ */
+export function taskSpacePath(tasksRoot, project, task) {
+  return join(String(tasksRoot ?? '').trim(), validateProjectName(project), validateTaskName(task))
 }
 
 
@@ -189,10 +218,11 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * @returns the document to write as JSON.
  */
 export function taskMetadata(details) {
-  const { task, tasksRoot, sourceRoot, branch, baseRef, repositories = [] } = details
+  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [] } = details
   return {
     version: 1,
     task,
+    project,
     tasksRoot,
     sourceRoot,
     branch,
@@ -260,10 +290,11 @@ async function parseLegacyBreadcrumb(taskPath) {
  * @returns the Markdown contents.
  */
 export function renderTaskMetadata(metadata) {
-  const { task, branch, baseRef, createdAt, sourceRoot, repositories = [] } = metadata
+  const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [] } = metadata
   const lines = [
     `# Task: ${task}`,
     '',
+    ...(typeof project === 'string' && project !== '' ? [`- Project: \`${project}\``] : []),
     `- Branch: \`${branch}\` (one branch per repository below)`,
     `- Base: ${baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '' ? "each repository's current HEAD" : `\`${baseRef}\``}`,
     ...(typeof createdAt === 'string' && createdAt !== '' ? [`- Created: ${createdAt}`] : []),

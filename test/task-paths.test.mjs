@@ -10,6 +10,19 @@ import {
   samePathLocation,
 } from "../src/host/task/paths.js"
 
+/**
+ * The first directory below a path's volume root — the level the rule puts the
+ * container under, worked out here the plain way so the test does not simply
+ * restate the implementation it is checking.
+ * @param path - an absolute path.
+ * @returns that directory, or the volume root itself when the path is that level.
+ */
+function rootWorkspaceOf(path) {
+  const { root } = parse(path)
+  const [first] = path.slice(root.length).split(/[\\/]+/).filter(Boolean)
+  return first === undefined ? root : join(root, first)
+}
+
 describe("canonicalPath", () => {
   it("unifies separator style so Git and filesystem paths compare equal", () => {
     expect(canonicalPath("E:\\work\\repo")).toBe(canonicalPath("E:/work/repo"))
@@ -109,42 +122,38 @@ describe("recommendTasksRoot", () => {
     expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 
-  it("shares the source root's first directory below the volume root", () => {
-    // Both the source root and the container sit under one directory that is
-    // still below the volume root, which is the common ancestor a session needs
-    // to commit in a linked worktree. A path without a drive has no such
-    // directory to share, and stays beside the source root instead.
-    const sourceRoot = join(process.cwd(), "nested", "source-root")
-    const absolute = resolve(sourceRoot)
-    const { root } = parse(absolute)
-    const first = /^[A-Za-z]:[\\/]$/.test(root)
-      ? join(root, absolute.slice(root.length).split(/[\\/]+/)[0])
-      : undefined
-    const recommended = recommendTasksRoot(sourceRoot)
-    expect(recommended).toBe(first === undefined ? join(dirname(absolute), "worktree-space") : join(first, "worktree-space"))
-    expect(() => assertIsolated(absolute, recommended)).not.toThrow()
+  it("gives every project under one root workspace the same container", () => {
+    // The point of the rule. A project sitting directly under the root workspace
+    // and one sitting three levels deeper both reach one container, so a deep
+    // project does not get a second copy of it beside itself.
+    const rootWorkspace = rootWorkspaceOf(resolve(process.cwd()))
+    const shallow = join(process.cwd(), "project1")
+    const deep = join(process.cwd(), "deep-path", "nested", "project2")
+    expect(recommendTasksRoot(shallow)).toBe(join(rootWorkspace, "worktree-space"))
+    expect(recommendTasksRoot(deep)).toBe(recommendTasksRoot(shallow))
+    for (const sourceRoot of [shallow, deep]) {
+      expect(() => assertIsolated(resolve(sourceRoot), recommendTasksRoot(sourceRoot))).not.toThrow()
+    }
   })
 
-  it("falls back when the source root is itself that first directory", () => {
-    // Nothing sits beside `<drive>:\repo` below the volume root, so the volume root
-    // answers, and the container keeps the name every other scenario uses.
+  it("falls back to the volume root for a source root that sits directly in it", () => {
+    // `E:\repo` has nothing beside it that is still below the volume root, so the
+    // volume root answers. A POSIX path has no level below its root at all, and its
+    // own parent answers instead — which is the same directory.
     const { root } = parse(resolve(process.cwd()))
-    const sourceRoot = join(root, "repo")
+    const sourceRoot = join(root, "source-root")
     const recommended = recommendTasksRoot(sourceRoot)
-    const drive = /^[A-Za-z]:[\\/]$/.test(root)
-    expect(recommended).toBe(drive ? join(root, "worktree-space") : join(dirname(sourceRoot), "worktree-space"))
-    expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
+    expect(recommended).toBe(join(dirname(resolve(sourceRoot)), "worktree-space"))
+    expect(() => assertIsolated(resolve(sourceRoot), recommended)).not.toThrow()
   })
 
   it("uses the backup name only when the container's own path is the source root", () => {
-    // `<parent>\worktree-space` is the answer everywhere else; this is the one
-    // layout where that name would be the source root itself.
-    const { root } = parse(resolve(process.cwd()))
-    const drive = /^[A-Za-z]:[\\/]$/.test(root)
-    const parent = drive ? root : dirname(join(root, "worktree-space"))
-    const sourceRoot = join(parent, "worktree-space")
+    // `<root workspace>\worktree-space` is the answer everywhere else; this is the
+    // one layout where that name would be the source root itself.
+    const rootWorkspace = rootWorkspaceOf(resolve(process.cwd()))
+    const sourceRoot = join(rootWorkspace, "worktree-space")
     const recommended = recommendTasksRoot(sourceRoot)
-    expect(recommended).toBe(join(parent, "dsh-worktree-space"))
+    expect(recommended).toBe(join(rootWorkspace, "dsh-worktree-space"))
     expect(() => assertIsolated(sourceRoot, recommended)).not.toThrow()
   })
 })

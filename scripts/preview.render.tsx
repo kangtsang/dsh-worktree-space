@@ -41,8 +41,8 @@ const repos = [
     currentBranch: "main",
     worktrees: [
       { path: "/repo/kratos-vue-admin", branch: "main", isMain: true, locked: false, prunable: false },
-      { path: "E:/worktree-space/hotfix/kratos-vue-admin", branch: "feat/hotfix", isMain: false, locked: false, prunable: false, commits: 2 },
-      { path: "E:/worktree-space/test-c/kratos-vue-admin", branch: "feat/test-c", isMain: false, locked: false, prunable: false, changedFiles: 3 },
+      { path: "E:/worktree-space/kratos-admin/hotfix/kratos-vue-admin", branch: "feat/hotfix", isMain: false, locked: false, prunable: false, commits: 2 },
+      { path: "E:/worktree-space/kratos-admin/test-c/kratos-vue-admin", branch: "feat/test-c", isMain: false, locked: false, prunable: false, changedFiles: 3 },
     ],
   },
   {
@@ -50,7 +50,7 @@ const repos = [
     currentBranch: "main",
     worktrees: [
       { path: "/repo/kratos-vue-admin-web", branch: "main", isMain: true, locked: false, prunable: false },
-      { path: "E:/worktree-space/hotfix/kratos-vue-admin-web", branch: "feat/hotfix", isMain: false, locked: false, prunable: false, commits: 2 },
+      { path: "E:/worktree-space/kratos-admin/hotfix/kratos-vue-admin-web", branch: "feat/hotfix", isMain: false, locked: false, prunable: false, commits: 2 },
     ],
   },
 ]
@@ -83,11 +83,11 @@ function services(workspaces: Array<{ workspaceId: string; path: string; title: 
  * The configuration form the create dialog reads its default prefix from, and the
  * preview of the settings card is drawn against.
  *
- * The archive strategy is the custom one on purpose: that is the only strategy that
- * draws the directory row under it, so the preview shows the card at its fullest.
+ * Both location strategies are the custom ones on purpose: that is the only setting
+ * that draws the directory row under it, so the preview shows the card at its fullest.
  */
 function configForm(defaultBranchPrefix = "task/") {
-  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix, archiveDocumentsStrategy: "custom", archiveDocumentsDirectory: "E:\\archived-docs" }
+  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix, tasksRootStrategy: "custom", tasksRootDirectory: "E:\\worktree-space", archiveDocumentsStrategy: "custom", archiveDocumentsDirectory: "E:\\archived-docs" }
   return { getSnapshot: () => ({ status: "ready", value }), subscribe: () => () => {}, set: vi.fn(async () => true) }
 }
 

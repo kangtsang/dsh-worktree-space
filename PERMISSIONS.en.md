@@ -10,9 +10,10 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 
 - **Purpose**: make "one task spanning several repositories" a Workspace beside the repositories'
   directory — never inside it, never above it. Every
-  selected repository gets its own `git worktree` at `<task space root>/<task>/<repository>`, all on the same
-  task branch; that directory is registered as a DSH Workspace and opened with a session whose working
-  directory is the task space.
+  selected repository gets its own `git worktree` at `<container root>/<project>/<task>/<repository>`, all on
+  the same task branch; the **project** layer is one the plugin derives from the source Workspace's own
+  directory name, so there is nothing for the user to fill in; `<container root>/<project>/<task>` is
+  registered as a DSH Workspace and opened with a session whose working directory is the task space.
 
 - **Reads**:
   - The Workspace directory tree, read-only: a breadth-first `readdir` walk, at most `scanDepth` levels
@@ -22,9 +23,13 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
     repository* — it **does not read file contents**.
   - The task space's two metadata files `worktree-space.json` and `worktree-space.md`, plus each repository
     worktree's `<worktree>/.git` marker file (used to tell whether that worktree has gone stale).
+  - The container root's `<container root>/.git` and `<container root>/README.md`: the first, if present,
+    means the container root is itself a Git repository and creation is refused; the second, if present, is
+    never written over. Both are existence checks only.
   - `assets/skill/task-worktree-space/SKILL.md` inside this package (registered as a bundled skill, read
     only, never copied anywhere).
-  - The paths the user chooses (source root, task space root, archive directory).
+  - The paths the user chooses (source root; the task space root, either typed into the create dialog
+    or named by the Custom task space root setting; and the archive directory).
   - On finish, the **contents** of the files git lists in a worktree through `git diff --name-only HEAD` and
     `git diff --name-only --diff-filter=U`: each is read back only to decide whether a merge still carries
     conflict markers (line by line, for lines starting with `<<<<<<<`, `=======` or `>>>>>>>`). A listed path
@@ -35,11 +40,14 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
   identified as a stale worktree, and one merge checkout the plugin creates under the **system temporary
   directory** (below); **never** into the files of a source repository's checkout, and never into the DSH
   installation or a configuration file.
-  - Create: `mkdir` the task space directory; `git worktree add` creates each checkout (git writes it); write
+  - Create: `mkdir` the container root, the project directory beneath it and the task space directory; write
+    one `README.md` at the container root the first time it is used (declaring it the worktree-only area;
+    an existing one is left alone); `git worktree add` creates each checkout (git writes it); write
     `worktree-space.json` and the `worktree-space.md` rendered from it.
-  - Archive: `cp` the task space's documents to `<workspace>-<YYYYMMDD-HHMMSS>/` under the **archive root**
-    the configuration names; the default root is `<volume>:\worktree-space\archived-docs` on the volume the
-    task space sits on, and it can also point beside the task space or at any directory you choose.
+  - Archive: `cp` the task space's documents to `<project>/<task>-<YYYYMMDD-HHMMSS>/` under the **archive
+    root** the configuration names; the default root is the task space's **own container root**
+    (`<container root>/archived-docs`, the very directory chosen when the task space was created), and it
+    can also point at any directory you choose.
   - Clean up: `git worktree remove --force` removes a checkout; a **stale worktree** whose `.git` points at a
     gitdir that no longer exists has that one directory removed with `fs.rm(directory, { recursive: true })`;
     the task space directory itself is deleted and its Workspace registration removed only once it really is
@@ -56,7 +64,8 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
   - git's own bookkeeping: `git worktree add/remove` writes git's own registration and index under
     `<source repo>/.git/worktrees/<name>/` (the `.git` marker, `HEAD`, `index`, …). That is git's doing; the
     plugin never edits files in a source repository's checkout.
-  - Configuration (the entry switches, scan depth, default branch prefix, archive directory) is stored by
+  - Configuration (the entry switches, scan depth, default branch prefix, task space location, archive
+    location) is stored by
     DSH's own plugin configuration service (the Plugins page's live form); **the plugin writes no
     configuration file**, and its `task.preference` endpoint is read-only.
 

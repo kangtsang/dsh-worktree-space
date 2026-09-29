@@ -42,6 +42,35 @@ export function nameOf(value: unknown) {
 }
 
 /**
+ * The project layer a task space is filed under.
+ *
+ * A task space is `<container root>/<project>/<task>`, and the project is the
+ * source root's own directory name. Nothing carries it in a path, so it is read
+ * back from the depth: the directory one above the task.
+ * @param taskPath - a task space directory.
+ * @returns the project name.
+ */
+export function projectOf(taskPath: unknown) {
+  return nameOf(parentOf(taskPath))
+}
+
+/**
+ * The container root a task space is filed under — the directory every project
+ * and every task of this container sits in.
+ *
+ * Read from the depth rather than carried around, and read through this one
+ * function so that the archive root, the plan request and the panel's grouping
+ * cannot disagree about where the container begins. The Host writes the same
+ * layout in `taskSpacePath`; the two halves are separate bundles, so the depth is
+ * the only thing that can be shared and this is where it is written down.
+ * @param taskPath - a task space directory.
+ * @returns the container root.
+ */
+export function containerRootOf(taskPath: unknown) {
+  return parentOf(parentOf(taskPath))
+}
+
+/**
  * A path as this plugin displays it: forward slashes, whichever separator the
  * host or the user reported. Windows accepts both, so showing one style keeps
  * the panel and the dialogs from mixing them.

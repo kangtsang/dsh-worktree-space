@@ -5,10 +5,9 @@
  * work and source must never nest inside one another, and the recommended task
  * container sits beside the repositories' directory. Where it sits is decided by
  * {@link recommendTasksRoot}: in the source root's first directory below its
- * volume root, which keeps the two under one common ancestor without widening
- * the recommendation to the volume root itself. What it is called is decided by
- * {@link containerIn}: `worktree-space` in every scenario, with
- * `dsh-worktree-space` for the one layout whose own name would land on the
+ * volume root, so the two share that directory as a common ancestor. What it is
+ * called is decided by {@link containerIn}: `worktree-space` in every scenario,
+ * with `dsh-worktree-space` for the one layout whose own name would land on the
  * source root.
  */
 import { dirname, join, parse, resolve } from 'node:path'
@@ -116,8 +115,10 @@ export function containerIn(parent, sourceRoot) {
  * ancestor: that is the directory a session opened for a linked worktree needs
  * as its working directory, because a commit writes into the source
  * repository's git directory as well as the worktree. Sharing the first
- * directory below the volume root gives them one - `E:\workspace` for both
- * `E:\workspace\public\repo` and `E:\workspace\worktree-space\<task>\repo` -
+ * directory below the volume root gives them one, and it gives every project
+ * filed under that directory the same one - `E:\workspace` for both
+ * `E:\workspace\project1` and `E:\workspace\deep\project2`, so both containers
+ * land in `E:\workspace\worktree-space` however deep their own project sits -
  * while staying off the volume root, which a session may not be opened on.
  * @param absolute - an absolute path.
  * @param root - that path's volume root (`E:\`, `/`).
@@ -135,10 +136,16 @@ function firstDirectoryBelowRoot(absolute, root) {
  * The parent is the source root's own first directory below its volume root -
  * `E:\workspace` for `E:\workspace\public\repo` - because the container then
  * shares a real prefix with the source tree without either of them being widened
- * to the volume root, which a session may not be opened on. A source root that is
- * itself that first directory (`E:\repo`) has nothing beside it that is still
- * below the volume root, so the volume root answers; a path without a drive has no
- * meaningful first directory at all, and its own parent answers.
+ * to the volume root, which a session may not be opened on. One such directory is
+ * the whole point: every project filed anywhere under the same root workspace
+ * reaches the same `worktree-space`, so the container does not follow each
+ * project's own depth and does not scatter a second copy of itself beside a
+ * project that sits deeper than its neighbours.
+ *
+ * A source root that is itself that first directory (`E:\repo`) has nothing
+ * beside it that is still below the volume root, so the volume root answers; a
+ * path without a drive has no meaningful first directory at all, and its own
+ * parent answers.
  * {@link containerIn} names the container under whichever parent won.
  * @param sourceRoot - the directory holding the source repositories.
  * @returns the recommended container root, in native separators.

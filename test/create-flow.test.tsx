@@ -24,12 +24,15 @@ const suggestion = {
 }
 const created = {
   task: "fix-login",
+  // The project layer is the source root's own directory name, so `/repo` files
+  // its tasks under `/tasks/repo`.
+  project: "repo",
   branch: "task/fix-login",
-  path: "/tasks/fix-login",
+  path: "/tasks/repo/fix-login",
   tasksRoot: "/tasks",
   repositories: [
-    { name: "alpha", path: "/tasks/fix-login/alpha" },
-    { name: "beta", path: "/tasks/fix-login/beta" },
+    { name: "alpha", path: "/tasks/repo/fix-login/alpha" },
+    { name: "beta", path: "/tasks/repo/fix-login/beta" },
   ],
   warnings: [],
 }
@@ -358,7 +361,7 @@ describe("native task create flow", () => {
     expect(screen.getByText(created.path)).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: t("cleanupTask") }))
     await waitFor(() => expect(next.onClose).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "fix-login", tasksRoot: "/tasks" })
+    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "fix-login", project: "repo", tasksRoot: "/tasks" })
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.uiWorkspace.openWorkspace).not.toHaveBeenCalled()
   })
@@ -473,5 +476,116 @@ describe("the default branch prefix this dialog may record", () => {
     await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.workspaces.create).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("the default task space location this dialog may record", () => {
+  /**
+   * The plugin configuration form, as the shell serves it to the dialog.
+   *
+   * `refuse` names the one field the Host turns down, which is how the order the two
+   * location settings are written in is checked: the strategy is what reads the
+   * directory, so a refused directory must never be paired with a strategy naming it.
+   */
+  function configForm(refuse: string | null = null) {
+    let value: unknown = { defaultBranchPrefix: "task/", tasksRootStrategy: "default", tasksRootDirectory: "" }
+    const listeners = new Set<() => void>()
+    return {
+      form: {
+        getSnapshot: () => ({ status: "ready", value }),
+        subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) },
+        set: vi.fn(async (field: string, next: unknown) => {
+          if (field === refuse) return false
+          value = { ...(value as Record<string, unknown>), [field]: next }
+          listeners.forEach((listener) => listener())
+          return true
+        }),
+      },
+      read: () => value,
+    }
+  }
+  const rememberRoot = () => screen.queryByRole("checkbox", { name: t("rememberTasksRoot") }) as HTMLInputElement | null
+  // The label line carries the field's own explanation, so the control is looked up by
+  // the name it starts with - the same way the name and prefix fields are.
+  const containerField = () => screen.getByRole("textbox", { name: new RegExp(`^${t("containerLocation")}`) }) as HTMLInputElement
+
+  it("offers the checkbox only once the typed location is one worth keeping", async () => {
+    const next = setup(configForm().form)
+    next.mount()
+    await ready()
+
+    // Prefilled from the Host's own suggestion: nothing to promise yet, so no offer.
+    expect(containerField().value).toBe("/tasks")
+    expect(rememberRoot()).toBeNull()
+
+    fireEvent.change(containerField(), { target: { value: "/tasks" } })
+    expect(rememberRoot()).toBeNull()
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    expect(rememberRoot()).not.toBeNull()
+    // The sentence beside the box is the setting's own, because it is the same
+    // trade-off the user is deciding - a directory that shares no common ancestor
+    // with the project makes the handoff session ask for authorisation by hand.
+    expect(screen.getByText(t("tasksRootStrategyHint"))).toBeTruthy()
+    // A cleared field names no location at all, so it cannot be promised either.
+    fireEvent.change(containerField(), { target: { value: "   " } })
+    expect(rememberRoot()).toBeNull()
+  })
+
+  it("writes both settings only on create, and creates the space it was asked for", async () => {
+    const { form: form0, read } = configForm()
+    const next = setup(form0)
+    next.mount()
+    await ready()
+
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    fireEvent.click(rememberRoot()!)
+    // Ticking alone promises; it does not write.
+    expect(form0.set).not.toHaveBeenCalled()
+
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.onClose).toHaveBeenCalledTimes(1))
+    expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ tasksRoot: "E:\\worktree-space" }))
+    // Directory first, strategy second: a directory the Host refuses can then never
+    // be paired with the strategy that would read it.
+    expect(form0.set.mock.calls).toEqual([["tasksRootDirectory", "E:\\worktree-space"], ["tasksRootStrategy", "custom"]])
+    expect(read()).toMatchObject({ tasksRootStrategy: "custom", tasksRootDirectory: "E:\\worktree-space" })
+  })
+
+  it("leaves the strategy alone when the Host refuses the directory", async () => {
+    const { form: form0, read } = configForm("tasksRootDirectory")
+    const next = setup(form0)
+    next.mount()
+    await ready()
+
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    fireEvent.click(rememberRoot()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    // The task space still exists: a refused preference may not undo it.
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.api.createTask).toHaveBeenCalledTimes(1)
+    expect(form0.set).toHaveBeenCalledExactlyOnceWith("tasksRootDirectory", "E:\\worktree-space")
+    expect(read()).toMatchObject({ tasksRootStrategy: "default", tasksRootDirectory: "" })
+    expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
+  })
+
+  it("reports a refused strategy the same way, after the directory was accepted", async () => {
+    const { form: form0, read } = configForm("tasksRootStrategy")
+    const next = setup(form0)
+    next.mount()
+    await ready()
+
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    fireEvent.click(rememberRoot()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    // The directory landed but nothing reads it now, which is the inert half of the
+    // pair - the strategy is still the derived default, so the setting is not in force.
+    expect(read()).toMatchObject({ tasksRootStrategy: "default", tasksRootDirectory: "E:\\worktree-space" })
+    expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
   })
 })

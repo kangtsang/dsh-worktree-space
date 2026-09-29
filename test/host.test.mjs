@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, branchTargets, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
+import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
 
 function handleFor(outputs = {}, config) {
@@ -272,7 +272,7 @@ describe("worktree RPC contract", () => {
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
   })
 
-  it("answers the configured archive strategy, and anchors by default", async () => {
+  it("answers the configured archive strategy, and stays in the container by default", async () => {
     // The strategy names the root and the directory above only narrows it, so the dialog
     // reads both before it computes anything: one without the other says nothing.
     let strategy
@@ -280,13 +280,51 @@ describe("worktree RPC contract", () => {
     // A Host nobody has configured answers with the shipped default, and so does one
     // serving a word the schema does not offer - the dialog would have to guess at it,
     // and the guess belongs in one place.
-    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "drive" })
-    strategy = "container"
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "container" })
     strategy = "custom"
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "custom" })
     strategy = "somewhere"
-    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "drive" })
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "container" })
+  })
+
+  it("reads the configured task space location, and only under the custom strategy", async () => {
+    // Two settings rather than one: the strategy says whether a directory is read at
+    // all, so a directory left over from an earlier custom run has to go inert the
+    // moment the strategy is back on the derived default.
+    let strategy
+    let directory = "E:\\worktree-space"
+    const handler = handleFor({}, {
+      tasksRootStrategy: { get: () => strategy },
+      tasksRootDirectory: { get: () => directory },
+    })
+    // Nobody configured anything: the answer is "no configured root", so a create
+    // derives the location it always did rather than taking a directory nobody chose.
+    expect(configuredTasksRoot()).toBe("")
+    strategy = "default"
+    expect(configuredTasksRoot()).toBe("")
+    strategy = "custom"
+    expect(configuredTasksRoot()).toBe("E:\\worktree-space")
+    // A word the schema does not offer is not the custom strategy, so it reads as the
+    // default rather than as a licence to use the directory.
+    strategy = "somewhere"
+    expect(configuredTasksRoot()).toBe("")
+    // Whitespace is emptiness, so a cleared field cannot become a root named "  ".
+    strategy = "custom"
+    directory = "   "
+    expect(configuredTasksRoot()).toBe("")
+    // Unset at all is the same as empty, and reads the same way.
+    directory = undefined
+    expect(configuredTasksRoot()).toBe("")
+    // And the endpoint asks through this same accessor, so the dialog opens on the
+    // root a create would use.
+    const fixture = await scanFixture()
+    try {
+      directory = join(fixture.root, "worktree-space")
+      const answered = await handler("task.suggest-root", { sourceRoot: join(fixture.root, "repo"), tasksRoot: "" })
+      expect(answered.value.suggested).toBe(join(fixture.root, "worktree-space"))
+    } finally {
+      await fixture.cleanup()
+    }
   })
 
   it("answers whether the agent entries are offered, and offers them by default", async () => {

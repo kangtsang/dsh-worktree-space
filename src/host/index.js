@@ -120,6 +120,23 @@ let archiveStrategyReference
 let handoffEntryReference
 
 /**
+ * Whether the container root is derived from the source root or named by the user.
+ *
+ * `default` is the recommendation the plugin has always made; `custom` hands the
+ * question to the directory below. Volatile for the same reason as the settings above.
+ */
+let tasksRootStrategyReference
+
+/**
+ * The container root the configuration names, under the `custom` strategy.
+ *
+ * Volatile for the same reason as the settings above, and read as a live reference
+ * because the setting is a default for the *next* task space: a value saved while a
+ * session is running has to reach the create that follows it.
+ */
+let tasksRootDirectoryReference
+
+/**
  * The branch prefix a request that names none should use.
  * @returns the configured prefix, or the built-in default when none is set.
  */
@@ -144,17 +161,17 @@ export function configuredArchiveDirectory() {
 }
 
 /**
- * Which of the three roots archived documents are filed under.
+ * Which of the two roots archived documents are filed under.
  *
  * A value the schema does not offer is answered with the default rather than
  * passed on: the setting is read by the finish dialog, which has to compute a
  * destination from it, and an unrecognised word there would have to be guessed at
  * anyway. Falling back here keeps the guess in one place.
- * @returns `'drive'`, `'container'` or `'custom'`.
+ * @returns `'container'` or `'custom'`.
  */
 export function configuredArchiveStrategy() {
   const value = archiveStrategyReference?.get()
-  return value === 'container' || value === 'custom' ? value : 'drive'
+  return value === 'custom' ? value : 'container'
 }
 
 /**
@@ -163,6 +180,22 @@ export function configuredArchiveStrategy() {
  */
 export function configuredHandoffEntry() {
   return handoffEntryReference?.get() === 'hide' ? 'hide' : 'show'
+}
+
+/**
+ * The container root the configuration names for the next task space.
+ *
+ * One answer rather than the pair the two fields hold: a strategy of `default` means
+ * "derive it from the source root", which is the recommendation with nothing added,
+ * and so is a `custom` strategy whose directory was never filled in. Both are
+ * reported as "not named" rather than as a path, because that is what the callers
+ * need - an empty answer leaves the recommendation in place.
+ * @returns the configured directory, or an empty string when the configuration names none.
+ */
+export function configuredTasksRoot() {
+  if (tasksRootStrategyReference?.get() !== 'custom') return ''
+  const value = tasksRootDirectoryReference?.get()
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 /**
@@ -310,38 +343,60 @@ export const Config = z.object({
   defaultBranchPrefix: z.string().default(DEFAULT_BRANCH_PREFIX).volatile()
     .description('The prefix every new task space starts from: the branch is this plus the task name. The create dialog offers to update it.'),
   /**
+   * Whether the container root is the plugin's recommendation or the user's.
+   *
+   * `default` keeps the derived rule - the first directory below the volume root,
+   * which is what gives every project of one root workspace the same container and
+   * the worktree the common ancestor a session needs to commit. `custom` answers
+   * with `tasksRootDirectory` instead, for a user who wants every task space
+   * somewhere of their own; a directory that shares no such ancestor with the
+   * repositories then has to be authorised by hand in the agent sessions the finish
+   * opens, which is what the setting's own note warns about.
+   *
+   * The create dialog offers to save the location it was about to use, the way it
+   * already does for the branch prefix. Volatile like the rest of this schema.
+   */
+  tasksRootStrategy: z.union(['default', 'custom']).default('default').loose().volatile()
+    .description('Where a new task space goes. default derives it from the source root, and custom uses the directory below.'),
+  /**
+   * The container root a task space goes in under the `custom` strategy.
+   *
+   * Empty means "not set", which leaves the recommendation in place rather than
+   * naming nowhere. Unlike the archive directory this one is not merely a
+   * destination: it is checked by the same isolation rule an explicitly requested
+   * container root is, so a directory inside (or containing) the repositories is
+   * refused when a task is created or suggested rather than silently used.
+   */
+  tasksRootDirectory: z.string().default('').volatile()
+    .description('Where new task spaces go under the custom strategy. Empty keeps the derived recommendation instead.'),
+  /**
    * Which root a task's documents are filed under when it is archived.
    *
-   * `drive` anchors them on the task container's volume, at
-   * `<volume>\worktree-space\archived-docs`, so every task made anywhere on that
-   * volume files into one well-known directory. `container` keeps them beside the
-   * task space, under `<container>\archived-docs`, which is what this plugin did
-   * before the setting existed. `custom` uses `archiveDocumentsDirectory`.
+   * `container` keeps them in the container root, under
+   * `<container root>\archived-docs`: everything this plugin writes then lives
+   * under the one directory it names, and no second anchor appears elsewhere on
+   * the volume. `custom` uses `archiveDocumentsDirectory`.
    *
-   * The default is `drive` because the container follows the repositories - that
-   * is what keeps a session from having to be approved to write there - so a rule
-   * shaped like the container would scatter the archive wherever a task space was
-   * made. Volatile like the rest of this schema: the Plugins page serves it and a
-   * write lands on the running entry without a reload.
+   * Volatile like the rest of this schema: the Plugins page serves it and a write
+   * lands on the running entry without a reload.
    */
-  archiveDocumentsStrategy: z.union(['drive', 'container', 'custom']).default('drive').loose().volatile()
-    .description('The root archived documents are filed under. drive anchors them on the task container\'s volume, container keeps them beside the task space, and custom uses the directory below.'),
+  archiveDocumentsStrategy: z.union(['container', 'custom']).default('container').loose().volatile()
+    .description('The root archived documents are filed under. container keeps them in the container root, and custom uses the directory below.'),
   /**
    * Where a task's documents are filed when it is archived, under the `custom`
    * strategy.
    *
-   * Empty means "not set" and falls back to the fixed anchor, which is what the
-   * setting means by default. The per-task folder named after the Workspace and the
-   * moment is added under whatever root is chosen, so two tasks filed into one
-   * directory never mix their documents. Volatile for the same reason as the
-   * strategy above.
+   * Empty means "not set" and falls back to the container root, which is what the
+   * setting files under by default. The `<project>\<task>-<stamp>` folders are
+   * added under whatever root is chosen, so two tasks filed into one directory
+   * never mix their documents. Volatile for the same reason as the strategy above.
    *
    * The value is not checked here. A directory that cannot hold the copy, or one
    * inside the task container, is refused by the archive itself, where the path it
    * has to stay out of is known.
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
-    .description('Where archived documents go under the custom strategy. Empty uses the fixed anchor on the task container\'s volume.'),
+    .description('Where archived documents go under the custom strategy. Empty files them under the container root instead.'),
 })
 
 export function apply(ctx, config = {}) {
@@ -363,15 +418,19 @@ export function apply(ctx, config = {}) {
   // And for the agent handoff entries: the settings card writes this one, the finish
   // dialog reads it, and shown is what anything but an explicit `hide` means.
   handoffEntryReference = config.handoffEntry
+  // And for where a task space goes: the settings card writes the pair, and every
+  // caller that was not told a container root resolves it through these.
+  tasksRootStrategyReference = config.tasksRootStrategy
+  tasksRootDirectoryReference = config.tasksRootDirectory
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot }))
   } else {
-    registerTaskTool(ctx)
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot })
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -472,6 +531,9 @@ export function apply(ctx, config = {}) {
         branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
           ? payload.branchPrefix
           : configuredBranchPrefix(),
+        // Likewise for the location, so the dialog opens on the container root the
+        // configuration names instead of on the one it would otherwise derive.
+        configuredRoot: configuredTasksRoot(),
       })
     })
 
@@ -505,6 +567,9 @@ export function apply(ctx, config = {}) {
         branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
           ? payload.branchPrefix
           : configuredBranchPrefix(),
+        // A request that names no container root takes the configured one, which is
+        // the same answer `task.suggest-root` just gave the dialog.
+        configuredRoot: configuredTasksRoot(),
         push: payload.push === true,
       })
     })
@@ -525,6 +590,7 @@ export function apply(ctx, config = {}) {
       if (!task) throw new Error('A task name is required.')
       return planTask(ctx.subprocess, {
         task,
+        project: typeof payload.project === 'string' ? payload.project : '',
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
         targets: branchTargets(payload.targets),
       })
@@ -535,6 +601,7 @@ export function apply(ctx, config = {}) {
       if (!task) throw new Error('A task name is required.')
       return finishTask(ctx.subprocess, {
         task,
+        project: typeof payload.project === 'string' ? payload.project : '',
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
         merge: payload.merge === true,
         target: typeof payload.target === 'string' ? payload.target : undefined,

@@ -9,17 +9,20 @@ function repository(repoPath: string, rows: Worktree[]): WorktreeList {
   return { repoPath, commonDir: `${repoPath}/.git`, worktrees: [worktree(repoPath, "main", { isMain: true }), ...rows] }
 }
 const root = "E:\\worktree-space"
-const taskPath = (task: string, name: string) => `${root}\\${task}\\${name}`
+// A task space is `<container root>/<project>/<task>`, and the project is the
+// source root's own directory name.
+const project = "kratos-admin"
+const taskPath = (task: string, name: string) => `${root}\\${project}\\${task}\\${name}`
 
 describe("task grouping", () => {
   it("recognizes only the container layout a task is created in", () => {
-    expect(taskContainerOf(worktree(taskPath("antest", "api"), "feat/antest"))).toBe(`${root}\\antest`)
+    expect(taskContainerOf(worktree(taskPath("antest", "api"), "feat/antest"))).toBe(`${root}\\${project}\\antest`)
     // A hand-made worktree keeps its repository's own directory name and does
     // not sit on the branch its container is named after.
     expect(taskContainerOf(worktree("/projects/alpha.worktrees/task", "task/feature"))).toBeUndefined()
     expect(taskContainerOf(worktree("/projects/alpha.worktrees/alpha.worktrees", "task/feature"))).toBeUndefined()
     // The repository's own working tree is never a task.
-    expect(taskContainerOf({ ...worktree(`${root}\\antest\\api`, "feat/antest"), isMain: true })).toBeUndefined()
+    expect(taskContainerOf({ ...worktree(`${root}\\${project}\\antest\\api`, "feat/antest"), isMain: true })).toBeUndefined()
     // A detached worktree has no branch to match.
     expect(taskContainerOf(worktree(taskPath("antest", "api"), undefined))).toBeUndefined()
   })
@@ -33,7 +36,10 @@ describe("task grouping", () => {
     expect(tasks).toHaveLength(1)
     expect(tasks[0]).toMatchObject({
       name: "antest",
-      path: `${root}\\antest`,
+      path: `${root}\\${project}\\antest`,
+      // Both coordinates read back from the path's depth, so a finish names the
+      // same task space the create wrote.
+      project,
       tasksRoot: root,
       branch: "feat/antest",
       changedFiles: 3,
@@ -58,9 +64,23 @@ describe("task grouping", () => {
     expect(tasks.map((task) => task.name)).toEqual(["antest", "zebra"])
   })
 
+  it("keeps two projects' same-named tasks apart", () => {
+    // One container root, two projects, a task called `login` in each: without the
+    // project layer these would be a single task holding two repositories.
+    const tasks = groupTasks([
+      repository("/projects/api", [worktree(`${root}\\kratos-admin\\login\\api`, "task/login")]),
+      repository("/projects/web", [worktree(`${root}\\kratos-api\\login\\web`, "task/login")]),
+    ])
+
+    expect(tasks.map((task) => `${task.project}/${task.name}`)).toEqual(["kratos-admin/login", "kratos-api/login"])
+    expect(tasks.map((task) => task.tasksRoot)).toEqual([root, root])
+    expect(tasks[0].repositories.map((entry) => entry.name)).toEqual(["api"])
+    expect(tasks[1].repositories.map((entry) => entry.name)).toEqual(["web"])
+  })
+
   it("counts a task once when two scans surface the same worktree", () => {
     const row = worktree(taskPath("antest", "api"), "feat/antest", { changedFiles: 2 })
-    const tasks = groupTasks([repository("/projects/api", [row]), repository("E:\\worktree-space\\antest\\api", [row])])
+    const tasks = groupTasks([repository("/projects/api", [row]), repository(`${root}\\${project}\\antest\\api`, [row])])
 
     expect(tasks).toHaveLength(1)
     expect(tasks[0].repositories).toHaveLength(1)

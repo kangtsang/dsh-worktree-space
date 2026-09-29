@@ -77,7 +77,10 @@ async function fixture({ conflict = false, held = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), "dsh-task-merge-"))
   const source = join(root, "source")
   const tasksRoot = join(root, "tasks")
-  const taskPath = join(tasksRoot, "sample")
+  // The project layer a create derives from its source root's own directory name;
+  // this fixture builds the task space by hand, so it names the layer itself.
+  const project = "source"
+  const taskPath = join(tasksRoot, project, "sample")
   const taskRepo = join(taskPath, "source")
 
   git(root, ["init", "-q", "-b", "develop", "source"])
@@ -103,7 +106,7 @@ async function fixture({ conflict = false, held = false } = {}) {
   }
   if (held) git(source, ["worktree", "add", "-q", join(root, "elsewhere"), "main"])
 
-  return { root, source, tasksRoot, taskPath, taskRepo, cleanup: () => rm(root, { recursive: true, force: true }) }
+  return { root, source, tasksRoot, project, taskPath, taskRepo, cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
 /** The source repository's own registered worktrees, the main one included. */
@@ -122,13 +125,13 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     const fixtureUnderTest = await fixture()
     const subprocess = realSubprocess()
     try {
-      const { source, tasksRoot } = fixtureUnderTest
+      const { source, tasksRoot, project } = fixtureUnderTest
       // What the dialog shows before anything is chosen: the branch the source
       // repository is on, and the alternatives beside it.
-      const plan = await planTask(subprocess, { task: "sample", tasksRoot })
+      const plan = await planTask(subprocess, { task: "sample", project, tasksRoot })
       expect(plan.repositories[0]).toMatchObject({ target: "develop", checkedOut: "develop", branches: ["develop", "main"] })
 
-      const result = await finishTask(subprocess, { task: "sample", tasksRoot, merge: true, targets: { source: "main" } })
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true, targets: { source: "main" } })
 
       expect(result.failed).toBe(false)
       expect(result.mergeTarget).toBe("main")
@@ -151,10 +154,10 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     const fixtureUnderTest = await fixture({ conflict: true })
     const subprocess = realSubprocess()
     try {
-      const { source, tasksRoot } = fixtureUnderTest
+      const { source, tasksRoot, project } = fixtureUnderTest
       const before = git(source, ["rev-parse", "main"])
 
-      const result = await finishTask(subprocess, { task: "sample", tasksRoot, merge: true, targets: { source: "main" } })
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true, targets: { source: "main" } })
 
       expect(result.failed).toBe(true)
       expect(result.repositories[0].error).toMatch(/CONFLICT/)
@@ -181,9 +184,9 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     const fixtureUnderTest = await fixture()
     const subprocess = realSubprocess()
     try {
-      const { source, tasksRoot } = fixtureUnderTest
+      const { source, tasksRoot, project } = fixtureUnderTest
 
-      const result = await finishTask(subprocess, { task: "sample", tasksRoot, merge: true })
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
 
       expect(result.failed).toBe(false)
       expect(result.mergeTarget).toBe("develop")
@@ -199,9 +202,9 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     const fixtureUnderTest = await fixture({ held: true })
     const subprocess = realSubprocess()
     try {
-      const { source, tasksRoot } = fixtureUnderTest
+      const { source, tasksRoot, project } = fixtureUnderTest
 
-      const result = await finishTask(subprocess, { task: "sample", tasksRoot, merge: true, targets: { source: "main" } })
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true, targets: { source: "main" } })
 
       expect(result.failed).toBe(true)
       // Git's own refusal, which names the checkout holding the branch. The wording

@@ -8,7 +8,10 @@ import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
 
 const root = "E:\\worktree-space"
-const container = `${root}\\antest`
+// A task space is `<container root>/<project>/<task>`, the project being the source
+// root's own directory name.
+const project = "kratos-admin"
+const container = `${root}\\${project}\\antest`
 const branch = "feat/antest"
 
 function worktree(path: string, on: string | undefined, extra: Partial<Worktree> = {}): Worktree {
@@ -33,6 +36,7 @@ function scanned(): WorktreeList[] {
 function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResult {
   return {
     task: "antest",
+    project,
     path: container,
     mergeTarget: "main",
     repositories: [
@@ -49,7 +53,7 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "drive", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
@@ -69,9 +73,9 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     // answer: branch, merge target, the branches it could merge into instead,
     // commits and uncommitted files per repository. A chosen target comes back
     // with the commits that belong to it, exactly as the Host answers.
-    planTask: vi.fn().mockImplementation(async ({ task, tasksRoot, targets }: { task: string; tasksRoot: string; targets?: Record<string, string> }) => {
+    planTask: vi.fn().mockImplementation(async ({ task, project: layer, tasksRoot, targets }: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }) => {
       const repositories = ["kratos-vue-admin", "kratos-vue-admin-web"].map((name) => {
-        const repoPath = tasksRoot + "\\" + task + "\\" + name
+        const repoPath = tasksRoot + "\\" + layer + "\\" + task + "\\" + name
         const target = targets?.[name] ?? "main"
         return {
           name,
@@ -86,8 +90,9 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
       })
       const built = {
         task,
+        project: layer,
         tasksRoot,
-        path: tasksRoot + "\\" + task,
+        path: tasksRoot + "\\" + layer + "\\" + task,
         mergeTarget: repositories[0].target,
         changedFiles: repositories.reduce((total, repository) => total + repository.changedFiles, 0),
         commits: repositories.reduce((total, repository) => total + repository.commits, 0),
@@ -237,7 +242,7 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", tasksRoot: root, merge: true, deleteBranch: true, force: false, cleanStray: true })
+    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", project, tasksRoot: root, merge: true, deleteBranch: true, force: false, cleanStray: true })
     await waitFor(() => expect(screen.getByText(t("finishDone"))).toBeTruthy())
     expect(screen.getAllByText(new RegExp(t("finishMerged").replace("{target}", "main")))).toHaveLength(2)
     expect(screen.getAllByText(new RegExp(t("finishRemoved"))).length).toBeGreaterThan(0)
@@ -517,16 +522,16 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
 
     await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
-    expect(next.created[0].cwd).toBe("E:/worktree-space/antest")
+    expect(next.created[0].cwd).toBe("E:/worktree-space/kratos-admin/antest")
     await waitFor(() => expect(next.prompts).toHaveLength(1))
     // One turn carries the whole batch, to that one session: the agent is handed the list of
     // repositories with their worktrees at once, rather than being queued a message per
     // repository - and the shared directory its git commands are allowed to write inside is
     // named in the same message.
     expect(next.prompts[0].sessionId).toBe("session-1")
-    expect(next.prompts[0].text).toContain("E:/worktree-space/antest/kratos-vue-admin")
-    expect(next.prompts[0].text).toContain("E:/worktree-space/antest/kratos-vue-admin-web")
-    expect(next.prompts[0].text).toContain("E:/worktree-space/antest")
+    expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest/kratos-vue-admin")
+    expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest/kratos-vue-admin-web")
+    expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest")
     expect(next.prompts[0].text).not.toMatch(/\{[a-z]+\}/)
     // The panel counts sessions and names the repositories they cover: two rows, one
     // session - and the boundary reaches every git directory it needs, which the line
@@ -695,18 +700,18 @@ describe("finishing a task", () => {
     // One session for both repositories, opened on the task space rather than on either
     // worktree: the batch is still one conversation, told about both in one turn.
     await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
-    expect(next.created[0].cwd?.replace(/\\/g, "/")).toBe("E:/worktree-space/antest")
+    expect(next.created[0].cwd?.replace(/\\/g, "/")).toBe("E:/worktree-space/kratos-admin/antest")
     await waitFor(() => expect(next.prompts).toHaveLength(1))
     expect(next.prompts[0].sessionId).toBe("session-1")
-    expect(next.prompts[0].text).toContain("E:/worktree-space/antest/kratos-vue-admin")
+    expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest/kratos-vue-admin")
     expect(next.prompts[0].text).toContain("D:/elsewhere/kratos-vue-admin-web")
     // The directory it works in is named, and so is what that directory does not reach: the
     // message asks for the elevation rather than claiming the git commands will go through.
-    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeTight"), { boundary: "E:/worktree-space/antest" }))
+    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeTight"), { boundary: "E:/worktree-space/kratos-admin/antest" }))
     expect(next.prompts[0].text).not.toMatch(/\{[a-z]+\}/)
     // The panel says the same thing in its own words: one line, one session, and the scope
     // it stops short of.
-    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/worktree-space/antest" }))).toBeTruthy()
+    expect(screen.getByText(format(t("finishHandoffBoundary"), { path: "E:/worktree-space/kratos-admin/antest" }))).toBeTruthy()
     expect(screen.getAllByTitle(t("finishHandoffScopeTight"))).toHaveLength(1)
     expect(screen.queryAllByTitle(t("finishHandoffScopeWide"))).toHaveLength(0)
   })
@@ -929,9 +934,9 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; discardDocuments?: boolean }
-    // The folder is named after the workspace and the moment: the exact second is
-    // the dialog's, so it is matched by shape rather than recomputed here.
-    expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\antest-\\d{8}-\\d{6}$`))
+    // The folder is named after the project and the task with the moment: the exact
+    // second is the dialog's, so it is matched by shape rather than recomputed here.
+    expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\${project}\\\\antest-\\d{8}-\\d{6}$`))
     expect(payload.discardDocuments).toBeUndefined()
   })
 
@@ -972,12 +977,12 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
-    // Under the configured root, and still in a folder of this task's own: one root holds
-    // every task's archive, so the title and the moment are what keep them apart.
-    expect(payload.documentsDirectory).toMatch(new RegExp(`^${configured.replace(/\\/g, "\\\\")}\\\\antest-\\d{8}-\\d{6}$`))
+    // Under the configured root, and still in a project and task folder of this task's
+    // own: one root holds every archive, so those two names are what keep them apart.
+    expect(payload.documentsDirectory).toMatch(new RegExp(`^${configured.replace(/\\/g, "\\\\")}\\\\${project}\\\\antest-\\d{8}-\\d{6}$`))
   })
 
-  it("files under the anchor the shipped strategy names when no directory is set", async () => {
+  it("files under the container root when no directory is set", async () => {
     const user = userEvent.setup()
     // A Host nobody has configured answers with the shipped strategy and no directory at
     // all, which is what a Host that has never had either setting written answers with.
@@ -990,10 +995,10 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
-    // The drive anchor, which this fixture cannot tell from the container root: its task
-    // space sits directly under the volume's own `worktree-space`, so the two coincide.
-    // `documents.test.ts` is where the three roots are told apart.
-    expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\antest-\\d{8}-\\d{6}$`))
+    // The container root's own archived-docs, which is the shipped default: nothing
+    // outside `root` is written, whatever volume the container happened to be made on.
+    // `documents.test.ts` is where the two roots are told apart.
+    expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\${project}\\\\antest-\\d{8}-\\d{6}$`))
   })
 
   it("warns about uncommitted work and only forces discarding it deliberately", async () => {

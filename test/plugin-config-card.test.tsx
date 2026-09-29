@@ -10,7 +10,8 @@ import { t } from "../src/client/lib/i18n"
  * write that lands in that same snapshot, which is what the real form does after a
  * round trip.
  */
-function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "drive") {
+function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "container",
+  tasksRootStrategy = "default", tasksRootDirectory = "") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
@@ -24,6 +25,8 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "", ha
     defaultBranchPrefix: prefix,
     archiveDocumentsStrategy: archiveStrategy,
     archiveDocumentsDirectory: archiveDirectory,
+    tasksRootStrategy,
+    tasksRootDirectory,
   }
   const listeners = new Set<() => void>()
   return {
@@ -182,24 +185,24 @@ describe("the configuration card's agent handoff row", () => {
 })
 
 describe("the configuration card's archive strategy row", () => {
-  it("offers the three roots, and names the one in force", () => {
+  it("offers the two roots, and names the one in force", () => {
     const { form } = configForm()
     render(<PluginConfigCard form={form} />)
 
     // The row is the shape the other display choices have: label, note beneath it, the
-    // value on the trailing side. The Host serves the shipped strategy, so the fixed
-    // anchor is what it names.
+    // value on the trailing side. The Host serves the shipped strategy, so the container
+    // root is what it names.
     expect(hintIn(t("archiveDocumentsStrategy"))).toBe(t("archiveDocumentsStrategyHint"))
-    expect(screen.getByLabelText(t("archiveDocumentsStrategy")).textContent).toContain(t("archiveStrategyDrive"))
+    expect(screen.getByLabelText(t("archiveDocumentsStrategy")).textContent).toContain(t("archiveStrategyContainer"))
 
     fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
     const menu = within(screen.getByRole("menu"))
-    expect([t("archiveStrategyDrive"), t("archiveStrategyContainer"), t("archiveStrategyCustom")]
-      .map((name) => menu.getByRole("menuitem", { name }))).toHaveLength(3)
+    expect([t("archiveStrategyContainer"), t("archiveStrategyCustom")]
+      .map((name) => menu.getByRole("menuitem", { name }))).toHaveLength(2)
   })
 
   it("saves the choice through the form the other display choices use", async () => {
-    const { form, read } = configForm()
+    const { form, read } = configForm("task/", true, "", "hide", "custom")
     render(<PluginConfigCard form={form} />)
 
     fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
@@ -211,9 +214,9 @@ describe("the configuration card's archive strategy row", () => {
   })
 
   it("draws the directory row only while the custom strategy is in force", async () => {
-    // A directory under one of the two computed roots is read by nothing, so showing it
-    // would read as a setting being ignored. Driving it from the control itself rather
-    // than from the fixture is also what proves the row follows a pending choice.
+    // A directory beside the computed root is read by nothing, so showing it would read
+    // as a setting being ignored. Driving it from the control itself rather than from the
+    // fixture is also what proves the row follows a pending choice.
     const { form } = configForm("task/", true, "E:\\archived-docs")
     render(<PluginConfigCard form={form} />)
 
@@ -223,6 +226,88 @@ describe("the configuration card's archive strategy row", () => {
     fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("archiveStrategyCustom") }))
 
     await waitFor(() => expect(screen.getByLabelText(ARCHIVE_LABEL).textContent).toBe("E:\\archived-docs"))
+  })
+})
+
+describe("the configuration card's task space location rows", () => {
+  /** The form as the Host serves it when a directory of the user's own is the location. */
+  const customForm = (tasksRootDirectory: string) => configForm("task/", true, "", "hide", "container", "custom", tasksRootDirectory)
+
+  it("offers the two locations, and names the one in force", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // The archive strategy's shape: a label, a note beneath it, and the value on the
+    // trailing side. The Host serves the shipped strategy, so the derived location is
+    // what it names.
+    expect(hintIn(t("tasksRootStrategy"))).toBe(t("tasksRootStrategyHint"))
+    expect(screen.getByLabelText(t("tasksRootStrategy")).textContent).toContain(t("tasksRootStrategyDefault"))
+
+    fireEvent.click(screen.getByLabelText(t("tasksRootStrategy")))
+    const menu = within(screen.getByRole("menu"))
+    expect([t("tasksRootStrategyDefault"), t("tasksRootStrategyCustom")]
+      .map((name) => menu.getByRole("menuitem", { name }))).toHaveLength(2)
+  })
+
+  it("saves the choice through the form the other display choices use", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("tasksRootStrategy")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("tasksRootStrategyCustom") }))
+
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("tasksRootStrategy", "custom"))
+    expect(read()).toMatchObject({ tasksRootStrategy: "custom" })
+    expect(screen.getByLabelText(t("tasksRootStrategy")).textContent).toContain(t("tasksRootStrategyCustom"))
+  })
+
+  it("draws the directory row only while the custom location is in force", async () => {
+    // A directory the derived location never reads is worth no row: showing it would
+    // read as a setting being ignored. Driving it from the control rather than from the
+    // fixture is also what proves the row follows a pending choice.
+    const { form } = configForm("task/", true, "", "hide", "container", "custom", "E:\\worktree-space")
+    render(<PluginConfigCard form={form} />)
+
+    expect(screen.getByLabelText(t("tasksRootDirectory")).textContent).toBe("E:\\worktree-space")
+
+    fireEvent.click(screen.getByLabelText(t("tasksRootStrategy")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("tasksRootStrategyDefault") }))
+
+    await waitFor(() => expect(screen.queryByLabelText(t("tasksRootDirectory"))).toBeNull())
+  })
+
+  it("keeps the directory row off the card while the derived location is in force", () => {
+    const { form } = configForm("task/", true, "", "hide", "container", "default", "E:\\worktree-space")
+    render(<PluginConfigCard form={form} />)
+
+    // Served but inert: the strategy is what decides, so a leftover directory from an
+    // earlier custom run is not shown as if it were being used.
+    expect(screen.queryByLabelText(t("tasksRootDirectory"))).toBeNull()
+  })
+
+  it("saves a location, and lets it be cleared back to the derived one", async () => {
+    const { form, read } = customForm("E:\\worktree-space")
+    render(<PluginConfigCard form={form} />)
+
+    // The prefix row's shape: a note under the label, the value locked behind Edit.
+    expect(hintIn(t("tasksRootDirectory"))).toBe(t("tasksRootDirectoryHint"))
+    const row = rowFor(t("tasksRootDirectory"))
+    fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
+    const input = within(row).getByRole("textbox", { name: t("tasksRootDirectory") }) as HTMLInputElement
+    expect(input.value).toBe("E:\\worktree-space")
+
+    fireEvent.change(input, { target: { value: "E:\\spaces" } })
+    fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("tasksRootDirectory", "E:\\spaces"))
+    expect(read()).toMatchObject({ tasksRootDirectory: "E:\\spaces" })
+
+    // Empty is this setting's own "not set", which leaves the derived location in place —
+    // a value the row sends rather than one it refuses.
+    fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
+    fireEvent.change(within(row).getByRole("textbox", { name: t("tasksRootDirectory") }), { target: { value: "   " } })
+    fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("tasksRootDirectory", ""))
+    expect(read()).toMatchObject({ tasksRootDirectory: "" })
   })
 })
 
@@ -240,7 +325,7 @@ describe("the configuration card's archive destination row", () => {
     expect(screen.getByLabelText(ARCHIVE_LABEL).textContent).toBe("E:\\archived-docs")
   })
 
-  it("saves a destination, and lets it be cleared back to the anchor", async () => {
+  it("saves a destination, and lets it be cleared back to the container root", async () => {
     const { form, read } = customForm("E:\\archived-docs")
     render(<PluginConfigCard form={form} />)
 
@@ -254,8 +339,9 @@ describe("the configuration card's archive destination row", () => {
     await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", "E:\\docs"))
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "E:\\docs" })
 
-    // Empty is the setting's own "not set", which falls back to the fixed anchor — a value
-    // the row sends rather than one it refuses; the prefix row is the one that refuses.
+    // Empty is the setting's own "not set", which falls back to the container root — a
+    // value the row sends rather than one it refuses; the prefix row is the one that
+    // refuses.
     fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
     fireEvent.change(within(row).getByRole("textbox", { name: ARCHIVE_LABEL }), { target: { value: "   " } })
     fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))

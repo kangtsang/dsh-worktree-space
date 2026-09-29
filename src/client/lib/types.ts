@@ -89,6 +89,8 @@ export interface TaskRootSuggestion {
 /** Answer of `task.create`. */
 export interface CreateTaskResult {
   task: string
+  /** The project layer the task was filed under: the source root's directory name. */
+  project: string
   branch: string
   path: string
   tasksRoot: string
@@ -133,6 +135,8 @@ export interface TaskInspection {
   isTask: boolean
   /** The task's name, from its breadcrumb when it has one. */
   task: string
+  /** The project the task is filed under, from its record or from its path. */
+  project: string
   /** The container root the task sits in, which `task.done` takes as `tasksRoot`. */
   tasksRoot: string
   branch?: string
@@ -182,6 +186,8 @@ export interface TaskPlanStray {
 /** Answer of `task.plan`: what archiving would do, before anything is done. */
 export interface TaskPlan {
   task: string
+  /** The project the task is filed under, which `task.done` takes as `project`. */
+  project: string
   path: string
   /** The container root the task sits in, which `task.done` takes as `tasksRoot`. */
   tasksRoot: string
@@ -197,6 +203,8 @@ export interface TaskPlan {
 /** Answer of `task.done`. */
 export interface FinishTaskResult {
   task: string
+  /** The project the finished task was filed under. */
+  project: string
   path: string
   /** The merge target the first merged repository reported. */
   mergeTarget?: string

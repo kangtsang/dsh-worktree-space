@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, GitPullRequest, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { slashPath, slugOf, taskDirectory } from "../lib/paths"
+import { nameOf, slashPath, slugOf, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
@@ -71,11 +71,12 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
   const [namedBase, setNamedBase] = useState("")
   const [saveAsDefault, setSaveAsDefault] = useState(false)
+  const [saveRootAsDefault, setSaveRootAsDefault] = useState(false)
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   // Prevent duplicate mutations even before React commits the disabled state.
   const busyRef = useRef(false)
-  const [recovery, setRecovery] = useState<{ task: string; tasksRoot: string; path: string; branch: string } | null>(null)
+  const [recovery, setRecovery] = useState<{ task: string; project: string; tasksRoot: string; path: string; branch: string } | null>(null)
 
   useEffect(() => {
     setTaskName("")
@@ -83,6 +84,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     setNamedBase("")
     setRecovery(null)
     setSaveAsDefault(false)
+    setSaveRootAsDefault(false)
   }, [target.path])
 
   // The configured default is read from the form the Plugins page edits, and kept
@@ -141,6 +143,13 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   // save, and an unusable one would be refused by the Host. The field is prefilled
   // with the current default, so the box starts clear rather than already ticked.
   const canSaveDefault = typedPrefix !== "" && prefixProblem === "" && typedPrefix !== configuredPrefix
+  // The suggestion carries the container root the configuration names, when it names
+  // one, so this is one comparison rather than a second read of the settings: a field
+  // left where the dialog put it is already the default, and one that was moved is a
+  // location the user may want next time too.
+  const typedRoot = tasksRoot.trim()
+  const defaultRoot = suggestion === null ? "" : slashPath(suggestion.suggested)
+  const canSaveDefaultRoot = typedRoot !== "" && defaultRoot !== "" && typedRoot !== defaultRoot
   // The host refuses separators and whitespace; this form additionally keeps the
   // name a valid Git ref, so the branch cannot fail later.
   const normalizedName = taskName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
@@ -148,7 +157,13 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const validSlug = /^[a-z0-9_][a-z0-9._-]*$/.test(taskSlug)
     && !taskSlug.includes("..") && !taskSlug.endsWith(".") && !taskSlug.endsWith(".lock")
   const taskBranch = validSlug && prefixProblem === "" ? `${effectivePrefix}${taskSlug}` : ""
-  const taskPath = taskSlug !== "" && tasksRoot.trim() !== "" ? taskDirectory(tasksRoot.trim(), taskSlug) : ""
+  // The project layer is the source root's own directory name, which is how the
+  // Host files it - so the preview reads `<container root>/<project>/<task>` and
+  // matches what `task.create` will write.
+  const project = nameOf(target.path)
+  const taskPath = taskSlug !== "" && tasksRoot.trim() !== "" && project !== ""
+    ? taskDirectory(taskDirectory(tasksRoot.trim(), project), taskSlug)
+    : ""
   const invalidName = taskName.length > 0 && !validSlug
   // Which rule it broke, in the order the checks run.
   const nameProblem = !invalidName ? "" : taskSlug === "" ? "invalidNameEmpty" : taskSlug.startsWith(".") ? "invalidNameLeadingDot" : taskSlug.includes("..") ? "invalidNameConsecutiveDots" : taskSlug.endsWith(".lock") ? "invalidNameLockSuffix" : taskSlug.endsWith(".") ? "invalidNameTrailingDot" : "invalidNameGeneric"
@@ -193,7 +208,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     try {
       // The task is freshly created, so finishing it removes its worktrees and
       // the container while keeping the branches.
-      await api.doneTask({ task: recovery.task, tasksRoot: recovery.tasksRoot })
+      await api.doneTask({ task: recovery.task, project: recovery.project, tasksRoot: recovery.tasksRoot })
       setRecovery(null)
       onClose()
     } catch (reason: any) {
@@ -216,7 +231,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       return
     }
     startBusy()
-    let created: { path: string; task: string } | undefined
+    let created: { path: string; task: string; project: string } | undefined
     let workspace: Workspace | undefined
     // Which step failed decides what the user is offered: only a registration the
     // plugin made itself is worth undoing or retrying as one unit.
@@ -230,7 +245,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         baseRef: baseRef === "" ? undefined : baseRef,
         branchPrefix: effectivePrefix,
       })
-      created = { path: result.path, task: result.task }
+      // The Host's own project name, not the one this dialog derived: cleanup
+      // names the task space back to it, so it must be the one that was written.
+      created = { path: result.path, task: result.task, project: result.project }
       // Ticking the box is a promise about the *next* task space, so the new default
       // is written only once this one exists - and a form that refuses it cannot
       // undo the task that was just created.
@@ -238,6 +255,19 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         const accepted = await config?.set("defaultBranchPrefix", typedPrefix)
         setSaveAsDefault(false)
         if (!accepted) setError(t("branchPrefixNotSaved"))
+      }
+      // The location is two settings rather than one - the strategy names the rule and
+      // the directory is what the custom one reads - so they are written in the order
+      // that leaves nothing odd behind: a directory the Host refuses is never paired
+      // with a strategy that would read it, and a directory it accepted while the
+      // strategy write failed stays inert under the default.
+      if (saveRootAsDefault && canSaveDefaultRoot) {
+        const savedDirectory = await config?.set("tasksRootDirectory", typedRoot)
+        const savedStrategy = savedDirectory === true
+          ? await config?.set("tasksRootStrategy", "custom")
+          : false
+        setSaveRootAsDefault(false)
+        if (savedStrategy !== true) setError(t("tasksRootNotSaved"))
       }
       phase = "register"
       workspace = await workspaces.create({ path: result.path })
@@ -362,6 +392,27 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         <label className="dws-field-label" htmlFor={`${id}-container`}><span id={`${id}-container-label`}>{t("containerLocation")}</span><span className="dws-field-note">{t("containerHint")}</span></label>
         <Input id={`${id}-container`} aria-labelledby={`${id}-container-label`} value={tasksRoot} disabled={fieldsDisabled} onChange={(event) => setTasksRoot(event.target.value)} autoComplete="off" spellCheck={false} aria-describedby={`${id}-container-note`} />
         <span id={`${id}-container-note`} className="dws-field-note dws-visually-hidden">{t("containerHint")}</span>
+        {/* Offered on the same terms as the prefix above: a field left where the dialog
+            put it has nothing to promise, and a moved one can become the next task
+            space's default. The note under it is the one the setting carries in the
+            configuration, because it is the same trade-off the user is deciding. */}
+        {canSaveDefaultRoot ? <>
+          <label className="dws-default-prefix" htmlFor={`${id}-default-root`}>
+            <input
+              id={`${id}-default-root`}
+              className="dws-checkbox"
+              type="checkbox"
+              aria-label={t("rememberTasksRoot")}
+              checked={saveRootAsDefault}
+              disabled={fieldsDisabled}
+              onChange={(event) => setSaveRootAsDefault(event.target.checked)}
+            />
+            <span className="dws-check-copy">
+              <span className="dws-check-label">{t("rememberTasksRoot")}</span>
+            </span>
+          </label>
+          <p className="dws-field-note">{t("tasksRootStrategyHint")}</p>
+        </> : null}
       </div>
     </div>
   </fieldset>

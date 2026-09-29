@@ -69,12 +69,18 @@ export const ARCHIVE_DIRECTORY_LABEL = "archiveDocumentsDirectory"
 export const ARCHIVE_DIRECTORY_LABEL_FALLBACK = "Custom archive directory"
 /** The key for the note under it, and the wording shown without that key. */
 export const ARCHIVE_DIRECTORY_HINT = "archiveDocumentsDirectoryHint"
-export const ARCHIVE_DIRECTORY_HINT_FALLBACK = "Used only by the custom strategy; empty falls back to the fixed directory on the drive."
+export const ARCHIVE_DIRECTORY_HINT_FALLBACK = "Used only by the custom strategy; empty files them under the container root instead."
 
 /** The row that decides which root archived documents are filed under. */
 const ARCHIVE_STRATEGY_FIELD = "archiveDocumentsStrategy"
 /** The strategy in force when the Host serves none, which is the schema's own default. */
-const ARCHIVE_STRATEGY_FALLBACK = "drive"
+const ARCHIVE_STRATEGY_FALLBACK = "container"
+
+/** The row that decides where a new task space goes, and the directory it may name. */
+const TASKS_ROOT_STRATEGY_FIELD = "tasksRootStrategy"
+const TASKS_ROOT_DIRECTORY_FIELD = "tasksRootDirectory"
+/** The strategy in force when the Host serves none, which is the schema's own default. */
+const TASKS_ROOT_STRATEGY_FALLBACK = "default"
 
 /**
  * The fields this plugin declares in its Host configuration.
@@ -131,23 +137,45 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     hint: t("defaultBranchPrefixHint"),
   },
   {
+    // Where a new task space goes. The same shape as the archive location below, and
+    // for the same reason: the default is a rule rather than a path, and only the
+    // other choice is a directory the user names - in the row under this one. It is
+    // offered first because it is asked before anything is created.
+    field: TASKS_ROOT_STRATEGY_FIELD,
+    label: t("tasksRootStrategy"),
+    fallback: TASKS_ROOT_STRATEGY_FALLBACK,
+    hint: t("tasksRootStrategyHint"),
+    choices: [
+      { value: "default", key: "tasksRootStrategyDefault" },
+      { value: "custom", key: "tasksRootStrategyCustom" },
+    ],
+  },
+  {
+    // The container root only the custom strategy reads. Clearing it is how the
+    // setting says "not set", which leaves the derived recommendation in place.
+    kind: "text",
+    field: TASKS_ROOT_DIRECTORY_FIELD,
+    label: t("tasksRootDirectory"),
+    fallback: "",
+    hint: t("tasksRootDirectoryHint"),
+    allowEmpty: true,
+  },
+  {
     // Which root archived documents are filed under. A choice rather than free text
-    // because the two built-in roots are computed - one from the task container's
-    // volume, one from the container itself - and only the third is a directory the
-    // user names, in the row below this one.
+    // because the shipped root is computed - from the container itself - and only the
+    // other is a directory the user names, in the row below this one.
     field: ARCHIVE_STRATEGY_FIELD,
     label: t("archiveDocumentsStrategy"),
     fallback: ARCHIVE_STRATEGY_FALLBACK,
     hint: t("archiveDocumentsStrategyHint"),
     choices: [
-      { value: "drive", key: "archiveStrategyDrive" },
       { value: "container", key: "archiveStrategyContainer" },
       { value: "custom", key: "archiveStrategyCustom" },
     ],
   },
   {
     // The root only the custom strategy reads. Clearing it is how the setting says
-    // "not set", which falls back to the fixed anchor rather than leaving the archive
+    // "not set", which falls back to the container root rather than leaving the archive
     // nowhere to go - so the field may be emptied as well as typed into. The row is
     // drawn only while that strategy is in force: a destination nothing reads would
     // look like a setting that is being ignored.
@@ -254,7 +282,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -338,11 +366,16 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
   // The strategy in force decides whether the custom destination is worth a row, so it
   // is read here rather than inside the map, which filters on it. The pending value is
   // read first, so the row appears the moment the choice is made rather than a round
-  // trip later.
+  // trip later. Both pairs work the same way: a directory that nothing reads would look
+  // like a setting being ignored.
   const strategy = chosen[ARCHIVE_STRATEGY_FIELD] ?? served[ARCHIVE_STRATEGY_FIELD] ?? ARCHIVE_STRATEGY_FALLBACK
+  const tasksRootStrategy = chosen[TASKS_ROOT_STRATEGY_FIELD] ?? served[TASKS_ROOT_STRATEGY_FIELD] ?? TASKS_ROOT_STRATEGY_FALLBACK
+  const shown = (field: Field) => field.field === "archiveDocumentsDirectory"
+    ? strategy === "custom"
+    : field.field === TASKS_ROOT_DIRECTORY_FIELD ? tasksRootStrategy === "custom" : true
   return <div className="dws-plugin-config" ref={card}>
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
-    {fieldsFor(t).filter((field) => field.field !== "archiveDocumentsDirectory" || strategy === "custom").map((field) => {
+    {fieldsFor(t).filter(shown).map((field) => {
       if (field.kind === "text") {
         return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
       }

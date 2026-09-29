@@ -1,4 +1,4 @@
-import { cleanPath, nameOf, parentOf } from "./paths"
+import { cleanPath, containerRootOf, nameOf, parentOf, projectOf } from "./paths"
 import type { Worktree, WorktreeList } from "./types"
 
 /** One repository inside a task container, with the status the page already read. */
@@ -19,8 +19,8 @@ export interface TaskRepository {
 }
 
 /**
- * A task container: one directory beside the repositories' directory holding one worktree
- * per repository, all on one branch.
+ * A task container: one directory under a project under the container root,
+ * holding one worktree per repository, all on one branch.
  *
  * The page derives these from the worktrees it already scanned rather than
  * asking the Host for a second list, so a task is exactly as visible as the
@@ -28,10 +28,12 @@ export interface TaskRepository {
  * is left to finish.
  */
 export interface TaskGroup {
-  /** Container directory name, which is what `task.done` takes as `task`. */
+  /** Task directory name, which is what `task.done` takes as `task`. */
   name: string
-  /** Container directory. */
+  /** Task directory, `<container root>/<project>/<task>`. */
   path: string
+  /** The project this task is filed under, read from the path's depth. */
+  project: string
   /** Container root, which is what `task.done` takes as `tasksRoot`. */
   tasksRoot: string
   /** The shared branch, when every repository agrees on one. */
@@ -89,7 +91,10 @@ export function groupTasks(repos: WorktreeList[], { pending }: { pending?: strin
           group: {
             name: nameOf(container),
             path: container,
-            tasksRoot: parentOf(container),
+            project: projectOf(container),
+            // Two levels up, not one: the task's parent is its project, and the
+            // project's parent is the root `task.done` files the archive against.
+            tasksRoot: containerRootOf(container),
             repositories: [],
             changedFiles: 0,
             commits: 0,
@@ -139,5 +144,7 @@ export function groupTasks(repos: WorktreeList[], { pending }: { pending?: strin
     task.branch = branches.size === 1 ? task.repositories[0]?.branch : undefined
     task.repositories.sort((left, right) => left.name.localeCompare(right.name))
   }
-  return tasks.sort((left, right) => left.name.localeCompare(right.name))
+  // Project first, then task: two projects may each hold a task of the same name,
+  // and a name-only order would leave their relative order to the map's insertion.
+  return tasks.sort((left, right) => left.project.localeCompare(right.project) || left.name.localeCompare(right.name))
 }

@@ -23,18 +23,32 @@ Drive the whole workflow through the `task_worktree_space` tool. Do not run
 ## The model
 
 ```
-E:\workspace\public\projects\      ← source root: the repositories, stay on main
-├── project_a\
-└── project_b\
-
-E:\worktree-space\                 ← task space: beside the repositories' directory
-└── fix-login\                     ← the task directory — the session's cwd
-    ├── project_a\                 ← worktree, branch task/fix-login
-    └── project_b\
+~/workspace/                        ← the root workspace: the first directory below the volume root
+├── projects/                        ← source root: the repositories, stay on main
+│   ├── project_a/
+│   └── project_b/
+├── deep/other-project/              ← another source root, filed deeper — same container
+└── worktree-space/                  ← container root: one level below the root workspace
+    └── projects/                    ← project layer: the source root's own directory name
+        └── fix-login/               ← the task directory — the session's cwd
+            ├── project_a/           ← worktree, branch task/fix-login
+            └── project_b/
 ```
 
+The container root holds one directory per **project** — the source root's own
+directory name, derived rather than asked for — and each project holds its tasks.
+That is what keeps two projects' tasks of the same name apart, and it is the same
+depth in every case, so the task directory is always `<container root>/<project>/<task>`.
+
 For a single repository the shape is the same: the source root is that one
-repository and the task directory holds a single worktree of it.
+repository and the task directory holds a single worktree of it. Where the source
+root **is** the repository, the project layer and the repository take the same
+name — `~/workspace/repo-x` gives `<container root>/repo-x/fix-login/repo-x` —
+and that repeat is deliberate, not a mistake to correct.
+
+The container root is the plugin's own zone: the first task space created under it
+writes a `README.md` there saying so, and a container root that is itself a git
+repository (it has a `.git`) is refused outright.
 
 Why this shape:
 
@@ -57,18 +71,27 @@ Follow this order. Never create a workspace with a guessed location.
    session's working directory. If that directory is itself a git repository it
    is used directly; a git worktree checkout is not a source root.
 3. **Run `action: "suggest-root"`** with that directory as `sourceRoot`. It
-   reports the repositories the task would span and the recommended task space
-   location — `worktree-space` inside the first directory below the volume root
-   that the source root sits in, so the task space and the source tree share a
-   prefix and a session opened on their common ancestor can still reach each
-   worktree's index (which lives under the source repository's
+   reports the repositories the task would span and the recommended container
+   root — `worktree-space` one level below the **root workspace**, that is, in
+   the first directory the source root sits in below its volume root. Two source
+   roots under the same root workspace are offered the same container however
+   deep their own project is filed (`~/workspace/projects` and
+   `~/workspace/deep/other-project` both recommend
+   `~/workspace/worktree-space`). The task space and the source tree therefore
+   share a prefix, and a session opened on their common ancestor can still reach
+   each worktree's index (which lives under the source repository's
    `.git/worktrees/<name>/`) to commit and to resolve a conflict. A source root
    sitting directly under the volume root shares nothing but that root with its
    worktrees, so a session there has to be approved in by the user.
+   The plugin's own configuration can name the container root instead — that
+   setting is the user's standing answer to where task spaces go — and
+   `suggest-root` reports that one when it is set, so report what it returns
+   rather than a location of your own.
 4. **Ask the user where the task space should live**, offering the recommendation
    first and one or two alternatives. Skip the question only when the user
-   already stated the location. Never offer a location inside the repositories'
-   directory, and never one that would hold it.
+   already stated the location, and expect the recommendation to be the
+   configured container root when the plugin has one. Never offer a location
+   inside the repositories' directory, and never one that would hold it.
 5. **Ask which repositories** to include when the source root holds several and
    the user did not say; pass the chosen directory names as `repos`.
 6. **Ask which commit to start from** — recommend each repository's current HEAD
@@ -106,6 +129,12 @@ worktrees of different repositories:
 Run `action: "done"`. By default it **removes the worktrees, keeps every branch,
 and keeps any stray files** the session left in the task space — it does not
 merge, delete a branch, or delete stray files unless asked.
+
+Name the task's own layer as well as the container: pass `tasksRoot` (the container
+root), `task`, and `project` — the source root's directory name. Passing `sourceRoot`
+instead of `project` is enough, since the name is derived from it; passing neither is
+refused, because the container root alone cannot say which project's task of that name
+was meant.
 
 Confirm each destructive step with the user before passing it:
 
@@ -189,6 +218,9 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
 
 - A task space inside the repositories' directory, or a directory that holds them,
   is refused: work and source must stay isolated.
+- A container root that is itself a git repository (it holds a `.git`) is refused
+  before anything is created — that zone is for worktrees, not for a checkout of
+  its own. Point `tasksRoot` somewhere that is not a repository.
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
 - `create` refuses a base that any repository does not have.

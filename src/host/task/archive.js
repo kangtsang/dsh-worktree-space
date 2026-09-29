@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateTaskName } from './naming.js'
-import { assertIsolated, recommendTasksRoot } from './paths.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName } from './naming.js'
+import { assertIsolated } from './paths.js'
 
-import { TASK_OWNED_FILES, isLinkedWorktree } from './shared.js'
+import { TASK_OWNED_FILES, isLinkedWorktree, taskSpacePath } from './shared.js'
 
 /**
  * Whether a merge is waiting to be concluded in a checkout.
@@ -221,13 +221,14 @@ async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
  * previews a choice the user just made: the target and the commit count it gets
  * back are the ones {@link finishTask} would act on.
  * @param subprocess - the profile's subprocess service.
- * @param options - `task`, `tasksRoot`, and the optional per-repository `targets`.
+ * @param options - `task`, `project`, `tasksRoot`, and the optional per-repository `targets`.
  * @returns the per-repository plan and its totals.
  * @throws Error when the task directory or its worktrees cannot be found.
  */
-export async function planTask(subprocess, { task, tasksRoot, targets } = {}) {
+export async function planTask(subprocess, { task, project, tasksRoot, targets } = {}) {
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
-  const taskPath = join(tasksRoot.trim(), validateTaskName(task))
+  const projectName = validateProjectName(project)
+  const taskPath = taskSpacePath(tasksRoot, projectName, task)
   if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -294,7 +295,7 @@ export async function planTask(subprocess, { task, tasksRoot, targets } = {}) {
     repositories.push(plan)
   }
 
-  return { task, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays }
+  return { task, project: projectName, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays }
 }
 
 
@@ -378,13 +379,14 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
  * Merging the resolved branch into the source repository is the step this side owns, and
  * it runs outside any session, where git's own directory is in reach.
  * @param subprocess - the profile's subprocess service.
- * @param options - the task, its root, and what to do with branches, documents and worktrees.
+ * @param options - the task, its project, its root, and what to do with branches, documents and worktrees.
  * @returns what each repository's worktree, branch and merge ended up as.
  * @throws Error when the task space is missing or the request contradicts itself.
  */
 export async function finishTask(subprocess, options) {
   const {
     task,
+    project,
     tasksRoot,
     merge = false,
     target,
@@ -405,13 +407,15 @@ export async function finishTask(subprocess, options) {
   }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
 
-  // Resolved and checked before anything is touched: when the documents are
-  // archived the originals leave the container, which is then removed — so a
-  // destination inside the container would be deleted moments after the copy.
-  const destination = typeof documentsDirectory === 'string' ? documentsDirectory.trim() : ''
-  if (destination !== '') assertIsolated(join(tasksRoot.trim(), validateTaskName(task)), destination)
+  const projectName = validateProjectName(project)
+  const taskPath = taskSpacePath(tasksRoot, projectName, task)
 
-  const taskPath = join(tasksRoot.trim(), validateTaskName(task))
+  // Checked before anything is touched: when the documents are archived the
+  // originals leave the container, which is then removed — so a destination
+  // inside the container would be deleted moments after the copy.
+  const destination = typeof documentsDirectory === 'string' ? documentsDirectory.trim() : ''
+  if (destination !== '') assertIsolated(taskPath, destination)
+
   if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -621,6 +625,7 @@ export async function finishTask(subprocess, options) {
 
   return {
     task,
+    project: projectName,
     path: taskPath,
     mergeTarget: repositories.find((entry) => entry.target)?.target,
     repositories,

@@ -3,7 +3,7 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, commonAncestor, nameOf, parentOf, slashPath } from "../lib/paths"
+import { cleanPath, commonAncestor, containerRootOf, nameOf, projectOf, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finishScene"
 import { BetaNotice } from "./BetaNotice"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
@@ -80,7 +80,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const [options, setOptions] = useState({ merge: true, deleteBranch: false, force: false, archiveDocuments: true })
   // Named once, and used both for the preview and for the call, so what the user
   // reads is the folder they get.
-  const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, workspace?.title, new Date()))
+  const [documentsDirectory, setDocumentsDirectory] = useState(() => documentsDirectoryFor(path, new Date()))
   const [error, setError] = useState("")
   // A report the dialog left behind when it was unmounted is put straight back: the
   // user is returning from the session it handed on, not opening a fresh finish.
@@ -155,9 +155,12 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     // back on screen, so only the newest call is allowed to land.
     const generation = ++planGeneration.current
     try {
+      // The three coordinates the Host needs to name this task space, all read back
+      // from its depth: `<container root>/<project>/<task>`.
       const planned = await api.planTask({
         task: nameOf(path),
-        tasksRoot: parentOf(path),
+        project: projectOf(path),
+        tasksRoot: containerRootOf(path),
         ...(chosen === undefined || Object.keys(chosen).length === 0 ? {} : { targets: chosen }),
       })
       if (generation !== planGeneration.current) return
@@ -239,13 +242,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     void api.preferences().then((served) => {
       if (!live) return
       setHandoffEntry(served?.handoffEntry !== "hide")
-      setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), {
+      setDocumentsDirectory(documentsDirectoryFor(path, new Date(), {
         strategy: served?.archiveDocumentsStrategy ?? DEFAULT_ARCHIVE_PREFERENCE.strategy,
         directory: typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : "",
       }))
     }).catch(() => { /* falls back to the default folder and to hidden entries */ })
     return () => { live = false }
-  }, [api, path, workspace?.title])
+  }, [api, path])
 
   /**
    * Follow the sessions the handoff opened, so "working" turns into "stopped" on
@@ -422,6 +425,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     try {
       const archived = await api.doneTask({
         task: plan.task,
+        project: plan.project,
         tasksRoot: plan.tasksRoot,
         merge: options.merge,
         // The branch each repository was pointed at, when the user picked one; a

@@ -6,6 +6,7 @@
 import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
@@ -26,9 +27,9 @@ export async function classifySourceRoot(sourceRoot) {
 }
 
 
-export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX } = {}) {
+export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX, configuredRoot = '' } = {}) {
   const requested = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
-  const suggested = resolveTasksRoot(sourceRoot, requested)
+  const suggested = resolveTasksRoot(sourceRoot, requested, configuredRoot)
   assertIsolated(sourceRoot, suggested)
   const repositories = await discoverSourceRepos(sourceRoot)
   return {
@@ -86,7 +87,9 @@ export function parseBreadcrumb(text) {
 export async function inspectTask(taskPath) {
   const path = String(taskPath ?? '').trim()
   const name = basename(path)
-  const notATask = { path, isTask: false, task: name, tasksRoot: dirname(path), repositories: [] }
+  // Two levels up: a task space is `<container root>/<project>/<task>`.
+  const containerRoot = dirname(dirname(path))
+  const notATask = { path, isTask: false, task: name, project: basename(dirname(path)), tasksRoot: containerRoot, repositories: [] }
   if (path === '') return notATask
 
   let entries
@@ -110,7 +113,11 @@ export async function inspectTask(taskPath) {
     path,
     isTask: true,
     task: details?.task ?? name,
-    tasksRoot: dirname(path),
+    // The record knows where it was filed. A space made before the project layer
+    // existed has neither field, and its path answers for both: the directory it
+    // sits in is its project, and the one above that the container root.
+    project: typeof details?.project === 'string' && details.project !== '' ? details.project : basename(dirname(path)),
+    tasksRoot: typeof details?.tasksRoot === 'string' && details.tasksRoot !== '' ? details.tasksRoot : containerRoot,
     ...(details?.branch === undefined ? {} : { branch: details.branch }),
     ...(details?.sourceRoot === undefined ? {} : { sourceRoot: details.sourceRoot }),
     ...(details?.baseRef === undefined || details.baseRef === null ? {} : { baseRef: details.baseRef }),
@@ -125,14 +132,28 @@ export async function listTasks(subprocess, { tasksRoot } = {}) {
   const root = tasksRoot.trim()
   if (!existsSync(root)) return { tasksRoot: root, tasks: [] }
 
-  const entries = await readdir(root, { withFileTypes: true })
+  // Two levels: the container root holds one directory per project, and a project
+  // holds one per task. The archive folder is the one directory at the root that
+  // is neither - it is where the `container` strategy files documents, and its
+  // own subdirectories are named after tasks without being any.
+  const projects = await readdir(root, { withFileTypes: true })
   const tasks = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const taskPath = join(root, entry.name)
-    tasks.push({ name: entry.name, path: taskPath, repositories: await listTaskWorktrees(subprocess, taskPath) })
+  for (const project of projects) {
+    if (!project.isDirectory()) continue
+    if (project.name === CONTAINER_ARCHIVE_FOLDER) continue
+    const projectPath = join(root, project.name)
+    for (const entry of await readdir(projectPath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const taskPath = join(projectPath, entry.name)
+      tasks.push({
+        name: entry.name,
+        project: project.name,
+        path: taskPath,
+        repositories: await listTaskWorktrees(subprocess, taskPath),
+      })
+    }
   }
-  tasks.sort((left, right) => left.name.localeCompare(right.name))
+  tasks.sort((left, right) => left.project.localeCompare(right.project) || left.name.localeCompare(right.name))
   return { tasksRoot: root, tasks }
 }
 

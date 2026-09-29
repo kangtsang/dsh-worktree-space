@@ -6,12 +6,13 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
-import { assertIsolated, recommendTasksRoot } from './paths.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
+import { assertIsolated } from './paths.js'
 
-import { TASK_OWNED_FILES, resolveTasksRoot, taskMetadata, writeTaskMetadata } from './shared.js'
+import { TASK_OWNED_FILES, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 export function breadcrumb(details) {
   const { task, branch, baseRef, sourceRoot, repositories } = details
@@ -98,6 +99,7 @@ export async function createTask(subprocess, options) {
     repos,
     baseRef,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
+    configuredRoot = '',
     push = false,
   } = options
 
@@ -105,8 +107,13 @@ export async function createTask(subprocess, options) {
   // Resolved before anything is touched: an unusable prefix must fail as a
   // request, not halfway through a worktree.
   const prefix = validateBranchPrefix(branchPrefix)
-  const tasksRoot = resolveTasksRoot(sourceRoot, requestedRoot)
+  const tasksRoot = resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot)
   assertIsolated(sourceRoot, tasksRoot)
+  // The layer this source root's task spaces live under, so one container holding
+  // several projects never mixes their tasks. Derived from the source root rather
+  // than asked for: the dialog never has to name it, and the layout cannot drift
+  // from the directory the user sees on disk.
+  const project = projectNameFor(sourceRoot)
 
   // An absent list means "every discovered repository"; an explicitly empty one
   // is a caller that selected nothing, which must not silently become all.
@@ -129,7 +136,7 @@ export async function createTask(subprocess, options) {
   }
 
   const branch = branchNameFor(name, prefix)
-  const taskPath = join(tasksRoot, name)
+  const taskPath = taskSpacePath(tasksRoot, project, name)
   if (existsSync(taskPath)) throw new Error(`task space already exists: ${taskPath}`)
 
   for (const repoPath of selected) {
@@ -145,7 +152,11 @@ export async function createTask(subprocess, options) {
     }
   }
 
-  await mkdir(tasksRoot, { recursive: true })
+  await prepareContainerRoot(tasksRoot)
+  // The project directory may already hold other tasks, so only the task's own
+  // directory is asked for strictly: a second one with the same name is reported
+  // rather than silently reused.
+  await mkdir(join(tasksRoot, project), { recursive: true })
   await mkdir(taskPath)
 
   const created = []
@@ -173,6 +184,7 @@ export async function createTask(subprocess, options) {
 
     await writeTaskMetadata(taskPath, taskMetadata({
       task: name,
+      project,
       tasksRoot,
       sourceRoot,
       branch,
@@ -193,6 +205,7 @@ export async function createTask(subprocess, options) {
 
   return {
     task: name,
+    project,
     branch,
     path: taskPath,
     tasksRoot,
