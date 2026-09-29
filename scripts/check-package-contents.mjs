@@ -24,6 +24,8 @@ assert.equal(result.length, 1, "npm pack must produce one package manifest")
 
 const files = result[0].files.map(({ path }) => path).sort()
 const expected = [
+  "CHANGELOG.en.md",
+  "CHANGELOG.md",
   "LICENSE",
   "PERMISSIONS.en.md",
   "PERMISSIONS.md",

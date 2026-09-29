@@ -11,7 +11,7 @@ into the main branch and deletes the worktree branches and the task space.
 
 <img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
 
-[中文](README.md) · **English**
+[中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
 > **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
 > in an experimental validation phase and is **shown by default** - set the plugin's agent handoff

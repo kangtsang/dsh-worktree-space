@@ -43,6 +43,8 @@
     "locale/*.json",
     "icon.svg",
     "package.json",
+    "CHANGELOG.en.md",
+    "CHANGELOG.md",
     "PERMISSIONS.en.md",
     "PERMISSIONS.md",
     "README.en.md",

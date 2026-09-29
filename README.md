@@ -9,7 +9,7 @@ DeepSeek Harness 的 Worktree Space 插件：一个包含单个/多个 Git 仓�
 
 <img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="960">
 
-**简体中文** · [English](README.en.md)
+**简体中文** · [English](README.en.md) · [更新日志](CHANGELOG.md)
 
 > **Beta（实验性）**：把提交和合并冲突交给 agent 处理的功能处于实验性验证阶段，行为可能继续调整；它**默认
 > 显示**，不想看到这两个入口就把插件配置里的「授权 agent 处理入口」设为「隐藏」（见文末「实验性：把提交与
