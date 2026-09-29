@@ -50,12 +50,12 @@
     "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
     "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
   },
-  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6, which registry.npmjs.org serves as latest with gitHead 5774c5f760790dbee99e24bd2b75f731eb779236 and shasum 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7, its tarball byte-identical to npm pack here",
+  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6 and then as 1.0.7, which registry.npmjs.org serves as latest with gitHead 0209e8e176e5b0fc36f6b9bd3c1fa49476370af0 and shasum 603c5fc76c5512483b0a68f3e06fb4787bb50eb4, its tarball byte-identical to npm pack at that commit",
   "manifestCompatibilityFix": {
     "version": "1.0.7",
     "change": "manifest-only: engines.dsh and dsh.compatibility.dsh moved from a single version or a 0.1.7-rc.1 floor to the range \">=0.1.7-alpha.2 <0.2.0\", dsh.compatibility.node added \">=22.19.0\", and dshReleases plus dshOperations now declare every release in the live latest-three window: 0.1.7-alpha.2, 0.1.7-rc.1 and 0.1.7-rc.2",
     "windowAuthority": "official-dsh-releases.mjs resolves the latest-three window from official GitHub Releases and published npm versions in the active major.minor line; previews tagged on the next channel that belong to a later major.minor line are deliberately excluded",
-    "runtimeEvidenceCarriesForward": "lib/index.js and client/client.js are byte-identical to 1.0.6, so the end-to-end evidence in the matrix above still applies",
+    "runtimeEvidenceCarriesForward": "for 1.0.7 itself: lib/index.js and client/client.js were byte-identical to 1.0.6, so the end-to-end evidence in the matrix above applies to that release unchanged",
     "undeclared": "a release that has not been tested stays undeclared rather than being claimed, so it reads as unknown; peer dependencies still pin 0.1.7-rc.1",
     "dshOperations": {
       "0.1.7-alpha.2": {
@@ -85,5 +85,13 @@
       "incompatibleMentions": 0,
       "pnpmPeerNotice": "the routine '[WARN] Issues with peer dependencies found' appears in every install, including the already-verified 0.1.7-rc.2; it is not a version incompatibility"
     }
+  },
+  "archiveStrategyRelease": {
+    "version": "1.0.8",
+    "change": "the archived-documents root became a configured strategy instead of one computed rule: dsh.compatibility.dshOperations is untouched, but the finish dialog now chooses between a fixed anchor on the task container's volume (<volume>\\worktree-space\\archived-docs, the new default), the container beside the task space (<container>\\archived-docs, the previous behaviour) and a configured directory, and adds the per-task <workspace>-<stamp> folder under whichever root is in force",
+    "hostContractUnchanged": "the Host side of the archive is the same surface: task.done still carries the same documentsDirectory string, finishTask still validates it with assertIsolated against the task container, and archive.js's copy/clean-up paths are unchanged. The Host plugin gains one configuration field and one accessor, and lib/index.js is rebuilt for it.",
+    "clientBundleChanged": "client/client.js is no longer byte-identical to 1.0.6 or 1.0.7 - it now computes the destination from the served strategy - so the byte-identity claim recorded under manifestCompatibilityFix stops at 1.0.7",
+    "lifecycleRowsNotReRun": "not yet run for 1.0.8: the install/start/uninstall/rollback rows in the matrix above were taken against 1.0.6 and 1.0.7 tarballs and have not been repeated against a published 1.0.8. The three roots are covered by unit tests (test/documents.test.ts) and by the finish-dialog tests (test/task-finish.test.tsx) only so far; the disposable-profile matrix should be re-run before 1.0.8 is offered to the Catalog",
+    "dumpConfigCountsMayMove": "the --dump-config line counts recorded above are 1.0.7's; a release that adds a configuration field may compose a different tree, so those numbers must not be carried into a 1.0.8 claim without measuring again"
   }
 }

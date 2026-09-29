@@ -1,6 +1,6 @@
 {
   "name": "dsh-worktree-space",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Worktree Space: Creates an isolated workspace per task with Git worktrees for multiple repositories. Agents work in parallel without interference. On completion, it merges branches, removes worktrees, and archives documents.",
   "icon": "./icon.svg",
   "repository": {

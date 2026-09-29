@@ -49,12 +49,11 @@ interface TextField {
 type Field = ChoiceField | TextField
 
 /**
- * Copy for a key that may not exist yet.
+ * Copy for a key the dictionary in force may not carry.
  *
- * Two sessions share this repository, and the one that owns `src/client/lib/i18n.ts`
- * carries the copy for this row. Until that lands, `t` answers with the key itself —
- * so the key is what tells us the copy is missing, and the row falls back to a
- * wording of its own rather than putting `archiveDocumentsDirectory` on screen.
+ * `t` answers with the key itself when it has no entry for it, so the key is what
+ * tells us the copy is missing: the row then shows a wording of its own rather than
+ * putting `archiveDocumentsDirectory` on screen.
  * @param t - the translation function in force.
  * @param key - the key this row would like.
  * @param fallback - what to show while the key is not there.
@@ -65,12 +64,17 @@ const copyOr = (t: (key: string) => string, key: string, fallback: string): stri
   return translated === key ? fallback : translated
 }
 
-/** The copy key the archive destination row prefers, and what it shows until that key exists. */
+/** The copy key the archive destination row prefers, and what it shows without that key. */
 export const ARCHIVE_DIRECTORY_LABEL = "archiveDocumentsDirectory"
-export const ARCHIVE_DIRECTORY_LABEL_FALLBACK = "Archive documents directory"
-/** The key for the note under it, and the wording shown until that key exists. */
+export const ARCHIVE_DIRECTORY_LABEL_FALLBACK = "Custom archive directory"
+/** The key for the note under it, and the wording shown without that key. */
 export const ARCHIVE_DIRECTORY_HINT = "archiveDocumentsDirectoryHint"
-export const ARCHIVE_DIRECTORY_HINT_FALLBACK = "Leave it empty to file documents under each workspace's own default directory."
+export const ARCHIVE_DIRECTORY_HINT_FALLBACK = "Used only by the custom strategy; empty falls back to the fixed directory on the drive."
+
+/** The row that decides which root archived documents are filed under. */
+const ARCHIVE_STRATEGY_FIELD = "archiveDocumentsStrategy"
+/** The strategy in force when the Host serves none, which is the schema's own default. */
+const ARCHIVE_STRATEGY_FALLBACK = "drive"
 
 /**
  * The fields this plugin declares in its Host configuration.
@@ -127,9 +131,26 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     hint: t("defaultBranchPrefixHint"),
   },
   {
-    // The destination an archived task's documents are filed into. Empty is the
-    // setting's "not set", so the field is allowed to be cleared as well as typed
-    // into - clearing it puts every task back on its own computed folder.
+    // Which root archived documents are filed under. A choice rather than free text
+    // because the two built-in roots are computed - one from the task container's
+    // volume, one from the container itself - and only the third is a directory the
+    // user names, in the row below this one.
+    field: ARCHIVE_STRATEGY_FIELD,
+    label: t("archiveDocumentsStrategy"),
+    fallback: ARCHIVE_STRATEGY_FALLBACK,
+    hint: t("archiveDocumentsStrategyHint"),
+    choices: [
+      { value: "drive", key: "archiveStrategyDrive" },
+      { value: "container", key: "archiveStrategyContainer" },
+      { value: "custom", key: "archiveStrategyCustom" },
+    ],
+  },
+  {
+    // The root only the custom strategy reads. Clearing it is how the setting says
+    // "not set", which falls back to the fixed anchor rather than leaving the archive
+    // nowhere to go - so the field may be emptied as well as typed into. The row is
+    // drawn only while that strategy is in force: a destination nothing reads would
+    // look like a setting that is being ignored.
     kind: "text",
     field: "archiveDocumentsDirectory",
     label: copyOr(t, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK),
@@ -233,7 +254,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory"]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -261,7 +282,11 @@ function textOf(section: unknown): Record<string, string> {
  */
 export function PluginConfigCard({ form }: PluginConfigCardProps) {
   const t = useT()
-  const [served, setServed] = useState<Record<string, string>>({})
+  // Read from the snapshot once up front, not only when it changes: the form is a
+  // snapshot rather than something to wait on, so the first paint can already carry the
+  // values in force. It matters here because the strategy among them is what decides
+  // whether the custom archive directory row is drawn at all.
+  const [served, setServed] = useState<Record<string, string>>(() => form === undefined ? {} : textOf(form.getSnapshot().value))
   const [chosen, setChosen] = useState<Record<string, string>>(() => previewValues())
   const [open, setOpen] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -310,9 +335,14 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     })
   }
   if (notice !== null) window.setTimeout(() => setNotice(null), 2400)
+  // The strategy in force decides whether the custom destination is worth a row, so it
+  // is read here rather than inside the map, which filters on it. The pending value is
+  // read first, so the row appears the moment the choice is made rather than a round
+  // trip later.
+  const strategy = chosen[ARCHIVE_STRATEGY_FIELD] ?? served[ARCHIVE_STRATEGY_FIELD] ?? ARCHIVE_STRATEGY_FALLBACK
   return <div className="dws-plugin-config" ref={card}>
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
-    {fieldsFor(t).map((field) => {
+    {fieldsFor(t).filter((field) => field.field !== "archiveDocumentsDirectory" || strategy === "custom").map((field) => {
       if (field.kind === "text") {
         return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
       }

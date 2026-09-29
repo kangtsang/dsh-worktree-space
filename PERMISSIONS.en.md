@@ -37,8 +37,9 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
   installation or a configuration file.
   - Create: `mkdir` the task space directory; `git worktree add` creates each checkout (git writes it); write
     `worktree-space.json` and the `worktree-space.md` rendered from it.
-  - Archive: `cp` the task space's documents to `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>/` (or the
-    archive directory set in the configuration).
+  - Archive: `cp` the task space's documents to `<workspace>-<YYYYMMDD-HHMMSS>/` under the **archive root**
+    the configuration names; the default root is `<volume>:\worktree-space\archived-docs` on the volume the
+    task space sits on, and it can also point beside the task space or at any directory you choose.
   - Clean up: `git worktree remove --force` removes a checkout; a **stale worktree** whose `.git` points at a
     gitdir that no longer exists has that one directory removed with `fs.rm(directory, { recursive: true })`;
     the task space directory itself is deleted and its Workspace registration removed only once it really is

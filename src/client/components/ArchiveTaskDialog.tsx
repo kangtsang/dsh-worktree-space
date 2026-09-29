@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { documentsDirectoryFor } from "../lib/documents"
+import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
 import { cleanPath, commonAncestor, nameOf, parentOf, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finishScene"
 import { BetaNotice } from "./BetaNotice"
@@ -222,24 +222,28 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   }, [path, result, handoff])
 
   /**
-   * What the Host has configured, once it answers: the destination archived documents
-   * are filed into, and whether the agent entries are offered at all.
+   * What the Host has configured, once it answers: the root archived documents are
+   * filed under together with the directory that may narrow it, and whether the agent
+   * entries are offered at all.
    *
-   * Read rather than assumed, and it arrives after the first paint: the computed
-   * folder is on screen until then, so the row never shows an empty path while it
-   * waits. A Host that answers nothing leaves the computed folder in place — which
-   * is exactly what an empty setting means — and leaves the entries shown, which is
-   * what the setting defaults to.
+   * Read rather than assumed, and it arrives after the first paint: the folder the
+   * shipped default computes is on screen until then, so the row never shows an empty
+   * path while it waits. Both halves of the preference are read together, because the
+   * strategy names the root and the directory only narrows it - a directory on its own
+   * says nothing about where the documents would land. A Host that answers nothing
+   * leaves that default folder in place, which is the same answer the schema gives, and
+   * leaves the entries shown, which is what the setting defaults to.
    */
   useEffect(() => {
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
       setHandoffEntry(served?.handoffEntry !== "hide")
-      const configured = typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : ""
-      if (configured.trim() === "") return
-      setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), configured))
-    }).catch(() => { /* falls back to the computed folder and to hidden entries */ })
+      setDocumentsDirectory(documentsDirectoryFor(path, workspace?.title, new Date(), {
+        strategy: served?.archiveDocumentsStrategy ?? DEFAULT_ARCHIVE_PREFERENCE.strategy,
+        directory: typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : "",
+      }))
+    }).catch(() => { /* falls back to the default folder and to hidden entries */ })
     return () => { live = false }
   }, [api, path, workspace?.title])
 

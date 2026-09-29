@@ -33,9 +33,10 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 - **结束任务**：在任务行上点「结束任务」。默认把各仓库的分支合并回该仓库当前检出的分支（也就是任务空间的
   起点；插件不会切换源码仓库的检出），也可以在对话框里按仓库改成别的分支 —— 那会在一个临时 worktree 里
   合并，同样不碰你的检出。worktree 里还没提交的改动得你自己先提交掉（插件不代写提交，见「结束任务」），
-  然后删掉 worktree，把任务空间里的文档存到
-  `archived-docs/<工作区名>-<YYYYMMDD-HHMMSS>`（不勾选归档，就会连这些文件一起删掉），
-  最后注销这个工作区。要是该工作区里还有会话在跑，会先拒绝，等它结束或停掉再试。
+  然后删掉 worktree，把任务空间里的文档归档到 `<归档根目录>/<工作区名>-<YYYYMMDD-HHMMSS>/`
+  （不勾选归档，就会连这些文件一起删掉），最后注销这个工作区。归档根目录默认是**任务空间所在盘符**下的
+  `<盘符>:\worktree-space\archived-docs` —— 文档因此不会跟着任务空间散落到各处；在「配置」里可以改成
+  跟随任务空间，或指定一个目录。要是该工作区里还有会话在跑，会先拒绝，等它结束或停掉再试。
 - **结束任务空间**也在这个工作区列表自己的 `⋯` 菜单里 —— 只对确实是任务空间的目录出现。
 - **新建任务空间**同样在那个 `⋯` 菜单里 —— 只对挂有代码仓库的工作区出现，点开的就是同一个创建对话框。
 - **不需要额外服务。** 入口开关、扫描深度和目录上限都在插件自己的配置里改（见「配置」）。支持 DSH
@@ -44,17 +45,20 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 ## 任务目录结构
 
 ```text
-<任务空间根目录>/
-├── <任务名>/                      任务空间 —— 同时是会话的工作目录
-│   ├── worktree-space.json        任务的记录：分支、起点、仓库与创建时间
-│   ├── worktree-space.md          由上面的记录渲染出来，给人读的分支、起点与约定
-│   ├── <仓库 A>/                  位于 <分支前缀><任务名> 的 worktree
-│   └── <仓库 B>/                  同名分支的 worktree
-└── archived-docs/
-    └── <上级>-<任务名>-20260926-020933/    归档文档时存到这里
+<任务空间根目录>/                       容器跟着仓库目录走：你选它在哪，它就在哪
+├── <任务名>/                           任务空间 —— 同时是会话的工作目录
+│   ├── worktree-space.json             任务的记录：分支、起点、仓库与创建时间
+│   ├── worktree-space.md               由上面的记录渲染出来，给人读的分支、起点与约定
+│   ├── <仓库 A>/                       位于 <分支前缀><任务名> 的 worktree
+│   └── <仓库 B>/                       同名分支的 worktree
+└── archived-docs/                      「跟随任务空间」这一档的归档根
+
+<盘符>:\worktree-space\archived-docs/    「盘符固定目录」这一档的归档根（默认）
+└── <上级>-<任务名>-20260926-020933/     每个任务各自一层，默认档下归档时存到这里
 ```
 
-删掉 worktree 不会删除对应的 Git 分支；结束任务会先把分支合并回去，再删 worktree。
+归档根底下总是再建一层 `<工作区名>-<时间戳>`：默认档把整块盘上的任务都收在一个目录里，那一层就是
+各任务互不混淆的依据。删掉 worktree 不会删除对应的 Git 分支；结束任务会先把分支合并回去，再删 worktree。
 
 ## 兼容性
 
@@ -89,8 +93,9 @@ manifest（`package.json`）里显式声明的兼容范围：
 `POST /api/dsh-worktree-space/task.preference` 作答，再卸载并确认条目归零、重新启动干净。
 完整记录见 [`docs/store-evidence.md`](docs/store-evidence.md)。
 
-**固定提交**：本版（`v1.0.7`）对应的源码提交见 [`docs/store-evidence.md`](docs/store-evidence.md)；验收用的包正是
-从这个提交打出来的，可逐字节核对。
+**固定提交**：本版（`v1.0.8`）的源码提交与逐版本验收记录都在
+[`docs/store-evidence.md`](docs/store-evidence.md) 里；哪一部分已经实测到 1.0.8、哪一部分还停在 1.0.7，
+该文件第 6 节写明了。
 
 `engines.dsh` / `dsh.compatibility.dsh` 是**声明**而非强制：当前 DSH 的安装器与加载器都不校验它，写一个范围不会拒绝不兼容的宿主，
 因此这个范围的含义只是「`0.1.7-alpha.2` 及之后的 `0.1.x` 按兼容处理」；其中逐一验证过的是上表三个版本，
@@ -109,7 +114,7 @@ manifest（`package.json`）里显式声明的兼容范围：
 | 权限 | 范围 |
 | --- | --- |
 | 文件读取 | 你选择的工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间里的 `worktree-space.json`、`worktree-space.md`；各 worktree 的 `.git` 标记文件；插件自带的 `assets/skill/task-worktree-space/SKILL.md`；结束任务时按 `git diff --name-only HEAD` / `--diff-filter=U` 读回那些文件的内容，只为判断合并是否还留着冲突标记 |
-| 文件写入 | 只写任务空间容器：`<任务空间>/<任务名>/` 及其中的 worktree、`worktree-space.json`、`worktree-space.md`、归档时的 `archived-docs/`。结束任务时删除的是插件自己创建的 worktree、任务目录与文档；合并时另在**系统临时目录**里建一份临时检出（`git worktree add` → 合并 → `worktree remove --force` → 删除该目录）。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录与配置文件（配置由 DSH 的插件配置服务保存） |
+| 文件写入 | 只写任务空间容器：`<任务空间>/<任务名>/` 及其中的 worktree、`worktree-space.json`、`worktree-space.md`；归档时另写配置选定的**归档根目录**下的 `<工作区名>-<时间戳>/`（默认 `<盘符>:\worktree-space\archived-docs`，见「配置」）。结束任务时删除的是插件自己创建的 worktree、任务目录与文档；合并时另在**系统临时目录**里建一份临时检出（`git worktree add` → 合并 → `worktree remove --force` → 删除该目录）。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录与配置文件（配置由 DSH 的插件配置服务保存） |
 | 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。查询类：`rev-parse`（含 `rev-parse --verify --quiet MERGE_HEAD`）、`worktree list`、`status`、`rev-list`、`for-each-ref`、`show-ref`、`symbolic-ref`、`merge-base`、`diff --name-only`（含 `--diff-filter=U`）；变更类：`worktree add / remove / prune`、`merge`、`merge --abort`、`reset --hard`、`branch -d / -D`。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下；交给 agent 的提交由**宿主里的 agent** 在那个会话里执行（见失败边界） |
 | 网络 | 只有 `git push -u origin <分支>`，且仅在你于新建面板或工具里显式选择推送时才执行；插件自身不发任何 HTTP 请求、不下载任何东西 |
 | 凭据 | 不读取、不保存、不转发任何凭据。推送时用的是你本机 Git 已配置的凭据（credential helper / SSH），插件不接触密钥，也不读环境变量 |
@@ -182,7 +187,8 @@ dsh plugin --profile web add dsh-worktree-space
 | 扫描深度 | 1–5 层 | 2 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
 | 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | 一次扫描最多读多少个目录；超过会提示你换一个更小的工作区 |
 | 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建面板里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
-| 归档文档目录 | 任意路径 | 留空 | 结束任务归档文档时把文件存到哪里；留空则存到每个工作区标题下的默认目录 |
+| 归档文档位置 | 盘符固定目录 / 跟随任务空间 / 指定目录 | **盘符固定目录** | 归档文档存到哪个根目录下；三档都在该根目录下再建一层 `<工作区名>-<时间戳>`。默认档固定为 `<任务空间所在盘符>:\worktree-space\archived-docs`，与任务空间建在哪一层无关 |
+| 指定归档目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则回退到盘符固定目录 |
 
 扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` 就认定是
 仓库；`node_modules`、`dist`、`build`、`vendor` 等目录和隐藏目录会跳过（`.worktrees` 除外）。

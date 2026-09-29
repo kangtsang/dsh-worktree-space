@@ -94,11 +94,20 @@ let branchPrefixReference
 /**
  * The configured archive destination, as the running entry carries it.
  *
- * Empty is the setting's own "unset": it means every task keeps filing its
- * documents under its own Workspace title, which is the behaviour this plugin had
- * before the setting existed. Volatile for the same reason as the prefix above.
+ * Empty is the setting's own "unset": it means the tasks file their documents
+ * under whichever root the strategy names. Only the `custom` strategy reads this
+ * at all, so an empty value beside that strategy also means "not set". Volatile
+ * for the same reason as the prefix above.
  */
 let archiveDirectoryReference
+
+/**
+ * The configured archive strategy, as the running entry carries it.
+ *
+ * It decides the root the per-task archive folders go under, and the directory
+ * above only narrows it. Volatile for the same reason as the settings above.
+ */
+let archiveStrategyReference
 
 /**
  * Whether the agent handoff entries are offered, as the running entry carries it.
@@ -123,15 +132,29 @@ export function configuredBranchPrefix() {
  * The directory the configuration asks archived documents to be filed into.
  *
  * An empty answer is not an error: it is the setting saying "not set", and the
- * caller keeps its own per-task default. The value is returned as it was written,
- * without checking that it exists or is isolated - the archive is where such a
- * path is judged, because only there is the task container known and a path inside
- * it would be deleted moments after the copy.
+ * caller falls back to the root its strategy names. The value is returned as it
+ * was written, without checking that it exists or is isolated - the archive is
+ * where such a path is judged, because only there is the task container known and
+ * a path inside it would be deleted moments after the copy.
  * @returns the configured directory, or an empty string when none is set.
  */
 export function configuredArchiveDirectory() {
   const value = archiveDirectoryReference?.get()
   return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * Which of the three roots archived documents are filed under.
+ *
+ * A value the schema does not offer is answered with the default rather than
+ * passed on: the setting is read by the finish dialog, which has to compute a
+ * destination from it, and an unrecognised word there would have to be guessed at
+ * anyway. Falling back here keeps the guess in one place.
+ * @returns `'drive'`, `'container'` or `'custom'`.
+ */
+export function configuredArchiveStrategy() {
+  const value = archiveStrategyReference?.get()
+  return value === 'container' || value === 'custom' ? value : 'drive'
 }
 
 /**
@@ -287,20 +310,38 @@ export const Config = z.object({
   defaultBranchPrefix: z.string().default(DEFAULT_BRANCH_PREFIX).volatile()
     .description('The prefix every new task space starts from: the branch is this plus the task name. The create dialog offers to update it.'),
   /**
-   * Where a task's documents are filed when it is archived.
+   * Which root a task's documents are filed under when it is archived.
    *
-   * Empty means "not set", and every task keeps the destination it computed for
-   * itself: a folder of its own, named after its Workspace title, under the
-   * container's `archived-docs`. Set, it becomes the destination the archive dialog
-   * proposes instead. Volatile like the rest of this schema: the Plugins page
-   * serves it and a write lands on the running entry without a reload.
+   * `drive` anchors them on the task container's volume, at
+   * `<volume>\worktree-space\archived-docs`, so every task made anywhere on that
+   * volume files into one well-known directory. `container` keeps them beside the
+   * task space, under `<container>\archived-docs`, which is what this plugin did
+   * before the setting existed. `custom` uses `archiveDocumentsDirectory`.
+   *
+   * The default is `drive` because the container follows the repositories - that
+   * is what keeps a session from having to be approved to write there - so a rule
+   * shaped like the container would scatter the archive wherever a task space was
+   * made. Volatile like the rest of this schema: the Plugins page serves it and a
+   * write lands on the running entry without a reload.
+   */
+  archiveDocumentsStrategy: z.union(['drive', 'container', 'custom']).default('drive').loose().volatile()
+    .description('The root archived documents are filed under. drive anchors them on the task container\'s volume, container keeps them beside the task space, and custom uses the directory below.'),
+  /**
+   * Where a task's documents are filed when it is archived, under the `custom`
+   * strategy.
+   *
+   * Empty means "not set" and falls back to the fixed anchor, which is what the
+   * setting means by default. The per-task folder named after the Workspace and the
+   * moment is added under whatever root is chosen, so two tasks filed into one
+   * directory never mix their documents. Volatile for the same reason as the
+   * strategy above.
    *
    * The value is not checked here. A directory that cannot hold the copy, or one
    * inside the task container, is refused by the archive itself, where the path it
    * has to stay out of is known.
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
-    .description('Where archived documents go. Empty files them under each workspace title, which is the default.'),
+    .description('Where archived documents go under the custom strategy. Empty uses the fixed anchor on the task container\'s volume.'),
 })
 
 export function apply(ctx, config = {}) {
@@ -316,6 +357,9 @@ export function apply(ctx, config = {}) {
   // Likewise for the archive destination: the settings card writes it and the
   // archive dialog reads it, both through this entry rather than its snapshot.
   archiveDirectoryReference = config.archiveDocumentsDirectory
+  // And the strategy beside it, which the dialog needs before the directory is
+  // any use: it names the root the directory may narrow.
+  archiveStrategyReference = config.archiveDocumentsStrategy
   // And for the agent handoff entries: the settings card writes this one, the finish
   // dialog reads it, and shown is what anything but an explicit `hide` means.
   handoffEntryReference = config.handoffEntry
@@ -436,6 +480,7 @@ export function apply(ctx, config = {}) {
       // preference this dialog needs joins it without a second endpoint.
       return {
         defaultBranchPrefix: configuredBranchPrefix(),
+        archiveDocumentsStrategy: configuredArchiveStrategy(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
         handoffEntry: configuredHandoffEntry(),
       }

@@ -49,16 +49,16 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "drive", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(repos),
     cachedScan: vi.fn().mockResolvedValue(null),
-    // What the Host has configured: the archive destination is empty unless a test
-    // sets one, which is the same "not set" the real entry answers with, and the agent
+    // What the Host has configured: the archive reads the shipped strategy unless a test
+    // asks for another one, its directory is empty unless a test sets one, and the agent
     // entries are offered unless a test hides them, which is what a case about the
     // standard flow does.
-    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsDirectory: archiveDirectory, handoffEntry }),
+    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsStrategy: archiveStrategy, archiveDocumentsDirectory: archiveDirectory, handoffEntry }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),
@@ -956,31 +956,31 @@ describe("finishing a task", () => {
     expect(payload.documentsDirectory).toBeUndefined()
   })
 
-  it("files into the configured destination when the Host has one set", async () => {
+  it("files into the directory the Host names under the custom strategy", async () => {
     const user = userEvent.setup()
-    // The setting is read rather than assumed: this Host has one configured, so it is
-    // the folder the dialog proposes and the one the call carries.
+    // The setting is read rather than assumed: this Host roots its archive at a directory
+    // of its own, so that is the folder the dialog proposes and the one the call carries.
     const configured = "E:\\archived-docs"
-    const next = setup({ strays: [{ name: "notes.md", directory: false, documents: 1, kind: "content" }], archiveDirectory: configured })
+    const next = setup({ strays: [{ name: "notes.md", directory: false, documents: 1, kind: "content" }], archiveStrategy: "custom", archiveDirectory: configured })
     await ready()
     await user.click(screen.getByRole("button", { name: t("finishTask") }))
 
     const box = await waitFor(() => option(t("archiveDocuments")))
-    // The row names the configured folder, not a folder computed for this task.
+    // The row names the configured folder, not an anchor computed for this task.
     expect(box.closest(".dws-check-option")?.textContent).toContain(configured.replace(/\\/g, "/"))
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
-    // Exactly the configured directory: no title, no moment added to it, so repeated
-    // archives land in one place rather than in a folder each.
-    expect(payload.documentsDirectory).toBe(configured)
+    // Under the configured root, and still in a folder of this task's own: one root holds
+    // every task's archive, so the title and the moment are what keep them apart.
+    expect(payload.documentsDirectory).toMatch(new RegExp(`^${configured.replace(/\\/g, "\\\\")}\\\\antest-\\d{8}-\\d{6}$`))
   })
 
-  it("keeps the computed folder when the setting is empty", async () => {
+  it("files under the anchor the shipped strategy names when no directory is set", async () => {
     const user = userEvent.setup()
-    // Empty is the setting's "not set", which is also the answer from a Host that has
-    // never had it written: the per-workspace folder has to come back.
+    // A Host nobody has configured answers with the shipped strategy and no directory at
+    // all, which is what a Host that has never had either setting written answers with.
     const next = setup({ strays: [{ name: "notes.md", directory: false, documents: 1, kind: "content" }], archiveDirectory: "" })
     await ready()
     await user.click(screen.getByRole("button", { name: t("finishTask") }))
@@ -990,6 +990,9 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
     const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string }
+    // The drive anchor, which this fixture cannot tell from the container root: its task
+    // space sits directly under the volume's own `worktree-space`, so the two coincide.
+    // `documents.test.ts` is where the three roots are told apart.
     expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\antest-\\d{8}-\\d{6}$`))
   })
 

@@ -1,6 +1,7 @@
 import type { WorkspaceView, IWorkspaces } from "@deepseek-ai/dsh-api-workspace-controller/client"
 import type { UiWorkspace } from "@deepseek-ai/dsh-client-ui-workspace/client"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
+import type { ArchiveStrategy } from "./documents"
 
 /** Workspace row projected by the Host Workspace Controller. */
 export type Workspace = WorkspaceView
@@ -213,6 +214,15 @@ export interface FinishTaskResult {
 /** Answer of `task.preference`: the settings a dialog defaults from. */
 export interface TaskPreference {
   defaultBranchPrefix: string
+  /**
+   * Which root archived documents are filed under; see {@link ArchiveStrategy}.
+   *
+   * Optional because the answer is cast rather than parsed: a Host that predates
+   * this setting answers without it, and the caller reads that as the shipped
+   * default rather than as a strategy it has to guess at.
+   */
+  archiveDocumentsStrategy?: ArchiveStrategy
+  /** The root the `custom` strategy files into, empty when none is set. */
   archiveDocumentsDirectory: string
   /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
   handoffEntry: string

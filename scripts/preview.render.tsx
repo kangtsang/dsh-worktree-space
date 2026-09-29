@@ -79,9 +79,15 @@ function services(workspaces: Array<{ workspaceId: string; path: string; title: 
   return { api, workspaces: service, uiWorkspace: { openWorkspace: vi.fn() } as any, sessions: { list: { getSnapshot: () => ({ byId: {} }) } } as any }
 }
 
-/** The configuration form the create dialog reads its default prefix from. */
+/**
+ * The configuration form the create dialog reads its default prefix from, and the
+ * preview of the settings card is drawn against.
+ *
+ * The archive strategy is the custom one on purpose: that is the only strategy that
+ * draws the directory row under it, so the preview shows the card at its fullest.
+ */
 function configForm(defaultBranchPrefix = "task/") {
-  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix }
+  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix, archiveDocumentsStrategy: "custom", archiveDocumentsDirectory: "E:\\archived-docs" }
   return { getSnapshot: () => ({ status: "ready", value }), subscribe: () => () => {}, set: vi.fn(async () => true) }
 }
 

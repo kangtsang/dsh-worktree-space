@@ -10,7 +10,7 @@ import { t } from "../src/client/lib/i18n"
  * write that lands in that same snapshot, which is what the real form does after a
  * round trip.
  */
-function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide") {
+function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "drive") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
@@ -22,6 +22,7 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "", ha
     scanDepth: 3,
     maxScanDirectories: 3000,
     defaultBranchPrefix: prefix,
+    archiveDocumentsStrategy: archiveStrategy,
     archiveDocumentsDirectory: archiveDirectory,
   }
   const listeners = new Set<() => void>()
@@ -180,9 +181,57 @@ describe("the configuration card's agent handoff row", () => {
   })
 })
 
-describe("the configuration card's archive destination row", () => {
-  it("shows the destination the Host serves, with its own note under the label", () => {
+describe("the configuration card's archive strategy row", () => {
+  it("offers the three roots, and names the one in force", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // The row is the shape the other display choices have: label, note beneath it, the
+    // value on the trailing side. The Host serves the shipped strategy, so the fixed
+    // anchor is what it names.
+    expect(hintIn(t("archiveDocumentsStrategy"))).toBe(t("archiveDocumentsStrategyHint"))
+    expect(screen.getByLabelText(t("archiveDocumentsStrategy")).textContent).toContain(t("archiveStrategyDrive"))
+
+    fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
+    const menu = within(screen.getByRole("menu"))
+    expect([t("archiveStrategyDrive"), t("archiveStrategyContainer"), t("archiveStrategyCustom")]
+      .map((name) => menu.getByRole("menuitem", { name }))).toHaveLength(3)
+  })
+
+  it("saves the choice through the form the other display choices use", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("archiveStrategyContainer") }))
+
+    expect(screen.getByLabelText(t("archiveDocumentsStrategy")).textContent).toContain(t("archiveStrategyContainer"))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsStrategy", "container"))
+    expect(read()).toMatchObject({ archiveDocumentsStrategy: "container" })
+  })
+
+  it("draws the directory row only while the custom strategy is in force", async () => {
+    // A directory under one of the two computed roots is read by nothing, so showing it
+    // would read as a setting being ignored. Driving it from the control itself rather
+    // than from the fixture is also what proves the row follows a pending choice.
     const { form } = configForm("task/", true, "E:\\archived-docs")
+    render(<PluginConfigCard form={form} />)
+
+    expect(screen.queryByLabelText(ARCHIVE_LABEL)).toBeNull()
+
+    fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("archiveStrategyCustom") }))
+
+    await waitFor(() => expect(screen.getByLabelText(ARCHIVE_LABEL).textContent).toBe("E:\\archived-docs"))
+  })
+})
+
+describe("the configuration card's archive destination row", () => {
+  /** The form as the Host serves it when a directory of its own is the root in force. */
+  const customForm = (archiveDirectory: string) => configForm("task/", true, archiveDirectory, "hide", "custom")
+
+  it("shows the destination the Host serves, with its own note under the label", () => {
+    const { form } = customForm("E:\\archived-docs")
     render(<PluginConfigCard form={form} />)
 
     // The row is the prefix row's shape: a label with a note beneath it, and the value
@@ -191,8 +240,8 @@ describe("the configuration card's archive destination row", () => {
     expect(screen.getByLabelText(ARCHIVE_LABEL).textContent).toBe("E:\\archived-docs")
   })
 
-  it("saves a destination, and lets it be cleared back to the computed one", async () => {
-    const { form, read } = configForm("task/", true, "E:\\archived-docs")
+  it("saves a destination, and lets it be cleared back to the anchor", async () => {
+    const { form, read } = customForm("E:\\archived-docs")
     render(<PluginConfigCard form={form} />)
 
     const row = rowFor(ARCHIVE_LABEL)
@@ -205,8 +254,8 @@ describe("the configuration card's archive destination row", () => {
     await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", "E:\\docs"))
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "E:\\docs" })
 
-    // Empty is the setting's own "not set", so clearing the field is a value the row
-    // sends rather than one it refuses — the prefix row is the one that refuses.
+    // Empty is the setting's own "not set", which falls back to the fixed anchor — a value
+    // the row sends rather than one it refuses; the prefix row is the one that refuses.
     fireEvent.click(within(row).getByRole("button", { name: t("configEdit") }))
     fireEvent.change(within(row).getByRole("textbox", { name: ARCHIVE_LABEL }), { target: { value: "   " } })
     fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))

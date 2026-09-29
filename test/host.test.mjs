@@ -262,14 +262,31 @@ describe("worktree RPC contract", () => {
     // the settings card is what the next archive dialog reads.
     let directory = ""
     const handler = handleFor({}, { archiveDocumentsDirectory: { get: () => directory } })
-    // Unset is an answer, not a missing key: the dialog reads the key and keeps its
-    // own computed folder when it is empty.
+    // Unset is an answer, not a missing key: the dialog reads the key and keeps the root
+    // the strategy names when it is empty.
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
     directory = "E:\\archived-docs"
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "E:\\archived-docs" })
     // Whitespace is emptiness, so a cleared field cannot become a destination named "  ".
     directory = "   "
     expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsDirectory: "" })
+  })
+
+  it("answers the configured archive strategy, and anchors by default", async () => {
+    // The strategy names the root and the directory above only narrows it, so the dialog
+    // reads both before it computes anything: one without the other says nothing.
+    let strategy
+    const handler = handleFor({}, { archiveDocumentsStrategy: { get: () => strategy } })
+    // A Host nobody has configured answers with the shipped default, and so does one
+    // serving a word the schema does not offer - the dialog would have to guess at it,
+    // and the guess belongs in one place.
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "drive" })
+    strategy = "container"
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "container" })
+    strategy = "custom"
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "custom" })
+    strategy = "somewhere"
+    expect((await handler("task.preference")).value).toMatchObject({ archiveDocumentsStrategy: "drive" })
   })
 
   it("answers whether the agent entries are offered, and offers them by default", async () => {

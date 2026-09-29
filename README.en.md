@@ -44,9 +44,11 @@ Workspace with its own sessions.
   branch instead, which is then merged in a temporary worktree without touching your checkout.
   Uncommitted changes in a worktree have to be committed by you first (the plugin writes no
   commit; see Finish a task), and then the worktrees are removed, the task space's own documents
-  are filed under
-  `archived-docs/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option unticked and they
-  are deleted along with everything else), and the Workspace registration is removed. It will not finish while a
+  are filed under `<archive root>/<workspace>-<YYYYMMDD-HHMMSS>` (leave the archive option
+  unticked and they are deleted along with everything else), and the Workspace registration is
+  removed. The archive root defaults to `<volume>:\worktree-space\archived-docs` on the volume
+  the task space sits on, so the documents do not scatter after every task space; Configuration
+  can point it beside the task space, or at a directory of your own. It will not finish while a
   session in that Workspace is still running — stop it or let it end, then try again.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
@@ -59,15 +61,20 @@ Workspace with its own sessions.
 ## Layout of a task
 
 ```text
-<task space root>/
-├── <task>/                        the task space — also the session's working directory
-│   ├── worktree-space.json        the task's record: branch, base, repositories, created
-│   ├── worktree-space.md          rendered from that record — branch, base and conventions
-│   ├── <repository A>/            a worktree on <branch prefix><task>
-│   └── <repository B>/            a worktree on the same branch name
-└── archived-docs/
-    └── <parent>-<task>-20260926-020933/    documents filed here when a task is finished
+<task space root>/                       the container follows the repositories: you choose where
+├── <task>/                              the task space — also the session's working directory
+│   ├── worktree-space.json              the task's record: branch, base, repositories, created
+│   ├── worktree-space.md                rendered from that record — branch, base and conventions
+│   ├── <repository A>/                  a worktree on <branch prefix><task>
+│   └── <repository B>/                  a worktree on the same branch name
+└── archived-docs/                       the archive root the "beside the task space" strategy uses
+
+<volume>:\worktree-space\archived-docs\   the archive root the default strategy uses
+└── <parent>-<task>-20260926-020933/      one folder per task, filed here when it is finished
 ```
+
+Every strategy adds that per-task `<workspace>-<stamp>` folder under its root: the default collects
+every task on a volume into one directory, and the folder is what keeps them apart.
 
 Removing a worktree never deletes its Git branch; finishing a task merges the branch back
 before the worktree goes.
@@ -108,8 +115,9 @@ carrying the worktree-space row, a warning-free cold start, the page carrying th
 `POST /api/dsh-worktree-space/task.preference` that answers, then an uninstall that leaves zero
 occurrences and a clean restart. The full record is in [`docs/store-evidence.md`](docs/store-evidence.md).
 
-**Fixed commit**: this version (`v1.0.7`) is recorded in [`docs/store-evidence.md`](docs/store-evidence.md) —
-the acceptance package is packed from that commit, byte for byte.
+**Fixed commit**: this version (`v1.0.8`), and the per-release acceptance record, are in
+[`docs/store-evidence.md`](docs/store-evidence.md) — section 6 there says which parts have been
+verified against 1.0.8 and which still stand at 1.0.7.
 
 `engines.dsh` / `dsh.compatibility.dsh` is **declarative**: today's DSH installers and loaders do not
 enforce it, so declaring a range does not reject an incompatible host — the range means no more than
@@ -132,7 +140,7 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 | Permission | Scope |
 | --- | --- |
 | File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md`; and, at finish, the contents of the files git lists through `git diff --name-only HEAD` / `--diff-filter=U`, read only to decide whether a merge still carries conflict markers |
-| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, and `archived-docs/` when filing documents. Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
+| File writes | Only inside the task-space container: `<task space>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`; when filing documents it also writes the per-task `<workspace>-<stamp>/` folder under the **archive root** the configuration names (by default `<volume>:\worktree-space\archived-docs`, see Configuration). Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
 | Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse` (including `rev-parse --verify --quiet MERGE_HEAD`), `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`, `diff --name-only` (including `--diff-filter=U`). Mutations: `worktree add / remove / prune`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D`. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository, and a commit handed to an agent is run by the **host's agent** in that session (see the failure boundaries) |
 | Network | Only `git push -u origin <branch>`, and only when you explicitly ask for a push in the create dialog or the tool; the plugin itself makes no HTTP requests and downloads nothing |
 | Credentials | Reads, stores and forwards none. A push uses whatever credentials your local Git is already configured with (credential helper / SSH); the plugin never touches keys and never reads environment variables |
@@ -206,7 +214,8 @@ data directory (as in the sample above), which needs a DSH restart.
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
-| Archive documents directory | any path | empty | Where a finished task's documents are filed; empty files them under each Workspace's own title directory |
+| Archive documents location | fixed directory on the drive / beside the task space / custom directory | **fixed directory on the drive** | The root the archive is filed under; every strategy adds a `<workspace>-<stamp>` folder beneath it. The default is fixed at `<volume>:\worktree-space\archived-docs` on the task space's own volume, wherever the task space was made |
+| Custom archive directory | any path | empty | Used only by the custom strategy; empty falls back to the fixed directory on the drive |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,

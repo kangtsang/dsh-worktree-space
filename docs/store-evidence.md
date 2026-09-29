@@ -77,7 +77,9 @@ dsh --profile evidence --no-open --port 0
   加上宿主加载器补的那层包装。
 - **端到端功能验收**（一次性仓库，不要用真实项目）：在临时目录里 `git init` 一个仓库 → 新建任务空间 →
   确认 `<任务空间>/<任务名>/<仓库名>` 是 worktree、任务空间已注册为工作区并开了会话 → 改一个文件 →
-  「结束任务」确认分支合并、worktree 移除、文档归档到 `archived-docs/<工作区名>-<时间戳>/`。
+  「结束任务」确认分支合并、worktree 移除、文档归档到 `<归档根目录>/<工作区名>-<时间戳>/`
+  （归档根目录由配置的「归档文档位置」决定，默认是 `<任务空间所在盘符>:\worktree-space\archived-docs`；
+  三档各验收一次）。
 - 留存：上面每一步的截图（插件列表、配置区、管理页面、结束任务结果）。
 
 ### 2.4 卸载与回滚
@@ -168,8 +170,9 @@ DSH STORE 的八小时自动策略要求「文件 / 网络 / 命令 / 凭据信�
 
 ## 5. v1.0.7 兼容性声明与逐版本操作矩阵（2026-09-29）
 
-`v1.0.7` 是**纯 manifest 修复**：`lib/index.js`、`client/client.js` 等运行产物逐字节未变，第 3 节的
-端到端功能证据继续适用。本节补的是上架契约里「逐版本操作证据」那一项。
+`v1.0.7` 是**纯 manifest 修复**：`lib/index.js`、`client/client.js` 等运行产物逐字节未变——这句话只对
+`v1.0.7` 成立，`v1.0.8` 改了客户端产物，见第 6 节——第 3 节的端到端功能证据继续适用。本节补的是上架
+契约里「逐版本操作证据」那一项。
 
 根因：旧 manifest 的 `dsh.compatibility.dshReleases` 只声明了 `0.1.7-rc.1`，而官方窗口（由
 `official-dsh-releases.mjs` 从 GitHub Releases 与 npm 已发布版本双源解析，锁在活跃的 0.1.x 线）
@@ -212,3 +215,32 @@ profile `acceptance`，装 `npm pack` 出来的 `dsh-worktree-space-1.0.7.tgz`�
 未实测的版本保持**不声明**（不写进 `dshReleases`，即按 `unknown` 处理），不用宽泛范围冒充精确证据。
 Bundle Patch 只插入插件自有 entry ID `worktree-space`，未替换或遮蔽任何 `@deepseek-ai/*` 包与受保护
 entry ID；manifest 无安装期生命周期脚本。
+
+## 6. v1.0.8：归档位置改为三档策略（2026-09-29）
+
+`v1.0.8` 改的是**归档文档落在哪里**。以前只有一条写死的规则——任务空间容器旁边的 `archived-docs`；
+现在由配置里的「归档文档位置」在三档中选择，最高优先的是用户自己填的目录：
+
+| 档位 | 归档根 | 例（任务空间容器在 `E:\work\worktree-space\demo`） |
+| --- | --- | --- |
+| `custom` 指定目录 | 用户填的那个目录 | `E:\my-archive\` |
+| `drive` 盘符固定目录（**新出厂默认**） | `<任务空间所在盘符>:\worktree-space\archived-docs` | `E:\worktree-space\archived-docs\` |
+| `container` 跟随任务空间（旧行为） | `<容器>\archived-docs` | `E:\work\worktree-space\archived-docs\` |
+
+三档都在各自的根目录下再建一层 `<工作区名>-<时间戳>`。这么改的理由：容器本身跟着仓库目录走（会话因此
+不必提权），一条与容器同形的规则就会把归档散到每一个建过任务空间的地方；固定锚点把它收成同一盘符下的
+一个已知目录，而定死不放心的用户可以自己指定。
+
+**与上架声明的关系，逐条说清：**
+
+- **宿主契约未变。** `task.done` 仍然只带一个 `documentsDirectory` 字符串，`finishTask` 仍然用
+  `assertIsolated` 对着任务空间容器校验它，`archive.js` 的复制与清理路径逐字未改。宿主侧新增的只有一个
+  配置字段与一个访问器。
+- **第 5 节那些数字属于 1.0.7，不能顺延到 1.0.8。** `client/client.js` 已不再与 1.0.6 / 1.0.7 逐字节相同；
+  `--dump-config` 的行数也可能因为多了一个配置字段而变化，必须重新测，不能沿用 1237 / 1249。第 3 节的
+  端到端功能证据同理，属于 1.0.6 那一次运行。
+- **一次性 Profile 的四步矩阵尚未对 1.0.8 复跑。** 目前三档只被单元测试（`test/documents.test.ts`）与
+  结束对话框的测试（`test/task-finish.test.tsx`）覆盖，**没有**运行期证据。在把 1.0.8 交给 Catalog 之前，
+  应按第 5.1 节同样的方法，对窗口内三个版本各复跑一遍 install → start → uninstall → rollback，确认
+  `dshOperations` 的结论仍然成立，并把新的 `--dump-config` 行数记下来。
+- `docs/store-evidence.json` 的 `archiveStrategyRelease` 里记着同样这几点。

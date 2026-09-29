@@ -29,7 +29,8 @@
   或配置文件。
   - 创建：`mkdir` 任务空间目录；`git worktree add` 生成各仓库检出（由 git 自己落盘）；写
     `worktree-space.json` 与由它渲染出的 `worktree-space.md`。
-  - 归档：把任务空间里的文档 `cp` 到 `archived-docs/<工作区名>-<YYYYMMDD-HHMMSS>/`（或配置里指定的归档目录）。
+  - 归档：把任务空间里的文档 `cp` 到配置选定的**归档根目录**下的 `<工作区名>-<YYYYMMDD-HHMMSS>/`；
+    默认的归档根是 `<任务空间所在盘符>:\worktree-space\archived-docs`，也可设为跟随任务空间，或指定任意目录。
   - 清理：`git worktree remove --force` 移除检出；对 `.git` 指向的 gitdir 已不存在的**孤儿 worktree**，
     用 `fs.rm(directory, { recursive: true })` 删掉那个目录；最后，只有当任务空间目录确实空了，才删除该目录
     并注销工作区。
