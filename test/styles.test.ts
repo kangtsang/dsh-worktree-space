@@ -49,8 +49,10 @@ describe("floating panel surface", () => {
 
   it("gives the create form room while confirmations stay narrow", () => {
     expect(rule(".dws-dialog-content")).toContain("width: min(460px, calc(100vw - 32px))")
-    // One and a half times the confirmation width.
-    expect(rule(".dws-create-dialog")).toContain("width: min(690px, calc(100vw - 32px))")
+    // A tenth wider than the 690px that was one and a half times the
+    // confirmation width; the archive dialog kept the 690px.
+    expect(rule(".dws-create-dialog")).toContain("width: min(759px, calc(100vw - 32px))")
+    expect(rule(".dws-finish-dialog")).toContain("width: min(690px, calc(100vw - 32px))")
   })
 
   it("keeps the create form inside a 1080p viewport without scrolling", () => {

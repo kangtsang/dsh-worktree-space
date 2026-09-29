@@ -213,10 +213,14 @@
   .dws-dialog-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
   .dws-dialog-content { position: fixed; z-index: 1001; top: 50%; left: 50%; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); transform: translate(-50%, -50%); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }
   /* The create form carries more per row than a confirmation does, and fits a
-     1080p viewport without scrolling at these numbers. */
-  .dws-create-dialog { width: min(690px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+     1080p viewport without scrolling at these numbers. It is the widest dialog
+     here: 690px was one and a half times a confirmation, and the form reads
+     better a tenth wider than that again — 759px, the number written out rather
+     than a factor, so the field rows keep the line they were laid out for. */
+  .dws-create-dialog { width: min(759px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
   /* Archiving reports as much per repository as the create form does — branches,
-     merge targets, commit counts, leftovers — so it takes the same width. */
+     merge targets, commit counts, leftovers — so it takes the width the create
+     form had before it was widened. */
   .dws-finish-dialog { width: min(690px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
   /* The archive dialog stacks a status line, notices, options and a report. They
      ran into each other without a rhythm, so the body lays them out with one —
@@ -456,7 +460,11 @@
      line while it fits, and the button drops under the title rather than squeezing it. */
   .dws-finish-handoff-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
   .dws-finish-handoff-head button { flex: none; }
-  .dws-finish-handoff-hint { color: var(--wt-muted); }
+  /* The panel's small print - the conflict hint, the approval a commit may need, the word
+     while a session is being opened - reads at the beta notice's own size rather than at
+     the dialog's body size: it is the same kind of line, sitting a few lines above that
+     notice in the same panel. */
+  .dws-finish-handoff-hint { color: var(--wt-muted); font-size: 12px; line-height: 18px; }
   .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
   .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
   .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }

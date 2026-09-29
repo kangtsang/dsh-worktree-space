@@ -288,7 +288,7 @@ dsh plugin --profile web add dsh-worktree-space
 
 ### 结束任务
 
-<img src="docs/img/finish-task.png" alt="结束任务对话框" width="612">
+<img src="docs/img/finish-task.png" alt="结束任务对话框" width="960">
 
 在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框会先说明接下来会
 发生什么：未提交的文件、待合并的提交、合并到哪个分支，以及任务空间里的文档（确实有东西可归档时，
