@@ -58,25 +58,44 @@ DeepSeek Harness 的 Worktree Space 插件：一个任务可以横跨多个仓�
 
 ## 兼容性
 
-基于 DSH **0.1.7-rc.1** 的客户端契约开发。已在 `0.1.7-rc.1`、`0.1.7-rc.2` 上验证：宿主 RPC 路由能注册，客户端 bundle
-不用改就能加载，插件列表里的名称、描述、图标和配置区都正常显示。
+基于 DSH **0.1.7-rc.1** 的客户端契约开发。已在 `0.1.7-alpha.2`、`0.1.7-rc.1`、`0.1.7-rc.2` 上验证：宿主 RPC 路由能
+注册，客户端 bundle 不用改就能加载，插件列表里的名称、描述、图标和配置区都正常显示。
 
 manifest（`package.json`）里显式声明的兼容范围：
 
 | 字段 | 声明值 | 含义 |
 | --- | --- | --- |
 | `engines.node` | `>=22.19.0` | 需要的 Node.js 版本 |
-| `engines.dsh` | `>=0.1.7-rc.1` | 兼容的 DSH 版本 |
+| `engines.dsh` | `>=0.1.7-alpha.2` | 兼容的 DSH 版本（下界，声明式） |
 | `dsh.manifestVersion` | `1` | DSH 清单格式版本 |
+| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.2.0` | 兼容的 DSH 范围（0.1.x） |
+| `dsh.compatibility.node` | `>=22.19.0` | 兼容的 Node.js 范围 |
 | `dsh.compatibility.profiles` | `["web"]` | 已验证的 profile |
+| `dsh.compatibility.dshReleases` | 逐版本精确声明（见下） | 每个官方 DSH 完整版本的结论 |
+| `dsh.compatibility.dshOperations` | 逐版本的四项操作结论（见下） | 安装 / 启动 / 卸载 / 回滚的实测结果 |
 
-**固定提交**：本版（`v1.0.6`）对应的源码提交是 `ae7bb4386069090f9f188937a4d4eeafaadc9407`；验收用的包正是
+`dsh.compatibility.dshReleases` 只声明**实测过**的 DSH 完整版本；未实测的版本不写进声明（即按 `unknown` 处理），
+不用宽泛范围冒充精确证据。下表每一行都来自一次性 Profile 里真跑过的一次
+安装 → 配置组合 → 冷启动 → 卸载 → 回滚，`dshOperations` 记录的就是这四项：
+
+| DSH 版本 | dshReleases | install | start | uninstall | rollback |
+| --- | --- | --- | --- | --- | --- |
+| `0.1.7-alpha.2` | compatible | passed | passed | passed | passed |
+| `0.1.7-rc.1` | compatible | passed | passed | passed | passed |
+| `0.1.7-rc.2` | compatible | passed | passed | passed | passed |
+
+三个版本各自用**该版本自己的** `@deepseek-ai/dsh` CLI 跑：临时 `$DSH_HOME` 里从官方 web 模板建一次性 profile，
+装 `npm pack` 出来的 tarball，确认组合树里出现 worktree-space 行、冷启动无警告、页面带上插件模块、
+`POST /api/dsh-worktree-space/task.preference` 作答，再卸载并确认条目归零、重新启动干净。
+完整记录见 [`docs/store-evidence.md`](docs/store-evidence.md)。
+
+**固定提交**：本版（`v1.0.7`）对应的源码提交见 [`docs/store-evidence.md`](docs/store-evidence.md)；验收用的包正是
 从这个提交打出来的，可逐字节核对。
 
-`engines.dsh` 是**声明**而非强制：当前 DSH 的安装器与加载器都不校验它，写一个范围不会拒绝不兼容的宿主，
-因此这个范围的含义只是「`0.1.7-rc.1` 及之后都按兼容处理」；其中真正逐一验证过的是 `0.1.7-rc.1` 与
-`0.1.7-rc.2`。如果后续 DSH 版本改动了客户端契约、让插件失效，会把下界往上收，或在 `dsh.compatibility`
-里如实标记；遇到版本相关的问题，请到
+`engines.dsh` / `dsh.compatibility.dsh` 是**声明**而非强制：当前 DSH 的安装器与加载器都不校验它，写一个范围不会拒绝不兼容的宿主，
+因此这个范围的含义只是「`0.1.7-alpha.2` 及之后的 `0.1.x` 按兼容处理」；其中逐一验证过的是上表三个版本，
+其余版本保持不声明。如果后续 DSH 版本改动了客户端契约、让插件失效，会把下界往上收，
+或在 `dsh.compatibility` 里如实标记；遇到版本相关的问题，请到
 [Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
 
 ## 权限、依赖与失败边界

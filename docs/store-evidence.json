@@ -50,5 +50,40 @@
     "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
     "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
   },
-  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6, which registry.npmjs.org serves as latest with gitHead 5774c5f760790dbee99e24bd2b75f731eb779236 and shasum 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7, its tarball byte-identical to npm pack here"
+  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6, which registry.npmjs.org serves as latest with gitHead 5774c5f760790dbee99e24bd2b75f731eb779236 and shasum 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7, its tarball byte-identical to npm pack here",
+  "manifestCompatibilityFix": {
+    "version": "1.0.7",
+    "change": "manifest-only: engines.dsh and dsh.compatibility.dsh moved from a single version or a 0.1.7-rc.1 floor to the range \">=0.1.7-alpha.2 <0.2.0\", dsh.compatibility.node added \">=22.19.0\", and dshReleases plus dshOperations now declare every release in the live latest-three window: 0.1.7-alpha.2, 0.1.7-rc.1 and 0.1.7-rc.2",
+    "windowAuthority": "official-dsh-releases.mjs resolves the latest-three window from official GitHub Releases and published npm versions in the active major.minor line; previews tagged on the next channel that belong to a later major.minor line are deliberately excluded",
+    "runtimeEvidenceCarriesForward": "lib/index.js and client/client.js are byte-identical to 1.0.6, so the end-to-end evidence in the matrix above still applies",
+    "undeclared": "a release that has not been tested stays undeclared rather than being claimed, so it reads as unknown; peer dependencies still pin 0.1.7-rc.1",
+    "dshOperations": {
+      "0.1.7-alpha.2": {
+        "install": "passed",
+        "start": "passed",
+        "uninstall": "passed",
+        "rollback": "passed"
+      },
+      "0.1.7-rc.1": {
+        "install": "passed",
+        "start": "passed",
+        "uninstall": "passed",
+        "rollback": "passed"
+      },
+      "0.1.7-rc.2": {
+        "install": "passed",
+        "start": "passed",
+        "uninstall": "passed",
+        "rollback": "passed"
+      }
+    },
+    "method": "each release ran against its own @deepseek-ai/dsh CLI in a throwaway DSH_HOME: profile 'acceptance' built from the shipped web template, dsh-worktree-space-1.0.7.tgz installed, --dump-config composed the worktree-space row, cold start printed its URL with no warning, the page carried dsh-worktree-space/client.js with the plugin RPC answering ok:true, then remove dropped the package and left zero occurrences, and a second cold start was clean",
+    "observations": {
+      "dumpConfigLines": { "0.1.7-alpha.2": 1237, "0.1.7-rc.1": 1237, "0.1.7-rc.2": 1249 },
+      "dumpConfigLinesAfterRemove": { "0.1.7-alpha.2": 1234, "0.1.7-rc.1": 1234, "0.1.7-rc.2": 1246 },
+      "worktreeSpaceOccurrencesAfterRemove": 0,
+      "incompatibleMentions": 0,
+      "pnpmPeerNotice": "the routine '[WARN] Issues with peer dependencies found' appears in every install, including the already-verified 0.1.7-rc.2; it is not a version incompatibility"
+    }
+  }
 }

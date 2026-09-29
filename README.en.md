@@ -74,8 +74,8 @@ before the worktree goes.
 
 ## Compatibility
 
-Built against the DSH **0.1.7-rc.1** client contract. Verified on `0.1.7-rc.1` and `0.1.7-rc.2`: the
-host RPC routes register, the client bundle loads without changes, and the plugin
+Built against the DSH **0.1.7-rc.1** client contract. Verified on `0.1.7-alpha.2`, `0.1.7-rc.1` and
+`0.1.7-rc.2`: the host RPC routes register, the client bundle loads without changes, and the plugin
 list shows the name, description, icon and configuration section correctly.
 
 The compatibility range declared explicitly in the manifest (`package.json`):
@@ -83,19 +83,41 @@ The compatibility range declared explicitly in the manifest (`package.json`):
 | Field | Declared value | Meaning |
 | --- | --- | --- |
 | `engines.node` | `>=22.19.0` | Required Node.js version |
-| `engines.dsh` | `>=0.1.7-rc.1` | Compatible DSH versions |
+| `engines.dsh` | `>=0.1.7-alpha.2` | Compatible DSH versions (declarative lower bound) |
 | `dsh.manifestVersion` | `1` | DSH manifest format version |
+| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.2.0` | Compatible DSH range (0.1.x) |
+| `dsh.compatibility.node` | `>=22.19.0` | Compatible Node.js range |
 | `dsh.compatibility.profiles` | `["web"]` | Verified profile |
+| `dsh.compatibility.dshReleases` | per-release verdicts (below) | Each official full DSH release |
+| `dsh.compatibility.dshOperations` | per-release operation verdicts (below) | Measured install / start / uninstall / rollback |
 
-**Fixed commit**: this version (`v1.0.6`) is the commit `ae7bb4386069090f9f188937a4d4eeafaadc9407` on GitHub —
-the acceptance package was packed from that commit, byte for byte.
+`dsh.compatibility.dshReleases` declares only the DSH releases that were actually tested; a release that
+has not been tested stays undeclared, which reads as `unknown`. A broad range is not used to
+impersonate exact evidence. Every row below comes from one real pass in a disposable Profile —
+install → compose → cold start → uninstall → rollback — which is what `dshOperations` records:
 
-`engines.dsh` is **declarative**: today's DSH installers and loaders do not enforce it, so declaring
-a range does not reject an incompatible host — the range means no more than "`0.1.7-rc.1` and later
-are treated as compatible", and what has actually been verified is `0.1.7-rc.1` and `0.1.7-rc.2`. If
-a later DSH release changes the client contract and breaks the plugin, this lower bound will be
-raised, or the state recorded honestly in `dsh.compatibility`; if you hit a version-specific problem,
-open an [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
+| DSH release | dshReleases | install | start | uninstall | rollback |
+| --- | --- | --- | --- | --- | --- |
+| `0.1.7-alpha.2` | compatible | passed | passed | passed | passed |
+| `0.1.7-rc.1` | compatible | passed | passed | passed | passed |
+| `0.1.7-rc.2` | compatible | passed | passed | passed | passed |
+
+Each release ran against **its own** `@deepseek-ai/dsh` CLI: a disposable profile built from the official
+web template under a throwaway `$DSH_HOME`, the `npm pack` tarball installed into it, the composed tree
+carrying the worktree-space row, a warning-free cold start, the page carrying the plugin module, a
+`POST /api/dsh-worktree-space/task.preference` that answers, then an uninstall that leaves zero
+occurrences and a clean restart. The full record is in [`docs/store-evidence.md`](docs/store-evidence.md).
+
+**Fixed commit**: this version (`v1.0.7`) is recorded in [`docs/store-evidence.md`](docs/store-evidence.md) —
+the acceptance package is packed from that commit, byte for byte.
+
+`engines.dsh` / `dsh.compatibility.dsh` is **declarative**: today's DSH installers and loaders do not
+enforce it, so declaring a range does not reject an incompatible host — the range means no more than
+"`0.1.7-alpha.2` and later `0.1.x` are treated as compatible", and what has actually been verified is
+the three releases in the table above; every other release stays undeclared. If a later DSH release
+changes the client contract and breaks the plugin, this lower bound will be raised, or the state
+recorded honestly in `dsh.compatibility`; if you hit a version-specific problem, open an
+[issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 ## Permissions, dependencies and failure boundaries
 

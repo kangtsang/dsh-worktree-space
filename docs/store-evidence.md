@@ -165,3 +165,50 @@ DSH STORE 的八小时自动策略要求「文件 / 网络 / 命令 / 凭据信�
 本次修复能清掉的是另外两项可清除的判定：**Node.js 兼容性未声明**（已补 `engines.node` / `engines.dsh` /
 `dsh.manifestVersion`）与**运行期依赖需要单独供应链复核**（已把三个仅构建期使用的包移入
 `devDependencies`，运行期第三方依赖归零）。
+
+## 5. v1.0.7 兼容性声明与逐版本操作矩阵（2026-09-29）
+
+`v1.0.7` 是**纯 manifest 修复**：`lib/index.js`、`client/client.js` 等运行产物逐字节未变，第 3 节的
+端到端功能证据继续适用。本节补的是上架契约里「逐版本操作证据」那一项。
+
+根因：旧 manifest 的 `dsh.compatibility.dshReleases` 只声明了 `0.1.7-rc.1`，而官方窗口（由
+`official-dsh-releases.mjs` 从 GitHub Releases 与 npm 已发布版本双源解析，锁在活跃的 0.1.x 线）
+已经把 `0.1.7-alpha.2`、`0.1.7-rc.2` 纳入其中；`dsh.compatibility.node` 缺失，
+`dsh.compatibility.dsh` 写成了单个版本而非范围，`dsh.compatibility.dshOperations` 完全没有。
+
+### 5.1 实测矩阵
+
+每个版本各用**该版本自己的** `@deepseek-ai/dsh` CLI，在一次性 `$DSH_HOME` 下从官方 web 模板建
+profile `acceptance`，装 `npm pack` 出来的 `dsh-worktree-space-1.0.7.tgz`，再按顺序验收四步。
+全程不写真实 `~/.dsh`。
+
+| DSH 版本 | install | start | uninstall | rollback |
+| --- | --- | --- | --- | --- |
+| `0.1.7-alpha.2` | **passed** | **passed** | **passed** | **passed** |
+| `0.1.7-rc.1` | **passed** | **passed** | **passed** | **passed** |
+| `0.1.7-rc.2` | **passed** | **passed** | **passed** | **passed** |
+
+每一步的判定标准与实测结果：
+
+| 步骤 | 判定标准 | 三个版本的结果 |
+| --- | --- | --- |
+| install | `dsh plugin --profile acceptance add <tarball>` 退出 0；输出 `+ dsh-worktree-space 1.0.7`；`incompatible` 出现 0 次；装上的 `package.json` 版本为 1.0.7 | 全部满足 |
+| start | `--dump-config` 组合树里出现 `- id: worktree-space` / `name: dsh-worktree-space`；冷启动打印 URL 且无 `did not activate`；页面 200 并带 `dsh-worktree-space/client.js&rev=…`；`POST /api/dsh-worktree-space/task.preference` 返回 `ok:true` | alpha.2 与 rc.1 组合树各 1237 行、rc.2 1249 行，均含 worktree-space 行；启动日志只有 URL 一行，无任何警告 |
+| uninstall | `remove dsh-worktree-space` 退出 0；`node_modules/dsh-worktree-space` 消失；`dsh.profile.bundles` 回到 `["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]`；`--dump-config` 里 worktree-space 出现 0 次 | 全部满足（删除后 1234 / 1234 / 1246 行，0 次命中） |
+| rollback | 卸载后再次冷启动：正常打印 URL、无警告，页面里 `dsh-worktree-space` 出现 0 次 | 全部满足 |
+
+`alpha.2` 与 `rc.1` 组合树同为 1237 行、`rc.2` 为 1249 行，是各版本自带模板不同所致，与插件无关。
+`add` 输出里三个版本都有一条 `[WARN] Issues with peer dependencies found`——这是 pnpm 对
+`@deepseek-ai/cordis` 等由 profile 提供的 peer 的常规提示，`incompatible` 一次都没有出现。
+
+### 5.2 声明内容
+
+- `engines.dsh`：`>=0.1.7-rc.1` → `>=0.1.7-alpha.2`
+- `dsh.compatibility.dsh`：`0.1.7-rc.1` → `>=0.1.7-alpha.2 <0.2.0`（0.1.x 范围）
+- `dsh.compatibility.node`：新增 `>=22.19.0`（与 `engines.node` 一致）
+- `dsh.compatibility.dshReleases` / `dsh.compatibility.dshOperations`：对窗口内三个版本逐项声明
+  compatible 与四项操作 passed（见上表）
+
+未实测的版本保持**不声明**（不写进 `dshReleases`，即按 `unknown` 处理），不用宽泛范围冒充精确证据。
+Bundle Patch 只插入插件自有 entry ID `worktree-space`，未替换或遮蔽任何 `@deepseek-ai/*` 包与受保护
+entry ID；manifest 无安装期生命周期脚本。
