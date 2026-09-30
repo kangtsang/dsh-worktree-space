@@ -966,7 +966,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
               {result.failed ? <Button className="dws-button-warn-solid" disabled={busy || agentPending} onClick={() => void step()}>{busy || agentPending ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : agentPending ? t("finishContinueWaiting") : t("finishContinue")}</Button> : null}
               <Button onClick={close}>{t("close")}</Button>
             </>
-            : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className={discardsWork ? "dws-button-danger-solid" : "dws-button-warn-solid"} disabled={optionsDisabled || commitPending} onClick={() => void step()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}
+            : <><Button className="dws-button-ghost" disabled={busy} onClick={close}>{t("cancel")}</Button><Button className={discardsWork ? "dws-button-danger-outline" : "dws-button-warn-outline"} disabled={optionsDisabled || commitPending} onClick={() => void step()}>{busy ? <Loader2 size={14} className="dws-spin" /> : <Check size={14} />}{busy ? t("finishing") : t("finishConfirmAction")}</Button></>}
         </div>
       </DialogContent>
     </Dialog>

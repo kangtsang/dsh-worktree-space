@@ -33,9 +33,13 @@ function setup({ repos = [repository("alpha", [worktree(linkedPath, "task/featur
   const mount = () => render(<WorktreesSettings api={api} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} onCreate={onCreate} />)
   return { api, workspaces, uiWorkspace, onCreate, mount }
 }
-async function settled() {
+async function ready() {
   await waitFor(() => expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false))
-  // The page opens on tasks; everything here is about the repository list.
+}
+/** The page opens on the Workspaces; everything here is about the repository list, so a
+ *  case that wants repositories asks for them. */
+async function settled() {
+  await ready()
   fireEvent.click(screen.getByRole("button", { name: t("viewRepositories") }))
 }
 function repoArticle(name: string) {
@@ -154,10 +158,11 @@ describe("WorktreesSettings discovery controls", () => {
     const next = setup({ repos: [repository("alpha", [taskRow])] })
     next.api.status.mockImplementation(async (path: string) => path === taskRow.path ? { ...clean, commits: 4 } : clean)
     next.mount()
-    await waitFor(() => expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false))
+    await ready()
+    fireEvent.click(screen.getByRole("button", { name: t("viewTasks") }))
 
-    // The page opens on the task view: the count rides the task's own row and the
-    // repository row under it, so a task reads as needing attention while collapsed.
+    // In the task view the count rides the task's own row and the repository row under
+    // it, so a task reads as needing attention while collapsed.
     const badges = screen.getAllByText(format(t("pending"), { count: "4" }))
     expect(badges).toHaveLength(2)
     expect(badges.every(badge => badge.closest(".dws-status-pending"))).toBe(true)

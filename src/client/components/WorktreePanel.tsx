@@ -84,7 +84,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
   const t = useT()
   // A view is state, not a prop, so neither host has to hold it: React unmounts this
   // component whenever the page closes, so both hosts open on the same view anyway.
-  const [view, setView] = useState<WorktreeView>("tasks")
+  const [view, setView] = useState<WorktreeView>("spaces")
   const settings = <WorktreesSettings
     api={api}
     workspaces={workspaces}

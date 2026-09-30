@@ -10,8 +10,11 @@ import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
 import { finishScenes } from "../lib/finishScene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
-/** The three views this page has, in the order they are offered. */
-export const WORKTREE_VIEWS = [['tasks', 'viewTasks'], ['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories']] as const
+/** The three views this page has, in the order they are offered: a Workspace is where a
+ *  task space starts from, a repository is what one is opened across, a task space is
+ *  what the page then has to keep an eye on. Finishing a task is the last of the three,
+ *  so it is offered last rather than first. */
+export const WORKTREE_VIEWS = [['spaces', 'viewWorkspaces'], ['repos', 'viewRepositories'], ['tasks', 'viewTasks']] as const
 export type WorktreeView = (typeof WORKTREE_VIEWS)[number][0]
 
 /**
@@ -55,7 +58,7 @@ const relativePath = (repoPath: string, path: string) => path.startsWith(`${repo
 
 export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave }: Props) {
   const t = useT()
-  const [ownView, setOwnView] = useState<WorktreeView>("tasks")
+  const [ownView, setOwnView] = useState<WorktreeView>("spaces")
   const view = control?.view ?? ownView
   const setView = control?.onView ?? setOwnView
   const [repos, setRepos] = useState<WorktreeList[]>([])
@@ -236,6 +239,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   /** Between two runs rather than inside one, so it gets air on both sides. */
   const separator = <span className="dws-filter-divider dws-filter-separator" aria-hidden="true">|</span>
 
+  /** One line per view: what that view holds, and what a row of it can start or finish.
+   *  The heading's own line says what the plugin does for a task across repositories;
+   *  this answers the narrower question the view switcher just asked. It sits under the
+   *  controls because it describes the list they are about to narrow. */
+  const viewDescription = view === "spaces" ? t("viewSpacesDescription") : view === "repos" ? t("viewReposDescription") : t("viewTasksDescription")
+
   // The list is the only thing that scrolls: one reading column holds the heading,
   // the toolbar and the filters, and the rows move under them. The dialog says the
   // first half for both hosts and borrows the toolbar for the switcher it owns; the
@@ -259,6 +268,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         <div className="dws-filters" role="group" aria-label={t("filters")}>{filterButtons}{divider}{foldButton}</div>
         <span className="dws-summary" {...(view === "tasks" ? { title: format(t("summaryTasksHint"), { tasks: String(tasks.length), worktrees: String(taskRepositoryCount) }) } : {})}>{view === "repos" ? <>{counted(visibleRepos.length, repos.length)} {t("repositories")}<span aria-hidden="true">·</span>{counted(shownWorktrees, totalWorktrees)} {t("worktreeCount")}</> : view === "tasks" ? <>{counted(visibleTasks.length, tasks.length)} {t("taskCount")}<span aria-hidden="true">·</span>{counted(shownTaskRepositoryCount, taskRepositoryCount)} {t("worktreeCount")}</> : <>{counted(visibleWorkspaces.length, workspaceItems.length)} {t("workspaceCount")}</>}</span>
       </div>
+      <p className="dws-view-description">{viewDescription}</p>
       {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
       {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{t("scanning")}</span></div> : null}
       {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
