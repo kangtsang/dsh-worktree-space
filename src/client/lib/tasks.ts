@@ -72,12 +72,9 @@ export function taskContainerOf(worktree: Worktree): string | undefined {
 /**
  * Group scanned repositories into the tasks their worktrees belong to.
  * @param repos - scanned repository lists, as the settings page holds them.
- * @param options.pending - the text the page writes into `statusError` while a
- *   status read is still in flight. It is what lets a repository be "not read
- *   yet" rather than "could not be read": the two arrive here as the same field.
  * @returns one entry per task container, ordered by task name.
  */
-export function groupTasks(repos: WorktreeList[], { pending }: { pending?: string } = {}): TaskGroup[] {
+export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
   const groups = new Map<string, { group: TaskGroup; seen: Set<string> }>()
   for (const repo of repos) {
     for (const worktree of repo.worktrees) {
@@ -111,11 +108,11 @@ export function groupTasks(repos: WorktreeList[], { pending }: { pending?: strin
       const repoKey = cleanPath(worktree.path)
       if (entry.seen.has(repoKey)) continue
       entry.seen.add(repoKey)
-      // "Not read yet" and "could not be read" are the same field on the row, and
-      // only the caller knows which text it wrote while the read was in flight.
+      // "Not read yet" and "could not be read" both land in `statusError`; the flag
+      // is what keeps them apart.
+      const checking = worktree.checking === true
       const statusError = worktree.statusError
-      const checking = pending !== undefined && statusError === pending
-      const unknown = statusError !== undefined && statusError !== "" && !checking
+      const unknown = !checking && statusError !== undefined && statusError !== ""
       const changedFiles = worktree.changedFiles ?? 0
       const commits = worktree.commits ?? 0
       entry.group.repositories.push({

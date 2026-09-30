@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
@@ -140,27 +140,40 @@ const taskArticles = () => document.querySelectorAll(".dws-task")
 // clear it: otherwise the next case opens on the previous one's conflict.
 afterEach(() => { cleanup(); clearFinishScenes() })
 
-/** The page opens on tasks, so this only waits for the first scan to settle. */
-async function ready() {
+/** The first scan has answered and the page is still on the view it opened on. */
+async function settled() {
   await waitFor(() => expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", false))
 }
 
+/** The page opens on the Workspaces, and this file is about tasks: a case that wants
+ *  them asks for them, which is one click on the view that holds them. */
+async function ready() {
+  await settled()
+  fireEvent.click(screen.getByRole("button", { name: t("viewTasks") }))
+}
+
 describe("task view", () => {
-  it("opens on the tasks, which no other view groups this way", async () => {
+  it("opens on the Workspaces, and the tasks view groups tasks this way no other view does", async () => {
     const user = userEvent.setup()
     setup()
-    await ready()
+    await settled()
 
+    // A task space starts from a Workspace, so the page opens on the registered ones —
+    // and this fixture registers none.
+    expect(screen.getByText(t("workspaceEmpty"))).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: t("viewTasks") }))
     expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
     // The panel shows every path with forward slashes, whichever separator the host reported.
     expect(screen.getByText(container.replace(/\\/g, "/"))).toBeTruthy()
     expect(screen.getByText(branch)).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin")).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin-web")).toBeTruthy()
-    // Tasks lead the switch, since they are what the page opens on. The filters and
-    // the fold button follow it in one run, the order the panel reads them in too.
+    // The views read in the order they are offered: a Workspace a task starts from, a
+    // repository one is opened across, and the task space itself last. The filters and
+    // the fold button follow the switch in one run, the order the panel reads them in too.
     const viewSwitch = screen.getByRole("group", { name: t("viewSwitch") })
-    expect([...viewSwitch.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
+    expect([...viewSwitch.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
     const foldRun = screen.getByRole("group", { name: t("filters") })
     expect([...foldRun.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
     // The hand-made `spike` worktree shares no container with a matching branch.
@@ -171,9 +184,6 @@ describe("task view", () => {
     await user.click(screen.getByRole("button", { name: t("viewRepositories") }))
     expect(screen.getByRole("heading", { name: "kratos-vue-admin" })).toBeTruthy()
     expect(taskArticles()).toHaveLength(0)
-
-    await user.click(screen.getByRole("button", { name: t("viewTasks") }))
-    expect(taskArticles()).toHaveLength(1)
   })
 
   it("offers the attention filter here too, and applies it to whole tasks", async () => {
@@ -1089,15 +1099,15 @@ describe("finishing a task", () => {
 
     // Merging with the branches kept is routine: the merge can be reverted and
     // nothing is discarded, so the button warns instead of shouting.
-    expect(confirm().className).toContain("dws-button-warn-solid")
+    expect(confirm().className).toContain("dws-button-warn-outline")
     // Force discards those two files, which is not reversible.
     await user.click(option(t("finishForce")))
-    expect(confirm().className).toContain("dws-button-danger-solid")
+    expect(confirm().className).toContain("dws-button-danger-outline")
     // Deleting a branch that was merged loses nothing, so with the files gone this
     // is a warning again.
     await user.click(option(t("finishForce")))
     await user.click(option(t("finishDeleteBranch")))
-    expect(confirm().className).toContain("dws-button-warn-solid")
+    expect(confirm().className).toContain("dws-button-warn-outline")
     expect(next.api.doneTask).not.toHaveBeenCalled()
   })
 
@@ -1113,12 +1123,12 @@ describe("finishing a task", () => {
     const confirm = () => screen.getByRole("button", { name: t("finishConfirmAction") })
 
     // A clean worktree and no branch deletion: still routine.
-    expect(confirm().className).toContain("dws-button-warn-solid")
+    expect(confirm().className).toContain("dws-button-warn-outline")
     // No merge, forced branch deletion, and three commits that live only there.
     await user.click(option(t("finishMerge")))
     await user.click(option(t("finishForce")))
     await user.click(option(t("finishDeleteBranch")))
-    expect(confirm().className).toContain("dws-button-danger-solid")
+    expect(confirm().className).toContain("dws-button-danger-outline")
     expect(next.api.doneTask).not.toHaveBeenCalled()
   })
 

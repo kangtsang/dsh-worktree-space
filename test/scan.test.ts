@@ -33,18 +33,23 @@ describe("the rows a remembered scan paints", () => {
     const repositories = rememberedRepositories({
       repositories: [repository("/projects/one", true)],
       statuses: { "/projects/one.worktrees/task": status },
-    }, "checking status…")
+    })
 
     expect(repositories[0].worktrees[0]).toMatchObject({ path: "/projects/one.worktrees/task", changedFiles: 3, branchLine: "## task" })
     expect(repositories[0].worktrees[0].statusError).toBeUndefined()
+    expect(repositories[0].worktrees[0].checking).toBeUndefined()
   })
 
   it("leaves a worktree the Host was never asked about as still being checked", () => {
     const repositories = rememberedRepositories({
       repositories: [repository("/projects/one", true)],
       statuses: {},
-    }, "checking status…")
+    })
 
-    expect(repositories[0].worktrees[0]).toMatchObject({ path: "/projects/one.worktrees/task", statusError: "checking status…" })
+    // A flag rather than a message in `statusError`: the flag is what later tells
+    // "not read yet" apart from "could not be read", and it must not depend on how
+    // the panel happens to word the label.
+    expect(repositories[0].worktrees[0]).toMatchObject({ path: "/projects/one.worktrees/task", checking: true })
+    expect(repositories[0].worktrees[0].statusError).toBeUndefined()
   })
 })

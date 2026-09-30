@@ -21,7 +21,7 @@
   - 容器根的 `<容器根>/.git`（存在就说明容器根本身是 Git 仓库，创建会被拒绝）与 `<容器根>/README.md`
     （存在就不再写，绝不覆盖用户自己写的内容）。两者都只做存在性判断。
   - 本插件自己包内的 `assets/skill/task-worktree-space/SKILL.md`（作为内置技能注册，只读，不复制到别处）。
-  - 用户自己指定的路径（源码根、任务空间根——新建对话框里填的，或配置里「指定任务空间根目录」那一档 ——
+  - 用户自己指定的路径（源码根、任务空间根——新建对话框里填的，或配置里「指定 Worktree Space 容器根目录」那一档 ——
     以及归档目录）。
   - 结束任务时，某个 worktree 里被 `git diff --name-only HEAD` 与 `git diff --name-only --diff-filter=U`
     列出（合并中还有 `ls-files -u` 一类的未解决条目）的那些文件的**内容**：逐个读回，只为判断一个合并是否
@@ -48,7 +48,7 @@
     试合并干净则 `reset --hard` 回到试合并前记录的提交，再由上面那一步在目标分支上记录合并提交。
   - git 自己的登记：`git worktree add/remove` 会写 `<源仓库>/.git/worktrees/<名字>/` 下 git 自己的登记与索引
     （`.git` 标记、`HEAD`、`index` 等）。这是 git 的行为，插件不去编辑源仓库检出里的文件。
-  - 配置项（入口开关、扫描深度、默认分支前缀、任务空间位置、归档位置）由 DSH 自己的插件配置服务
+  - 配置项（入口开关、扫描深度、默认分支前缀、Worktree Space 容器根目录、归档位置）由 DSH 自己的插件配置服务
     （Plugins 页面的实时表单）保存，**插件不写任何配置文件**；`task.preference` 端点只读。
 
 - **命令执行**：通过宿主注入的 `subprocess` 服务以**固定 argv** 调用 `git`
@@ -119,7 +119,7 @@
 | 结束任务时某个 worktree 还有未提交的改动 | 停下该仓库（`force` 表示调用方说「这些改动不要了」）：报 `uncommitted work is waiting in <worktree>; commit it before the task can be finished`，**不代写提交**；其余仓库继续，结果里逐条报出 |
 | 合并已解决但还没有提交 | 不代为提交：报 `the merge in <worktree> is resolved but not committed`，现场原样保留，等它的解决者提交 |
 | 解决后的文件里还留着冲突标记 | 报 `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
-| 合并冲突 | 不中止、不还原，冲突现场原样留在对应 worktree（保留 `MERGE_HEAD` 与未解决文件）；整体记为部分完成（`failed: true`），返回 `mergeSite` 与 `conflictedFiles`，等用户授权后交给 agent 解决 |
+| 合并冲突 | 不中止、不还原，冲突现场原样留在对应 worktree（保留 `MERGE_HEAD` 与未解决文件）；整体记为部分完成（`failed: true`），返回 `mergeSite` 与 `conflictedFiles`，等用户交由 agent 解决 |
 | 移除 worktree 失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`（并用 `worktree prune` 作为补救），任务空间目录与工作区注册保留，绝不强行删除目录 |
 | 归档复制失败 | 报错并保留源文件，不删除任务空间 |
 | 工作区里仍有会话在运行 | 拒绝结束任务，等该会话结束或被停掉后重试 |

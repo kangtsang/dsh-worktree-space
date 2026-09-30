@@ -76,12 +76,18 @@ describe("the management page as a main panel", () => {
     // The three views live in the column, so the toolbar no longer offers them: it
     // reads the filters first, the fold button right after, and the summary stays right.
     expect(within(nav).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
-    expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
+      .toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
+    expect(within(nav).getByRole("button", { name: t("viewWorkspaces") }).getAttribute("aria-current")).toBe("true")
     expect(screen.queryByRole("group", { name: t("viewSwitch") })).toBeNull()
+    // The page opens on the Workspaces, and a Workspace is narrowed by what it holds
+    // rather than by what needs attention — so the run reads that way here. It is the
+    // same three buttons either way.
     expect(within(screen.getByRole("group", { name: t("filters") })).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
+      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("collapseAll")])
 
+    fireEvent.click(within(nav).getByRole("button", { name: t("viewTasks") }))
+    expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
+    await waitFor(() => expect(screen.getByText(t("noTasks"))).toBeTruthy())
     fireEvent.click(within(nav).getByRole("button", { name: t("viewWorkspaces") }))
     expect(within(nav).getByRole("button", { name: t("viewWorkspaces") }).getAttribute("aria-current")).toBe("true")
     // The workspace view is the one that answered: it lists Workspaces, and there are
@@ -107,11 +113,13 @@ describe("the management page as a main panel", () => {
     // column, selected the same way — and no way back, because closing is the way out.
     const nav = screen.getByRole("navigation", { name: t("worktreesTitle") })
     expect(within(nav).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
-    expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
+      .toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
+    expect(within(nav).getByRole("button", { name: t("viewWorkspaces") }).getAttribute("aria-current")).toBe("true")
     // The navigation is the switcher, so the toolbar keeps only the filters here too.
     expect(screen.queryByRole("group", { name: t("viewSwitch") })).toBeNull()
 
+    fireEvent.click(within(nav).getByRole("button", { name: t("viewRepositories") }))
+    expect(within(nav).getByRole("button", { name: t("viewRepositories") }).getAttribute("aria-current")).toBe("true")
     fireEvent.click(within(nav).getByRole("button", { name: t("viewWorkspaces") }))
     expect(within(nav).getByRole("button", { name: t("viewWorkspaces") }).getAttribute("aria-current")).toBe("true")
     await waitFor(() => expect(screen.getByText(t("workspaceEmpty"))).toBeTruthy())
@@ -136,9 +144,9 @@ describe("the management page as a main panel", () => {
     // then the very same filters-and-fold run the panel reads, and no nav column.
     const group = screen.getByRole("group", { name: t("viewSwitch") })
     expect(within(group).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("viewTasks"), t("viewWorkspaces"), t("viewRepositories")])
+      .toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
     expect(within(screen.getByRole("group", { name: t("filters") })).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
+      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("collapseAll")])
     // The two runs are set off from each other, which the panel's own single run is not.
     expect(document.querySelectorAll(".dws-filter-separator")).toHaveLength(1)
     expect(screen.queryByRole("navigation", { name: t("worktreesTitle") })).toBeNull()
@@ -198,6 +206,10 @@ describe("the management page as a main panel", () => {
       uiWorkspace={{ openWorkspace: vi.fn() } as any}
       sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
     />)
+    await settle()
+    // This fixture is a repository and its worktrees, so the repository view is the one
+    // that has something to show; the page opens on the Workspaces.
+    fireEvent.click(screen.getByRole("button", { name: t("viewRepositories") }))
     await settle()
     // A repository's worktrees are one list of their own under the repository row —
     // the nesting the tree rail used to draw, said with the list instead of a line.

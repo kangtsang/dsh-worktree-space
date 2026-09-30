@@ -1,15 +1,15 @@
 # Worktree Space
 
-Worktree Space for DeepSeek Harness: one task covering a single Git repository or several — under
-one shared task space directory, every repository gets a worktree on a branch of the same name, and
-the task space is registered as an agent Workspace that can open its own sessions to carry the task
-out. Tasks run in parallel without interfering with one another, and finishing one merges it back
-into the main branch and deletes the worktree branches and the task space.
+Worktree Space for DeepSeek Harness: A task that covers multiple Git repositories can give each repository
+its own worktree on one shared task branch under a single task space directory, then register that task space
+as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without
+interfering with one another; when the work is done they merge back into the target branch of each repository,
+and the worktree branches and task spaces are cleaned up as needed.
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
+<img src="docs/img/new-session.png" alt="The New Worktree Space entry above the session input box" width="960">
 
 [中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
@@ -20,16 +20,26 @@ into the main branch and deletes the worktree branches and the task space.
 > without an agent. Please report problems in
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
+## Install
+
+**From npm:**
+
+```sh
+dsh plugin --profile web add dsh-worktree-space
+```
+
+To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and reinstall.
+
 ## Features
 
 - **Create a task from a session.** Pick a source root, name the task, choose the branch prefix,
   tick the repositories it should span, and say where the task space goes. Every repository gets a
   worktree on `<branch prefix><task>` — `task/<task>` by default — starting from each repository's
-  current HEAD, or from a branch or commit you name.
+  current HEAD, or from a named branch or commit.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
-- **A management page**, with three views (both ways in, and their defaults, are described under Manage tasks):
+- **A management page**, with three views (both ways in, and their defaults, are described under Manage a Worktree Space):
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
@@ -39,18 +49,10 @@ into the main branch and deletes the worktree branches and the task space.
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
   folds that row on its own; the button beside the filters folds or opens them all at once.
-- **Finish a task** from its row. By default each repository's branch is merged back into the
-  branch that repository has checked out — the task space's own starting point, since nothing
-  here switches a source checkout — and the dialog can point any repository at another local
-  branch instead, which is then merged in a temporary worktree without touching your checkout.
-  Uncommitted changes in a worktree have to be committed by you first (the plugin writes no
-  commit; see Finish a task), and then the worktrees are removed, the task space's own documents
-  are filed under `<archive root>/<project>/<task>-<YYYYMMDD-HHMMSS>` (leave the archive option
-  unticked and they are deleted along with everything else), and the Workspace registration is
-  removed. The archive root defaults to the **container root's own** `archived-docs`, so every
-  project shares one and the archive keeps the container's shape; Configuration can point it at a
-  directory of your own instead. It will not finish while a
-  session in that Workspace is still running — stop it or let it end, then try again.
+- **Finish a task** from its row: each repository's branch is merged back into its target branch,
+  the worktrees are removed, the task space's documents are filed under a selected directory,
+  and the Workspace registration is removed — but not while a session in that Workspace is still
+  running. Where the merge runs and what a conflict means: see Finish a Worktree Space.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
 - **New task space** is in that same `⋯` menu, for Workspaces that hold repositories, and
@@ -61,8 +63,12 @@ into the main branch and deletes the worktree branches and the task space.
 
 ## Layout of a task
 
+> Terms: the **Worktree Space container** (the **container** below) is the directory the plugin keeps
+> task spaces in — one container holds the task spaces of every project. The container’s own top
+> level is the **container root**. Each paragraph names it in full the first time and in short after.
+
 ```text
-~/workspace/                            the root workspace: projects hang off this level, and the container root lives here too
+~/workspace/                            the root workspace: projects hang off this level, and the Worktree Space container root lives here too
 ├── repo-x/                             project x's main Workspace (a repository itself)
 ├── project1/                           project 1's main Workspace (several repositories)
 │   ├── repo-a/
@@ -89,136 +95,78 @@ into the main branch and deletes the worktree branches and the task space.
     │       └── repo-d/
     ├── archived-docs/                  the archive root (default): non-Git output lands here
     │   └── project1/                   filed by project
-    │       └── hotfix-20260926-020933/   `<task>-<stamp>`, one folder per task
+    │       └── hotfix-20260926-020933/   `<task>-<YYYYMMDD-HHMMSS>`, one folder per task
     └── README.md                       written once, on first use: this is the worktree-only area
 
-~/my-archive/                           an archive root of your own, chosen in the plugin's settings
-└── project2/                           same shape: a project layer, then a task-stamp layer
+~/my-archive/                           an archive root, chosen in the plugin's settings
+└── project2/                           same shape: a project layer, then a task name with its timestamp
     └── task-b-20260926-020933/
 ```
 
-The container root is recommended **one level below the root workspace** (`~/workspace/worktree-space`),
+The **Worktree Space container root** is recommended **one level below the root workspace** (`~/workspace/worktree-space`),
 and where that is depends only on the first directory below the volume root: `~/workspace/project1` and
 `~/workspace/deep-path/project2` are both offered the **same** container however deep their own project
-sits. You can still point it somewhere else when you create a task space.
+sits. A different path can be given when a task space is created.
 
 The project name is the **source Workspace's directory name**; the plugin layers by itself, so there is
-nothing to fill in. Two projects in one container can each hold a task called `hotfix` without crowding
+nothing to fill in. Two projects in one Worktree Space container can each hold a task called `hotfix` without crowding
 each other. When the Workspace directory *is* a repository (`~/workspace/repo-x`), the project and
 repository layers end up with the same name — `repo-x/task-x/repo-x`. That repeat is deliberate: the
 layout is three levels deep either way, so neither the plugin nor the client needs to be told which
 level is which.
 
-The container root is the plugin's zone: the first task space created under it writes a `README.md`
+The **Worktree Space container root** is the plugin's zone: the first task space created under it writes a `README.md`
 saying this is a worktree-only area and that `git init` / `clone` do not belong there (an existing one is
 never overwritten). Conversely, if the container root is itself a Git repository — it has a `.git` —
 creation is **refused**, and not a single directory is made.
 
-The archive root splits two levels further, `<project>/<task>-<stamp>/`, so its shape mirrors the
-container's and a project's documents stay in that project's own folder. By default it sits in the
+The archive root splits two levels further, `<project>/<task>-<YYYYMMDD-HHMMSS>/`, so its shape mirrors the
+Worktree Space container's and a project's documents stay in that project's own folder. By default it sits in the
 container root, adding exactly one directory — `archived-docs` — to the whole volume.
 
 Removing a worktree never deletes its Git branch; finishing a task merges the branch back
 before the worktree goes.
 
-## Compatibility
+## Requirements
 
-Built against the DSH **0.2.0-rc.2** client contract, while keeping the 0.1.7 line working. All
-**five** releases of the current official window — `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`,
-`0.2.0-rc.1` and `0.2.0-rc.2` — were verified one by one: the host RPC routes register, the client
-bundle loads without changes, and the plugin list shows the name, description, icon and configuration
-section correctly.
+- [Node.js](https://nodejs.org) `>=22.19.0`
+- [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
+  plugin, and has to be on `PATH`
+- DSH `>=0.1.7-alpha.2 <0.3.0-0`, the 0.1.7 line and 0.2.x
 
-The compatibility range declared explicitly in the manifest (`package.json`):
+**All five official releases were verified one by one** — `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`,
+`0.2.0-rc.1` and `0.2.0-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
+install, start, uninstall and rollback. The per-release record is in
+[`docs/store-evidence.md`](docs/store-evidence.md).
 
-| Field | Declared value | Meaning |
-| --- | --- | --- |
-| `engines.node` | `>=22.19.0` | Required Node.js version |
-| `engines.dsh` | `>=0.1.7-alpha.2 <0.3.0-0` | Compatible DSH versions (the 0.1.7 line and 0.2.x, declarative) |
-| `dsh.manifestVersion` | `1` | DSH manifest format version |
-| `dsh.compatibility.dsh` | `>=0.1.7-alpha.2 <0.3.0-0` | Compatible DSH range (the 0.1.7 line and 0.2.x) |
-| `dsh.compatibility.node` | `>=22.19.0` | Compatible Node.js range |
-| `dsh.compatibility.profiles` | `["web"]` | Verified profile |
-| `dsh.compatibility.dshReleases` | per-release verdicts (below) | Each official full DSH release |
-| `dsh.compatibility.dshOperations` | per-release operation verdicts (below) | Measured install / start / uninstall / rollback |
-| `peerDependencies` | `@deepseek-ai/dsh-tools` and `@deepseek-ai/dsh-client-connection`, each `>=0.1.7-alpha.2 <0.3.0-0` | The one DSH **enforces**, see below |
-
-**The DSH range in `peerDependencies` is enforced.** From DSH 0.2.0 on, installing a plugin and
-starting a profile compare the runtime's `dsh --version` against every `@deepseek-ai/dsh` /
-`@deepseek-ai/dsh-*` peer the manifest declares (SemVer, with prereleases participating): a peer it
-does not satisfy rejects the install before pnpm runs (`installation rejected: … incompatible with
-dsh …`) or refuses to load it at startup, and the exact-version exemption (`dsh plugin allow-version`)
-is offered instead. DSH 0.1.7 and earlier only looked at declarative fields such as
-`dsh.compatibility`, which is why writing a declaration without touching the peers looked fine then —
-1.0.7 being rejected on 0.2.0 is exactly its two peers still reading `^0.1.7-rc.1`. This version
-declares `>=0.1.7-alpha.2 <0.3.0-0` — the same single range as `engines.dsh` and
-`dsh.compatibility.dsh`, so the three declarations no longer disagree: both lines covered, with
-0.3.0's prereleases kept out too.
-
-`dsh.compatibility.dshReleases` declares only the DSH releases that were actually tested; a release that
-has not been tested stays undeclared, which reads as `unknown`. A broad range is not used to
-impersonate exact evidence. Every row below comes from one real pass in a disposable Profile —
-install → compose → cold start → uninstall → rollback — which is what `dshOperations` records:
-
-| DSH release | dshReleases | install | start | uninstall | rollback |
-| --- | --- | --- | --- | --- | --- |
-| `0.1.7-alpha.2` | compatible | passed | passed | passed | passed |
-| `0.1.7-rc.1` | compatible | passed | passed | passed | passed |
-| `0.1.7-rc.2` | compatible | passed | passed | passed | passed |
-| `0.2.0-rc.1` | compatible | passed | passed | passed | passed |
-| `0.2.0-rc.2` | compatible | passed | passed | passed | passed |
-
-Each release ran against **its own** `@deepseek-ai/dsh` CLI: a disposable profile built from the official
-web template under a throwaway `$DSH_HOME`, the `npm pack` tarball installed into it, the composed tree
-carrying the worktree-space row, a warning-free cold start, the page carrying the plugin module, a
-`POST /api/dsh-worktree-space/task.preference` that answers, then an uninstall that leaves zero
-occurrences and a clean restart. The full record is in [`docs/store-evidence.md`](docs/store-evidence.md).
-
-**Fixed commit**: this version (`v1.0.8`), and the per-release acceptance record, are in
-[`docs/store-evidence.md`](docs/store-evidence.md) — section 6 there says which parts have been
-verified against 1.0.8 and which still stand at 1.0.7.
-
-`engines.dsh` / `dsh.compatibility.dsh` is **declarative**: DSH's installers and loaders do not enforce
-it, so declaring a range does not reject an incompatible host — the peer range above is what actually
-blocks. These two therefore mean no more than "`0.1.7-alpha.2` up to and including `0.2.x` are treated
-as compatible", and what has actually been verified is the five releases in the table above; every
-other release stays undeclared. If a later DSH release
-changes the client contract and breaks the plugin, this upper bound will be pulled in, or the state
-recorded honestly in `dsh.compatibility`; if you hit a version-specific problem, open an
+DSH **enforces** the DSH range declared in the manifest's `peerDependencies`: a runtime that does not
+satisfy it has the install refused before pnpm runs, or the plugin refused at startup, with the
+exact-version exemption (`dsh plugin allow-version`) offered instead. Fields such as `engines.dsh` are
+declarations and block nothing. Anything outside the tested range is treated as unknown rather than
+passed off as evidence; if you hit a version-specific problem, open an
 [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
-## Permissions, dependencies and failure boundaries
+## Permissions and failure boundaries
 
 At runtime this plugin reads and writes files and runs `git`. Those two permissions *are* its
-function; they cannot be reduced to zero. The full account — what it reads, what it writes, which
-subcommands it runs and what happens when things fail — is in
-[PERMISSIONS.en.md](PERMISSIONS.en.md); the disposable-Profile install / start / uninstall
-acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
+function; they cannot be reduced to zero. Every runtime dependency is supplied by the DSH profile and
+none of them ship with the plugin — installing it brings in no new runtime third-party dependency,
+contacts no external service and reports no telemetry.
 
 **Permissions at a glance:**
 
 | Permission | Scope |
 | --- | --- |
-| File reads | The Workspace directories you pick (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); a task space's `worktree-space.json` and `worktree-space.md`; the container root's `.git` and `README.md` (to tell whether it is a Git repository, and whether to write the notice); each worktree's `.git` marker file; the plugin's own `assets/skill/task-worktree-space/SKILL.md`; and, at finish, the contents of the files git lists through `git diff --name-only HEAD` / `--diff-filter=U`, read only to decide whether a merge still carries conflict markers |
-| File writes | Only inside the task-space container: `<container root>/<project>/<task>/` and the worktrees in it, `worktree-space.json`, `worktree-space.md`, plus the container root's own `README.md` (written only when absent, never over what you wrote); when filing documents it also writes the per-task `<project>/<task>-<stamp>/` folder under the **archive root** the configuration names (by default the container root's own `archived-docs`, see Configuration). Finishing a task removes only worktrees, task directories and documents the plugin itself created; a merge also `git worktree add`s one temporary checkout under the **system temporary directory** (merge → `worktree remove --force` → delete that directory). It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory or config files (DSH's own plugin configuration service stores your settings) |
-| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. Queries: `rev-parse` (including `rev-parse --verify --quiet MERGE_HEAD`), `worktree list`, `status`, `rev-list`, `for-each-ref`, `show-ref`, `symbolic-ref`, `merge-base`, `diff --name-only` (including `--diff-filter=U`). Mutations: `worktree add / remove / prune`, `merge`, `merge --abort`, `reset --hard`, `branch -d / -D`. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository, and a commit handed to an agent is run by the **host's agent** in that session (see the failure boundaries) |
-| Network | Only `git push -u origin <branch>`, and only when you explicitly ask for a push in the create dialog or the tool; the plugin itself makes no HTTP requests and downloads nothing |
-| Credentials | Reads, stores and forwards none. A push uses whatever credentials your local Git is already configured with (credential helper / SSH); the plugin never touches keys and never reads environment variables |
+| File reads | The selected Workspace directories (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); the record files in the task space and at the Worktree Space container root; each worktree's `.git` marker file; and, at finish, the contents of the files git lists, read only to decide whether a merge still carries conflict markers |
+| File writes | Only inside the task space, the Worktree Space container root, and the archive directory the configuration names (see Configuration); finishing a task removes only the worktrees and documents the plugin itself created, and a merge also `git worktree add`s one temporary checkout under the **system temporary directory** and deletes it right after. It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory |
+| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository (see below), and a commit handed to an agent is run by the host's own session |
+| Network | Only `git push -u origin <branch>`, and only when a push is explicitly requested; the plugin itself makes no HTTP requests |
+| Credentials | Reads, stores and forwards none. A push uses whatever credentials the local Git is already configured with; the plugin never touches keys |
 | Global resources | No global installs, no daemon or resident service, no writes to system directories |
 
-**Dependencies:**
-
-| Dependency | Purpose | Provided by |
-| --- | --- | --- |
-| Node.js `>=22.19.0` | Runs the host code | Your DSH installation |
-| DSH `>=0.1.7-alpha.2 <0.3.0-0` | Client contract, RPC and the Workspace API | Your DSH installation |
-| `@deepseek-ai/cordis`, `@deepseek-ai/schemastery` | Plugin framework and config schema | peer dependencies supplied by the DSH profile |
-| `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-tools` | Host RPC registration and tool definitions | peer dependencies supplied by the DSH profile |
-| React 18 | Management-page UI | Supplied by the DSH web runtime |
-| `git` | Every worktree and branch operation | The Git already installed on your machine (not shipped with the plugin; a missing `git` on `PATH` is an error) |
-| `@hugeicons/*`, `@radix-ui/react-dialog` | Icons and dialog primitives, **build-time only**; inlined into `client/client.js` when building | Not installed as runtime packages — installing this plugin brings in no new runtime third-party dependency |
-
-**External services:** none. The plugin contacts no third-party service and reports no telemetry.
+The full account — what it reads, what it writes, which subcommands it runs and what happens when
+things fail — is in [PERMISSIONS.en.md](PERMISSIONS.en.md); the disposable-Profile install, start,
+uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 
 **Failure boundaries (never silent):**
 
@@ -229,111 +177,73 @@ acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 | A repository still holds uncommitted work at finish | That repository stops (`force` is what discards it): `uncommitted work is waiting in <worktree>; commit it before the task can be finished`; the plugin **writes no commit**, the others carry on, and the result names each one |
 | A merge is resolved but not committed | `the merge in <worktree> is resolved but not committed` — the state is kept as it stands |
 | The resolved files still carry conflict markers | `the resolved merge still has conflict markers in <files>` — kept as they stand, no side is taken |
-| Merge conflict | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until you authorise the next step |
+| The rehearsal merge conflicts | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until it is resolved and committed, then carry on |
+| The real merge meets a fresh commit | The rehearsal passed, then the real merge ran into a commit someone pushed in between: the merge is undone (`merge --abort`, the branch is left as it was) and Git's own words are surfaced; the worktree and the task branch are kept, and pressing **Continue finishing** rehearses again |
 | Worktree removal fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)`; the worktree is kept and reported, and `git worktree prune` is the remedy |
 | A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
 | A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
 
 ## Usage
 
-### Install
-
-**From npm:**
-
-```sh
-dsh plugin --profile web add dsh-worktree-space
-```
-
-The plugin's row lives in the profile's `cordis.patch.yml` — this repository carries DSH's bundle
-patch, which normally writes it for you; if the plugin never shows up, add it by hand:
-
-```yaml
-- id: worktree-space
-  name: dsh-worktree-space
-  config:
-    panelEntry: hide         # the management page's row under New session (hidden by default)
-    sidebarEntry: show       # the shortcut in the sidebar footer (shown by default)
-    scanDepth: 2
-    maxScanDirectories: 1000
-```
-
-To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and reinstall.
-
 ### Configuration
 
 **In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → its configuration
-section, beside every other plugin's; changes take effect immediately, no restart. You can also
-edit the file: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
-data directory (as in the sample above), which needs a DSH restart.
+section, beside every other plugin's; changes take effect immediately, no restart. The file can also be
+edited directly: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
+data directory, which needs a DSH restart.
 
 | Setting | Values | Default | Meaning |
 | --- | --- | --- | --- |
 | Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
-| Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Authorize the agent to commit** and **Authorize the agent to resolve it**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
+| Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
-| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it you are asked for a smaller Workspace |
-| Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when you create |
-| Task space location | default / custom directory | **default** | Where new task spaces go. **The default is the best practice**: it is derived from the source Workspace by the rule below. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
-| Custom task space root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the container root in the create dialog and ticking Set as the default task space root writes both back when you create |
-| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<stamp>` folder beneath it. The default files them in the container root's own `archived-docs`, wherever the task space was made |
-| Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the container root's `archived-docs` |
+| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it, a smaller Workspace is requested |
+| Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
+| Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the best practice**: it is derived from the source Workspace by the rule below. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
+| Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
+| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<YYYYMMDD-HHMMSS>` folder beneath it, the stamp being the local time of that moment, to the second. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
+| Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the Worktree Space container root's `archived-docs` |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
 `dist`, `build`, `vendor` and hidden directories are skipped (except `.worktrees`).
 
-### Create a task
+### Create a Worktree Space
 
-<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="720">
+<img src="docs/img/new-worktree-space.png" alt="The New Worktree Space dialog" width="720">
 
-> Terms: the **source root** is the Workspace directory you hand the plugin — a repository itself, or a directory
+> Terms: the **source root** is the Workspace directory handed to the plugin — a repository itself, or a directory
 > whose top-level children are repositories; the **source tree** is that directory and everything under it. The
 > create dialog calls it the "repositories' directory".
 
 1. In a session, click **New Worktree Space** above the composer.
 2. Name the task — it is lower-cased, and spaces, Chinese and other characters become dashes
-   (`hotfix-placeorder`); an invalid name tells you which rule it breaks.
-3. Set the **branch prefix** if you want another one. The branch is this prefix plus the task
+   (`hotfix-placeorder`); an invalid name is reported with the rule it breaks.
+3. Set the **branch prefix** when a different one is needed. The branch is this prefix plus the task
    name, and an empty field falls back to the configured default (`task/` unless you changed it).
    The line under the field always names the default it would use. Tick **Set as the default
-   branch prefix** — offered only when what you typed differs from the configured default — to
-   write it back to the plugin's settings when you create.
-4. Say where the task space goes — the **container root**. This directory has to sit beside the
-   **repositories' directory** — not inside it, and not above it. A recommended path is filled in for
-   you: `worktree-space` **one level below the root workspace** (or the directory the Task space
-   location setting names, when it is on the custom strategy — see Configuration). The root workspace is the first
-   directory a path sits in below its volume root: source root `~/workspace/project1` recommends
-   `~/workspace/worktree-space`, and a source root filed deeper (`~/workspace/deep-path/project2`)
-   recommends the **same** one. The container lands one level up, so the task space and the source tree
-   share a common ancestor: a commit writes into the source repository's git directory as well as the
-   worktree, and the session's working directory has to reach both. The level above the volume root is
-   not available — a volume root cannot be a working directory; and a source root directly under the
-   volume root (`~/repo`) has nothing else to share, so it recommends `<volume root>/worktree-space`
-   (an agent handed the commits or the conflict then has to authorise itself in that session — see the
-   experimental section at the end). The container is named
-   `worktree-space` in every case; only where that name would land on the source root itself does the
-   recommendation take `dsh-worktree-space`. Another location still works. Point the container root
-   somewhere else and **Set as the default task space root** appears under the field: ticking it
-   writes that path back to the plugin's settings when you create (the Custom task space root
-   setting, switched to the custom strategy), so the next task space opens there by default. The
-   note beside it names what that choice costs — a directory sharing no common ancestor with the
-   project's directory makes the session that hands commits and conflicts to an agent ask for
-   authorisation by hand.
-
-   The plugin layers the rest itself, so the container's location is the only thing to choose: a task
-   space is `<container root>/<project>/<task>`, with the project named after the source Workspace
-   directory (see Layout of a task). If the container root is itself a Git repository, creation is
-   refused; the first use writes a `README.md` there declaring it the worktree-only area.
+   branch prefix** — offered only when the entered prefix differs from the configured default —
+   to write it back to the plugin's settings when the space is created.
+4. Say where the task space goes — the **Worktree Space container root**. It has to sit beside the
+   **repositories' directory**: not inside it, and not above it. A recommended path is
+   pre-filled — `worktree-space` **one level below the root workspace** — and rarely needs
+   changing. Another location also works: **Set as the default Worktree Space container
+   root** then appears under the field; ticking it writes that path back to the plugin's
+   settings when the space is created, and the note below it states what that choice costs.
+   For how the recommendation is worked out and what the container holds, see Layout of a
+   task.
 5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
    choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
    task space.
 
-If the task space is built but registering the Workspace fails, the dialog says why and lets
-you retry the registration.
+If the task space is built but registering the Workspace fails, the dialog says why and
+allows the registration to be retried.
 
-### Manage tasks
+### Manage a Worktree Space
+
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
 
 Open the **management page** — two ways in:
 
@@ -355,7 +265,7 @@ of the previous scan, so it shows data straight away and swaps in the fresh resu
 scan lands (`Scanning every Workspace…` marks the wait). That memory lives in the DSH instance's own
 process only: nothing is written to disk, and it is gone when the instance exits.
 
-### Finish a task
+### Finish a Worktree Space
 
 <img src="docs/img/finish-task.png" alt="The Finish task dialog" width="960">
 
@@ -371,90 +281,55 @@ Finishing a task space is one standard path, in three steps:
 uncommitted changes in a repository and **Force** is not ticked, **Finish task** stays
 unavailable — those changes are not this side's to write, and a worktree will not go while it
 holds them. The plan names those repositories and how many changes each one holds. Commit them in
-each worktree yourself with `git add` and `git commit` (the message is yours to write); when you
+each worktree with `git add` and `git commit` (the message is written by the user); afterwards
 are done, close the dialog and open it again — it re-reads the plan every time it opens, and those
-repositories stop holding **Finish task** back. You can also tick **Force**, which says those
-changes are not wanted: they are discarded with the worktree. This plugin writes no commit and
-never touches the index — the changes are yours, and so is the message. If your own commit fails
-(a hook refusing, a missing `user.name`/`user.email`, gpg signing, `index.lock`, a file in use),
-the repository is simply still dirty and still blocks the finish: fix it and commit again. If you
-would rather not do it yourself, **Authorize the agent to commit** hands it to an agent session
-(see the experimental section at the end). Two cases skip this step: a deliberate
-delete-without-merge — abandoning the task space with `deleteBranch` and `force`, where a commit
-would be deleted along with the branch — and a worktree in the middle of an unfinished merge (it
-holds `MERGE_HEAD`), which step 3 takes over.
+repositories stop holding **Finish task** back. **Force** may also be ticked, which discards
+those changes with the worktree. When the work is not to be done by hand,
+yourself, **Hand the commits to the agent** hands it to an agent session (see the experimental
+section at the end). A worktree in the middle of an unfinished merge does not take this step; that
+one is step 3's.
 
 **2. Merge: rehearse the other way round, then merge for real.** The merge itself puts **the task
 branch into the target branch** (by default the branch the source repository has checked out), and
 it lands in the **source repository**. Before the target is touched, the target is merged into the
-task branch **inside the task space's own worktree** — the opposite direction — with
-`git merge --no-ff --no-edit <target>`, run in `<task space>/<repository>`. Two outcomes:
+task branch **inside the task space's own worktree** — the opposite direction. Two outcomes:
 
-- **Clean**: that rehearsal is undone again (`git reset --hard <the HEAD from before the
-  rehearsal>`, the worktree back where it started), and the task branch is then merged into the
-  target branch with `--no-ff` as usual, so the target keeps an ordinary merge commit. A target
-  that is not checked out anywhere is merged in a temporary worktree that is discarded
-  afterwards, leaving the source checkout alone.
+- **Clean**: that rehearsal is undone again (the worktree goes back to where it started), and the
+  task branch is then merged into the target branch with `--no-ff` as usual, so the target keeps
+  an ordinary merge commit. A target that is not checked out anywhere is merged in a temporary
+  worktree that is discarded afterwards, leaving the source checkout alone.
 - **Conflicted**: that merge is **not aborted and not reverted** — the rehearsal simply stays
   where it stands, in the task branch's worktree, which keeps its `MERGE_HEAD` and the conflicted
   files with their markers sitting in its working tree (for instance
   `~/wt-demo/spaces/demo/alpha/src/app.ts`). The **target branch is untouched**, and so is the
   source repository's checkout.
 
-Why rehearse the other way round: a conflict in the real merge lands in your source repository and
+Why rehearse the other way round: a conflict in the real merge lands in the source repository and
 its checkout, and it would have to be aborted, with a side picked by hand. Rehearsing first puts
 the conflict in the plugin's own checkout — the task branch's worktree — which is exactly where the
-work can be dealt with in place, without touching your checkout.
+work can be dealt with in place, without touching the source checkout.
 
-**3. A conflict stops the finish and waits for you to resolve it on the spot.** As soon as one
-repository stands on a conflict the whole finish is partial (`failed: true`, the container stays,
+**3. A conflict stops the finish and waits for the user to resolve it on the spot.** As soon as one
+repository stands on a conflict the whole finish is partial (`failed: true`, the Worktree Space container stays,
 and the other repositories may already be merged and removed). Every repository row reports
 `mergeInProgress`, `mergeSite` (the directory the conflict stands in) and `conflictedFiles`. The
-dialog then shows **A merge conflicted: deal with it, then finish the task again.** with the
-direction and the site explained above; the way on is **Continue finishing** at the foot of the
-panel.
+dialog then shows **A merge conflicted: deal with it, then finish the task again.**; the way on is
+**Continue finishing** at the foot of the panel.
 
 The site is the task branch's own worktree (for instance `~/wt-demo/spaces/demo/alpha`), standing
-in an unfinished merge: `git -C <site> status` lists the `both modified:` files, and
-`git -C <site> rev-parse MERGE_HEAD` has a value. Resolve the conflict there, `git add`, and one
-`git commit` that says how you reconciled the two sides concludes the merge — the target branch and
-the source repository's checkout were never touched; the worktree's index lives under the source
-repository's `.git/worktrees/<name>/`, so the commit has to land on that one. To have an agent
-resolve this conflict instead, use **Authorize the agent to resolve it** (see the experimental
-section at the end).
+in an unfinished merge. Resolve the conflict there, `git add`, and one `git commit` that says how
+the two sides are reconciled concludes the merge — the target branch and the source repository's
+checkout were never touched; the commit has to land on that worktree, whose index lives under the
+source repository's `.git/worktrees/<name>/`. To have an agent resolve this conflict instead, use
+**Hand the conflict to the agent** (see the experimental section at the end).
 
-Pressing **Continue finishing** runs the same checks, in the same order:
+**Continue finishing** then runs the same judgement again: if the target branch is already inside
+the task branch, the rehearsal is skipped and the real merge goes ahead; otherwise it is rehearsed
+once more and a conflict stands where it stood before, for the user to resolve again.
 
-- first that no conflict markers are left on the site, then that the merge has been committed (the
-  `MERGE_HEAD` is gone);
-- then the usual question, whether the target branch is already contained in the task branch
-  (`git merge-base --is-ancestor <target> <branch>`): you have just merged the target branch into
-  the task branch and committed it, so the answer is usually yes, and **the rehearsal is skipped**,
-  going straight to the real merge from step 2 (the task branch into the target branch with
-  `--no-ff`), followed by the worktree removal and, when asked, the branch deletion;
-- **but if someone has pushed to the target branch in the meantime**, the target is no longer
-  contained in the task branch, so **the rehearsal runs once more** — this time merging those new
-  commits into the task branch. Clean, and it is undone before the real merge; conflicted, and it
-  is the same story as before: the conflict stays where it stands in the task branch's worktree,
-  and you resolve it there once more and press **Continue finishing** again. Skipping the rehearsal
-  has exactly one condition — that the target really is already contained in the task branch — so
-  resolving a conflict once never bypasses it.
-- The one exception is a **race**: the rehearsal came out clean and, a moment later, the real
-  merge (in the source repository, into the target branch) conflicts because the target moved
-  again. That one is `git merge --abort`ed: the source repository is left as it was found and
-  git's own words are reported. A rehearsal has already been paid for, so a conflict left standing
-  there could only be somebody else's commit, not a conflict to hand on. The worktree and the
-  branch are kept — merge the new target into the task branch, then finish again.
-
-If the site still holds a resolution nobody committed, the plugin does not commit it for you: the
-site is left exactly as it stands and the question goes back to the user — the row's `error` says
-`the merge in <path> is resolved but not committed`, or that conflict markers remain — and
-**Continue finishing** at the foot of the panel is the way back in.
-
-**Leaving loses no progress.** The report and any session rows opened are kept, so reopening the
-dialog shows the page you left, with the plan read again (the per-repository target branches and the
-checkboxes are not part of that, so pick those again). The backdrop, Esc and the ✕ in the corner
-leave the same way, and all of them are held back only while a finish is actually running.
+If the site still holds a resolution nobody committed, or conflict markers are still in the files,
+the plugin does not commit it: the site is left exactly as it stands and the outcome goes
+back to the user — fix it and press **Continue finishing** again.
 
 Deleting a branch normally needs the merge: deselect the merge and the branch option goes
 with it. To abandon a task space instead of finishing it — nothing merged, the branches and
@@ -466,16 +341,16 @@ in step 1.
 
 | Merge back | Delete branch | Force | What happens |
 | --- | --- | --- | --- |
-| ✓ | | | **Finish task** is unavailable at first: commit each worktree's uncommitted changes to its own task branch yourself (until you do, the finish stays on that step and names the worktree — `uncommitted work is waiting in <path>` in that row's `error`), and its branch is then merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository standing on a conflict keeps its place, the others still finish |
+| ✓ | | | **Finish task** is unavailable at first: commit each worktree's uncommitted changes to its own task branch (until this is done, the finish stays on that step and names the worktree — `uncommitted work is waiting in <path>` in that row's `error`), and its branch is then merged into the target chosen on its own row (by default the branch that repository has checked out) with `--no-ff`; the worktrees are removed; **the branches stay**. A repository standing on a conflict keeps its place, the others still finish |
 | ✓ | ✓ | | The same, and the branch is deleted once merged (`git branch -d`, so an unmerged branch cannot be deleted this way) |
-| ✓ | | ✓ | Merging still happens, but Force skips the commit: uncommitted changes in the worktree are **discarded with it**, and the plugin does not commit them for you; the branches stay |
+| ✓ | | ✓ | Merging still happens, but Force skips the commit: uncommitted changes in the worktree are **discarded with it**, and the plugin does not commit them; the branches stay |
 | ✓ | ✓ | ✓ | Merge and force-delete the branch (`git branch -D`); the branch was merged, so nothing extra is lost |
-| | | | Nothing is merged: **Finish task** is unavailable until you commit the changes yourself (they stay on the branch that stays), the worktrees and the task space go, **the branches stay** for you to merge by hand |
+| | | | Nothing is merged: **Finish task** is unavailable until the changes are committed (they stay on the branch that stays), the worktrees and the task space go, **the branches stay** to be merged by hand |
 | | | ✓ | The same, without the commit: uncommitted changes are **discarded with the worktree**; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged and nothing committed, the branch force-deleted, and **the commits it held are discarded along with the uncommitted changes in the worktree** |
 
 Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
-outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the container is empty, and its sessions then fall back to Ungrouped with their transcripts
+outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the Worktree Space container is empty, and its sessions then fall back to Ungrouped with their transcripts
 intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
@@ -492,15 +367,15 @@ plugin writes nobody's commit and picks no side of a conflict. It stops and says
 instead: uncommitted work is yours to commit in each worktree, and a resolved conflict is committed
 and then carried on with **Continue finishing**, which is what the line under the panel says.
 
-When finishing a task, the plugin can open a DSH agent session to do two jobs for you: commit the
+When finishing a task, the plugin can open a DSH agent session to do two jobs: commit the
 uncommitted changes, and resolve a merge that stands on a conflict.
 
 ### The two buttons and what they do
 
-- Repositories with uncommitted changes in the plan → **Authorize the agent to commit**: it opens a
+- Repositories with uncommitted changes in the plan → **Hand the commits to the agent**: it opens a
   session that `git add`s those changes and commits them, with a message saying what changed and why
   (in the language and style that repository's own commits use).
-- A repository standing on a merge conflict → **Authorize the agent to resolve it**: it opens a
+- A repository standing on a merge conflict → **Hand the conflict to the agent**: it opens a
   session that reads both sides, works out what each was after, writes a version that keeps both
   intentions, and concludes the merge itself (`git add`, then `git commit` with a message saying how
   the two sides were reconciled).
@@ -518,7 +393,7 @@ space**, and the elevation is yours to approve in that session.
 
 ### The flow and its steps
 
-1. With uncommitted changes in the plan, press **Authorize the agent to commit**: the plugin opens a
+1. With uncommitted changes in the plan, press **Hand the commits to the agent**: the plugin opens a
    session and hands the job over. Ticking **Force** skips this step and opens no session at all.
 2. Wait for the session to stop. Once it does, the plugin re-reads the plan once (once per job, and a
    session seen running re-arms that read).
@@ -527,11 +402,11 @@ space**, and the elevation is yours to approve in that session.
    and finish the task.", in the conflict step "The conflict is resolved: carry on and finish the
    task."
 4. Press **Finish task** or **Continue finishing** to carry on.
-5. When a merge stands on a conflict, press **Authorize the agent to resolve it** and repeat steps
+5. When a merge stands on a conflict, press **Hand the conflict to the agent** and repeat steps
    2-4.
 6. An agent that only edited the files without committing (or left conflict markers behind) gets no
    commit from this side: the site is left exactly as it stands, the result says it did not finish,
-   and you wrap it up or take over yourself before pressing **Continue finishing**.
+   and it is wrapped up or taken over by hand before pressing **Continue finishing**.
 7. The rehearsal in step 3: once the agent has merged the target branch into the task branch and
    committed it, pressing **Continue finishing** usually answers "yes" to whether the target branch is
    already contained in the task branch, and the rehearsal is skipped; only when somebody has pushed

@@ -40,9 +40,13 @@ function setup() {
 
 afterEach(cleanup)
 
-/** The page opens on tasks; this suite covers the repository list. */
+/** The page opens on the Workspaces; this suite covers the repository list, so a case
+ *  that wants repositories asks for them, and the one about tasks asks for those. */
 function showRepositories() {
   fireEvent.click(screen.getByRole("button", { name: t("viewRepositories") }))
+}
+function showTasks() {
+  fireEvent.click(screen.getByRole("button", { name: t("viewTasks") }))
 }
 
 describe("WorktreesSettings loading lifecycle", () => {
@@ -95,9 +99,10 @@ describe("WorktreesSettings loading lifecycle", () => {
     const status = deferred<any>()
     next.api.status.mockReturnValue(status.promise)
     next.mount()
+    showTasks()
 
-    // The page opens on the task view: the sentinel a refresh writes has to read as
-    // "checking", which is what this view used to report as an unknown status.
+    // In the task view the sentinel a refresh writes has to read as "checking", which is
+    // what this view used to report as an unknown status.
     await waitFor(() => expect(next.api.status).toHaveBeenCalledTimes(1))
     expect(screen.getByText(t("checkingStatus"))).toBeTruthy()
     expect(screen.queryByText(t("statusUnknown"))).toBeNull()
