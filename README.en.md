@@ -1,15 +1,15 @@
 # Worktree Space
 
-Worktree Space for DeepSeek Harness: one task can span one or more Git repositories — under one task space
-directory, every repository gets its own worktree on one shared task branch, and the task space is
-registered as an agent Workspace where its sessions start. Tasks run in parallel without interfering
-with one another; finishing one merges it back into each repository's current branch, and the worktree
-branches and the task space are cleaned up on request.
+Worktree Space for DeepSeek Harness: A task that covers multiple Git repositories can give each repository
+its own worktree on one shared task branch under a single task space directory, then register that task space
+as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without
+interfering with one another; when the work is done they merge back into the target branch of each repository,
+and the worktree branches and task spaces are cleaned up as needed.
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
+<img src="docs/img/new-session.png" alt="The New Worktree Space entry above the session input box" width="960">
 
 [中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
@@ -39,7 +39,7 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
-- **A management page**, with three views (both ways in, and their defaults, are described under Manage tasks):
+- **A management page**, with three views (both ways in, and their defaults, are described under Manage a Worktree Space):
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
@@ -52,7 +52,7 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
 - **Finish a task** from its row: each repository's branch is merged back into its target branch,
   the worktrees are removed, the task space's documents are filed under a selected directory,
   and the Workspace registration is removed — but not while a session in that Workspace is still
-  running. Where the merge runs and what a conflict means: see Finish a task.
+  running. Where the merge runs and what a conflict means: see Finish a Worktree Space.
 - **Finish task space** also sits in that workspace list's own `⋯` menu, for directories that
   really are task spaces.
 - **New task space** is in that same `⋯` menu, for Workspaces that hold repositories, and
@@ -95,11 +95,11 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
     │       └── repo-d/
     ├── archived-docs/                  the archive root (default): non-Git output lands here
     │   └── project1/                   filed by project
-    │       └── hotfix-20260926-020933/   `<task>-<stamp>`, one folder per task
+    │       └── hotfix-20260926-020933/   `<task>-<YYYYMMDD-HHMMSS>`, one folder per task
     └── README.md                       written once, on first use: this is the worktree-only area
 
 ~/my-archive/                           an archive root, chosen in the plugin's settings
-└── project2/                           same shape: a project layer, then a task-stamp layer
+└── project2/                           same shape: a project layer, then a task name with its timestamp
     └── task-b-20260926-020933/
 ```
 
@@ -120,7 +120,7 @@ saying this is a worktree-only area and that `git init` / `clone` do not belong 
 never overwritten). Conversely, if the container root is itself a Git repository — it has a `.git` —
 creation is **refused**, and not a single directory is made.
 
-The archive root splits two levels further, `<project>/<task>-<stamp>/`, so its shape mirrors the
+The archive root splits two levels further, `<project>/<task>-<YYYYMMDD-HHMMSS>/`, so its shape mirrors the
 Worktree Space container's and a project's documents stay in that project's own folder. By default it sits in the
 container root, adding exactly one directory — `archived-docs` — to the whole volume.
 
@@ -202,16 +202,16 @@ data directory, which needs a DSH restart.
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
 | Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the best practice**: it is derived from the source Workspace by the rule below. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
 | Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
-| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<stamp>` folder beneath it. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
+| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<YYYYMMDD-HHMMSS>` folder beneath it, the stamp being the local time of that moment, to the second. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
 | Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the Worktree Space container root's `archived-docs` |
 
 A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
 `dist`, `build`, `vendor` and hidden directories are skipped (except `.worktrees`).
 
-### Create a task
+### Create a Worktree Space
 
-<img src="docs/img/new-worktree-space.png" alt="New Worktree Space" width="720">
+<img src="docs/img/new-worktree-space.png" alt="The New Worktree Space dialog" width="720">
 
 > Terms: the **source root** is the Workspace directory handed to the plugin — a repository itself, or a directory
 > whose top-level children are repositories; the **source tree** is that directory and everything under it. The
@@ -241,7 +241,9 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 If the task space is built but registering the Workspace fails, the dialog says why and
 allows the registration to be retried.
 
-### Manage tasks
+### Manage a Worktree Space
+
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
 
 Open the **management page** — two ways in:
 
@@ -263,7 +265,7 @@ of the previous scan, so it shows data straight away and swaps in the fresh resu
 scan lands (`Scanning every Workspace…` marks the wait). That memory lives in the DSH instance's own
 process only: nothing is written to disk, and it is gone when the instance exits.
 
-### Finish a task
+### Finish a Worktree Space
 
 <img src="docs/img/finish-task.png" alt="The Finish task dialog" width="960">
 

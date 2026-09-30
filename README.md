@@ -1,13 +1,13 @@
 # Worktree Space
 
-DeepSeek Harness 的 Worktree Space 插件——一个任务横跨一个或多个 Git 仓库：在同一个任务空间目录下，
-每个仓库各开一个 worktree、共用同一个任务分支，任务空间再注册成一个 Agent 工作区，会话就在其中开工。
-多个任务并行推进、互不干扰；结束后合并回各仓库当前分支，worktree 分支和任务空间按需清理。
+DeepSeek Harness 的 Worktree Space 插件——一个包含多个 Git 仓库的工作任务，可以在同一个任务空间目录下，
+使用同样的任务分支为每个仓库各开一个 worktree，再将任务空间注册成工作区，agent 会话就在任务空间内独立工作。
+多个任务可以并行推进、互不干扰；结束后合并回各仓库目标分支，worktree 分支和任务空间按需清理。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="960">
+<img src="docs/img/new-session.png" alt="会话输入框上方的新建 Worktree Space 入口" width="960">
 
 **简体中文** · [English](README.en.md) · [更新日志](CHANGELOG.md)
 
@@ -33,7 +33,7 @@ dsh plugin --profile web add dsh-worktree-space
   也可以指定某个分支或提交。
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— Agent 可以
   跨仓库改代码，不会动到源码检出。
-- **管理页面**，分三个视图（两种入口与各自默认值见「管理任务」一节）：
+- **管理页面**，分三个视图（两种入口与各自默认值见「管理 Worktree Space」一节）：
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理）；
   - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库；
   - **Git 仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree。
@@ -42,7 +42,7 @@ dsh plugin --profile web add dsh-worktree-space
   每行左边的箭头能单独折叠，筛选旁的按钮可以一次全部展开或折叠。
 - **结束任务**：在任务行上点「结束任务」，默认把各仓库的分支合并回它的目标分支、删掉 worktree、把任务
   空间里的文档归档到选定的目录，最后注销这个工作区；工作区里仍有会话运行时先拒绝。合并往哪儿做、
-  冲突怎么办，见「结束任务」。
+  冲突怎么办，见「结束 Worktree Space」。
 - **结束任务空间**也在这个工作区列表自己的 `⋯` 菜单里 —— 只对确属任务空间的目录显示。
 - **新建任务空间**同样在那个 `⋯` 菜单里 —— 只对包含代码仓库的工作区显示，点开的就是同一个创建对话框。
 - **无额外服务依赖。** 入口开关、扫描深度和目录上限均由插件自身配置控制（见「配置」）。支持 DSH
@@ -81,11 +81,11 @@ dsh plugin --profile web add dsh-worktree-space
     │       └── repo-d/
     ├── archived-docs/                 归档根（默认）：非 Git 产物收在这里
     │   └── project1/                  按项目归档
-    │       └── hotfix-20260926-020933/   「任务名-时间戳」，每个任务一层
+    │       └── hotfix-20260926-020933/   「任务名-YYYYMMDD-HHMMSS」，每个任务一层
     └── README.md                      第一次使用时由插件写入：这里是 Worktree 专用区
 
 ~/my-archive/                          归档根：可以在插件设置改成指定的目录
-└── project2/                          结构一样：项目一层，任务-时间戳一层
+└── project2/                          结构一样：项目一层，任务名加时间戳一层
     └── task-b-20260926-020933/
 ```
 
@@ -102,7 +102,7 @@ dsh plugin --profile web add dsh-worktree-space
 不要直接 `git init` 或 `clone`（已经有了就不覆盖）。反过来说，容器根本身要已经是 Git 仓库（下面有 `.git`），
 创建会被**拒绝**，且一个目录都不会建出来。
 
-归档根底下再分两层：`<项目>/<任务名>-<时间戳>/`。归档结构因此与 Worktree Space 容器结构同形，一个项目的归档收在自己
+归档根底下再分两层：`<项目>/<任务名>-<YYYYMMDD-HHMMSS>/`。归档结构因此与 Worktree Space 容器结构同形，一个项目的归档收在自己
 那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录。删掉 worktree 不会删除对应的 Git
 分支；结束任务会先把分支合并回去，再删 worktree。
 
@@ -173,15 +173,15 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建面板里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
 | Worktree Space 容器根目录 | 默认 / 指定目录 | **默认** | 新建任务空间默认放哪。**默认配置即最佳实践**：按下面的推荐规则从源工作区推导；指定目录与项目目录若无公共目录，agent 处理提交与冲突的会话需要手动提权 |
 | 指定 Worktree Space 容器根目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则按推荐规则推导。新建面板里改动 Worktree Space 容器根并勾选「设为默认 Worktree Space 容器根目录」，点创建时把这两项一并写回 |
-| 归档文档位置 | 跟随容器根 / 指定目录 | **跟随容器根** | 归档文档存到哪个根目录下；两档都在该根目录下再建一层 `<项目>/<任务名>-<时间戳>`。默认档收在 Worktree Space 容器根自己的 `archived-docs` 里，与任务空间建在哪一层无关 |
+| 归档文档位置 | 跟随容器根 / 指定目录 | **跟随容器根** | 归档文档存到哪个根目录下；两档都在该根目录下再建一层 `<项目>/<任务名>-<YYYYMMDD-HHMMSS>`，时间戳是归档那一刻的本地时间，精确到秒。默认档收在 Worktree Space 容器根自己的 `archived-docs` 里，与任务空间建在哪一层无关 |
 | 指定归档目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则收在 Worktree Space 容器根的 `archived-docs` 里 |
 
 扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` 就认定是
 仓库；`node_modules`、`dist`、`build`、`vendor` 等目录和隐藏目录会跳过（`.worktrees` 除外）。
 
-### 创建任务
+### 创建 Worktree Space
 
-<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space" width="720">
+<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space 对话框" width="720">
 
 > 术语：**源码根**＝交给插件的工作区目录（它自己是一个仓库，或者它顶层装着若干仓库）；**源码树**＝该
 > 目录连同下面的一切。新建对话框里的提示把它称作「仓库目录」。
@@ -201,7 +201,9 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 
 如果任务空间已经建好、但工作区注册失败，对话框说明原因，并提供重试注册的入口。
 
-### 管理任务
+### 管理 Worktree Space
+
+<img src="docs/img/manage-worktree-space.png" alt="管理页面：任务 / 工作区 / 仓库三个视图" width="960">
 
 打开 **管理页面**，两种入口：
 
@@ -219,7 +221,7 @@ Git 仓库视图展示扫描到的每个 Git 仓库及其 worktree。
 结束后自动更新（标题栏会显示「正在扫描所有工作区…」）。这份记忆只放在 DSH 实例的内存里：既不写磁盘，
 也会在实例关闭时随之清空。
 
-### 结束任务
+### 结束 Worktree Space
 
 <img src="docs/img/finish-task.png" alt="结束任务对话框" width="960">
 
