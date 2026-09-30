@@ -63,6 +63,25 @@ describe("WorktreesSettings workspace view", () => {
     expect(next.onCreate).toHaveBeenCalledWith({ path: "/projects", title: "Projects" })
   })
 
+  it("says a Workspace it could not read is unreadable, not unable to host a task space", async () => {
+    // The Host cannot answer for one of them. Reporting that Workspace as unable to
+    // host a task space would rule out a directory the plugin never managed to look
+    // inside, so the two answers stay apart.
+    const next = setup((path) => {
+      if (path === "/notes") return Promise.reject(new Error("EPERM"))
+      return { path, isRepository: true, isSourceRoot: true, repositoryCount: 1, repositories: [] }
+    })
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+
+    expect(await screen.findByText(t("workspaceUnreadable"))).toBeTruthy()
+    expect(screen.queryByText(t("workspaceCannot"))).toBeNull()
+    // The amber an unreadable worktree status wears, not the neutral checking look.
+    expect(screen.getByText(t("workspaceUnreadable")).closest(".dws-status-unavailable")).toBeTruthy()
+    // A Workspace the plugin could not read is not offered creation either.
+    expect(screen.getAllByRole("button", { name: t("workspaceCreate") })).toHaveLength(2)
+  })
+
   it("keeps the Workspaces that hold a repository when the filter asks for them", async () => {
     // The filter used to keep the ones it excluded and named itself after something
     // else entirely. It says what it keeps now, and what it keeps is a Workspace with

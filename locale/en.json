@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "Worktree Space: one task covering a single Git repository or several - under one shared task space directory, every repository gets a worktree on a branch of the same name, and the task space is registered as an agent Workspace that can open its own sessions to carry the task out. Tasks run in parallel without interfering with one another, and finishing one merges it back into the main branch and deletes the worktree branches and the task space. Beta and experimental: handing commits and conflicts to an agent may still change - report problems at https://github.com/kangtsang/dsh-worktree-space/issues"
+    "description": "Worktree Space: one task can span one or more Git repositories - under one task space directory, every repository gets its own worktree on one shared task branch, and the task space is registered as an agent Workspace where its sessions start. Tasks run in parallel without interfering with one another; finishing one merges it back into each repository's current branch, and the worktree branches and the task space are cleaned up on request. Beta and experimental: handing commits and conflicts to an agent may still change - report problems at https://github.com/kangtsang/dsh-worktree-space/issues"
   }
 }

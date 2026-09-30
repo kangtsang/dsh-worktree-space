@@ -45,7 +45,7 @@ dsh plugin --profile evidence add dsh-worktree-space
   管理器写下的；本机日常 web profile 里那一行连同它的 `config` 就是这样来的。
 
   > 想从官方模板起步时，可用启动器的 `--from-default-profile web` 先把 `evidence` 按 web 模板初始化；
-  > 具体用法以 `dsh --help` 在你所用 DSH 版本上的输出为准。
+  > 具体用法以 `dsh --help` 在所用 DSH 版本上的输出为准。
 
 ### 2.2 配置组合（启动前的静态验收）
 
@@ -326,7 +326,7 @@ entry ID；manifest 无安装期生命周期脚本。
   不再假装插件只跑在 Windows 的某个盘上；SKILL.md 第 233 行那个 `\` 是「任务名不许含哪些字符」
   的列举，属于规则本身，保留不动。
 
-**与上架声明的关系，逐条说清：**
+**与上架声明的关系，逐条说明：**
 
 - **归档那一半的宿主契约未变，布局那一半变了。** `task.done` 的 `documentsDirectory` 仍然只是一个字符串，
   `finishTask` 仍然用 `assertIsolated` 对着任务空间校验它，`archive.js` 的复制与清理路径逐字未改；宿主侧

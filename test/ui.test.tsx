@@ -188,7 +188,8 @@ describe("WorktreesSettings", () => {
   it("groups linked worktrees without showing the main repository as a row", async () => {
     const next = renderSettings([{ path: "/repo", branch: "main", isMain: true, locked: false, prunable: false }, { path: "/repo.worktrees/feature", branch: "feature", isMain: false, locked: false, prunable: false }], [])
     await waitFor(() => expect(screen.getByText("feature")).toBeTruthy())
-    expect(screen.queryByRole("button", { name: t("open") })).toBeNull()
+    // A worktree row is informational: its controls live on the repository header above it.
+    expect(document.querySelectorAll(".dws-worktree button")).toHaveLength(0)
     expect([...document.querySelectorAll(".dws-worktree-title")].some(node => node.textContent?.includes("main"))).toBe(false)
     expect(next.workspaces.create).not.toHaveBeenCalled()
   })

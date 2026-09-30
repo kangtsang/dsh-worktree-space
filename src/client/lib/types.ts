@@ -18,6 +18,13 @@ export interface Worktree {
   /** Commits on this worktree's HEAD that the merge target does not have yet. */
   commits?: number
   statusError?: string
+  /**
+   * The page is reading this row's status right now, so there is no answer to show
+   * yet. This is a flag rather than a mark written into `statusError`, because a
+   * read still in flight and a read that failed arrive in the same field and must
+   * not be told apart by comparing the text.
+   */
+  checking?: boolean
 }
 
 export interface WorktreeStatus {

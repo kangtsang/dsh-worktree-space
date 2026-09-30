@@ -28,8 +28,8 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
     never written over. Both are existence checks only.
   - `assets/skill/task-worktree-space/SKILL.md` inside this package (registered as a bundled skill, read
     only, never copied anywhere).
-  - The paths the user chooses (source root; the task space root, either typed into the create dialog
-    or named by the Custom task space root setting; and the archive directory).
+  - The paths the user chooses (source root; the Worktree Space container root, either typed into the create dialog
+    or named by the Custom Worktree Space container root setting; and the archive directory).
   - On finish, the **contents** of the files git lists in a worktree through `git diff --name-only HEAD` and
     `git diff --name-only --diff-filter=U`: each is read back only to decide whether a merge still carries
     conflict markers (line by line, for lines starting with `<<<<<<<`, `=======` or `>>>>>>>`). A listed path
@@ -64,7 +64,7 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
   - git's own bookkeeping: `git worktree add/remove` writes git's own registration and index under
     `<source repo>/.git/worktrees/<name>/` (the `.git` marker, `HEAD`, `index`, …). That is git's doing; the
     plugin never edits files in a source repository's checkout.
-  - Configuration (the entry switches, scan depth, default branch prefix, task space location, archive
+  - Configuration (the entry switches, scan depth, default branch prefix, Worktree Space container root, archive
     location) is stored by
     DSH's own plugin configuration service (the Plugins page's live form); **the plugin writes no
     configuration file**, and its `task.preference` endpoint is read-only.

@@ -118,18 +118,20 @@ describe("task grouping", () => {
   })
 
   it("tells a status still being read from one that could not be read", () => {
-    const row = worktree(taskPath("antest", "api"), "feat/antest", { statusError: "Checking status…" })
-    // Without the sentinel this is just a failed read, which is what the page used
-    // to report for every row of every refresh.
-    expect(groupTasks([repository("/projects/api", [row])])[0].unknownRepositories).toBe(1)
+    // The flag is set while the read is in flight, so the same field can carry a
+    // real failure without the two being told apart by comparing the text.
+    const row = worktree(taskPath("antest", "api"), "feat/antest", { checking: true })
+    expect(groupTasks([repository("/projects/api", [row])])[0]).toMatchObject({ checkingRepositories: 1, unknownRepositories: 0 })
+    expect(groupTasks([repository("/projects/api", [row])])[0].repositories[0]).toMatchObject({ checking: true, unknown: false })
 
-    const [task] = groupTasks([repository("/projects/api", [row])], { pending: "Checking status…" })
-    expect(task).toMatchObject({ checkingRepositories: 1, unknownRepositories: 0 })
-    expect(task.repositories[0]).toMatchObject({ checking: true, unknown: false })
+    // The same word in `statusError` with no flag is a failure, which is what the
+    // page used to report for every row of every refresh.
+    const mislabelled = worktree(taskPath("antest", "api"), "feat/antest", { statusError: "Checking status…" })
+    expect(groupTasks([repository("/projects/api", [mislabelled])])[0].unknownRepositories).toBe(1)
 
     // A real failure is still a failure while other reads are in flight.
     const failed = worktree(taskPath("antest", "web"), "feat/antest", { statusError: "worktree-unavailable" })
-    const [mixed] = groupTasks([repository("/projects/api", [row]), repository("/projects/web", [failed])], { pending: "Checking status…" })
+    const [mixed] = groupTasks([repository("/projects/api", [row]), repository("/projects/web", [failed])])
     expect(mixed).toMatchObject({ checkingRepositories: 1, unknownRepositories: 1 })
   })
 

@@ -113,7 +113,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       if (controller.signal.aborted) return
       const discovered = scannedRepositories(lists)
       paintedFresh.current = true
-      setRepos(discovered.map(list => ({ ...list, worktrees: list.worktrees.map(row => ({ ...row, statusError: t("checkingStatus") })) })))
+      setRepos(discovered.map(list => ({ ...list, worktrees: list.worktrees.map(row => ({ ...row, checking: true })) })))
       const next = await Promise.all(discovered.map(async list => ({
         ...list,
         worktrees: await Promise.all(list.worktrees.map(async row => {
@@ -137,7 +137,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     const paths = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
     void api.cachedScan(paths, controller.signal).then((remembered: RememberedScan | null) => {
       if (!remembered || controller.signal.aborted || paintedFresh.current) return
-      setRepos(rememberedRepositories(remembered, t("checkingStatus")))
+      setRepos(rememberedRepositories(remembered))
     }).catch(() => {
       // Remembered rows are a shortcut, never a fallback the panel depends on: a
       // Host that cannot answer leaves it with the scan already under way.
@@ -151,7 +151,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
 
   // Committed work the merge target does not have is something to act on even
   // though the working tree is clean, which is why it counts as attention.
-  const needsAttention = (row: Worktree) => !!(row.changedFiles || row.commits || row.locked || row.prunable || (row.statusError && row.statusError !== t("checkingStatus")))
+  const needsAttention = (row: Worktree) => !!(row.changedFiles || row.commits || row.locked || row.prunable || (row.statusError && !row.checking))
   const needle = query.trim().toLocaleLowerCase()
   const visibleRepos = repos.filter(repo => {
     if (filter === "attention" && !repo.worktrees.some(needsAttention)) return false
@@ -164,7 +164,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   // The same two filters in both views: every task holds worktrees by
   // definition, so a "has worktrees" filter has nothing to say in either.
   const statusLabel = (row: Worktree) => {
-    if (row.statusError === t("checkingStatus")) return t("checkingStatus")
+    if (row.checking) return t("checkingStatus")
     if (row.statusError) return /worktree-unavailable|ENOENT|No such file/i.test(row.statusError) ? t("unavailable") : row.statusError
     if (row.changedFiles) return format(t("dirty"), { count: String(row.changedFiles) })
     if (row.prunable) return t("prunable")
@@ -180,9 +180,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     if (next.has(path)) next.delete(path); else next.add(path)
     return next
   })
-  // The sentinel this page writes while a read is in flight is passed down, so a
-  // repository being read is not reported as one that could not be read.
-  const tasks = groupTasks(repos, { pending: t("checkingStatus") })
+  // A repository still being read is flagged as such, so a read in flight is not
+  // reported as a read that could not be answered.
+  const tasks = groupTasks(repos)
   // A task needs attention when any of its repositories does, which is the same
   // condition the repository view filters on, one level up.
   const taskNeedsAttention = (task: TaskGroup) => task.changedFiles > 0 || task.commits > 0 || task.lockedRepositories > 0 || task.prunableRepositories > 0 || task.unknownRepositories > 0
@@ -280,7 +280,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           </header>
           {expanded ? <div className="dws-worktree-list">
             {repo.worktrees.map(row => {
-              const state = row.statusError === t("checkingStatus") ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
+              const state = row.checking ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
                 <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
                 <div className="dws-worktree-info"><div className="dws-worktree-title"><strong>{row.branch ?? t("detached")}</strong><span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>{pendingBadge(row.commits)}{row.locked ? <span className="dws-status">{t("locked")}</span> : null}</div><div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div></div>
@@ -293,7 +293,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     {view === "tasks" ? <div className="dws-repo-list">
       {visibleTasks.map(task => <article className="dws-task" key={task.path}>
         <header className="dws-task-header">
-          <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={task.repositories.length === 0} aria-expanded={task.repositories.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleRepository")} ${task.name}`}>
+          <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={task.repositories.length === 0} aria-expanded={task.repositories.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>
           {task.repositories.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-task-icon" />
           <span className="dws-task-heading">
             <span className="dws-task-title">
@@ -330,11 +330,15 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         // start there is not a count, so it takes the row's right edge instead: the
         // edge the creation button of the rows that can host one ends on.
         const empty = ready && state.repositoryCount === 0
+        // A Workspace the Host could not answer is neither a count nor a verdict:
+        // saying "cannot host a task space" about a read that never came back would
+        // rule out a Workspace that may well hold three repositories. It gets the
+        // amber an unreadable worktree status gets, not the neutral checking look.
         const badge = state === "checking"
           ? { className: "dws-status-checking", label: t("workspaceChecking") }
           : ready
             ? { className: canHost ? "dws-status-clean" : "dws-status-zero", label: format(t("workspaceSpans"), { count: String(state.repositoryCount) }) }
-            : { className: "dws-status-checking", label: t("workspaceCannot") }
+            : { className: "dws-status-unavailable", label: t("workspaceUnreadable") }
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
             {/* A Workspace is a folder like a task is, and it wears the same closed one:

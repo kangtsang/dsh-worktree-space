@@ -20,11 +20,11 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   overwritten). The other way round, a container root that is itself a git repository - it has a
   `.git` - is refused, before any directory is created.
 - **The task space's location is a setting.** "Task space location" derives the container root from
-  the source workspace by default, or takes a directory you name. The create dialog can write both
-  the directory you typed there and the strategy along with it back to the configuration.
+  the source workspace by default, or takes a specified directory. The create dialog can write both
+  that directory and the strategy along with it back to the configuration.
 - **The archived-documents root is a setting.** "Archived documents" keeps non-git files under
   `<container root>/archived-docs/` (the default), shared by every project of that container, or
-  under a root you name. Either way the per-task `<project>/<task>-<stamp>/` layer is added below it,
+  under a specified root. Either way the per-task `<project>/<task>-<stamp>/` layer is added below it,
   so the archive has the same shape as the task space.
 
 ### Changed

@@ -30,19 +30,19 @@ export function scannedRepositories(lists: WorktreeList[]): WorktreeList[] {
 /**
  * The rows a remembered scan paints, with whichever statuses the Host still holds.
  *
- * A worktree the Host was never asked about keeps the panel's "checking status…"
- * mark rather than a blank one: the caller is scanning again at that same moment,
- * so those rows are about to be filled in for real.
+ * A worktree the Host was never asked about is marked as still being checked rather
+ * than left blank: the caller is scanning again at that same moment, so those rows
+ * are about to be filled in for real. The mark is a flag, not a message, so the
+ * panel is free to word its own "checking status…" however it likes.
  * @param remembered - the Host's remembered answer.
- * @param pending - the label for a row whose status is not remembered yet.
  * @returns the repositories, ready to render.
  */
-export function rememberedRepositories(remembered: RememberedScan, pending: string): WorktreeList[] {
+export function rememberedRepositories(remembered: RememberedScan): WorktreeList[] {
   return scannedRepositories(remembered.repositories).map(repository => ({
     ...repository,
     worktrees: repository.worktrees.map(row => {
       const status = remembered.statuses[row.path]
-      return status === undefined ? { ...row, statusError: pending } : { ...row, ...status }
+      return status === undefined ? { ...row, checking: true } : { ...row, ...status }
     }),
   }))
 }

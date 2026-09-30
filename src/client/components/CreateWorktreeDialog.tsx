@@ -298,7 +298,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         setRecovery({ ...created, tasksRoot: tasksRoot.trim(), branch: taskBranch })
         setError(`${t("registerFailed")} ${detail}`)
       } else {
-        setError(`${t("operationFailed")}${detail}`)
+        setError(`${t("operationError")}${detail}`)
       }
     } finally {
       endBusy()

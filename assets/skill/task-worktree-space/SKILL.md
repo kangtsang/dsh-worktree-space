@@ -156,8 +156,8 @@ Confirm each destructive step with the user before passing it:
 2. **Work nobody committed?** Nothing to decide and nothing to pass: `done` reports
    every repository the plan showed uncommitted changes for, keeps its worktree, and
    names the checkout in the row's `error` — `uncommitted work is waiting in
-   <path>`. Nothing is committed until the user presses **Authorize the agent to
-   commit** in the panel, and that button opens **one** session shared by every
+   <path>`. Nothing is committed until the user presses **Hand the commits to the
+   agent** in the panel, and that button opens **one** session shared by every
    affected repository, working in the common ancestor of their worktrees (or of
    each worktree and its source repository, when the Host named it), so commit in
    **each** of those repositories, on the task branch, with a
@@ -180,7 +180,7 @@ Confirm each destructive step with the user before passing it:
 3. **A conflict?** The answer for a repository left on a conflict reports
    `mergeInProgress`, `mergeSite` — the checkout the conflict stands in, inside the
    task space — and `conflictedFiles`. Nothing is opened by itself here either: the
-   user presses **Authorize the agent to resolve it** in the panel, and that session is
+   user presses **Hand the conflict to the agent** in the panel, and that session is
    shared by every conflicting repository and works in the common ancestor of their
    sites (or of each site and its source repository, when the Host named it), and in the
    task space where those sites share nothing but the volume root; a
