@@ -25,6 +25,37 @@
 跑完 `run-all.ps1` 会打印每格结果，并留下 `<RunRoot>\homes` 与 `<RunRoot>\logs` 供查验；
 **脚本不清理它们**，由你自己看完再删。
 
+## 前提条件
+
+| # | 需要什么 | 不满足会怎样 |
+| --- | --- | --- |
+| 1 | **Windows + PowerShell**。用到 `Get-NetTCPConnection`、`Get-CimInstance Win32_Process`、`taskkill /T /F`、`Start-Process`、`.bin\dsh.cmd` | macOS / Linux 上**完全跑不了**，没有降级路径。PowerShell 5.1 与 7 都可 |
+| 2 | **`node`、`npm.cmd`、`pnpm` 在 PATH 上**。DSH 要求 node >= 22.19.0 | `install-tarball.ps1` 或安装步骤直接找不到命令 |
+| 3 | **能访问 npm registry** | `install-hosts.ps1` 装不上任何 DSH 版本 |
+| 4 | **约 2 GB 空闲磁盘**（默认在 `%TEMP%` 下）。四个版本装完是 1.8 GB / 10.6 万文件，约 3 分钟 | 装到一半磁盘满 |
+| 5 | **端口 34800 起连续可用**（默认四个版本用 34800–34803） | 占用时**直接失败并报出端口号**，不会闷头换一个——因为证据里必须写明实际端口 |
+| 6 | **执行策略允许运行**。用 `pnpm acceptance:*` 入口会自动带 `-ExecutionPolicy Bypass`；直接 `.\run-all.ps1` 可能被拦 | 被拦时改用 npm script 入口 |
+
+**不需要**的：
+
+- 不需要 `pnpm install`。`pnpm pack` 只读 `package.json` 的 `files` 字段，在没有 `node_modules` 的干净克隆上就能打包
+- 不需要 git。脚本只按 `$PSScriptRoot\..\..` 找 `package.json`，任何一份仓库副本都能跑
+- 不需要预先装 DSH。`install-hosts.ps1` 装的就是矩阵要用的那些
+
+**建议**：默认根落在 `%TEMP%`，而 `%TEMP%` 正是本项目事故里被整个删掉过的目录。守卫保证脚本自己只删
+`<RunRoot>\homes` 和 `<RunRoot>\logs`，但把一次性产物放在一个会被系统或人工定期清理的地方仍然不是好主意。
+正式跑之前显式指定一个自己的目录：
+
+```powershell
+.\scripts\acceptance\run-all.ps1 -RunRoot D:\dsh-acceptance\run -HostsRoot D:\dsh-acceptance\hosts
+```
+
+## 已知的脆弱点
+
+`run-one.ps1` 按固定路径找 DSH 的入口 `<HostsRoot>\<版本>\node_modules\@deepseek-ai\dsh\lib\bin.js`。
+这是 DSH 包**内部**的布局，不是它的公开接口。四个 0.1.7–0.2.0 的版本上它都成立，但 DSH 一旦调整
+bin 位置，脚本会以 `missing DSH at ...` 失败——这是刻意的：宁可明确报错，也不要静默换一条来路不明的入口。
+
 ## 删除范围
 
 `run-one.ps1` 是唯一会删东西的脚本，它只能删两类路径：

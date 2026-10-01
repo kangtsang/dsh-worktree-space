@@ -33,12 +33,33 @@ if ($parseErrors -and $parseErrors.Count) {
 # The versions come from the manifest, not from a list written here, so this cannot
 # drift away from what the package actually claims.
 $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\package.json') -Raw | ConvertFrom-Json
-$versions = @($manifest.dsh.compatibility.dshReleases)
+# dshReleases is an OBJECT (version -> verdict), not an array. @($obj) wraps it in a
+# one-element array, so the loop below would run once with the object itself and
+# print "@{0.1.7-rc.1=compatible; ...}" as the version. Take the keys.
+$versions = @($manifest.dsh.compatibility.dshReleases.PSObject.Properties.Name)
 if (-not $versions.Count) { throw 'manifest declares no dshReleases' }
 
-# Newest first. Sort on the numeric part only, or "0.2.0-rc.10" sorts below
-# "0.2.0-rc.2" as a plain string.
-$ordered = @($versions | Sort-Object { [version]($_ -replace '-.*$', '') } -Descending)
+# Newest first, and "newest" has to mean newest. Stripping the prerelease with
+# -replace '-.*$','' turns both 0.2.0-rc.1 and 0.2.0-rc.2 into the same sort key
+# "0.2.0"; Sort-Object keeps ties in their original order, so rc.2 never rises
+# above rc.1 and the run is not actually newest-first. Rank on the prerelease
+# number too, and treat a final release as outranking its own prereleases.
+function Get-VersionRank {
+  param([string]$Spec)
+  $m = [regex]::Match($Spec, '^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$')
+  if (-not $m.Success) { throw ("declared DSH release is not a version number: " + $Spec) }
+  $core = [double]$m.Groups[1].Value * 1e12 + [double]$m.Groups[2].Value * 1e8 + [double]$m.Groups[3].Value * 1e4
+  $pre  = $m.Groups[4].Value
+  if (-not $pre) { return $core + 9999 }
+  $pm = [regex]::Match($pre, '^[A-Za-z][A-Za-z.-]*?(\d+)$')
+  if (-not $pm.Success) {
+    Write-Host ("  note: " + $Spec + " has an unrecognised prerelease tag '" + $pre + "'; ranking it as 0")
+    return $core
+  }
+  return $core + [double]$pm.Groups[1].Value
+}
+
+$ordered = @($versions | Sort-Object { Get-VersionRank -Spec $_ } -Descending)
 Write-Host ('versions, newest first: ' + ($ordered -join ', '))
 
 $summary = @()
