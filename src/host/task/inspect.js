@@ -7,12 +7,11 @@ import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
-import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
-import { assertIsolated, recommendTasksRoot } from './paths.js'
+import { discoverSourceRepos, isSourceRepository } from './discover.js'
+import { tryRunGit } from './git.js'
+import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
+import { assertIsolated } from './paths.js'
 
-import { breadcrumb } from './create.js'
 import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot } from './shared.js'
 
 export async function classifySourceRoot(sourceRoot) {

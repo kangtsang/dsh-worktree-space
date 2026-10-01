@@ -5,10 +5,10 @@
  */
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
 import { auditEnter, recordError } from './audit.js'
 import { prepareContainerRoot } from './container.js'
-import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
+import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated } from './paths.js'

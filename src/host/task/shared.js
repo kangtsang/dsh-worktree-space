@@ -4,16 +4,11 @@
  * What more than one of those needs: the layout a task container follows, and the worktrees it holds.
  */
 
-import { createTask } from './create.js'
-import { DOCUMENT_EXTENSIONS, finishTask } from './archive.js'
-
-import { existsSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
-import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName, validateTaskName } from './naming.js'
-import { assertIsolated, recommendTasksRoot } from './paths.js'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tryRunGit } from './git.js'
+import { validateProjectName, validateTaskName } from './naming.js'
+import { recommendTasksRoot } from './paths.js'
 
 /** File a task container carries so a session finds the task's own rules. */
 
@@ -163,7 +158,7 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * A source root is a repository that is not a linked worktree, or a directory
  * whose top-level children are repositories. The answer is filesystem-only —
  * `.git` as a directory is what marks a repository — so it costs no git calls
- * and cannot disagree with what {@link createTask} would discover.
+ * and cannot disagree with what `createTask` would discover.
  * @param sourceRoot - the candidate directory.
  * @returns the classification plus the repositories a task would span.
  */
@@ -368,7 +363,7 @@ export async function writeTaskMetadata(taskPath, metadata) {
 /**
  * Whether a file name looks like a document.
  * @param name - the entry's name.
- * @returns whether its extension is one of {@link DOCUMENT_EXTENSIONS}.
+ * @returns whether its extension is one of `DOCUMENT_EXTENSIONS`.
  */
 
 /**

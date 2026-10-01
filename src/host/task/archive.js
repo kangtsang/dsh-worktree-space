@@ -4,13 +4,12 @@
  * Finishing a task: what merging would do, which files are the user's own, and the merge, removal, and filing that follow.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, readFile, rmdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordWarning } from './audit.js'
-import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName } from './naming.js'
+import { validateProjectName } from './naming.js'
 import { assertIsolated } from './paths.js'
 
 import { TASK_OWNED_FILES, isLinkedWorktree, taskSpacePath } from './shared.js'
