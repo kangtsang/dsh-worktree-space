@@ -8,7 +8,7 @@ import { readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 

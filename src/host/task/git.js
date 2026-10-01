@@ -6,7 +6,13 @@
  * questions are answered by the exit status alone — `show-ref --verify
  * --quiet` prints nothing either way, so a helper that reads stdout cannot tell
  * a reused branch from a missing one.
+ *
+ * Because `runGit` is that one place, it is also where every git call is
+ * recorded: the two helpers below answer an empty string and a false rather
+ * than throwing, and the exit code and diagnostic behind those answers are what
+ * a report of "the merge did nothing" has to be read against.
  */
+import { recordGitCall } from './audit.js'
 
 /**
  * Run git in a directory and fail on a non-zero exit.
@@ -27,9 +33,19 @@ export async function runGit(subprocess, cwd, args) {
     },
     graceMs: 1000,
   })
+  const startedAt = Date.now()
   const outcome = await handle.done
   const stdout = handle.collected.stdout?.readFrom(0).text ?? ''
   const stderr = handle.collected.stderr?.readFrom(0).text ?? ''
+  await recordGitCall({
+    cwd,
+    args,
+    exitCode: outcome.exitCode,
+    signal: outcome.signal,
+    stdout,
+    stderr,
+    ms: Date.now() - startedAt,
+  })
   if (outcome.exitCode !== 0 || outcome.signal !== null) {
     throw new Error(`git ${args.join(' ')} failed${outcome.signal ? ` (${outcome.signal})` : ` (exit ${outcome.exitCode})`}: ${stderr.trim() || stdout.trim()}`)
   }

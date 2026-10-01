@@ -6,9 +6,10 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { auditEnter, recordError } from './audit.js'
 import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated } from './paths.js'
 
@@ -100,7 +101,6 @@ export async function createTask(subprocess, options) {
     baseRef,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
     configuredRoot = '',
-    push = false,
   } = options
 
   const name = validateTaskName(task)
@@ -138,6 +138,10 @@ export async function createTask(subprocess, options) {
   const branch = branchNameFor(name, prefix)
   const taskPath = taskSpacePath(tasksRoot, project, name)
   if (existsSync(taskPath)) throw new Error(`task space already exists: ${taskPath}`)
+  // What every record this create writes carries. Entered before the container
+  // root exists on purpose: the probes below are worth having, and an append
+  // that finds no directory to write in drops the line rather than creating one.
+  auditEnter({ task: name, project, tasksRoot })
 
   for (const repoPath of selected) {
     if (await gitSucceeded(subprocess, repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])) {
@@ -160,7 +164,6 @@ export async function createTask(subprocess, options) {
   await mkdir(taskPath)
 
   const created = []
-  const warnings = []
   try {
     for (const repoPath of selected) {
       const worktreePath = join(taskPath, basename(repoPath))
@@ -172,14 +175,6 @@ export async function createTask(subprocess, options) {
         : ['worktree', 'add', worktreePath, '-b', branch, `${baseRef}`]
       await runGit(subprocess, repoPath, args)
       created.push({ name: basename(repoPath), path: worktreePath, repoPath, ...facts })
-    }
-
-    if (push) {
-      for (const entry of created) {
-        if (!(await gitSucceeded(subprocess, entry.repoPath, ['push', '-u', 'origin', branch]))) {
-          warnings.push(`push to origin failed for '${entry.name}'; the branch is kept locally`)
-        }
-      }
     }
 
     await writeTaskMetadata(taskPath, taskMetadata({
@@ -200,6 +195,13 @@ export async function createTask(subprocess, options) {
   } catch (error) {
     const stranded = await rollbackTask(subprocess, taskPath, created)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
+    // What the rollback could not undo is the part a create that failed leaves
+    // behind, and it is not in the message the caller reads - so it is here.
+    await recordError(error, {
+      phase: 'create',
+      ...(created.length === 0 ? {} : { created: created.map((entry) => entry.name) }),
+      ...(stranded.length === 0 ? {} : { stranded }),
+    })
     throw new Error(`${error.message}${suffix}`)
   }
 
@@ -211,7 +213,6 @@ export async function createTask(subprocess, options) {
     tasksRoot,
     baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
     repositories: created.map((entry) => ({ name: entry.name, path: entry.path })),
-    warnings,
   }
 }
 

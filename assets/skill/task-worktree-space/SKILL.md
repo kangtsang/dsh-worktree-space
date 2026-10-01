@@ -103,8 +103,8 @@ Follow this order. Never create a workspace with a guessed location.
    name.
 9. **Work in the task directory**: it is where the task's session belongs.
 
-Pass `push: true` only when the user explicitly asked for a remote branch.
-Branches are local-only by default.
+Task branches are local only. Pushing one to a remote is the user's own action:
+this plugin never writes to a remote, so never push from here.
 
 ## Working inside a task space
 

@@ -11,7 +11,7 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName, validateTaskName } from './naming.js'
 import { assertIsolated, recommendTasksRoot } from './paths.js'
 
@@ -330,7 +330,7 @@ export async function writeTaskMetadata(taskPath, metadata) {
  * @param subprocess - the profile's subprocess service.
  * @param options - `sourceRoot`, `task`, and the optional `tasksRoot`, `repos`
  * (repository names; omit for every discovered repository), `baseRef`,
- * `branchPrefix` and `push`.
+ * `branchPrefix`.
  * @returns the created task's branch, container path and repositories.
  * @throws Error, after rolling the partial create back, when any step fails.
  */

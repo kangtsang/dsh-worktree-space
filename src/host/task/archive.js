@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readdir, readFile, rmdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { auditEnter, recordError, recordWarning } from './audit.js'
 import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateProjectName } from './naming.js'
@@ -212,6 +213,36 @@ async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
 
 
 /**
+ * Record what a plan or a finish could not do.
+ *
+ * Both carry on past a repository that stopped and report it in that
+ * repository's own `error` field, so none of it reaches the caller's failure
+ * path and a single record around the call would never see it. The warnings are
+ * the softer half of the same report: a branch that was not deleted, a copy
+ * that failed and therefore kept the original.
+ * @param repositories - the per-repository rows the operation returned.
+ * @param warnings - the operation's own warnings.
+ * @param phase - `plan` or `done`, so a reader can group them.
+ */
+async function auditOutcome(repositories, warnings, phase) {
+  for (const entry of repositories) {
+    if (typeof entry?.error !== 'string' || entry.error === '') continue
+    await recordError(entry.error, {
+      phase,
+      repository: entry.name ?? '',
+      worktree: entry.path ?? '',
+      mainRepo: entry.mainRepo ?? '',
+      branch: entry.branch ?? '',
+      ...(entry.conflict === true ? { conflict: true } : {}),
+      ...(typeof entry.mergeSite === 'string' && entry.mergeSite !== '' ? { mergeSite: entry.mergeSite } : {}),
+      ...(Array.isArray(entry.conflictedFiles) && entry.conflictedFiles.length > 0 ? { conflictedFiles: entry.conflictedFiles } : {}),
+    })
+  }
+  for (const warning of warnings) await recordWarning(warning, { phase })
+}
+
+
+/**
  * Report what archiving a task would do, without doing any of it.
  *
  * Each repository reports the branch its worktree is on, the branch that branch
@@ -230,6 +261,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
   if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
+  auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
@@ -295,6 +327,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
     repositories.push(plan)
   }
 
+  await auditOutcome(repositories, [], 'plan')
   return { task, project: projectName, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays }
 }
 
@@ -417,6 +450,7 @@ export async function finishTask(subprocess, options) {
   if (destination !== '') assertIsolated(taskPath, destination)
 
   if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
+  auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
@@ -623,6 +657,7 @@ export async function finishTask(subprocess, options) {
     }
   }
 
+  await auditOutcome(repositories, warnings, 'done')
   return {
     task,
     project: projectName,

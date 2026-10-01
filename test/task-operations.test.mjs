@@ -468,24 +468,7 @@ describe("createTask", () => {
     }
   })
 
-  it("keeps the task and warns when a push fails", async () => {
-    const source = await sourceFixture()
-    const container = await containerFixture()
-    const { subprocess } = subprocessMock({
-      ...branchIsNew("task/login"),
-      "push -u origin task/login": { exitCode: 1, stderr: "no remote" },
-    })
-    try {
-      const result = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root, push: true })
-      expect(result.warnings).toHaveLength(2)
-      expect(result.warnings[0]).toMatch(/push to origin failed for 'alpha'/)
-      expect(existsSync(result.path)).toBe(true)
-    } finally {
-      await source.cleanup()
-      await container.cleanup()
-    }
   })
-})
 
 describe("the container root", () => {
   it("writes its own note the first time, and never over one already there", async () => {

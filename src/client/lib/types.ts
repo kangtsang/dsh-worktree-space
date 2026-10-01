@@ -103,7 +103,6 @@ export interface CreateTaskResult {
   tasksRoot: string
   baseRef?: string
   repositories: Array<{ name: string; path: string }>
-  warnings: string[]
 }
 
 /** Per-repository outcome of `task.done`. */
