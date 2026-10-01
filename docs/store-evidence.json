@@ -1,137 +1,129 @@
 {
-  "schemaVersion": 1,
-  "commit": "ae7bb4386069090f9f188937a4d4eeafaadc9407",
+  "schemaVersion": 2,
+  "version": "1.1.0",
+  "baseline": {
+    "package": "dsh-worktree-space@1.1.0",
+    "commit": "PENDING: the fixed commit on the default branch; fill once the release commit exists",
+    "note": "The manifest state, the acceptance procedure, the acceptance results and the boundary cases below all describe this version only; no other version is referenced.",
+    "procedure": "docs/store-evidence.md"
+  },
   "profile": "evidence",
-  "host": { "dsh": "0.1.7-rc.2", "node": "v24.18.0", "os": "Windows" },
-  "artifact": { "name": "dsh-worktree-space-1.0.6.tgz", "bytes": 307740, "packedFiles": 19 },
-  "hostAuthentication": {
-    "api": "connection.requestRejection",
-    "evidence": "not applicable: this plugin registers no webServer and no HTTP lifecycle surface of its own; its routes ride the host's authenticated /api carrier"
+  "isolation": {
+    "mechanism": "DSH_HOME pointed at a throwaway directory for every command, so install, start and uninstall never touch the daily profiles/",
+    "powershell": "$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) (\"dsh-evidence-\" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null"
   },
-  "dumpConfig": {
-    "verified": true,
-    "evidence": "dsh --profile evidence --dump-config exited 0 (1249 lines) and its composed tree ends with '# == dsh-worktree-space' / '- id: worktree-space' / 'name: dsh-worktree-space'"
-  },
-  "isolatedRuntime": {
-    "verified": true,
-    "evidence": "booted under a throwaway DSH_HOME: the page answers 200, the boot payload lists {\"id\":\"dsh-worktree-space\",...,\"rev\":\"473ca4a5f860\"}, that bundle is served 200 / 203853 bytes, and POST /api/dsh-worktree-space/task.preference answers 200 while an unknown endpoint answers 404"
-  },
-  "realProfile": {
-    "verified": true,
-    "evidence": "every command ran with DSH_HOME pointed at a throwaway directory: profiles/web still holds 1.0.3 and profiles/desktop 1.0.2, and profiles/web/cordis.patch.yml still hashes 0793DF16616591A7"
-  },
-  "externalReadback": {
-    "verified": true,
-    "evidence": "two readbacks, both byte-exact. The build: client/client.js from raw.githubusercontent.com at the fixed commit hashes F626FF55266DDEC472F4CA496ED05811C7F503B56302748C5F7717CAFBDB8B62 (203777 bytes), identical to the local file. The artifact: the 1.0.6 tarball from registry.npmjs.org hashes sha1 7469017d0c65cfcfc57edd81ac1fbe525e2d68b7 / sha256 1670ACF59035DE0A640FF07B77B06C1E4936213E3FCCF3EE684CF0C28B327A2B at 307904 bytes, identical to npm pack here"
-  },
-  "matrix": [
-    {
-      "dsh": "0.1.7-rc.2",
-      "node": "v24.18.0",
-      "os": "Windows",
-      "install": "pass: dsh plugin --profile evidence add <tarball> exited 0 with '+ dsh-worktree-space 1.0.6' and no incompatible warning",
-      "configuration": "pass: the profile's package.json gained the dependency and the bundle entry, and --dump-config composes the worktree-space row",
-      "start": "pass: dsh --profile evidence --no-open --port 0 printed its URL with no 'did not activate' warning",
-      "uninstall": "pass: dsh plugin --profile evidence remove dsh-worktree-space exited 0, node_modules/dsh-worktree-space is gone, and --dump-config mentions worktree-space 0 times",
-      "rollback": "pass: booting again after the removal starts clean, and the page mentions dsh-worktree-space 0 times",
-      "endToEnd": "pass: task.create built the worktree and its metadata (a tasks root inside the source root was refused with 'work and source must be isolated'), task.plan reported mergeTarget main / commits 1 / changedFiles 0, task.done reported merged, removed, branchDeleted and containerRemoved true with failed false and no warnings, and the source repository ended on 'Merge branch task/evidence' with only main left"
-    }
-  ],
-  "requiredCases": {
-    "unauthenticated-401": "not applicable: no HTTP lifecycle surface of its own",
-    "cross-origin-403": "not applicable: no HTTP lifecycle surface of its own",
-    "missing-authority-503": "not applicable: no HTTP lifecycle surface of its own",
-    "post-not-replayed": "not applicable: no HTTP lifecycle surface of its own",
-    "crash-recovery": "not applicable: the plugin keeps no durable operation journal; each route call is one git pass, and a stopped finish is re-read from the repository's own state",
-    "windows-file-lock": "not applicable: nothing in this Windows run hit a lock, so no case produced one",
-    "rollback-failure": "not applicable: uninstall rollback is the uninstall row above",
-    "pnpm-10": "not run: this run used pnpm 12.6.0",
-    "pnpm-11": "not run: this run used pnpm 12.6.0",
-    "pnpm-12": "pass: pnpm 12.6.0 installed the tarball and removed it again",
-    "monorepo-subpath": "not run: this plugin installs as a single package, not from a monorepo subpath"
-  },
-  "publicRelease": "1.0.5 was published from 88f8808ee66c6de733d718bd7588f96677a9da47; a version number cannot be reused, so the contract fixes shipped as 1.0.6 and then as 1.0.7, which registry.npmjs.org serves as latest with gitHead 0209e8e176e5b0fc36f6b9bd3c1fa49476370af0 and shasum 603c5fc76c5512483b0a68f3e06fb4787bb50eb4, its tarball byte-identical to npm pack at that commit",
-  "manifestCompatibilityFix": {
-    "version": "1.0.7",
-    "change": "manifest-only: engines.dsh and dsh.compatibility.dsh moved from a single version or a 0.1.7-rc.1 floor to the range \">=0.1.7-alpha.2 <0.2.0\", dsh.compatibility.node added \">=22.19.0\", and dshReleases plus dshOperations now declare every release in the live latest-three window: 0.1.7-alpha.2, 0.1.7-rc.1 and 0.1.7-rc.2",
-    "windowAuthority": "official-dsh-releases.mjs resolves the latest-three window from official GitHub Releases and published npm versions in the active major.minor line; previews tagged on the next channel that belong to a later major.minor line are deliberately excluded",
-    "runtimeEvidenceCarriesForward": "for 1.0.7 itself: lib/index.js and client/client.js were byte-identical to 1.0.6, so the end-to-end evidence in the matrix above applies to that release unchanged",
-    "undeclared": "a release that has not been tested stays undeclared rather than being claimed, so it reads as unknown; peer dependencies still pin 0.1.7-rc.1",
-    "dshOperations": {
-      "0.1.7-alpha.2": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.1.7-rc.1": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.1.7-rc.2": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      }
+  "manifest": {
+    "version": "1.1.0",
+    "enginesNode": ">=22.19.0",
+    "enginesDsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "peers": {
+      "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.3.0-0",
+      "@deepseek-ai/dsh-tools": ">=0.1.7-rc.1 <0.3.0-0"
     },
-    "method": "each release ran against its own @deepseek-ai/dsh CLI in a throwaway DSH_HOME: profile 'acceptance' built from the shipped web template, dsh-worktree-space-1.0.7.tgz installed, --dump-config composed the worktree-space row, cold start printed its URL with no warning, the page carried dsh-worktree-space/client.js with the plugin RPC answering ok:true, then remove dropped the package and left zero occurrences, and a second cold start was clean",
-    "observations": {
-      "dumpConfigLines": { "0.1.7-alpha.2": 1237, "0.1.7-rc.1": 1237, "0.1.7-rc.2": 1249 },
-      "dumpConfigLinesAfterRemove": { "0.1.7-alpha.2": 1234, "0.1.7-rc.1": 1234, "0.1.7-rc.2": 1246 },
-      "worktreeSpaceOccurrencesAfterRemove": 0,
-      "incompatibleMentions": 0,
-      "pnpmPeerNotice": "the routine '[WARN] Issues with peer dependencies found' appears in every install, including the already-verified 0.1.7-rc.2; it is not a version incompatibility"
+    "compatibilityDsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "compatibilityNode": ">=22.19.0",
+    "profiles": ["web", "desktop"],
+    "clientPlatform": "web",
+    "dshReleases": {
+      "0.1.7-rc.1": "compatible",
+      "0.1.7-rc.2": "compatible",
+      "0.2.0-rc.1": "compatible",
+      "0.2.0-rc.2": "compatible"
+    },
+    "dshOperations": {
+      "0.1.7-rc.1": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
+      "0.1.7-rc.2": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
+      "0.2.0-rc.1": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
+      "0.2.0-rc.2": { "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" }
+    },
+    "rangeShape": {
+      "oneString": "engines.dsh, both DSH peers and dsh.compatibility.dsh deliberately read the same string: from DSH 0.2.0 on install and startup enforce the peer range while the other two are declarative, so a manifest whose three disagree is a manifest whose gate is not the one it documents",
+      "upperBound": "<0.3.0-0 rather than <0.3.0: under the semver.satisfies(..., { includePrerelease: true }) call DSH makes, <0.3.0 would also admit 0.3.0-alpha.1, while the -0 prerelease floor excludes the 0.3.0 line's prereleases as well",
+      "lowerBound": ">=0.1.7-rc.1: support starts at the first release candidate of the 0.1.7 line"
+    },
+    "platformShape": "dsh.client.platform stays \"web\" because the desktop client runs the same web client and the same client/client.js build; the two clients are declared as profiles, not as platforms"
+  },
+  "clients": {
+    "declared": ["web", "desktop"],
+    "shared": "both run the same client artifact (client/client.js) and the same host interface; they differ only in how the plugin is installed and removed",
+    "web": "command line: dsh plugin --profile web add dsh-worktree-space, dsh plugin --profile web remove dsh-worktree-space",
+    "desktop": "the plugin management page: sidebar -> Plugins -> put dsh-worktree-space in Plugin package name -> Install; to remove it, open Worktree Space from the list, go to its Plugin details page, and press Uninstall at the top right"
+  },
+  "lifecycleMatrix": {
+    "status": "run",
+    "note": "the store contract's clause 8 requires install -> configuration -> visible -> uninstall/rollback in a disposable profile, and unit tests do not substitute for it. Each row below comes from an actual run on that release's own DSH CLI, per docs/store-evidence.md sections 1 and 2.",
+    "web": {
+      "ranOn": "2026-10-01",
+      "artifact": "dsh-worktree-space-1.1.0.tgz",
+      "artifactFiles": 21,
+      "ports": { "0.1.7-rc.1": 34800, "0.1.7-rc.2": 34801, "0.2.0-rc.1": 34802, "0.2.0-rc.2": 34803 },
+      "node": "v24.18.0",
+      "pnpm": "12.6.0"
+    },
+    "desktop": "confirmed by the author outside this run; the desktop lifecycle does not go through the command line",
+    "rows": [
+      {
+        "dsh": "0.2.0-rc.2",
+        "node": "v24.18.0",
+        "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
+        "compose": { "result": "passed", "exit": 0, "lines": 1262, "worktreeSpaceMentions": 3, "nameMentions": 1 },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35367, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "3c02e8695ba5", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
+        "rollback": { "result": "passed", "exit": 0, "lines": 1259, "worktreeSpaceMentions": 0 }
+      },
+      {
+        "dsh": "0.2.0-rc.1",
+        "node": "v24.18.0",
+        "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
+        "compose": { "result": "passed", "exit": 0, "lines": 1262, "worktreeSpaceMentions": 3, "nameMentions": 1 },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35333, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "b4c4e30ed039", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
+        "rollback": { "result": "passed", "exit": 0, "lines": 1259, "worktreeSpaceMentions": 0 }
+      },
+      {
+        "dsh": "0.1.7-rc.2",
+        "node": "v24.18.0",
+        "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
+        "compose": { "result": "passed", "exit": 0, "lines": 1249, "worktreeSpaceMentions": 3, "nameMentions": 1 },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 34825, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "a891e0ed576d", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
+        "rollback": { "result": "passed", "exit": 0, "lines": 1246, "worktreeSpaceMentions": 0 }
+      },
+      {
+        "dsh": "0.1.7-rc.1",
+        "node": "v24.18.0",
+        "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
+        "compose": { "result": "passed", "exit": 0, "lines": 1237, "worktreeSpaceMentions": 3, "nameMentions": 1 },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 33544, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "37a15226d7a9", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
+        "rollback": { "result": "passed", "exit": 0, "lines": 1234, "worktreeSpaceMentions": 0 }
+      }
+    ],
+    "probePreconditions": {
+      "sessionCookie": "the launch token is exchanged for a dsh-auth-* cookie on the first index request; without replaying that cookie every /api route answers 405 on POST and 404 on GET, including host routes that are certainly registered, so that response is the auth fence and not a missing route",
+      "envelopeMethod": "endpointFromPath('/api', p) is p.slice('/api'.length + 1), so the envelope's method is the whole remainder, 'dsh-worktree-space/<endpoint>'; sending only '<endpoint>' is rejected with 'RPC method does not match endpoint.'",
+      "bundleUrl": "the client bundle address is page-relative: plugins/??dsh-worktree-space/client.js&rev=<rev>, with a per-version rev"
     }
   },
-  "archiveStrategyRelease": {
-    "version": "1.0.8",
-    "change": "the archived-documents root became a configured strategy instead of one computed rule: dsh.compatibility.dshOperations is untouched, but the finish dialog now chooses between the task space's own container root (<container>/archived-docs, the new default) and a configured directory, and files documents under <project>/<task>-<stamp> beneath whichever root is in force rather than a flat <workspace>-<stamp> folder",
-    "hostContractUnchanged": "the Host side of the archive is the same surface: task.done still carries the same documentsDirectory string, finishTask still validates it with assertIsolated against the task container, and archive.js's copy/clean-up paths are unchanged. The Host plugin gains one configuration field and one accessor, and lib/index.js is rebuilt for it.",
-    "clientBundleChanged": "client/client.js is no longer byte-identical to 1.0.6 or 1.0.7 - it now computes the destination from the served strategy - so the byte-identity claim recorded under manifestCompatibilityFix stops at 1.0.7",
-    "lifecycleRowsNotReRun": "the four lifecycle rows have since been re-run for 1.0.8 across the five releases of the window - see dsh020CompatibilityRelease - but those runs answer only 'installs, starts, uninstalls, rolls back': the two archive roots themselves were not exercised on a running host. They are covered by unit tests (test/documents.test.ts) and by the finish-dialog tests (test/task-finish.test.tsx) only, and the section 2.3 end-to-end acceptance remains to be run",
-    "dumpConfigCountsMayMove": "the --dump-config line counts recorded above are 1.0.7's; a release that adds a configuration field may compose a different tree, so those numbers must not be carried into a 1.0.8 claim without measuring again"
+  "requiredCases": {
+    "unauthenticated-401": "not applicable: the plugin registers no webServer and no HTTP lifecycle surface of its own; its routes ride the host's authenticated /api carrier",
+    "cross-origin-403": "not applicable: same",
+    "missing-authority-503": "not applicable: same",
+    "post-not-replayed": "not applicable: same",
+    "crash-recovery": "not applicable: the plugin keeps no durable operation journal; each route call is one git pass, and a stopped finish is re-read from the repository's own state",
+    "windows-file-lock": "did not trigger: in all four runs the start, the probes and the stop left no holder behind, and node_modules was removable",
+    "rollback-failure": "did not trigger: in all four runs node_modules disappeared, cordis.patch.yml went back to 0 mentions, and --dump-config returned to its pre-install line count",
+    "pnpm-10": "not tested: only the host-bundled pnpm was present",
+    "pnpm-11": "not tested: only the host-bundled pnpm was present",
+    "pnpm-12": "tested: 12.6.0, the version the host bundles; all four installs used it",
+    "monorepo-subpath": "not applicable: this plugin installs as a single package, not from a monorepo subpath"
   },
-  "projectLayerRelease": {
-    "version": "1.0.8",
-    "change": "a task space moved down one level: it was <container root>/<task>/<repository> and is now <container root>/<project>/<task>/<repository>, with the project layer named after the source Workspace directory (basename of the source root) and derived by the plugin rather than asked for. The recommended container root is unchanged - 'worktree-space' inside the first directory below the volume root - so source roots of one root workspace share a single container however deep their own project is filed, and the container strategy's archive root is that container root itself, so every project shares one archived-docs rather than one per project.",
-    "containerRootValidation": "the container root is now the plugin's zone: the first task space created under it writes a bilingual README.md (an existing one is never overwritten), and a container root that is itself a git repository - it holds a .git - is refused before any directory is created. That refusal covers the case where the container root is the source repository itself, which assertIsolated already rejected from the other side.",
-    "protocolGainedACoordinate": "task.plan and task.done now take a required project alongside task and tasksRoot, createTask's result and every task's metadata carry it, the task_worktree_space tool gained the parameter and a two-level list, and the client's TaskGroup, types and create/finish payloads follow. This is a breaking change for this plugin's own client half, not for any external service.",
-    "oldLayoutNotMigrated": "the flat <container root>/<task>/ layout is neither supported nor migrated: listTasks walks two levels below the container root and skips archived-docs, and a task space created by an earlier version will not be listed.",
-    "evidenceAndDumpCountsInvalidated": "the end-to-end row in the matrix above was taken at 1.0.6 with the flat layout, so its paths are one level short and it is evidence for neither the project layer nor the 1.0.8 archive strategies. lib/index.js and client/client.js are rebuilt again for this change, and the --dump-config line counts remain 1.0.7's.",
-    "lifecycleRowsNotReRun": "the four lifecycle rows have since been re-run for 1.0.8 across the five releases of the window - see dsh020CompatibilityRelease - but the project layer, the container-root README and the .git refusal were not exercised on a running host: they are covered by unit tests (test/task-operations.test.mjs, test/task-paths.test.mjs, test/task-naming.test.mjs, test/task-tool.test.mjs) only. The section 2.3 end-to-end acceptance, which should exercise the two container-root validations, remains to be run."
-  },
-  "dsh020CompatibilityRelease": {
-    "version": "1.0.8",
-    "issue": "DSH 0.2.0 marks this plugin incompatible: 'dsh-worktree-space@1.0.8 is incompatible with DSH 0.2.0-rc.1 (requires @deepseek-ai/dsh-client-connection ^0.1.7-rc.1, @deepseek-ai/dsh-tools ^0.1.7-rc.1). Running it may cause crashes or data loss.'",
-    "rootCause": "@deepseek-ai/dsh-app-boot's evaluatePluginCompatibility(manifest, exemptions, runtimeVersion) walks peerDependencies, looks only at names equal to @deepseek-ai/dsh or starting with @deepseek-ai/dsh-, and flags a peer when !semver.satisfies(runtimeVersion, range, { includePrerelease: true }). From DSH 0.2.0 on that check gates installation - the install is refused before pnpm runs and the profile manifest and lockfile are restored - and a start skips the plugin. ^0.1.7-rc.1 has a SemVer upper bound of <0.2.0, so no 0.2.0-line prerelease satisfies it. DSH 0.1.7 and earlier read only declarative fields such as dsh.compatibility, which is why the hole only surfaced now. No runtime code changed for this fix - lib/index.js and client/client.js are not touched by it - and the 'may cause crashes or data loss' sentence is the failure notice's fixed wording rather than a measured verdict on the artifact.",
-    "change": "manifest-only, and all three DSH declarations now read one range: peerDependencies for @deepseek-ai/dsh-client-connection and @deepseek-ai/dsh-tools went from ^0.1.7-rc.1 to >=0.1.7-alpha.2 <0.3.0-0, engines.dsh from >=0.1.7-alpha.2 and dsh.compatibility.dsh from >=0.1.7-alpha.2 <0.2.0 to that same range, dshReleases and dshOperations gained 0.2.0-rc.1 and 0.2.0-rc.2, and the thirteen @deepseek-ai/dsh-* devDependencies moved from 0.1.7-rc.1 to 0.2.0-rc.2",
-    "upperBound": "<0.3.0-0 rather than <0.3.0: with includePrerelease on, <0.3.0 would also admit 0.3.0-alpha.1, while the -0 prerelease floor excludes the 0.3.0 line's prereleases as well. Checked version by version with the same semver.satisfies(..., { includePrerelease: true }) call DSH makes: true for 0.1.7-alpha.2, 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1, 0.2.0-rc.2, 0.2.0 and 0.2.9; false for 0.1.6, 0.3.0-0, 0.3.0-alpha.1 and 0.3.0.",
-    "peerFloorAligned": "the peer floor read 0.1.7-rc.1 while engines.dsh and dsh.compatibility.dsh already said 0.1.7-alpha.2, so the manifest contradicted itself - dshReleases claimed alpha.2 while the peers demanded at least rc.1. alpha.2 is in the window and was measured in this round, so the floor follows the measurement and the three ranges became one.",
-    "method": "each of the five releases ran against its own @deepseek-ai/dsh CLI in a fresh DSH_HOME: profile 'acceptance' built from the shipped web template, dsh-worktree-space-1.0.8.tgz installed as a file: dependency, --dump-config composed the worktree-space row (three lines), a cold start printed its URL with no warning, the page named dsh-worktree-space/client.js and the served module group contained id: \"dsh-worktree-space\", POST /api/dsh-worktree-space/task.preference answered 200 with ok:true and an unknown endpoint answered 404, then remove left zero occurrences in the composed tree and a second cold start was clean with zero mentions on the page",
-    "matrix": [
-      { "dsh": "0.1.7-alpha.2", "dumpConfigLines": [1234, 1237, 1234], "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
-      { "dsh": "0.1.7-rc.1", "dumpConfigLines": [1234, 1237, 1234], "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
-      { "dsh": "0.1.7-rc.2", "dumpConfigLines": [1246, 1249, 1246], "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
-      { "dsh": "0.2.0-rc.1", "dumpConfigLines": [1259, 1262, 1259], "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" },
-      { "dsh": "0.2.0-rc.2", "dumpConfigLines": [1259, 1262, 1259], "install": "passed", "start": "passed", "uninstall": "passed", "rollback": "passed" }
-    ],
-    "dumpConfigLinesAreWindowDependent": "the three numbers per release are the composed tree before the install, with the plugin, and after the remove; the plugin contributes exactly three lines. They are the same as the 1.0.7 round's numbers but are two independent measurements, and they must be taken again if the host version or the configuration fields change.",
-    "packRechecks": "the documentation of this round lives inside the artifact, so the tarball was packed again after the manifest and the documentation were settled and the four steps were re-run on those later packs, not only on the first: 0.1.7-alpha.2 once and 0.2.0-rc.1 three times. Every observation matched the matrix above, line for line and byte for byte - 0.2.0-rc.1's page came back at 35333 bytes and its module group at 600806 bytes every time. DSH reads only package.json, cordis.patch.yml and the two bundles during install and start, so the documentation text inside the tarball cannot move these results. The artifact is identified by name and version, dsh-worktree-space-1.0.8.tgz, rather than by a byte count, since its own documentation is part of it.",
-    "refusalReproduced":"the published 1.0.7 was installed into an already-cleaned 0.2.0-rc.1 and 0.2.0-rc.2 profile: both refused with 'installation rejected: Plugin dsh-worktree-space@1.0.7 is incompatible with dsh <runtime>: peerDependencies {...}. Running it may cause crashes or data loss. ... Exact-version exemption: not active.' followed by 'nothing was installed.'; before and after, the profile's dependencies and dsh.profile.bundles were identical and node_modules/dsh-worktree-space was absent, so the refusal rolls back cleanly, and the next cold start was clean. The 0.1.7 line has no such gate - which is exactly why the earlier round missed this - so the refusal probe was not repeated there; those releases' rollback evidence is remove followed by a clean second start.",
-    "clientBundleIdentityCriterion": "the 1.0.6-era criterion 'served bytes equal the local client.js plus the wrapper' no longer holds: the client carrier serves a whole module group per request (plugins/??<a>/client.js,<b>/client.js,...&rev=<hash>) in which this plugin's client.js is one entry, and on the 0.1.7 line that entry is not always the first. The criterion for this round is that the page names dsh-worktree-space/client.js and that the served group contains id: \"dsh-worktree-space\". build.mjs's wrapper and externals list are unchanged; this is the criterion moving with DSH, not the artifact regressing.",
-    "stillNotRun": "the section 2.3 end-to-end acceptance - the container-root README, the 'container root is a git repository' refusal and the task space location round-trip - was not part of these five runs and stays unit-test-only; this matrix answers only 'installs, starts, uninstalls and rolls back'",
-    "pnpmPeerNotice": "the routine '[WARN] Issues with peer dependencies found' appears on every install; pnpm peers check lists four missing peers rather than a version conflict, because the profile itself supplies those four, the same notice recorded for the 1.0.7 round"
-  },
-  "tasksRootStrategyRelease": {
-    "version": "1.0.8",
-    "change": "where a new task space goes became a configured strategy beside the archive's: a 'Task space location' setting picks between 'default' - the derived recommendation, unchanged - and 'custom', which reads a 'Custom task space root' directory. Both are new Host configuration fields, and empty under the custom strategy still derives the recommendation, so a profile that never touches them behaves exactly as 1.0.7 did.",
-    "oneResolutionPoint": "resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot) gained the third answer, and task.suggest-root, task.create and the task_worktree_space tool's suggest-root/create all call it, so the dialog's prefilled root, the root a create lands in and the root the model proposes are one value rather than three. A caller that names a root - the dialog's field, the tool's tasksRoot - still wins: this is a default, not an enforcement, and assertIsolated judges a configured root by the same rule as a typed one.",
-    "strategyGatesTheDirectory": "configuredTasksRoot answers with the directory only while the strategy is 'custom'; a directory left over from an earlier custom run goes inert the moment the strategy returns to the default. The create dialog writes the pair in that order - directory first, strategy second - so a refused directory is never paired with a strategy that reads it, and a refused strategy leaves only an inert directory behind.",
-    "noProtocolChange": "unlike the project layer, this changes no request or response shape: tasksRoot stays the field it was and only the meaning of its emptiness is extended, so this plugin's own client half is not broken by it. The client bundle changes again for the two rows and the create dialog's checkbox, so its byte identity stops at 1.0.7.",
-    "copyCorrections": "wording only, no behaviour: the store listing's experimental sentence, the agent-handoff entry's description, and the archive location's default wording. The create dialog's checkbox carries the same sentence as the setting it writes. The plugin description itself was rewritten in the same pass - it now leads with the task, says every repository gets a worktree on a branch of the same name and the task space is registered as an agent Workspace, and closes on merging back to the main branch and deleting the branches and the task space. That sentence lives in three places that must move together: locale/zh.json and locale/en.json (meta.description, the beta tail kept verbatim), package.json's description, and the client's panelDescription - the last of which is in client/client.js, so the client bundle changes again this round. Documentation paths were also rewritten from drive-letter backslash examples to `~/` with forward slashes across both READMEs, SKILL.md and both store-evidence files; that notation change reaches no code.",
-    "lifecycleRowsNotReRun": "the four lifecycle rows have since been re-run for 1.0.8 across the five releases of the window - see dsh020CompatibilityRelease, which also carries the re-measured --dump-config line counts, none of them 1.0.7's - but the accessor and the suggest-root endpoint were not exercised on a running host: they are covered by test/host.test.mjs, the resolution fallbacks and the isolation refusal by test/task-operations.test.mjs, the tool by test/task-tool.test.mjs, and the settings card's two rows plus the create dialog's checkbox and its two writes by test/plugin-config-card.test.tsx and test/create-flow.test.tsx - unit tests only, no runtime evidence."
-  }
+  "notCovered": [
+    "the end-to-end functional acceptance in docs/store-evidence.md section 2.3 has not been run this round: creating a task space, finishing a task, the two container-root checks and the task-space-location write-back all move Git repositories and are a layer above this matrix",
+    "UI-level visibility was not checked item by item: this round established the three machine-readable criteria (page reachable, bundle actually served, host RPC route registered), while the name, description and icon.svg in the plugin list, the nine configuration fields taking effect immediately, and the sidebar entry still need the walkthrough in section 2.3",
+    "only pnpm 12.6.0 was exercised; 10 and 11 were not installed and not tested",
+    "--dump-config line counts are host-version dependent and do not carry across DSH versions or across changes to the config fields",
+    "the window is the currently published releases, not a fixed set: it covers 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1 and 0.2.0-rc.2, and does not follow a new upstream release automatically",
+    "the desktop lifecycle was confirmed by the author outside this run; this matrix carries command-line evidence for the web client only"
+  ]
 }

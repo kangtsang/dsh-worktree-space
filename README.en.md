@@ -13,16 +13,29 @@ and the worktree branches and task spaces are cleaned up as needed.
 
 [中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
+> [!IMPORTANT]
 > **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
 > in an experimental validation phase and is **shown by default** - set the plugin's agent handoff
 > entry to hide to take those two entries off the finish dialog; its behaviour may still change
-> (see the experimental section at the end). The rest of this document describes the flow
+> (see the [experimental section](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)).
+> The rest of this document describes the flow
 > without an agent. Please report problems in
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
-## Install
+## 📑 Contents
 
-**From npm:**
+- [🚀 Install](#-install)
+- [✨ Features](#-features)
+- [📂 Layout of a task](#-layout-of-a-task)
+- [🔧 Requirements](#-requirements)
+- [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
+- [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)
+- [🤖 Experimental: handing the commits and the conflicts to an agent](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)　[The two buttons](#the-two-buttons-and-what-they-do) · [The flow](#the-flow-and-its-steps)
+- [📄 Companion documents](#-companion-documents)
+
+## 🚀 Install
+
+**On the web client, from the command line:**
 
 ```sh
 dsh plugin --profile web add dsh-worktree-space
@@ -30,7 +43,12 @@ dsh plugin --profile web add dsh-worktree-space
 
 To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, remove and reinstall.
 
-## Features
+**On the desktop client, from the plugin management page:** sidebar → **Plugins**, put
+`dsh-worktree-space` in **Plugin package name**, and press **Install**; to remove it, open
+**Worktree Space** from the list, go to its **Plugin details** page, and press **Uninstall** at the
+top right.
+
+## ✨ Features
 
 - **Create a task from a session.** Pick a source root, name the task, choose the branch prefix,
   tick the repositories it should span, and say where the task space goes. Every repository gets a
@@ -40,11 +58,11 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
   directory is the task space, so an agent can edit across repositories without touching the
   source checkouts.
 - **A management page**, with three views (both ways in, and their defaults, are described under Manage a Worktree Space):
-  - **Task spaces** puts each task's repositories together (branch, how many files changed,
-    whether it is locked or prunable);
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
     each one has;
-  - **Git repositories** lists every Git repository found and the worktrees linked to it.
+  - **Git repositories** lists every Git repository found and the worktrees linked to it;
+  - **Task spaces** puts each task's repositories together (branch, how many files changed,
+    whether it is locked or prunable).
 
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
@@ -61,7 +79,7 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
   live in the plugin's own configuration (see Configuration). It follows DSH themes, takes
   its language from DSH, and gives the plugin list its own name, description and icon.
 
-## Layout of a task
+## 📂 Layout of a task
 
 > Terms: the **Worktree Space container** (the **container** below) is the directory the plugin keeps
 > task spaces in — one container holds the task spaces of every project. The container’s own top
@@ -127,15 +145,16 @@ container root, adding exactly one directory — `archived-docs` — to the whol
 Removing a worktree never deletes its Git branch; finishing a task merges the branch back
 before the worktree goes.
 
-## Requirements
+## 🔧 Requirements
 
 - [Node.js](https://nodejs.org) `>=22.19.0`
 - [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
   plugin, and has to be on `PATH`
-- DSH `>=0.1.7-alpha.2 <0.3.0-0`, the 0.1.7 line and 0.2.x
+- DSH `>=0.1.7-rc.1 <0.3.0-0`, the 0.1.7 line without its `0.1.7-alpha.x` prereleases, and 0.2.x
+- Clients: **the web client and the desktop client have both been installed and used for real**
 
-**All five official releases were verified one by one** — `0.1.7-alpha.2`, `0.1.7-rc.1`, `0.1.7-rc.2`,
-`0.2.0-rc.1` and `0.2.0-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
+**All four official releases were verified one by one** — `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`
+and `0.2.0-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
 install, start, uninstall and rollback. The per-release record is in
 [`docs/store-evidence.md`](docs/store-evidence.md).
 
@@ -146,7 +165,7 @@ declarations and block nothing. Anything outside the tested range is treated as 
 passed off as evidence; if you hit a version-specific problem, open an
 [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
-## Permissions and failure boundaries
+## 🔐 Permissions and failure boundaries
 
 At runtime this plugin reads and writes files and runs `git`. Those two permissions *are* its
 function; they cannot be reduced to zero. Every runtime dependency is supplied by the DSH profile and
@@ -183,12 +202,13 @@ uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/s
 | A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
 | A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
 
-## Usage
+## 🛠️ Usage
 
-### Configuration
+### ⚙️ Configuration
 
-**In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → its configuration
-section, beside every other plugin's; changes take effect immediately, no restart. The file can also be
+**In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → the configuration
+section of its **Plugin details** page, beside every other plugin's; changes take effect
+immediately, no restart. The file can also be
 edited directly: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
 data directory, which needs a DSH restart.
 
@@ -209,7 +229,7 @@ A scan covers **every** Workspace. It goes breadth-first, reading up to eight di
 a time per level. Any directory holding `.git` counts as a repository; `node_modules`,
 `dist`, `build`, `vendor` and hidden directories are skipped (except `.worktrees`).
 
-### Create a Worktree Space
+### ➕ Create a Worktree Space
 
 <img src="docs/img/new-worktree-space.png" alt="The New Worktree Space dialog" width="720">
 
@@ -241,9 +261,9 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
 If the task space is built but registering the Workspace fails, the dialog says why and
 allows the registration to be retried.
 
-### Manage a Worktree Space
+### 🗂️ Manage a Worktree Space
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Tasks, Workspaces and Repositories views" width="960">
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Workspaces, Git repositories and Task spaces views" width="960">
 
 Open the **management page** — two ways in:
 
@@ -254,9 +274,9 @@ Open the **management page** — two ways in:
   conversation was in, then the three views. The dialog form keeps the switcher in its toolbar.
 
 The three
-views differ as described under Features: Task spaces shows each task and its repositories,
-Workspaces shows where a task space can start, Code repositories shows every Git project found
-and its worktrees. The summary on the right follows the view (`N tasks` / `N Workspaces` /
+views differ as described under Features: Workspaces shows where a task space can start, Git
+repositories shows every Git project found and its worktrees, Task spaces shows each task and its
+repositories. The summary on the right follows the view (`N tasks` / `N Workspaces` /
 `N repositories · M Worktrees`), and reads `shown / total` while a search or filter is
 narrowing the list.
 
@@ -265,7 +285,7 @@ of the previous scan, so it shows data straight away and swaps in the fresh resu
 scan lands (`Scanning every Workspace…` marks the wait). That memory lives in the DSH instance's own
 process only: nothing is written to disk, and it is gone when the instance exits.
 
-### Finish a Worktree Space
+### 🏁 Finish a Worktree Space
 
 <img src="docs/img/finish-task.png" alt="The Finish task dialog" width="960">
 
@@ -301,8 +321,8 @@ task branch **inside the task space's own worktree** — the opposite direction.
 - **Conflicted**: that merge is **not aborted and not reverted** — the rehearsal simply stays
   where it stands, in the task branch's worktree, which keeps its `MERGE_HEAD` and the conflicted
   files with their markers sitting in its working tree (for instance
-  `~/wt-demo/spaces/demo/alpha/src/app.ts`). The **target branch is untouched**, and so is the
-  source repository's checkout.
+  `~/workspace/worktree-space/project1/hotfix/repo-a/src/app.ts`). The **target branch is
+  untouched**, and so is the source repository's checkout.
 
 Why rehearse the other way round: a conflict in the real merge lands in the source repository and
 its checkout, and it would have to be aborted, with a side picked by hand. Rehearsing first puts
@@ -316,12 +336,12 @@ and the other repositories may already be merged and removed). Every repository 
 dialog then shows **A merge conflicted: deal with it, then finish the task again.**; the way on is
 **Continue finishing** at the foot of the panel.
 
-The site is the task branch's own worktree (for instance `~/wt-demo/spaces/demo/alpha`), standing
+The site is the task branch's own worktree (for instance `~/workspace/worktree-space/project1/hotfix/repo-a`), standing
 in an unfinished merge. Resolve the conflict there, `git add`, and one `git commit` that says how
 the two sides are reconciled concludes the merge — the target branch and the source repository's
 checkout were never touched; the commit has to land on that worktree, whose index lives under the
 source repository's `.git/worktrees/<name>/`. To have an agent resolve this conflict instead, use
-**Hand the conflict to the agent** (see the experimental section at the end).
+**Hand the conflict to the agent** (see the [experimental section](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)).
 
 **Continue finishing** then runs the same judgement again: if the target branch is already inside
 the task branch, the rehearsal is skipped and the real merge goes ahead; otherwise it is rehearsed
@@ -349,8 +369,8 @@ in step 1.
 | | | ✓ | The same, without the commit: uncommitted changes are **discarded with the worktree**; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged and nothing committed, the branch force-deleted, and **the commits it held are discarded along with the uncommitted changes in the worktree** |
 
-Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which since 1.0.5 is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
-outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the Worktree Space container is empty, and its sessions then fall back to Ungrouped with their transcripts
+Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
+outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the task space holds no worktree any more, and its sessions then fall back to Ungrouped with their transcripts
 intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
@@ -359,7 +379,7 @@ name what will be lost — abandoning the task space (no merge, force-deleting t
 while a worktree still holds uncommitted files, or while a branch still holds commits that
 were never merged.
 
-## Experimental: handing the commits and the conflicts to an agent
+## 🤖 Experimental: handing the commits and the conflicts to an agent
 
 What this section describes is **shown by default**: set the plugin's agent handoff entry to hide to
 take those two entries off the finish dialog. Hidden, the finish takes the standard route - the
@@ -414,3 +434,12 @@ space**, and the elevation is yours to approve in that session.
 
 **Finish task** or **Continue finishing** at the foot of the panel only ever runs once the user has
 confirmed it.
+
+## 📄 Companion documents
+
+| Document | What it covers |
+| --- | --- |
+| [PERMISSIONS.en.md](PERMISSIONS.en.md) | The full permissions and failure boundaries: what is read, what is written, which `git` subcommands run, and what happens when one fails |
+| [docs/store-evidence.md](docs/store-evidence.md) | The disposable-profile install, start, uninstall and rollback acceptance steps, with per-release records |
+| [CHANGELOG.en.md](CHANGELOG.en.md) | Release history |
+| [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) | Problem reports |

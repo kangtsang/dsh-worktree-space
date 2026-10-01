@@ -2,7 +2,7 @@
 
 本文件供 DSH STORE 自动审查与人工复核使用，如实描述插件在运行时做什么、不做什么，以及失败边界。
 
-声明基线：`dsh-worktree-space@1.0.6`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
+声明基线：`dsh-worktree-space@1.1.0`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
 
 ## 运行时行为
 
@@ -87,10 +87,10 @@
 | 依赖 | 用途 | 提供方 |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | 运行时（`package.json` 的 `engines.node`） | 用户环境 |
-| DSH `>=0.1.7-alpha.2 <0.3.0-0` | 宿主：客户端契约与服务注入（`engines.dsh` / `dsh.compatibility.dsh`，声明式） | 用户环境 |
+| DSH `>=0.1.7-rc.1 <0.3.0-0` | 宿主：客户端契约与服务注入（`engines.dsh` / `dsh.compatibility.dsh`，声明式） | 用户环境 |
 | `@deepseek-ai/cordis` `^4.0.2` | 插件框架 | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-client-connection` `>=0.1.7-alpha.2 <0.3.0-0` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`）；DSH 0.2.0 起安装与启动会强制校验这个范围 | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-tools` `>=0.1.7-alpha.2 <0.3.0-0` | 宿主工具定义 `defineTool`；同样被 DSH 强制校验 | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-client-connection` `>=0.1.7-rc.1 <0.3.0-0` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`）；DSH 0.2.0 起安装与启动会强制校验这个范围 | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-tools` `>=0.1.7-rc.1 <0.3.0-0` | 宿主工具定义 `defineTool`；同样被 DSH 强制校验 | DSH profile（`peerDependencies`） |
 | `@deepseek-ai/schemastery` `^3.18.2` | 配置模式校验 | DSH profile（`peerDependencies`） |
 | `react` / `react-dom` 18 | 客户端界面，打包时按 external 处理 | DSH web 运行时 |
 | `git` | 全部仓库操作 | 用户环境（须在 `PATH`，版本随系统） |
@@ -134,7 +134,7 @@
 - **权限信号**：本插件的功能就是**文件读写**与**命令执行**（调用 `git`），因此**无法**满足 DSH STORE
   「文件 / 网络 / 命令 / 凭据信号均为空」的自动批准条件。本文件的作用是把这些信号如实、完整地声明出来，
   供人工复核与上架详情展示 —— 高权限项目的正确状态是「已声明的高权限」，而不是「看起来没有权限」。
-- **固定提交**：`v1.0.6` 对应的源码提交是 `ae7bb4386069090f9f188937a4d4eeafaadc9407`（GitHub 上可核对）。
+- **固定提交**：待定 —— 打上 `v1.1.0` 标签后，把该标签指向的提交哈希填在这里（GitHub 上可核对）。
 - **生命周期**：一次性 Profile 的安装、启动与卸载验证步骤及当前证据见 `docs/store-evidence.md`。
 
 ## 对应语言版本

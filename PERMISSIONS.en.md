@@ -3,8 +3,7 @@
 This file exists for DSH STORE's automated review and for human re-review: it states plainly what this
 plugin does at runtime, what it does not do, and where it stops.
 
-Declared baseline: `dsh-worktree-space@1.0.6`, at the fixed commit on this repository's default branch. The
-plugin version, its `engines` and its `dsh` fields are in `package.json`.
+Declared baseline: `dsh-worktree-space@1.1.0`, at the fixed commit on this repository's default branch. The plugin version, `engines` and `dsh` fields are in `package.json`.
 
 ## Runtime behaviour
 
@@ -107,10 +106,10 @@ plugin version, its `engines` and its `dsh` fields are in `package.json`.
 | Dependency | Purpose | Provided by |
 | --- | --- | --- |
 | Node.js `>=22.19.0` | Runtime (`engines.node` in `package.json`) | The user's environment |
-| DSH `>=0.1.7-alpha.2 <0.3.0-0` | Host: client contract and service injection (`engines.dsh` / `dsh.compatibility.dsh`, declarative) | The user's environment |
+| DSH `>=0.1.7-rc.1 <0.3.0-0` | Host: client contract and service injection (`engines.dsh` / `dsh.compatibility.dsh`, declarative) | The user's environment |
 | `@deepseek-ai/cordis` `^4.0.2` | Plugin framework | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-client-connection` `>=0.1.7-alpha.2 <0.3.0-0` | Client connection and host RPC (`/api/dsh-worktree-space`); from DSH 0.2.0 on, install and startup enforce this range | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-tools` `>=0.1.7-alpha.2 <0.3.0-0` | Host tool definition, `defineTool`; enforced by DSH the same way | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-client-connection` `>=0.1.7-rc.1 <0.3.0-0` | Client connection and host RPC (`/api/dsh-worktree-space`); from DSH 0.2.0 on, install and startup enforce this range | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-tools` `>=0.1.7-rc.1 <0.3.0-0` | Host tool definition, `defineTool`; enforced by DSH the same way | DSH profile (`peerDependencies`) |
 | `@deepseek-ai/schemastery` `^3.18.2` | Configuration schema validation | DSH profile (`peerDependencies`) |
 | `react` / `react-dom` 18 | Client UI, marked external at bundle time | The DSH web runtime |
 | `git` | Every repository operation | The user's environment (must be on `PATH`; version follows the system) |
@@ -158,7 +157,7 @@ executable artifact.
   signals. The point of this file is to declare those signals completely and honestly for human re-review and
   for the listing details — the correct state for a high-capability project is "declared high capability",
   not "apparently no capability".
-- **Fixed commit**: `v1.0.6` is the commit `ae7bb4386069090f9f188937a4d4eeafaadc9407` on GitHub.
+- **Fixed commit**: to be filled — once the `v1.1.0` tag exists, put the commit it points at here (checkable on GitHub).
 - **Lifecycle**: the disposable-profile install, start and uninstall steps, with the evidence available today,
   are in `docs/store-evidence.md`.
 
