@@ -1,6 +1,6 @@
 {
   "name": "dsh-worktree-space",
-  "version": "1.0.8",
+  "version": "1.1.0",
   "description": "Worktree Space: A task that covers multiple Git repositories can give each repository its own worktree on one shared task branch under a single task space directory, then register that task space as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without interfering with one another; when the work is done they merge back into the target branch of each repository, and the worktree branches and task spaces are cleaned up as needed.",
   "icon": "./icon.svg",
   "repository": {
@@ -24,7 +24,7 @@
   "type": "module",
   "engines": {
     "node": ">=22.19.0",
-    "dsh": ">=0.1.7-alpha.2 <0.3.0-0"
+    "dsh": ">=0.1.7-rc.1 <0.3.0-0"
   },
   "main": "./lib/index.js",
   "exports": {
@@ -72,8 +72,8 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.7-alpha.2 <0.3.0-0",
-    "@deepseek-ai/dsh-tools": ">=0.1.7-alpha.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/schemastery": "^3.18.2"
   },
   "dsh": {
@@ -97,25 +97,19 @@
       "platform": "web"
     },
     "compatibility": {
-      "dsh": ">=0.1.7-alpha.2 <0.3.0-0",
+      "dsh": ">=0.1.7-rc.1 <0.3.0-0",
       "node": ">=22.19.0",
       "profiles": [
-        "web"
+        "web",
+        "desktop"
       ],
       "dshReleases": {
-        "0.1.7-alpha.2": "compatible",
         "0.1.7-rc.1": "compatible",
         "0.1.7-rc.2": "compatible",
         "0.2.0-rc.1": "compatible",
         "0.2.0-rc.2": "compatible"
       },
       "dshOperations": {
-        "0.1.7-alpha.2": {
-          "install": "passed",
-          "start": "passed",
-          "uninstall": "passed",
-          "rollback": "passed"
-        },
         "0.1.7-rc.1": {
           "install": "passed",
           "start": "passed",
