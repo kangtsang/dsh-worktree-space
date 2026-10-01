@@ -1,5 +1,7 @@
 # Worktree Space
 
+[简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
+
 Worktree Space for DeepSeek Harness: A task that covers multiple Git repositories can give each repository
 its own worktree on one shared task branch under a single task space directory, then register that task space
 as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without
@@ -10,8 +12,6 @@ and the worktree branches and task spaces are cleaned up as needed.
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
 <img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
-
-[中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
 > [!IMPORTANT]
 > **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
@@ -29,7 +29,7 @@ and the worktree branches and task spaces are cleaned up as needed.
 - [📂 Layout of a task](#-layout-of-a-task)
 - [🔧 Requirements](#-requirements)
 - [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
-- [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)
+- [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)　[Each combination](#what-each-combination-does)
 - [🤖 Experimental: handing the commits and the conflicts to an agent](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)　[The two buttons](#the-two-buttons-and-what-they-do) · [The flow](#the-flow-and-its-steps)
 - [📄 Companion documents](#-companion-documents)
 
@@ -75,15 +75,22 @@ top right.
   really are task spaces.
 - **New task space** is in that same `⋯` menu, for Workspaces that hold repositories, and
   opens the one create dialog.
+- **The interface is fully bilingual in Chinese and English.** The management page, the create and
+  finish dialogs, the configuration items and their explanations, the buttons and the error messages
+  all switch with DSH's language setting; the plugin registers `zh` and `en` with the host (214 strings
+  each) and carries no language switch of its own. The plugin list's name, description and icon are
+  English only.
 - **No extra service needed.** The two entries, the scan depth and the directory limit all
-  live in the plugin's own configuration (see Configuration). It follows DSH themes, takes
-  its language from DSH, and gives the plugin list its own name, description and icon.
+  live in the plugin's own configuration (see Configuration). It follows DSH themes.
 
 ## 📂 Layout of a task
 
 > Terms: the **Worktree Space container** (the **container** below) is the directory the plugin keeps
-> task spaces in — one container holds the task spaces of every project. The container’s own top
-> level is the **container root**. Each paragraph names it in full the first time and in short after.
+> task spaces in — that is, the **container root directory** `worktree-space/`. Each paragraph names
+> it in full the first time and in short after.
+>
+> **Container root** is short for **container root directory** and points at that one directory: both
+> the area it occupies and the path you fill into the setting.
 
 ```text
 ~/workspace/                            the root workspace: projects hang off this level, and the Worktree Space container root lives here too
@@ -151,11 +158,14 @@ before the worktree goes.
 - [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
   plugin, and has to be on `PATH`
 - DSH `>=0.1.7-rc.1 <0.3.0-0`, the 0.1.7 line without its `0.1.7-alpha.x` prereleases, and 0.2.x
-- Clients: **the web client and the desktop client have both been installed and used for real**
+- Clients: **both the web client and the desktop client work**; the desktop client was verified by
+  hand, the command-line matrix does not cover it
 
 **All four official releases were verified one by one** — `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`
 and `0.2.0-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
-install, start, uninstall and rollback. The per-release record is in
+install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
+the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
+matrix. The per-release record is in
 [`docs/store-evidence.md`](docs/store-evidence.md).
 
 DSH **enforces** the DSH range declared in the manifest's `peerDependencies`: a runtime that does not
@@ -220,7 +230,7 @@ data directory, which needs a DSH restart.
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it, a smaller Workspace is requested |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
-| Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the best practice**: it is derived from the source Workspace by the rule below. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
+| Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source Workspace by the rule below and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits, and their tasks cannot crowd each other. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
 | Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
 | Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<YYYYMMDD-HHMMSS>` folder beneath it, the stamp being the local time of that moment, to the second. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
 | Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the Worktree Space container root's `archived-docs` |
@@ -369,9 +379,21 @@ in step 1.
 | | | ✓ | The same, without the commit: uncommitted changes are **discarded with the worktree**; the branches stay |
 | | ✓ | ✓ | **Abandon**: nothing merged and nothing committed, the branch force-deleted, and **the commits it held are discarded along with the uncommitted changes in the worktree** |
 
-Whichever combination is chosen: the task space's own metadata — `worktree-space.json` and the `worktree-space.md` generated from it — is always cleared, and an older space may still hold `README.en.md` (cleared too) or a `README.md` this plugin wrote back then, which is left alone rather than assumed to be ours; anything else in the task space follows the archive choice (unselected, it is discarded
-outright). **A repository whose work nobody committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished** while the others finish, which is also why the task space directory and its workspace registration stay. The directory and the registration are removed only once every repository really went and the task space holds no worktree any more, and its sessions then fall back to Ungrouped with their transcripts
-intact.
+Whichever combination is chosen, three things do not change:
+
+1. **The metadata is always cleared.** The two records the plugin itself generates in the task
+   space — `worktree-space.json` and the `worktree-space.md` rendered from it — go every time. An
+   older space may still hold a `README.en.md`, which is cleared too, or a `README.md` this plugin
+   wrote back then; that one is left alone rather than assumed to be ours.
+2. **Everything else follows the archive choice.** Unselected, it is discarded outright.
+3. **Repositories that did not finish are kept as they are.** **A repository whose work nobody
+   committed, or whose merge stands on a conflict, is kept as it is and reported as unfinished**
+   while the others finish, which is also why the task space directory and its workspace
+   registration stay.
+
+The directory and the registration are removed only once every repository really went and the task
+space holds no worktree any more, and its sessions then fall back to Ungrouped with their
+transcripts intact.
 
 The **Finish task** button follows the same reasoning: **amber** is an ordinary finish (the
 merge can be reverted and nothing is discarded), and it is **red** only where the dialog can
