@@ -46,8 +46,34 @@ const expected = [
   "locale/zh.json",
   "package.json",
 ].sort()
-assert.deepEqual(files, expected, "npm package contents changed; update the allowlist deliberately")
+
+// A bare assert.deepEqual over 21 paths prints a wall of quoted strings and says
+// nothing about why any of them matter. Name each file that moved and say what it
+// is, so the fix is obvious without opening package.json.
+function describe(path) {
+  if (path.startsWith("docs/img/")) {
+    return "a README illustration. It ships so the store page and docs render; keep the file name and path stable or the links that point at it break. Note that gzip barely shrinks PNG, so each of these costs close to its raw size."
+  }
+  if (path.startsWith("docs/")) return "the evidence document. It ships because the store contract asks for it to be readable from the package."
+  if (path.startsWith("scripts/") || path.startsWith("test/") || path.startsWith("src/")) {
+    return "development-only. It never runs on a user's machine and should not be here."
+  }
+  if (path.startsWith("client/") || path.startsWith("lib/")) return "a runtime artifact. If its name changed, the build or the manifest probably has to change with it."
+  return "check whether this belongs in the package at all"
+}
+
+const unexpected = files.filter((path) => !expected.includes(path))
+const vanished = expected.filter((path) => !files.includes(path))
+
+if (unexpected.length > 0 || vanished.length > 0) {
+  console.error("npm package contents changed. Update the allowlist above AND the files field in package.json together, then confirm the change was intended.\n")
+  for (const path of unexpected) console.error(`  in the package but not in the allowlist: ${path}\n      -> ${describe(path)}`)
+  for (const path of vanished) console.error(`  in the allowlist but not in the package: ${path}\n      -> it stopped being packaged. Was it removed, renamed, or did a files pattern stop matching it?`)
+  console.error("")
+  process.exit(1)
+}
+
 assert.equal(result[0].entryCount, expected.length, "npm package entry count must match the allowlist")
 assert.ok(result[0].size > 0, "npm package must contain bytes")
 
-console.log(`npm package contents are valid (${files.length} files, ${result[0].size} bytes)`)
+console.log(`npm package contents are valid (${files.length} files, ${result[0].size} bytes packed, ${result[0].unpackedSize} bytes unpacked)`)

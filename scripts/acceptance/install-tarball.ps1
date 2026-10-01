@@ -1,0 +1,46 @@
+param(
+  [string]$RunRoot = (Join-Path $env:TEMP 'dsh-acceptance\run')
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# ASCII-only on purpose: Windows PowerShell 5.1 reads a BOM-less .ps1 as the system
+# ANSI code page, which mangles non-ASCII and can eat a closing quote.
+#
+# Packs this repository and drops the tarball where run-one.ps1 looks for it. The
+# pack is what the matrix actually installs, so it is the same artifact the release
+# workflow would publish.
+
+$runRoot = [System.IO.Path]::GetFullPath($RunRoot)
+if (-not (Test-Path -LiteralPath $runRoot)) {
+  New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+}
+
+$repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$manifest = Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json
+$target = Join-Path $runRoot ("dsh-worktree-space-$($manifest.version).tgz")
+
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+
+Write-Host ('packing ' + $repo + ' -> ' + $target)
+Push-Location $repo
+try {
+  & pnpm pack --pack-destination $runRoot
+  if ($LASTEXITCODE -ne 0) { throw "pnpm pack failed with exit $LASTEXITCODE" }
+} finally {
+  Pop-Location
+}
+
+if (-not (Test-Path -LiteralPath $target)) {
+  # pnpm names the file from the package name and version; look for it rather than
+  # assume, so a rename of the package does not silently break the matrix.
+  $found = @(Get-ChildItem -LiteralPath $runRoot -Filter '*.tgz')
+  if ($found.Count -eq 1) { $target = $found[0].FullName }
+  else { throw ("tarball not produced; found " + $found.Count + " .tgz in " + $runRoot) }
+}
+
+$size = (Get-Item -LiteralPath $target).Length
+Write-Host ('tarball: ' + $target)
+Write-Host ('bytes:   ' + $size)
+Write-Host ('sha256:  ' + (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)

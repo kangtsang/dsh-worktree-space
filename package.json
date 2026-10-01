@@ -64,7 +64,11 @@
     "check:tracked-bundle": "node scripts/check-tracked-bundle.mjs",
     "check:package": "node scripts/check-package-contents.mjs",
     "test": "pnpm build && pnpm typecheck && pnpm test:unit && pnpm check:client-bundle && pnpm check:tracked-bundle && pnpm check:package",
-    "prepublishOnly": "pnpm test"
+    "prepublishOnly": "pnpm test",
+    "acceptance:guard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/guard-tests.ps1",
+    "acceptance:hosts": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/install-hosts.ps1",
+    "acceptance:pack": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/install-tarball.ps1",
+    "acceptance:matrix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/run-all.ps1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
