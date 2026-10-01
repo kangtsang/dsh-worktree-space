@@ -7,7 +7,7 @@ DeepSeek Harness 的 Worktree Space 插件——一个包含多个 Git 仓库的
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/new-session.png" alt="会话输入框上方的新建 Worktree Space 入口" width="960">
+<img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
 
 **简体中文** · [English](README.en.md) · [更新日志](CHANGELOG.md)
 

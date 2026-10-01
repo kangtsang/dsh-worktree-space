@@ -36,7 +36,7 @@ const expected = [
   "cordis.patch.yml",
   "docs/img/finish-task.png",
   "docs/img/manage-worktree-space.png",
-  "docs/img/new-session.png",
+  "docs/img/user-story-flow.png",
   "docs/img/new-worktree-space.png",
   "docs/store-evidence.md",
   "docs/store-evidence.json",

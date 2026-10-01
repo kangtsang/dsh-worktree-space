@@ -9,7 +9,7 @@ and the worktree branches and task spaces are cleaned up as needed.
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-<img src="docs/img/new-session.png" alt="The New Worktree Space entry above the session input box" width="960">
+<img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
 
 [中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
