@@ -1,0 +1,221 @@
+# DSH STORE 生命周期证据 — 一次性 Profile 的安装 / 启动 / 卸载
+
+本文件是 DSH STORE 上架契约第 8 条要求的证据记录：**可安装的插件必须在一次性 Profile 里完成
+安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
+[`PERMISSIONS.md`](../PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
+
+声明基线：`dsh-worktree-space@1.1.0`，对应本仓库默认分支上的固定提交。下面的清单现状、验收方法、
+验收结果与边界情形都以它为准，不引用其它版本。
+
+---
+
+## 1. 隔离：绝不碰日常 profile
+
+验收必须在**一次性数据目录**里做，这样安装、启动、卸载都不会碰到用户日常的 `profiles/`：
+
+```sh
+# bash / zsh —— DSH_HOME 决定 profiles/ 的位置
+export DSH_HOME="$(mktemp -d)/dsh-home"
+```
+
+```powershell
+# PowerShell
+$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) ("dsh-evidence-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null
+```
+
+`DSH_HOME` 一旦这样设定，下面所有命令读写的都是那个临时目录；验收结束后整目录删掉即可。
+（`dsh --profile <name>` 解析的就是 `$DSH_HOME/profiles/<name>`。）
+
+> ⚠️ **清理前先断言路径。** 删掉整个目录时，请先确认解析后的绝对路径确实位于临时目录下、且不等于
+> `$HOME` / `%USERPROFILE%`。PowerShell 变量名**不区分大小写**，`$home` 就是只读自动变量 `$HOME`
+> ——给一个叫 `$home` 的局部变量赋值会**静默失败**，变量仍是 `C:\Users\<你>`，紧接着的
+> `Remove-Item $home -Recurse -Force` 就会把整个用户目录删掉。本插件的验收脚本曾因此酿成事故，
+> 完整经过见该事故的社区通报。
+
+## 2. 步骤与判定标准
+
+按顺序执行，每一步的**通过标准**写在一起 —— 证据要能逐条对上，不接受「看起来没问题」。
+
+### 2.1 安装
+
+```sh
+dsh plugin --profile evidence add dsh-worktree-space
+```
+
+- 该命令把 pnpm 参数原样转发给 profile，首次使用会初始化这个 profile。
+- 通过标准：命令以 0 退出且无 `incompatible` 警告（若有版本警告，说明 `engines.dsh` 与实际宿主不符，
+  应改声明而不是用 `allow-version --accept-risk` 掩盖）；`$DSH_HOME/profiles/evidence/node_modules/dsh-worktree-space/`
+  存在且其 `package.json` 的 `version` 等于本次提交的版本；profile 的 `package.json` 把它写进
+  `dsh.profile.bundles`。**注意**：`cordis.patch.yml` 不会因此多出挂载行——`dsh plugin add` 只做 pnpm
+  安装并登记 bundle，`- id: worktree-space` 那一行是之后在插件页里改过设置（或从插件市场启用）时由插件
+  管理器写下的；本机日常 web profile 里那一行连同它的 `config` 就是这样来的。
+
+  > 想从官方模板起步时，可用启动器的 `--from-default-profile web` 先把 `evidence` 按 web 模板初始化；
+  > 具体用法以 `dsh --help` 在所用 DSH 版本上的输出为准。
+
+### 2.2 配置组合（启动前的静态验收）
+
+```sh
+dsh --profile evidence --dump-config
+```
+
+- 通过标准：组合出的条目树里出现 `worktree-space` 一行，且 `config` 是 profile 文档里的值；
+  同时确认 `engines` 段落与实际宿主版本相符（这就是「Node.js / DSH 兼容范围已在 manifest 中声明」的验证点）。
+- 这一步不挂载 UI，因此适合放进 CI；它是「配置组合」的机器可读证据，截图或日志请一并留存。
+
+### 2.3 启动与可见性
+
+```sh
+dsh --profile evidence --no-open --port 0
+```
+
+- 通过标准：进程正常启动；在插件列表里能看到 **Worktree Space** 的名称、描述与 `icon.svg` 图标；
+  能看到它自己的配置区（面板入口、侧边栏底部入口、授权 agent 处理入口、扫描深度、最大遍历目录数、
+  默认分支前缀、Worktree Space 容器根目录与指定容器根目录、归档文档位置与指定归档目录），改动立刻生效；
+  「任务空间位置」切到「指定目录」时下面那一行才出现；侧边栏底部出现快捷入口，能打开管理页面；
+  宿主 RPC 路由 `/api/dsh-worktree-space` 已注册。
+- **profile 必须带上 Web 应用的 bundle 层**：`dsh plugin` 初始化出来的空 profile 里没有
+  `@deepseek-ai/dsh-web-app`，插件会停在 `pending (waiting for service: connection)`，宿主打印
+  `warning: 1 entry did not activate`——这不是插件的问题，用 `dsh evidence --from-default-profile web`
+  从官方 web 模板建 profile 即可。
+- 「RPC 路由已注册」的机器可读验法：这些路由是 `POST /api/dsh-worktree-space/<endpoint>`（endpoint
+  见 `src/host/index.js` 的 `ENDPOINTS`），带会话 cookie 请求 `task.preference` 得 200 与
+  `{"ok":true,"value":{…}}`，随便编一个 endpoint 得 404。客户端 bundle 的地址在启动数据里
+  （`plugins/??dsh-worktree-space/client.js&rev=<rev>`），取回应得 200，字节数等于 `client/client.js`
+  加上宿主加载器补的那层包装。
+- **端到端功能验收**（一次性仓库，不要用真实项目）：在临时目录里 `git init` 一个仓库 → 新建任务空间 →
+  确认 `<容器根>/<项目>/<任务名>/<仓库名>` 是 worktree（项目名 = 源工作区目录名，插件自己分层）、
+  `<容器根>/README.md` 已写、`<容器根>/<项目>/<任务名>` 已注册为工作区并开了会话 → 改一个文件 →
+  「结束任务」确认分支合并、worktree 移除、文档归档到 `<归档根目录>/<项目名>/<任务名>-<时间戳>/`
+  （归档根目录由配置的「归档文档位置」决定，默认就是容器根自己的 `archived-docs`；两档各验收一次）。
+- **容器根的两条校验**也各验一次：把任务空间根手填成一个**本身就是 git 仓库**的目录，确认创建被拒、
+  且一个目录都没建出来；再确认容器根已有的 `README.md` 不被覆盖。
+- **任务空间位置**这一档也各验一次：配置里切到「指定目录」并填一个路径后，新建对话框的容器根预填成
+  它；切回「默认」后预填回推导值，且配置里留着的目录不再被读。再验一次回写：新建面板里把容器根改成
+  别的路径（此时输入框下面出现「设为默认 Worktree Space 容器根目录」，旁边就是那条说明），勾上后点创建，
+  确认配置里「指定 Worktree Space 容器根目录」= 该路径且「任务空间位置」= 指定目录。
+- **两个 profile 各验一次**：`web` 与 `desktop` 是清单里声明的两个端，安装、可见性与配置都在两个端上
+  走一遍第 2.1 至 2.4 节（桌面端的安装与卸载在插件管理页里点，见 README「安装」）。
+- 留存：上面每一步的截图（插件列表、配置区、管理页面、结束任务结果）。
+
+### 2.4 卸载与回滚
+
+```sh
+dsh plugin --profile evidence remove dsh-worktree-space
+dsh --profile evidence --dump-config
+```
+
+- 通过标准：`profiles/evidence/node_modules/dsh-worktree-space/` 消失；`cordis.patch.yml` 里的挂载行被清掉；
+  第二次 `--dump-config` 的条目树里不再有 `worktree-space`；启动后插件列表里不再出现该插件，侧边栏入口一并消失，
+  且没有残留报错（宿主 RPC 路由注销，不留下需要手动清理的状态）。
+
+## 3. 本版清单现状
+
+`package.json` 在基线提交上的声明，逐字段抄录，不是转述：
+
+| 字段 | 值 |
+| --- | --- |
+| `version` | `1.1.0` |
+| `engines.node` | `>=22.19.0` |
+| `engines.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
+| `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.1.7-rc.1 <0.3.0-0` |
+| `peerDependencies["@deepseek-ai/dsh-tools"]` | `>=0.1.7-rc.1 <0.3.0-0` |
+| `dsh.compatibility.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
+| `dsh.compatibility.node` | `>=22.19.0` |
+| `dsh.compatibility.profiles` | `["web", "desktop"]` |
+| `dsh.client.platform` | `web` |
+| `dsh.compatibility.dshReleases` | `0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`，均为 `compatible` |
+| `dsh.compatibility.dshOperations` | 上述四个版本，`install` / `start` / `uninstall` / `rollback` 均为 `passed` |
+
+三处 DSH 范围（`engines.dsh`、两个 peer、`dsh.compatibility.dsh`）刻意写成同一个字符串：DSH 0.2.0 起
+安装与启动会强制校验 peer，另两处只是声明；三处不一致时，真正被闸住的那一处说了算，清单却会自相矛盾。
+
+上界 `<0.3.0-0` 而不是 `<0.3.0`：在 DSH 用的 `semver.satisfies(..., { includePrerelease: true })`
+下，`<0.3.0` 会把 `0.3.0-alpha.1` 一并放进来，`-0` 这个预发布下界把 0.3.0 整条线的预发布也排除在外。
+下界取 `>=0.1.7-rc.1`，即支持范围从 0.1.7 的首个 release candidate 起算。
+
+**`dsh.client.platform` 仍是 `web`**：桌面端跑的是同一份 web 客户端，构建产物同为 `client/client.js`，
+所以端声明写在 `dsh.compatibility.profiles`（两个 profile），平台声明保持一个值。
+
+## 4. 两个可用的端
+
+清单声明了两个 profile：`web` 与 `desktop`。两者跑的是同一份客户端产物（`client/client.js`）与同一套
+宿主接口，差别只在安装与卸载的入口：
+
+- **`web`**：命令行。`dsh plugin --profile web add dsh-worktree-space` 装，
+  `dsh plugin --profile web remove dsh-worktree-space` 卸。
+- **`desktop`**：插件管理页。侧边栏 →「插件」→ 在「插件包名」填 `dsh-worktree-space` → 点「安装」；
+  卸载时在插件列表里点开 **Worktree Space**，进「插件详情」页，右上方点「卸载」按钮。
+
+第 2.1 至 2.4 节那套命令只在 `web` 上跑；`desktop` 上的等价验收按上文的入口走一遍，记在第 5 节里。
+
+## 5. 生命周期实测矩阵
+
+四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口（`0.1.7-rc.1` → 34800、
+`0.1.7-rc.2` → 34801、`0.2.0-rc.1` → 34802、`0.2.0-rc.2` → 34803，避开宿主默认的 3080）。
+被测产物是 `dsh-worktree-space-1.1.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件。
+
+| DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `0.2.0-rc.2` | `v24.18.0` | 通过 | 通过（1262 行 / 3 处命中） | 通过 | 通过 | 通过（1259 行 / 0 处命中） |
+| `0.2.0-rc.1` | `v24.18.0` | 通过 | 通过（1262 行 / 3 处命中） | 通过 | 通过 | 通过（1259 行 / 0 处命中） |
+| `0.1.7-rc.2` | `v24.18.0` | 通过 | 通过（1249 行 / 3 处命中） | 通过 | 通过 | 通过（1246 行 / 0 处命中） |
+| `0.1.7-rc.1` | `v24.18.0` | 通过 | 通过（1237 行 / 3 处命中） | 通过 | 通过 | 通过（1234 行 / 0 处命中） |
+
+四个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
+`version` 均为 `1.1.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
+
+`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。
+
+### 逐条对照
+
+| 判据（第 2 节） | 实测 | 说明 |
+| --- | --- | --- |
+| 2.1 安装以 0 退出、无 `incompatible` | 四个版本均满足 | pnpm 12.6.0，`Packages: +1` |
+| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.1.0` | |
+| 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
+| 2.3 进程正常启动 | 四次均 `boot_alive: True` | |
+| 2.3 页面可达 | 四次均 HTTP 200（33544 / 34825 / 35333 / 35367 字节），页面中出现插件 5 次 | |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**213710 字节**，内容含 `id: "dsh-worktree-space"` | |
+| 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show"}}` | 编造的 endpoint → **404** |
+| 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
+| 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
+| 2.4 再次 `--dump-config` 无 `worktree-space` | 四次均 0 处命中，且行数回到安装前 | |
+
+**RPC 验法有前提**：请求必须带会话 cookie。启动 url 里的 token 在首次访问首页时换成 `dsh-auth-*`
+cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api/...` 回 **404**，
+连宿主自己确定存在的路由也一样——那是鉴权在前，不是路由缺失。另外，信封里的 `method` 是
+`/api/` 之后的**整段**（`dsh-worktree-space/task.preference`），只写 `task.preference` 会被判
+`RPC method does not match endpoint.`。
+
+**bundle 地址是页面相对的**：`plugins/??dsh-worktree-space/client.js&rev=<rev>`，`rev` 每个版本各不相同
+（`37a15226d7a9` / `a891e0ed576d` / `b4c4e30ed039` / `3c02e8695ba5`），字节数四个版本一致。
+
+## 6. 必须逐条回应的边界情形
+
+| 情形 | 结论 |
+| --- | --- |
+| 未认证请求 401 | 不适用：本插件不注册自己的 `webServer`，也没有独立的 HTTP 生命周期面；路由挂在宿主已认证的 `/api` 载体内 |
+| 跨源请求 403 | 同上 |
+| 缺少 authority 503 | 同上 |
+| POST 不被重放 | 同上 |
+| 崩溃恢复 | 不适用：插件不留持久化的操作日志，每次路由调用就是一遍 git；被中断的结束任务从仓库自身状态重新读取 |
+| Windows 文件锁 | 未触发：四次运行的启动、探测与停止都没有留下占用，`node_modules` 可正常删除 |
+| 回滚失败 | 未触发：四次卸载后 `node_modules` 消失、`cordis.patch.yml` 回到 0 处提及、`--dump-config` 回到安装前行数 |
+| pnpm 10 / 11 / 12 | 仅实测到 **pnpm 12.6.0**（宿主随附版本）；10 与 11 未装、未验 |
+| monorepo 子路径 | 不适用：本插件以单个包安装，不是从 monorepo 子路径装 |
+
+## 7. 尚未覆盖的
+
+- **第 2.3 节的端到端功能验收（本轮只验到「可见性」这一层）**：新建任务空间、结束任务、
+  容器根的两条校验、任务空间位置的两档与回写——这些都还没在本轮实跑。它们要动 Git 仓库
+  （`git init` 一个一次性仓库），与本节的安装 / 组合 / 可见性 / 卸载是不同的一层。
+- **UI 层面的可见性没有逐项核对。** 本轮验到的是「页面可达、bundle 真的下发、宿主 RPC 路由
+  已注册」这三条机器可读判据；插件列表里的名称 / 描述 / `icon.svg`、配置区九个字段的即时生效、
+  侧边栏底部入口，仍需按第 2.3 节逐项点一遍。
+- **pnpm 只验到 12.6.0。** 10 与 11 未验，见第 6 节。
+- **`--dump-config` 的行数与宿主版本相关，不能跨版本顺延。** 换 DSH 版本或再改配置字段都要重量。
+- **窗口是「当前已发布版本」，不是固定集合。** 本版覆盖 `0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、
+  `0.2.0-rc.2` 四个；官方一发新版，窗口就不再是这四个，本文件的结论不自动顺延。
+- **桌面端由作者实测确认**，本轮矩阵只有 `web` 端的命令行证据。
