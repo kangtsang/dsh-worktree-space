@@ -180,6 +180,42 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const endBusy = () => { busyRef.current = false; setBusy(false) }
   const dismiss = () => { if (!busyRef.current) onClose() }
 
+  /**
+   * Undo a create that got as far as making the task space.
+   *
+   * Registration is the last step that can fail, and by then the worktrees and the
+   * branch exist. They go back the way they came: the Workspace row first, because
+   * it points at the directory, then the directory and the branch together, so the
+   * next attempt at this name meets neither.
+   *
+   * `force` is what makes the branch deletable. It was cut seconds ago and carries
+   * no commits of its own, and this is the Host's own request to abandon it - not a
+   * user discarding work. A branch that refuses to go leaves the error to report
+   * rather than being forced past a check that exists for finished tasks.
+   */
+  const rollbackCreated = async (
+    made: { path: string; task: string; project: string },
+    workspace: Workspace | undefined,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const problems: string[] = []
+    if (workspace?.workspaceId) {
+      try { await workspaces.delete(workspace.workspaceId) }
+      catch (reason: any) { problems.push(String(reason?.message ?? reason)) }
+    }
+    try {
+      await api.doneTask({
+        task: made.task,
+        project: made.project,
+        tasksRoot: tasksRoot.trim(),
+        deleteBranch: true,
+        force: true,
+      })
+    } catch (reason: any) {
+      problems.push(String(reason?.message ?? reason))
+    }
+    return problems.length === 0 ? { ok: true } : { ok: false, error: problems.join("; ") }
+  }
+
   const registerAndOpen = async (createdPath: string, slug: string) => {
     const workspace = await workspaces.create({ path: createdPath })
     try {
@@ -202,13 +238,26 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     finally { endBusy() }
   }
 
+  /**
+   * Clear a task space an earlier version left behind unregistered.
+   *
+   * The branch goes with the directory, for the same reason the rollback deletes
+   * it: keeping it would make the next attempt at this name fail on the branch
+   * instead of succeeding. A leftover has no session in it, so nothing is lost -
+   * but the user is told which path and branch went, because the action is not
+   * reversible and the leftovers are not always the ones they remember making.
+   */
   const cleanupCreated = async () => {
     if (!recovery || busyRef.current) return
     startBusy()
     try {
-      // The task is freshly created, so finishing it removes its worktrees and
-      // the container while keeping the branches.
-      await api.doneTask({ task: recovery.task, project: recovery.project, tasksRoot: recovery.tasksRoot })
+      await api.doneTask({
+        task: recovery.task,
+        project: recovery.project,
+        tasksRoot: recovery.tasksRoot,
+        deleteBranch: true,
+        force: true,
+      })
       setRecovery(null)
       onClose()
     } catch (reason: any) {
@@ -285,21 +334,41 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         setError(`${t("openFailed")}${detail}`)
         return
       }
-      if (workspace?.workspaceId) {
-        try {
-          await workspaces.delete(workspace.workspaceId)
-        } catch (cleanupError: any) {
-          if (created) setRecovery({ ...created, tasksRoot: tasksRoot.trim(), branch: taskBranch })
-          setError(format(t("cleanupFailed"), { error: String(cleanupError?.message ?? cleanupError), path: created?.path ?? "" }))
-          return
-        }
+      // The container on disk is this task's own, left by an earlier version that
+      // could not register its Workspace. It is not a name clash the user should
+      // have to clear by hand, so it is reported with a way to clear it here.
+      if (reason?.code === "task-space-unregistered" && !created) {
+        setRecovery({
+          // taskPath is the preview path, built the way task.create builds it.
+          path: taskPath,
+          task: taskSlug,
+          project,
+          tasksRoot: tasksRoot.trim(),
+          branch: taskBranch,
+        })
+        setError(format(t("resumeUnregistered"), { path: taskPath }))
+        return
       }
+      // A create is one thing: the task space, its worktrees and its branch, or
+      // none of them. Once the containers exist but the registration failed, they
+      // are undone here rather than handed back, because a task space that was
+      // never registered is not half a task - and the branch outliving its
+      // directory is what would make the next attempt at this name fail.
       if (created) {
-        setRecovery({ ...created, tasksRoot: tasksRoot.trim(), branch: taskBranch })
-        setError(`${t("registerFailed")} ${detail}`)
-      } else {
-        setError(`${t("operationError")}${detail}`)
+        const undone = await rollbackCreated(created, workspace)
+        if (undone.ok) {
+          setError(format(t("createRolledBack"), { error: detail }))
+        } else {
+          setError(format(t("rollbackIncomplete"), {
+            error: detail,
+            undo: undone.error,
+            path: created.path,
+            branch: taskBranch || created.task,
+          }))
+        }
+        return
       }
+      setError(`${t("operationError")}${detail}`)
     } finally {
       endBusy()
     }

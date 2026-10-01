@@ -12,7 +12,7 @@ import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated } from './paths.js'
 
-import { TASK_OWNED_FILES, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 export function breadcrumb(details) {
   const { task, branch, baseRef, sourceRoot, repositories } = details
@@ -137,7 +137,20 @@ export async function createTask(subprocess, options) {
 
   const branch = branchNameFor(name, prefix)
   const taskPath = taskSpacePath(tasksRoot, project, name)
-  if (existsSync(taskPath)) throw new Error(`task space already exists: ${taskPath}`)
+  // A task space that is already there is not a plain name clash: when its
+  // breadcrumb names this task, this project and this branch, it is a create
+  // whose Workspace registration failed and left the container behind. The code
+  // lets the dialog tell the two apart and offer recovery instead of a dead end.
+  if (existsSync(taskPath)) {
+    const existing = await readTaskMetadata(taskPath).catch(() => undefined)
+    const ours = existing !== undefined
+      && existing.task === name
+      && existing.project === project
+      && existing.branch === branch
+    const error = new Error(`task space already exists: ${taskPath}`)
+    error.code = ours ? 'task-space-unregistered' : 'task-space-exists'
+    throw error
+  }
 
   for (const repoPath of selected) {
     if (await gitSucceeded(subprocess, repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])) {

@@ -321,63 +321,78 @@ describe("native task create flow", () => {
     expect(next.onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("retries registration without re-creating the task and guards recovery while busy", async () => {
+  it("rolls the whole create back when registration fails, leaving nothing to retry", async () => {
     const next = setup()
-    const registration = deferred<{ workspaceId: string; path: string; title: string }>()
-    next.workspaces.create.mockRejectedValueOnce(new Error("Workspace service unavailable")).mockReturnValueOnce(registration.promise)
+    next.workspaces.create.mockRejectedValue(new Error("Workspace service unavailable"))
     next.mount()
     await ready()
     fireEvent.change(nameField(), { target: { value: "Fix login" } })
     fireEvent.submit(form())
-    const retry = await screen.findByRole("button", { name: t("retryRegister") })
-    expect(screen.getByRole("alert").textContent).toContain(t("registerFailed"))
-    expect(nameField()).toHaveProperty("disabled", true)
-    expect(screen.getByText(created.path)).toBeTruthy()
-    expect(screen.queryByRole("button", { name: t("createAndOpen") })).toBeNull()
-    // A programmatic submit must not escape the recovery-only flow.
-    fireEvent.submit(form())
-    act(() => { fireEvent.click(retry); fireEvent.click(retry) })
-    expect(next.workspaces.create).toHaveBeenCalledTimes(2)
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole("button", { name: t("cleanupTask") })).toHaveProperty("disabled", true)
-    expect(screen.getByRole("button", { name: t("close") })).toHaveProperty("disabled", true)
-    await act(async () => { registration.resolve({ workspaceId: "ws-retry", path: created.path, title: "fix-login" }) })
-    expect(next.workspaces.rename).toHaveBeenCalledWith("ws-retry", "App/fix-login")
-    expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledExactlyOnceWith("ws-retry")
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
-  })
-
-  it("preserves cleanup recovery after failure and closes only after finishing the task succeeds", async () => {
-    const next = setup()
-    next.workspaces.create.mockRejectedValue(new Error("Registration unavailable"))
-    next.api.doneTask.mockRejectedValueOnce(new Error("Task is locked"))
-    next.mount()
-    await ready()
-    fireEvent.change(nameField(), { target: { value: "Fix login" } })
-    fireEvent.submit(form())
-    fireEvent.click(await screen.findByRole("button", { name: t("cleanupTask") }))
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Task is locked"))
+    // A create is one thing or the other: the task space and its branch go back with
+    // the registration that failed, so there is no half-made task to offer a retry on.
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith({
+      task: "fix-login",
+      project: "repo",
+      tasksRoot: "/tasks",
+      deleteBranch: true,
+      force: true,
+    }))
+    expect(next.workspaces.delete).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert").textContent).toContain(
+      format(t("createRolledBack"), { error: "Workspace service unavailable" }),
+    )
+    // The dialog is back to its normal state: the fields are live again and the user
+    // can simply submit the same name a second time.
+    expect(nameField()).toHaveProperty("disabled", false)
+    expect(screen.getByRole("button", { name: t("createAndOpen") })).toHaveProperty("disabled", false)
     expect(next.onClose).not.toHaveBeenCalled()
-    expect(screen.getByText(created.path)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: t("cleanupTask") }))
-    await waitFor(() => expect(next.onClose).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "fix-login", project: "repo", tasksRoot: "/tasks" })
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.uiWorkspace.openWorkspace).not.toHaveBeenCalled()
   })
 
-  it("rolls back partial Workspace registration on both initial failure and retry failure", async () => {
+  it("names what the rollback could not remove when it fails partway", async () => {
+    const next = setup()
+    next.workspaces.create.mockRejectedValue(new Error("Workspace service unavailable"))
+    next.api.doneTask.mockRejectedValue(new Error("Task is locked"))
+    next.mount()
+    await ready()
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+    const alert = await screen.findByRole("alert")
+    await waitFor(() => expect(alert.textContent).toContain(
+      format(t("rollbackIncomplete"), {
+        error: "Workspace service unavailable",
+        undo: "Task is locked",
+        path: created.path,
+        branch: "task/fix-login",
+      }),
+    ))
+    // Both the original failure and the one that stopped the rollback, and the exact
+    // path and branch still on disk - the three things manual cleanup needs.
+    expect(alert.textContent).toContain("Workspace service unavailable")
+    expect(alert.textContent).toContain("Task is locked")
+    expect(alert.textContent).toContain(created.path)
+    expect(alert.textContent).toContain("task/fix-login")
+    expect(next.onClose).not.toHaveBeenCalled()
+  })
+
+  it("removes a partially registered Workspace when the rename fails, and rolls the task back too", async () => {
     const next = setup()
     next.workspaces.rename.mockRejectedValue(new Error("Rename unavailable"))
     next.mount()
     await ready()
     fireEvent.change(nameField(), { target: { value: "Fix login" } })
     fireEvent.submit(form())
-    fireEvent.click(await screen.findByRole("button", { name: t("retryRegister") }))
-    await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledTimes(2))
+    // The row exists but is not usable, so it is deleted rather than left pointing at
+    // a container that is about to go.
+    await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith({
+      task: "fix-login",
+      project: "repo",
+      tasksRoot: "/tasks",
+      deleteBranch: true,
+      force: true,
+    }))
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
-    expect(next.api.doneTask).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: t("retryRegister") })).toBeTruthy()
     expect(next.onClose).not.toHaveBeenCalled()
   })
 })
