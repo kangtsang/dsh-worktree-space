@@ -27,11 +27,11 @@ and the worktree branches and task spaces are cleaned up as needed.
 - [🚀 Install](#-install)
 - [✨ Features](#-features)
 - [📂 Layout of a task](#-layout-of-a-task)
-- [📝 The operation log](#-the-operation-log)
 - [🔧 Requirements](#-requirements)
 - [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
 - [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)　[Each combination](#what-each-combination-does)
 - [🤖 Experimental: handing the commits and the conflicts to an agent](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)　[The two buttons](#the-two-buttons-and-what-they-do) · [The flow](#the-flow-and-its-steps)
+- [📝 The operation log](#-the-operation-log)
 - [📄 Companion documents](#-companion-documents)
 
 ## 🚀 Install
@@ -83,8 +83,8 @@ top right.
   English only.
 - **No extra service needed.** The two entries, the scan depth and the directory limit all
   live in the plugin's own configuration (see Configuration). It follows DSH themes.
-- **An operation log that is always on.** `worktree-space-log.jsonl` at the container root holds one
-  line per `git` call and per failure; reading it is how a report gets reproduced. See
+- **An operation log, on by default and switchable.** `worktree-space-log.jsonl` at the container root
+  records what this task space did; reading it is how a report gets reproduced. See
   [The operation log](#-the-operation-log).
 
 ## 📂 Layout of a task
@@ -155,133 +155,6 @@ Worktree Space container's and a project's documents stay in that project's own 
 container root, adding exactly one directory — `archived-docs` — and the operation log's one file to the
 whole volume. See [The operation log](#-the-operation-log).
 
-## 📝 The operation log
-
-A `worktree-space-log.jsonl` sits at the container root, always. Every `git` call that changes repository
-state, every `git` call that fails, and every error or warning appends one line of JSON to it. There is
-**no switch for it and it is always on**, and **nothing is sent anywhere**: it is a file in the container
-root.
-
-```json
-{"ts":"2026-09-28 12:0001","level":"info","kind":"git","op":"task.done","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["worktree","add","E:\\ws\\kratos-admin\\login","-b","task/login"],"exit":0,"ms":412}
-{"ts":"2026-09-28 12:0002","level":"info","kind":"git","op":"task.create","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["show-ref","--verify","--quiet","refs/heads/task/login"],"exit":1,"stderr":"","stdout":"","ms":135}
-{"ts":"2026-09-28 12:0003","level":"error","kind":"error","op":"task.done","task":"login","project":"kratos-admin","phase":"done","repository":"kratos-admin","conflict":true,"message":"fatal: refusing to merge unrelated histories","stack":"Error: git merge --no-ff ... "}
-```
-
-**Levels:** every record carries `level` - `info` for the ordinary case, `warn` for a warning, `error` for a
-failure. `kind` says what the record is about; `level` says how bad it is. A git call that failed is
-`kind:"git"` with `level:"error"`, so the command itself is still there to read.
-
-**Success or failure turns on whether git said anything, not on the exit code alone.** `show-ref --verify
---quiet` exits 1 to mean "no such ref" - a normal answer, and `--quiet` exists precisely so it prints nothing
-either way. That is `info`. A real failure is loud (`fatal: not a git repository`, `CONFLICT ...`) and is
-`error`. So a successful create leaves no false alarm behind, while a `gitSucceeded` run outside a repository
-exits 128, says so, and stays an error - a swallowed answer the caller cannot tell from a broken one is
-exactly what this file is for.
-
-**`msg` says in a sentence what happened.** Every other record is a fact - which
-command, what exit code, what error code - and reading one means knowing what
-`worktree add` does and that a bare `exit:1` from `show-ref --verify --quiet` means the branch is free rather than
-broken. `msg` says what it *means*, for someone who is not reading this file's source:
-
-```json
-{"ts":"2026-10-02 10:4658","level":"info","kind":"event","op":"task.create","task":"login","project":"kratos-admin","msg":"Created the task space. Every selected repository has a worktree on task/login and the task metadata is written, so this is the point from which the task exists.","phase":"create","branch":"task/login","worktrees":["api","web"]}
-{"ts":"2026-10-02 10:4812","level":"warn","kind":"event","op":"task.done","task":"login","project":"kratos-admin","msg":"The task space was taken down because creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made. The create had already made this work, so removing it is what makes the whole create fail as one thing: nothing of it is left behind.","phase":"done","cause":"creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made."}
-```
-
-A `kind:"event"` record is a conclusion; every other kind is a fact. Nothing
-recorded a success before: a create that works left nothing behind but the git
-calls that made it, and a log whose entries are all failures cannot tell you
-which of those were the trouble. The sentence says the conclusion and the fields
-say the particulars - the branch, which worktrees went - so the two do not repeat
-each other: filter by `level`, or read `msg`.
-
-**`msg` is not confined to `event`.** Any record with something to say carries
-one: a **failed git command** gets a sentence quoting the first line of git's own
-complaint - the usage block and the hints after it stay out, they are too long,
-and the whole of it is still in `stderr`. A git call that **worked** gets none;
-`argv` already says what ran, and a sentence beside it is noise. So every line
-that `level == "error"` selects can explain itself.
-
-**What is recorded:** every command that **changes repository state** (`worktree add/remove/prune`,
-`merge`, `merge --abort`, `branch -d/-D`, `reset --hard`), and **every failing command** — including a
-failing read, and including one whose failure the caller was going to swallow, such as the query that asks
-whether a branch already exists. A successful read is not recorded, or the file would be nothing but the
-echo of `git status`.
-
-**How to read it:** one JSON object per line, so filtering by task gives one task's whole story, from
-creation to finish:
-
-```sh
-# everything one task did
-jq -c 'select(.task == "login")' ~/workspace/worktree-space/worktree-space-log.jsonl
-# only the lines where something went wrong - git calls and the plugin's own errors alike
-jq -c 'select(.level == "error")' ~/workspace/worktree-space/worktree-space-log.jsonl
-```
-
-**The switch:** "Write a record of every operation…" in the plugin settings, `on` or `off`, **`on` by
-default**. Switching it off only **stops new records** - a log already on disk is left exactly where it
-is, because those records are frequently the only account of what happened to some work and making a
-setting delete them would be the one dangerous thing here. Let a log retire by rotating itself, or rename
-the file yourself. `task.preference` reports the same state, so a dialog can tell someone that what just
-happened was not recorded.
-
-**Conventions:**
-
-- **`ts` is local time on this machine**, `YYYY-MM-DD HH:MM:SS`, written from the clock you would read on it.
-  Nothing to convert during an incident. The file is only ever appended to, so **the order of the records is
-  the order they ran in**, and `ts` is not what sorts them.
-- **No file contents**, only paths, commands and git's own diagnostic text (truncated past 2 KB).
-- **Credentials in a URL are masked** first: `https://user:token@host/x` is recorded as `https://***@host/x`.
-- **It creates no directory.** It writes only where the container root already exists, so a call that
-  belongs to no task space — `worktree.scan` and the like — records nothing, and no container root is
-  brought into being just to hold a log.
-- **A failed write changes nothing.** A deleted file, a read-only directory or a full disk is ignored.
-- **Past 10 MB it is moved aside** to `worktree-space-log.<YYYY-MM-DD-HH-MM-SS>.jsonl` and a new one starts;
-  the name carries the same local clock as the records inside it. Dashes rather than colons,
-  because `2026-10-02 11:35:26` is not a legal filename on Windows at all: the rename throws, the throw
-  is swallowed, and the rotation silently stops working while the log grows without bound.
-  the old file is kept.
-- Delete the container root and the log goes with it. It is not a backup and not an audit record.
-
-### Error codes
-
-Every record with `level == "error"` carries a `code`: `E` and four digits. The first digit is the
-category, the last three are the position within it. Seven categories; numbering runs consecutively
-inside each, skipping nothing and reusing nothing - a code that once meant something keeps meaning it,
-so two lines that share a code are about the same thing.
-
-**The code is what the screen and the log share.** One fact gets said twice: the `message` on screen
-is the sentence written for a person, which gets translated and may be reworded, and `msg` in the log
-says what the failure meant for the operation. **Only the code is identical on both sides** - which is
-why a code copied off the screen finds its way to the log, and back. To see what the user saw, read
-`message`; to see which file to open, read `code`.
-
-```sh
-# everything a code has ever been
-jq -c 'select(.code == "E3001")' ~/workspace/worktree-space/worktree-space-log.jsonl
-# which places go wrong most
-jq -r 'select(.code) | .code' ~/workspace/worktree-space/worktree-space-log.jsonl | sort | uniq -c
-```
-
-| Category | What it covers | Files |
-| --- | --- | --- |
-| `E1xxx` | Container and isolation: where task spaces may and may not sit | `paths.js`, `container.js`, `archive.js`, `inspect.js` |
-| `E2xxx` | Task space lifecycle: creating, finding, taking one down | `create.js`, `archive.js` |
-| `E3xxx` | Git and branches: the repository underneath it all | `git.js`, `create.js` |
-| `E4xxx` | Arguments and validation: a request that does not add up | `index.js`, `create.js`, `archive.js`, `naming.js` |
-| `E5xxx` | Finishing and merging: work that has to be settled first | `archive.js` |
-| `E6xxx` | Scanning and discovery: finding workspaces to begin with | `discover.js`, `index.js` |
-| `E7xxx` | The package itself: packaging and wiring, not user input | `skill.js`, `tool.js` |
-| `E9001` | Nothing classified it; this plugin's catch-all | - |
-
-The full one-line-per-code table is `src/host/task/codes.js`, and it is the index for the table above.
-Codes are written as literals on the line that throws, so `grep -n E2003` lands on that line without
-looking anything up first.
-
-Removing a worktree never deletes its Git branch; finishing a task merges the branch back
-before the worktree goes.
-
 ## 🔧 Requirements
 
 - [Node.js](https://nodejs.org) `>=22.19.0`
@@ -319,7 +192,7 @@ contacts no external service and reports no telemetry.
 | File reads | The selected Workspace directories (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); the record files in the task space and at the Worktree Space container root; each worktree's `.git` marker file; and, at finish, the contents of the files git lists, read only to decide whether a merge still carries conflict markers |
 | File writes | Only inside the task space, the Worktree Space container root, and the archive directory the configuration names (see Configuration); finishing a task removes only the worktrees and documents the plugin itself created, and a merge also `git worktree add`s one temporary checkout under the **system temporary directory** and deletes it right after. It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory |
 | Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository (see below), and a commit handed to an agent is run by the host's own session |
-| Operation log | `worktree-space-log.jsonl` at the container root: each `git` call's `argv`, `cwd`, exit code and git's own diagnostic, and each error's and warning's `message`, `stack` and `code`. Every line carries `level` (`info`/`warn`/`error`), a success or a failure decided by whether git printed a diagnostic; a `kind:"event"` line carries `msg`, a sentence saying how the operation turned out. **No file contents**, credentials in a URL masked before the write; past 10 MB it is moved aside and a new one starts; a failed write changes no outcome; nothing reads it back and it leaves this machine |
+| Operation log | `worktree-space-log.jsonl` at the container root, **on by default**: the git commands that change repository state, any git command that fails, the outcome of every operation, and every error and warning with an error code. Switchable in the plugin settings; switching it off leaves any log already there alone. **No file contents**, credentials in a URL masked before the write; nothing sends it anywhere and it leaves this machine |
 | Network | None: the plugin itself makes no HTTP requests and runs no `git push`; every `git` subcommand it runs is local |
 | Credentials | Reads, stores and forwards none; the plugin never touches keys |
 | Global resources | No global installs, no daemon or resident service, no writes to system directories |
@@ -587,6 +460,24 @@ space**, and the elevation is yours to approve in that session.
 
 **Finish task** or **Continue finishing** at the foot of the panel only ever runs once the user has
 confirmed it.
+
+## 📝 The operation log
+
+A `worktree-space-log.jsonl` sits at the container root, **on by default**, recording every step this
+task space has been through:
+
+- **git commands that change repository state**, and **any git command that fails** - including a read
+  that fails. A successful read is not recorded, or the file would be nothing but the echo of `git status`.
+- **The outcome of every operation**: whether a create worked, which worktrees a finish removed.
+- **Every error and warning the plugin hits**, carrying an error code that points straight at the line in
+  the source that went wrong.
+
+**The switch** is in the plugin settings. Turning it off only stops new records being written - **a log
+already on disk is left exactly where it is**, because it is often the only account of some piece of
+work. Delete the file yourself if you want it gone.
+
+**Nothing is sent anywhere**: it is a file in the container root, and deleting the container root takes
+it with it. Failing to write it never affects any operation.
 
 ## 📄 Companion documents
 

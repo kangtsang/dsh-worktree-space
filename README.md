@@ -22,11 +22,11 @@ DeepSeek Harness 的 Worktree Space 插件——一个包含多个 Git 仓库的
 - [🚀 安装](#-安装)
 - [✨ 功能](#-功能)
 - [📂 任务目录结构](#-任务目录结构)
-- [📝 操作日志](#-操作日志)
 - [🔧 环境要求](#-环境要求)
 - [🔐 权限与失败边界](#-权限与失败边界)
 - [🛠️ 使用](#-使用)　[⚙️ 配置](#-配置) · [➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🏁 结束](#-结束-worktree-space)　[各选项组合](#各选项组合的行为)
 - [🤖 实验性：把提交与冲突交给 agent](#-实验性把提交与冲突交给-agent)　[两个按钮](#两个按钮和它们做什么) · [流程和步骤](#流程和步骤)
+- [📝 操作日志](#-操作日志)
 - [📄 配套文档](#-配套文档)
 
 ## 🚀 安装
@@ -66,7 +66,7 @@ dsh plugin --profile web add dsh-worktree-space
   只有英文一份。
 - **无额外服务依赖。** 入口开关、扫描深度和目录上限均由插件自身配置控制（见[配置](#-配置)）。支持 DSH
   主题。
-- **常驻操作日志。** 容器根下的 `worktree-space-log.jsonl` 逐行记录插件发的每条 `git` 命令和遇到的每个错误，
+- **可开关的操作日志。** 容器根下的 `worktree-space-log.jsonl` 记录这个任务空间做过什么，默认开启，
   排查和复现直接读它；见[操作日志](#-操作日志)。
 
 ## 📂 任务目录结构
@@ -130,106 +130,6 @@ dsh plugin --profile web add dsh-worktree-space
 那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录和操作日志那个文件（见[操作日志](#-操作日志)）。删掉 worktree 不会删除对应的 Git
 分支；结束任务会先把分支合并回去，再删 worktree。
 
-## 📝 操作日志
-
-容器根下常驻一个 `worktree-space-log.jsonl`。插件每发出一条会改动仓库状态的 `git` 命令、每有一条命令失败、每遇到
-一个错误或警告，就往这个文件追加一行 JSON。它**没有开关，常开着**，也**不发送到任何地方**——它就是容器根下的一个文件。
-
-```json
-{"ts":"2026-09-28 12:0001","level":"info","kind":"git","op":"task.done","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["worktree","add","E:\\ws\\kratos-admin\\login","-b","task/login"],"exit":0,"ms":412}
-{"ts":"2026-09-28 12:0002","level":"info","kind":"git","op":"task.create","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["show-ref","--verify","--quiet","refs/heads/task/login"],"exit":1,"stderr":"","stdout":"","ms":135}
-{"ts":"2026-09-28 12:0003","level":"error","kind":"error","op":"task.done","task":"login","project":"kratos-admin","phase":"done","repository":"kratos-admin","conflict":true,"message":"fatal: refusing to merge unrelated histories","stack":"Error: git merge --no-ff ... "}
-```
-
-**日志级别：** 每条记录都有 `level`——`info`（正常）、`warn`（警告）、`error`（故障）。`kind` 说这条记录**是什么**，
-`level` 说它**有多严重**；一条失败的 git 命令是 `kind:"git"` + `level:"error"`，命令本身照样查得到。
-
-**成功还是失败，看 git 有没有说话，不只看退出码。** `show-ref --verify --quiet` 退出 1 是「没有这个分支」这个**正常回答**——
-`--quiet` 本来就是不打印、只用退出码，所以它两个方向都不输出。它记 `info`；而真故障 git 一定会出声
-（`fatal: not a git repository`、`CONFLICT...`），记 `error`。所以每次成功创建都**不会**在日志里留下一条假警报，
-而 `gitSucceeded` 在非仓库目录里退出 128 仍然会被记成错误——那是个被吞掉、调用方分辨不出的答案，正是这个文件存在的理由。
-
-**`msg` 用一句话说明发生了什么。** 其他记录说的都是**事实**——命令是什么、退出码多少、错误码是什么；要读懂它们得知道
-`worktree add` 是干什么的，也得知道 `show-ref --verify --quiet` 那句光秃秃的 `exit:1` 意思是「分支是空的」而不是「坏了」。
-`msg` 说的是**这件事意味着什么**，给一个不读这份文件源码的人看：
-
-```json
-{"ts":"2026-10-02 10:4658","level":"info","kind":"event","op":"task.create","task":"login","project":"kratos-admin","msg":"Created the task space. Every selected repository has a worktree on task/login and the task metadata is written, so this is the point from which the task exists.","phase":"create","branch":"task/login","worktrees":["api","web"]}
-{"ts":"2026-10-02 10:4812","level":"warn","kind":"event","op":"task.done","task":"login","project":"kratos-admin","msg":"The task space was taken down because creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made. The create had already made this work, so removing it is what makes the whole create fail as one thing: nothing of it is left behind.","phase":"done","cause":"creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made."}
-```
-
-`kind:"event"` 的记录**专门说结果**，别的种类只说事实。成功以前根本没有记录——一次顺利的创建只留下做成的那些 git 命令，
-而一份条目全是失败的日志，没法告诉你哪一条才是麻烦。`msg` 说结论，旁边的字段说细节（分支、删了哪些 worktree），
-两者不重复：**按 `level` 筛也行，按 `msg` 读也行。**
-
-**记什么：** 所有**改动仓库状态**的命令（`worktree add/remove/prune`、`merge`、`merge --abort`、
-`branch -d/-D`、`reset --hard`），**以及任何一条失败的命令**——哪怕失败的是只读命令，哪怕调用方本来会吞掉这个
-失败（比如「这个分支是不是已经存在」那种查询）。成功的只读查询不记，否则文件会被 `git status` 的回声淹没。
-
-**`msg` 不限于 `event`。** 有话可说的记录都带它：**失败的 git 命令**带一句，引用 git 报错的第一行
-（后面那些 usage 说明和提示语不进来，太长；完整内容照旧在 `stderr` 里）；**成功的 git 命令不带**——
-`argv` 已经说清它干了什么，再加一句是噪音。所以按 `level=="error"` 筛出来的每一行都能自己说清自己。
-
-**怎么查：** 一行一个 JSON 对象，按任务筛就是一个任务从建到收尾的完整来龙去脉：
-
-**开关：** 插件设置里的「Write a record of every operation…」，`on` / `off`，**默认 `on`**。
-关掉只是**不再写新记录**，磁盘上已有的日志原样留着——记录常常是某次工作唯一的一份账，
-把开关做成删日志是危险的。旧日志想归档就等它自己轮转，或者直接手动改名。
-`task.preference` 里也有这个状态，对话框可以据此告诉用户「这次操作没有记录」。
-
-```sh
-# 某个任务做过什么
-jq -c 'select(.task == "login")' ~/workspace/worktree-space/worktree-space-log.jsonl
-# 只看出了什么的那些——这一条同时覆盖 git 命令失败和插件自己的错误
-jq -c 'select(.level == "error")' ~/workspace/worktree-space/worktree-space-log.jsonl
-```
-
-**几条约定：**
-
-- **`ts` 是本机本地时间**，`YYYY-MM-DD HH:MM:SS`，按你在自己机器上看到的时钟写。排查时不用再换算时区。
-  文件只追加不重写，**记录的先后就是它们发生的先后**，所以时间戳不承担排序的职责。
-
-- **不记文件内容**，只记路径、命令和 git 自己的报错文字（超过 2 KB 截断）。
-- **URL 里的凭据会先抹掉**：`https://user:token@host/x` 记成 `https://***@host/x`。
-- **不创建目录。** 只有容器根已经存在时才写，所以 `worktree.scan` 这类不属于任何任务空间的调用什么都不记，
-  也不会为了记日志而凭空造出一个容器根。
-- **写日志失败不影响任何操作。** 文件被删、目录只读、磁盘满了，插件都当没这回事。
-- **超过 10 MB 改名归档**成 `worktree-space-log.<YYYY-MM-DD-HH-MM-SS>.jsonl` 再重开，旧文件保留。文件名里的时间和记录里的是同一个本地时钟；
-  用短横线不用冒号，是因为 `2026-10-02 11:35:26` 这个字符串在 Windows 上根本不是合法文件名，`rename` 会抛错，
-  而抛错被吞掉的后果是轮转静默失效、日志无限增长。
-- 容器根被删，日志一起没；它不是备份，也不是审计凭证。
-
-### 错误码
-
-每条 `level=="error"` 的记录都带 `code`，**`E` 开头加四位数字**：第一位是分类，后三位是该分类里的编号。
-分类一共七个，编号在类内连续，不跳号不重号——一个码发出去过就一直表示同一件事，
-所以老日志和新日志里同码的行说的是同一件事。
-
-**码是前端和日志之间的接头。** 同一份信息有两处说法：屏幕上的 `message` 是写给人读的（会翻译、可能改写），
-日志里的 `msg` 是说这次失败对操作意味着什么。**只有码两边都不改**——所以从屏幕上抄一个码去日志里搜能搜到，
-反过来也一样。想知道用户当时看到了什么，读 `message`；想知道该去哪个文件查，读 `code`。
-
-```sh
-# 某个码都出现过什么
-jq -c 'select(.code == "E3001")' ~/workspace/worktree-space/worktree-space-log.jsonl
-# 哪个文件出的问题最多（码在源码里是字面量，grep 就能定位到抛出的那一行）
-jq -r 'select(.code) | .code' ~/workspace/worktree-space/worktree-space-log.jsonl | sort | uniq -c
-```
-
-| 分类 | 含义 | 涉及的文件 |
-| --- | --- | --- |
-| `E1xxx` | 容器与隔离：任务空间该在哪、不该在哪 | `paths.js`、`container.js`、`archive.js`、`inspect.js` |
-| `E2xxx` | 任务空间生命周期：创建、查找、收尾 | `create.js`、`archive.js` |
-| `E3xxx` | git 与分支：底下那个仓库 | `git.js`、`create.js` |
-| `E4xxx` | 参数与校验：请求本身说不通 | `index.js`、`create.js`、`archive.js`、`naming.js` |
-| `E5xxx` | 收尾与合并：有活没干完 | `archive.js` |
-| `E6xxx` | 扫描与发现：一开始去找工作区 | `discover.js`、`index.js` |
-| `E7xxx` | 包自身：打包和接线，不是用户输入的问题 | `skill.js`、`tool.js` |
-| `E9001` | 没有归类的失败，本插件的兜底码 | — |
-
-完整的一码一说明在 `src/host/task/codes.js`，它就是这个表的索引。
-码在抛出的那一行写成**字面量**，所以 `grep -n E2003` 直接落到那一行，不用先查表。
-
 ## 🔧 环境要求
 
 - [Node.js](https://nodejs.org) `>=22.19.0`
@@ -259,7 +159,7 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | 文件读取 | 所选工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间与 Worktree Space 容器根下的记录文件；各 worktree 的 `.git` 标记文件；结束任务时为判断合并是否仍留冲突而读回变更文件的内容 |
 | 文件写入 | 只写任务空间与 Worktree Space 容器根下的文件，以及配置选定的归档目录（见[配置](#-配置)），结束时删除的是插件自己创建的 worktree 与文档；合并时另在**系统临时目录**里建一份临时检出，用完即删。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录 |
 | 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下（见下表）；交给 agent 的提交由宿主里的那个会话自己执行 |
-| 操作日志 | 容器根下的 `worktree-space-log.jsonl`：每条 `git` 命令的 `argv`/`cwd`/退出码/git 自己的报错文字，每个错误与警告的 `message`/`stack`/`code`，每行都带 `level`（`info`/`warn`/`error`，按 git 有没有报错文字区分成功与失败），`kind:"event"` 的行带 `msg`，一句话说明这次操作结果如何。**不含任何文件内容**，URL 里的凭据写入前抹掉；超过 10 MB 改名归档后重开；写失败不影响任何操作；没有读它的端点，它不离开这台机器 |
+| 操作日志 | 容器根下的 `worktree-space-log.jsonl`，**默认开启**：改动仓库状态的 `git` 命令、任何失败的 `git` 命令、每个操作的结论、每个错误与警告（带错误码）。可在插件设置里关掉，关掉不影响已有文件。**不含任何文件内容**，URL 里的凭据写入前抹掉；不发送到任何地方，不离开这台机器 |
 | 网络 | 无：插件自身不发任何 HTTP 请求，也不执行任何 `git push`；它发出的 `git` 子命令全是本地操作 |
 | 凭据 | 不读取、不保存、不转发；插件不接触密钥 |
 | 全局资源 | 不装全局包、不起常驻进程或服务、不写系统目录 |
@@ -465,6 +365,21 @@ Git 仓库及其 worktree，任务空间视图展示每个任务及其各仓库�
    任务分支里」通常答「是」，试合并直接跳过；只有目标分支又有人推了新提交，才照样先试一遍。
 
 面板底部的 **确认结束任务** 或 **继续结束任务** 始终由用户操作确认才会执行。
+
+## 📝 操作日志
+
+容器根下有一个 `worktree-space-log.jsonl`，**默认开着**，记录这次任务空间里发生过的每一步：
+
+- **改动仓库状态的 git 命令**，以及**任何一条失败的 git 命令**（哪怕失败的是只读命令）。
+  成功的只读查询不记，否则文件会被 `git status` 的回声淹没。
+- **每个操作的结论**：创建成功还是失败、结束任务收掉了哪些 worktree。
+- **插件遇到的每个错误和警告**，带一个错误码，码能直接定位到源码里出问题的那一行。
+
+**开关：** 插件设置里可以关掉。关掉只是不再写新记录，**磁盘上已有的日志原样保留**——
+那常常是某次工作唯一的一份账。想清掉就自己删文件。
+
+它**不发送到任何地方**，就是容器根下的一个文件；容器根被删，日志一起没。
+写日志失败也不会影响任何操作。
 
 ## 📄 配套文档
 
