@@ -30,14 +30,14 @@
      view tabs on the toolbar's own line: in one band they would start under the back row
      instead, and the panel would read differently from the dialog for no reason but its
      back button. */
-  .dws-panel { --dws-nav-width: 208px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+  .dws-panel { --dws-nav-width: 167px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
   .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
   /* The plugin's navigation column, shared by both hosts of the page: the panel that
      takes the shell's main column and the dialog the footer's shortcut opens. Every
      number below is a variable, because the two frames differ only in width, in how far
      the column is inset, and in the line that separates it from what it selects — the
      rows themselves are the shell's own panel rows, to the pixel, in both. */
-  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 208px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
+  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 167px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
   .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }
   .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
@@ -121,12 +121,13 @@
   .dws-add-source-row { display: flex; flex: 1 1 240px; align-items: center; gap: 8px; min-width: 0; }
   .dws-add-source-row .dws-input { flex: 1 1 auto; min-width: 0; }
   .dws-add-source-button { flex: none; }
-  .dws-add-source { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--wt-line); }
-  .dws-add-source .dws-field-label { display: block; margin-bottom: 6px; }
   .dws-filter-fold { margin-left: 20px; }
   /* The search field takes half the row and the refresh button follows it: a button
      that says what it does, not an icon parked at the far edge. */
-  .dws-search { display: flex; flex: 0 1 50%; align-items: center; gap: 8px; min-width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
+  /* Three eighths of the toolbar. It shares the row with the refresh button and, in
+     the repository view, the add-repository button, and both need more of it than a
+     search of a list this size does. */
+.dws-search { display: flex; flex: 0 1 37.5%; align-items: center; gap: 8px; min-width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
   .dws-search:focus-within { border-color: var(--dsw-alias-brand-primary); }
   .dws-search > svg { flex: none; }
   .dws-search .dws-input { min-height: 34px; padding: 6px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
@@ -327,7 +328,7 @@
      own alignment — the label against the column's inner edge — because that is the edge
      a label reads from, and a dialog does not move it. */
   .dws-manage-page { display: flex; flex: 1; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
-  .dws-manage-page .dws-nav { --dws-nav-width: 196px; --dws-nav-pad: 16px 12px; border-right: 0; }
+  .dws-manage-page .dws-nav { --dws-nav-width: 157px; --dws-nav-pad: 16px 12px; border-right: 0; }
   /* The column the lists scroll in: flush against the navigation on its left, the same
      measure the panel's own content keeps, so both surfaces put their text on one line.
      It is the frame, not the scroller: the section inside it owns the pinned toolbar and
@@ -377,6 +378,14 @@
   .dws-field-label > .dws-field-note { text-align: right; }
   /* An option's explanation sits beside its name rather than under the control. */
   .dws-field-heading, .dws-field-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; padding: 0; }
+  /* A hint glyph beside a label. `align-self`, not the legend's own `baseline`: a
+     flex container whose only child is an SVG has that SVG's bottom edge for a
+     baseline, so baseline alignment pins the icon's bottom to the text's and it
+     rides above the line. Centring it on the line puts it where a mark of that
+     size belongs, and it is sized to the label rather than to a control so it
+     reads as part of the words and not as a button that forgot its action. */
+.dws-field-hint { display: inline-flex; flex: none; align-self: center; align-items: center; margin: 0; padding: 0; color: var(--wt-muted); cursor: help; }
+  .dws-field-hint:hover { color: var(--wt-secondary); }
   .dws-field-note { margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
   .dws-field-note-warning { color: var(--wt-danger); }
   .dws-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -611,7 +620,7 @@
     .dws-worktree-actions { margin-left: auto; }
     /* The dialog keeps its navigation, but there is no room for the panel's 208px rail
        beside the lists at this width, so the rail narrows and the content takes the rest. */
-    .dws-manage-page .dws-nav { --dws-nav-width: 124px; --dws-nav-pad: 12px 8px; }
+    .dws-manage-page .dws-nav { --dws-nav-width: 100px; --dws-nav-pad: 12px 8px; }
     .dws-manage-page-content { padding: 12px 14px 16px; }
     .dws-manage-heading { padding: 18px 52px 0 18px; }
     /* One repository per row once half a row is too narrow for a name and a path. */

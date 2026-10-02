@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { AlertCircle, GitPullRequest, Loader2, Plus } from "./icons"
+import { AlertCircle, GitPullRequest, InformationCircle, Loader2 } from "./icons"
 import { format, useT } from "../lib/i18n"
-import { commonAncestor, isInsideDirectory, nameOf, slashPath } from "../lib/paths"
-import { addRepositorySource } from "../lib/repositories"
+import { isInsideDirectory, nameOf, slashPath } from "../lib/paths"
+import { HoverHint } from "./HoverHint"
 import type { TaskInspection, WorktreeList, WorkspacesService } from "../lib/types"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
 import type { createWorktreeApi } from "../lib/api"
@@ -23,11 +23,10 @@ interface AddRepositoryDialogProps {
 /**
  * Add repositories to a task that is already under way.
  *
- * The candidates are the repository view's list, which is the same list the task
- * was created from — a repository the user can see there is one they can put in
- * here, and nothing else is offered without being named. A path can also be typed
- * in, which registers it the same way the repository view does: as a Workspace, so
- * it joins that list rather than living only in this one dialog.
+ * The candidates are the repository view's list and nothing else — the same list
+ * the task was created from. A repository that is not on it is not offered, because
+ * the one place a repository enters that list is the repository view's own
+ * "add repository" button, and two ways in would be two lists to keep in step.
  *
  * What is already in the task is not offered. Every worktree is named after the
  * directory its source repository lives in, so a repository whose name the task
@@ -44,8 +43,6 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
   const [picked, setPicked] = useState<string[]>([])
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
   const [namedBase, setNamedBase] = useState("")
-  const [manualPath, setManualPath] = useState("")
-  const [manualError, setManualError] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const busyRef = useRef(false)
@@ -81,36 +78,14 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
   ))
   const setAll = (include: boolean) => setPicked(include ? candidates.map((entry) => entry.repoPath) : [])
 
-  // One picked repository with nothing above both of them means the session that
-  // commits in the task space cannot reach that repository's `.git` without being
-  // widened, and a path on another volume cannot be widened at all. Nothing about
-  // the merge or the finish changes; this is what the user will be asked to
-  // approve when a commit is handed to an agent, so it is said here rather than
-  // then. Named the same way the finish names it, so the two agree.
-  const unreachable = picked.filter((repoPath) => commonAncestor(taskPath, repoPath) === undefined)
+  // No warning about a repository that shares no directory with the task space, and
+  // none about one on another volume. Neither changes what adding it does: the merge
+  // reads each repository from its own worktree and does not care where that is. The
+  // one thing that does care — the session handed a commit, and how far it is
+  // allowed to reach — is asked at the finish, where it is actually asked, rather
+  // than warned about here over an operation that has not happened yet.
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
   const canAdd = picked.length > 0 && (baseMode === "head" || baseRef !== "") && !loading
-
-  const addManual = async () => {
-    const path = manualPath.trim()
-    if (path === "" || busyRef.current) return
-    busyRef.current = true
-    setBusy(true)
-    setManualError("")
-    try {
-      await addRepositorySource(api, workspaces, path)
-      // The registration is what puts it in the list the picker draws from, and
-      // that list arrives with the next scan rather than with this request — so
-      // the path is offered here directly, and the scan will agree with it.
-      setPicked((current) => (current.some((entry) => entry === path) ? current : [...current, path]))
-      setManualPath("")
-    } catch (reason: any) {
-      setManualError(String(reason?.message ?? reason))
-    } finally {
-      busyRef.current = false
-      setBusy(false)
-    }
-  }
 
   const add = async () => {
     if (busyRef.current || !inspection || !canAdd) return
@@ -139,7 +114,15 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
   const fieldsDisabled = busy || loading || inspection === null
 
   const picker = <fieldset className="dws-field dws-repositories-fieldset" disabled={fieldsDisabled} aria-describedby={picked.length === 0 ? `${id}-repositories-note` : undefined}>
-    <legend className="dws-field-legend"><span id={`${id}-repositories`} className="dws-field-label">{t("addRepositoriesLabel")}</span></legend>
+    <legend className="dws-field-legend">
+      <span id={`${id}-repositories`} className="dws-field-label">{t("addRepositoriesLabel")}</span>
+      {/* The label says which repositories may be chosen; not where the list comes
+          from, which is the question this answers. Hover only: the icon repeats
+          nothing that is already on screen. */}
+      <HoverHint label={t("addRepositoriesSourceHint")} className="dws-field-hint">
+        <InformationCircle size={13} aria-hidden="true" />
+      </HoverHint>
+    </legend>
     <div className="dws-repo-picker">
       <div className="dws-repo-choices">
         {candidates.map((entry) => {
@@ -169,17 +152,6 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
           </span>
         </div>
       </div>
-    </div>
-    {/* A repository the repository view does not know about is typed in here, and
-        becomes one it does know about: this is the repository view's own entry
-        point, so both lists are the list of Workspaces and cannot drift. */}
-    <div className="dws-add-source">
-      <label className="dws-field-label" htmlFor={`${id}-manual`}><span id={`${id}-manual-label`}>{t("addRepositoryManual")}</span><span className="dws-field-note">{t("addRepositoryManualHint")}</span></label>
-      <div className="dws-add-source-row">
-        <Input id={`${id}-manual`} aria-labelledby={`${id}-manual-label`} value={manualPath} disabled={fieldsDisabled} onChange={(event) => setManualPath(event.target.value)} placeholder={t("addRepositoryManualPlaceholder")} autoComplete="off" spellCheck={false} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addManual() } }} />
-        <Button type="button" className="dws-button-ghost" disabled={fieldsDisabled || manualPath.trim() === ""} onClick={() => void addManual()}>{busy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}{t("addRepositoryAdd")}</Button>
-      </div>
-      {manualError ? <p className="dws-field-note dws-field-note-warning" role="alert">{manualError}</p> : null}
     </div>
   </fieldset>
 
@@ -215,10 +187,6 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
             </div> : <div className="dws-form-fields">
               {picker}
               {base}
-              {/* Said here rather than at the finish, because it changes nothing
-                  about what the finish will do and everything about what the
-                  session that commits here will be allowed to touch. */}
-              {unreachable.length > 0 ? <p className="dws-form-note dws-field-note-warning">{format(t("addRepositoriesIsolation"), { names: unreachable.map((entry) => nameOf(entry)).join(", ") })}</p> : null}
             </div>}
           </div>
 

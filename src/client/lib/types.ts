@@ -74,6 +74,13 @@ export interface SourceRepository {
  */
 export interface SourceRootClassification {
   path: string
+  /**
+   * Whether the path is a directory that exists.
+   *
+   * `isSourceRoot` cannot be used for this: a directory holding no repositories
+   * and a path that is not there both answer false.
+   */
+  isDirectory: boolean
   /** Whether the path itself is a repository (a linked worktree is not). */
   isRepository: boolean
   /** Whether a task can be started here. */

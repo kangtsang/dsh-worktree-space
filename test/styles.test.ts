@@ -10,6 +10,12 @@ function rule(selector: string) {
   return match?.[1] ?? ""
 }
 
+/** The width a rule declares, in pixels. */
+function width(declarations: string) {
+  const declared = declarations.match(/--dws-nav-width:\s*(\d+)px/)
+  return declared === null ? Number.NaN : Number(declared[1])
+}
+
 describe("floating panel surface", () => {
   it("warns in one amber, defined once", () => {
     // The plugin's warnings were the alias theme's amber-600, which sat close enough to the
@@ -98,17 +104,28 @@ describe("floating panel surface", () => {
     // row sits outside the column, in the heading's band, and takes the same width from the
     // same variable, which is what keeps the two bands one column.
     const nav = rule(".dws-nav")
-    expect(nav).toContain("width: var(--dws-nav-width, 208px)")
+    expect(nav).toContain("width: var(--dws-nav-width, 167px)")
     expect(nav).toContain("padding: var(--dws-nav-pad)")
     expect(rule(".dws-nav-item")).toContain("justify-content: var(--dws-nav-align)")
     // The label hugs the column's inner edge in both, the way the shell's own rows do:
     // the dialog tunes the width and the inset, and must not move the text.
     expect(nav).toContain("--dws-nav-align: flex-end")
-    expect(rule(".dws-panel")).toContain("--dws-nav-width: 208px")
+    expect(rule(".dws-panel")).toContain("--dws-nav-width: 167px")
     expect(rule(".dws-panel-lead-nav")).toContain("width: var(--dws-nav-width)")
     const dialogNav = rule(".dws-manage-page .dws-nav")
     expect(dialogNav).toContain("border-right: 0")
     expect(dialogNav).not.toContain("--dws-nav-align")
+    // Both hosts narrowed by the same factor, so the dialog's column stays in the
+    // proportion to the panel's that it was in: they are two windows of one page,
+    // and a column that is a different share of each reads as two designs.
+    expect(width(rule(".dws-manage-page .dws-nav")) / width(rule(".dws-panel"))).toBeCloseTo(196 / 208, 2)
+  })
+
+  it("gives the search three eighths of the toolbar, and the nav a share of the page", () => {
+    // The search sits beside the refresh button and, in the repository view, beside
+    // the add-repository button; it takes three eighths so both keep room to be
+    // read as buttons rather than as more field.
+    expect(rule(".dws-search")).toContain("flex: 0 1 37.5%")
   })
 
   it("nests a repository's worktrees as a block instead of hanging them off a rail", () => {

@@ -9,6 +9,7 @@ import FolderClosedIcon from "@hugeicons/core-free-icons/FolderClosedIcon"
 import FolderGit2Icon from "@hugeicons/core-free-icons/FolderGit2Icon"
 import FolderGitIcon from "@hugeicons/core-free-icons/FolderGitIcon"
 import GitPullRequestIcon from "@hugeicons/core-free-icons/GitPullRequestIcon"
+import InformationCircleIcon from "@hugeicons/core-free-icons/InformationCircleIcon"
 import Loading03Icon from "@hugeicons/core-free-icons/Loading03Icon"
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon"
 import RefreshCwIcon from "@hugeicons/core-free-icons/RefreshCwIcon"
@@ -74,6 +75,8 @@ export const FolderClosed = iconOf(FolderClosedIcon)
  * rather than the row itself.
  */
 export const GitPullRequest = iconOf(GitPullRequestIcon)
+/** The hint glyph: it says nothing on its own, and the hover bubble is where it speaks. */
+export const InformationCircle = iconOf(InformationCircleIcon)
 export const AlertCircle = iconOf(AlertCircleIcon)
 export const Check = iconOf(CheckIcon)
 /** The spinner: a loader, turned by the `dws-spin` animation its call sites add. */

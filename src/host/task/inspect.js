@@ -4,7 +4,7 @@
  * Looking at a workspace or a task: what it is, what it holds, and whether it is a source root or a task container.
  */
 import { existsSync } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
 import { coded } from './codes.js'
@@ -19,10 +19,28 @@ export async function classifySourceRoot(sourceRoot) {
   const repositories = await discoverSourceRepos(sourceRoot)
   return {
     path: sourceRoot,
+    // Whether the path is a directory at all. `isSourceRoot` cannot answer it: a
+    // directory that holds no repositories and a path that is not there both come
+    // back as false, and a caller registering a Workspace needs to tell those two
+    // apart before it makes one out of the path.
+    isDirectory: await isExistingDirectory(sourceRoot),
     isRepository: await isSourceRepository(sourceRoot),
     isSourceRoot: repositories.length > 0,
     repositoryCount: repositories.length,
     repositories: repositories.map((repoPath) => ({ name: basename(repoPath), path: repoPath })),
+  }
+}
+
+/**
+ * Whether a path is a directory that exists.
+ * @param {string} directory - the candidate path.
+ * @returns {Promise<boolean>} whether it is a directory.
+ */
+async function isExistingDirectory(directory) {
+  try {
+    return (await stat(directory)).isDirectory()
+  } catch {
+    return false
   }
 }
 

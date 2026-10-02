@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
-import { slashPath } from "../lib/paths"
+import { sameLocation, slashPath } from "../lib/paths"
 import { addRepositorySource } from "../lib/repositories"
 import { rememberedRepositories, scannedRepositories } from "../lib/scan"
 import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
@@ -80,19 +80,35 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   useEffect(() => {
     if (view !== "spaces") return
     const controller = new AbortController()
-    const items = workspaces.list.getSnapshot().items as Workspace[]
-    setClassifications(Object.fromEntries(items.map(workspace => [workspace.path, "checking" as const])))
-    void Promise.all(items.map(async workspace => {
-      try {
-        return [workspace.path, await api.classifyRoot(workspace.path, controller.signal)] as const
-      } catch {
-        return [workspace.path, "failed"] as const
-      }
-    })).then(results => {
-      if (controller.signal.aborted) return
-      setClassifications(Object.fromEntries(results))
-    })
-    return () => { controller.abort() }
+    // Only the Workspaces this run has not already answered for. Re-asking the whole
+    // list every time one is added would put every other row back to "checking",
+    // which is its own kind of wrong: a row claiming to be unexamined when it was
+    // examined a moment ago is no better than one claiming to be unreadable.
+    const answered = new Set<string>()
+    const classifyMissing = () => {
+      const items = workspaces.list.getSnapshot().items as Workspace[]
+      const pending = items.map(workspace => workspace.path).filter(path => !answered.has(path))
+      if (pending.length === 0) return
+      for (const path of pending) answered.add(path)
+      setClassifications(current => ({ ...current, ...Object.fromEntries(pending.map(path => [path, "checking" as const])) }))
+      void Promise.all(pending.map(async path => {
+        try {
+          return [path, await api.classifyRoot(path, controller.signal)] as const
+        } catch {
+          return [path, "failed"] as const
+        }
+      })).then(results => {
+        if (controller.signal.aborted) return
+        setClassifications(current => ({ ...current, ...Object.fromEntries(results) }))
+      })
+    }
+    // Subscribed rather than run once. Registering a Workspace is what makes the list
+    // grow, and a row with no answer is drawn as "cannot check" — so a row added from
+    // this page stays wrong until the view is left and come back to. The refresh
+    // button rescans repositories; this is not that, and never was.
+    classifyMissing()
+    const dispose = workspaces.list.subscribe(() => classifyMissing())
+    return () => { controller.abort(); dispose() }
   }, [view, api, workspaces])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
@@ -105,6 +121,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const [sourcePath, setSourcePath] = useState("")
   const [sourceError, setSourceError] = useState("")
   const [sourceBusy, setSourceBusy] = useState(false)
+  const [addingSpace, setAddingSpace] = useState(false)
+  const [spacePath, setSpacePath] = useState("")
+  const [spaceError, setSpaceError] = useState("")
+  const [spaceBusy, setSpaceBusy] = useState(false)
   // A finish that stopped at a conflict left its report behind, and the session it
   // handed on lives in a view of its own: coming back reopens that report, so the user
   // continues from where they were instead of finding the task and starting over.
@@ -116,13 +136,23 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   // painted only until then: once real rows exist, a late-arriving memory must not
   // put back what the scan has just replaced - including an empty result.
   const paintedFresh = useRef(false)
-  const refresh = useCallback(async () => {
+  /**
+   * Rescan the Workspaces.
+   *
+   * `extra` names paths to scan even if the Workspace list has not published them
+   * yet. Creating a Workspace resolves before the registry's snapshot catches up,
+   * so scanning the snapshot alone leaves the repository the user just added off
+   * the page until the next refresh — the path is known exactly, so it is scanned
+   * rather than waited for.
+   */
+  const refresh = useCallback(async (extra: string[] = []) => {
     refreshController.current?.abort()
     const controller = new AbortController()
     refreshController.current = controller
     setBusy(true); setError("")
     try {
-      const paths = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
+      const registered = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
+      const paths = extra.reduce((all, path) => (all.some((known) => sameLocation(known, path)) ? all : [...all, path]), registered)
       const lists: WorktreeList[] = await api.scan(paths, controller.signal)
       if (controller.signal.aborted) return
       const discovered = scannedRepositories(lists)
@@ -256,11 +286,43 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       setSourcePath("")
       setAddingSource(false)
       if (!outcome.added) setError(t("addRepositoryAlready"))
-      else await refresh()
+      else await refresh([path])
     } catch (reason: any) {
       setSourceError(String(reason?.message ?? reason))
     } finally {
       setSourceBusy(false)
+    }
+  }
+
+  /**
+   * Register a directory as a Workspace, the way the user would in DSH's own UI.
+   *
+   * A Workspace does not have to hold a repository — it may be one the user is
+   * about to clone into, or a directory of projects none of which is a repository
+   * yet — so this refuses only a path that is not a directory, and leaves the
+   * repository judgement to the repository view's own button, which is the one
+   * that has to make it.
+   */
+  const addSpace = async () => {
+    const path = spacePath.trim()
+    if (path === "" || spaceBusy) return
+    setSpaceBusy(true)
+    setSpaceError("")
+    try {
+      const state = await api.classifyRoot(path)
+      if (!state.isDirectory) throw new Error(format(t("addWorkspaceNotDirectory"), { path: slashPath(path) }))
+      const registered = workspaces.list.getSnapshot().items ?? []
+      if (registered.some((workspace: Workspace) => sameLocation(workspace.path, path))) {
+        throw new Error(t("addWorkspaceAlready"))
+      }
+      await workspaces.create({ path })
+      setSpacePath("")
+      setAddingSpace(false)
+      await refresh([path])
+    } catch (reason: any) {
+      setSpaceError(String(reason?.message ?? reason))
+    } finally {
+      setSpaceBusy(false)
     }
   }
 
@@ -307,8 +369,20 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           <Button className="dws-button-primary" disabled={sourceBusy || sourcePath.trim() === ""} onClick={() => void addSource()}>{sourceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{sourceBusy ? t("addingRepository") : t("addRepositoryAdd")}</Button>
           <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSource(false); setSourcePath(""); setSourceError("") }}><X size={14} /></Button>
         </div> : null}
+        {/* The same offer one level up: a Workspace is a directory the user has
+            named, and naming one is DSH's own job, done here because this is where
+            the list of them is. It sits next to the refresh rather than with the
+            repository button, which is a different act — that one adds a
+            repository to a Workspace list this one is what extends. */}
+        {view === "spaces" && !addingSpace ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSpaceError(""); setAddingSpace(true) }}><Plus size={14} />{t("addWorkspace")}</Button> : null}
+        {view === "spaces" && addingSpace ? <div className="dws-add-source-row">
+          <Input aria-label={t("addWorkspace")} placeholder={t("addWorkspacePlaceholder")} value={spacePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSpacePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSpace() } }} />
+          <Button className="dws-button-primary" disabled={spaceBusy || spacePath.trim() === ""} onClick={() => void addSpace()}>{spaceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{spaceBusy ? t("addingWorkspace") : t("addWorkspaceConfirm")}</Button>
+          <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSpace(false); setSpacePath(""); setSpaceError("") }}><X size={14} /></Button>
+        </div> : null}
       </div>
       {sourceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{sourceError}</span></div> : null}
+      {spaceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{spaceError}</span></div> : null}
       <div className="dws-list-controls">
         {/* The dialog form offers the three views here, as it always has, set off from
             the run that follows by the same `|` the filters and the fold button share. */}
