@@ -106,6 +106,35 @@ Follow this order. Never create a workspace with a guessed location.
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
 
+## Adding a repository to a task already under way
+
+Run `action: "add"` when a task that already exists turns out to need a repository
+it did not start with. Do **not** create a second task for it, and do not run
+`git worktree` by hand.
+
+- Pass `tasksRoot` (the container root), `task`, and `project` — or `sourceRoot`
+  instead of `project`, as for `done`.
+- Pass each repository in `repos` as an **absolute path**, not a name. A repository
+  added this way does not have to sit under the source root the task began from:
+  it may be under another source root, or on another volume entirely.
+- `baseRef` is optional. Omitted, each repository starts from its own HEAD; pass the
+  task's own `baseRef` to have them start from what the task started from.
+- The new repository joins the branch the task is already on, and the task's
+  metadata records where its source repository lives.
+- Nothing is removed from a task this way. There is no "remove a repository"
+  action: if the user asks for one, say so rather than approximating it with
+  `git worktree remove` or a delete.
+
+Where a repository lives changes nothing about finishing. A finish reads each
+worktree's own source repository, so the merge, the worktree removal and the
+branch deletion all work the same from any volume. What it does change is the
+write boundary of a session that commits here: a linked worktree keeps its git
+metadata inside its source repository, so a repository that shares no common
+directory with the task space — another volume, certainly — is outside a session
+opened on the task space. The finish dialog already says so when it hands commits
+or a conflict to an agent, and asks for the elevation in that session. Say it
+when you add such a repository rather than letting the user meet it at the end.
+
 ## Working inside a task space
 
 When the working directory is a task directory — a folder whose subfolders are
@@ -224,6 +253,14 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
 - `create` refuses a base that any repository does not have.
+- `add` refuses a repository the task already holds a worktree of: every worktree
+  is named after its source repository's directory, so two of them cannot share a
+  name inside one task.
+- `add` refuses a repository that sits inside the task space or holds it — a
+  worktree cut from such a repository would be written inside itself.
+- `add` takes back only the worktrees it made when it fails partway. The task's
+  own repositories are left exactly as they were; a repository that could not be
+  removed is named in the message and still on disk.
 - Removing a worktree refuses when it still has uncommitted changes; `done` waits for
   an agent to commit those first, so this is the exception rather than the rule. It
   reports the refusal and keeps the worktree so nothing is lost. Pass `force: true`

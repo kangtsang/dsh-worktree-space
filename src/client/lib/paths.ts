@@ -82,6 +82,45 @@ export function slashPath(value: unknown) {
 }
 
 /**
+ * Whether two paths name the same location.
+ *
+ * Compared after the separator style and trailing separators are settled, because
+ * the same directory reaches this code spelled more than one way: the Host answers
+ * with the platform's own, git reports forward slashes, and a user types either.
+ * Case is folded only when both names carry a drive letter — that is what says they
+ * are Windows paths, where one directory has one spelling, against a POSIX
+ * filesystem where `Repo` and `repo` really are two directories.
+ * @param left - one path.
+ * @param right - the other.
+ * @returns whether both name one location.
+ */
+export function sameLocation(left: unknown, right: unknown) {
+  const first = slashPath(cleanPath(left))
+  const second = slashPath(cleanPath(right))
+  if (first === second) return true
+  const windows = /^[a-zA-Z]:/.test(first) && /^[a-zA-Z]:/.test(second)
+  return windows && first.toLowerCase() === second.toLowerCase()
+}
+
+/**
+ * Whether `child` sits strictly below `parent`.
+ *
+ * The layout rules ask this of two directories that must stay outside one another,
+ * and the answer has to be about location rather than about spelling for the same
+ * reason {@link sameLocation} folds what it folds.
+ * @param parent - the containing directory.
+ * @param child - the candidate descendant.
+ * @returns whether `child` sits below `parent`, and is not `parent`.
+ */
+export function isInsideDirectory(parent: unknown, child: unknown) {
+  const outer = slashPath(cleanPath(parent)).replace(/\/+$/, "")
+  const inner = slashPath(cleanPath(child)).replace(/\/+$/, "")
+  if (sameLocation(outer, inner)) return false
+  const prefix = outer.endsWith("/") ? outer : `${outer}/`
+  return inner.toLowerCase().startsWith(prefix.toLowerCase())
+}
+
+/**
  * The deepest directory that contains both paths.
  *
  * A linked worktree keeps its git metadata inside the source repository, so a

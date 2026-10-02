@@ -44,11 +44,14 @@ export function breadcrumb(details) {
  * cut from it: the branch its HEAD is on, and the exact commit the new branch
  * will start from. Recorded so the task can still be described when the source
  * checkout is somewhere else, or gone.
+ *
+ * Exported because adding a repository to an existing task cuts its worktree the
+ * same way a create does, and has to record the same two facts about it.
  * @param subprocess - the profile's subprocess service.
  * @param repoPath - the source repository.
  * @returns the branch name and the starting commit, either possibly absent.
  */
-async function sourceFacts(subprocess, repoPath) {
+export async function sourceFacts(subprocess, repoPath) {
   const [branch, commit] = await Promise.all([
     tryRunGit(subprocess, repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
     tryRunGit(subprocess, repoPath, ['rev-parse', 'HEAD']),

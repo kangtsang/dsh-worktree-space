@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
 import { slashPath } from "../lib/paths"
+import { addRepositorySource } from "../lib/repositories"
 import { rememberedRepositories, scannedRepositories } from "../lib/scan"
 import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
 import type { RememberedScan, SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
+import { AddRepositoryDialog } from "./AddRepositoryDialog"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
 import { finishScenes } from "../lib/finish-scene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
@@ -94,6 +96,15 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   }, [view, api, workspaces])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
+  /** Path of the task whose add-repository dialog is open, if any. */
+  const [extending, setExtending] = useState<string | null>(null)
+  // Adding a repository to the repository view. The field is here rather than in a
+  // dialog of its own because it is one path and one button: the whole of what it
+  // does is register a Workspace, and a dialog would be a window around that.
+  const [addingSource, setAddingSource] = useState(false)
+  const [sourcePath, setSourcePath] = useState("")
+  const [sourceError, setSourceError] = useState("")
+  const [sourceBusy, setSourceBusy] = useState(false)
   // A finish that stopped at a conflict left its report behind, and the session it
   // handed on lives in a view of its own: coming back reopens that report, so the user
   // continues from where they were instead of finding the task and starting over.
@@ -224,6 +235,35 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return { state: "clean", label: t("clean") }
   }
 
+  /**
+   * Register the repository the user typed as a Workspace, which is what puts it
+   * in this list at all.
+   *
+   * Nothing here is a list of ours: the repository view is a scan of the
+   * Workspaces, so the entry goes where every other entry comes from and is
+   * removed the way every other entry is. Registering one that is already
+   * registered is not a failure — the user asked for it to be in the list and it
+   * is — so it says so and moves on rather than sending them looking for
+   * something to fix.
+   */
+  const addSource = async () => {
+    const path = sourcePath.trim()
+    if (path === "" || sourceBusy) return
+    setSourceBusy(true)
+    setSourceError("")
+    try {
+      const outcome = await addRepositorySource(api, workspaces, path)
+      setSourcePath("")
+      setAddingSource(false)
+      if (!outcome.added) setError(t("addRepositoryAlready"))
+      else await refresh()
+    } catch (reason: any) {
+      setSourceError(String(reason?.message ?? reason))
+    } finally {
+      setSourceBusy(false)
+    }
+  }
+
   // The toolbar's pieces, in the two orders the two hosts read them in.
   const viewButtons = WORKTREE_VIEWS.map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>{t(label)}</button>)
   // What narrows the list is what the list holds. A task and a repository are filtered
@@ -258,7 +298,17 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       <div className="dws-toolbar">
         <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
         <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
+        {/* Offered only in the repository view: it is this view's list being added
+            to, and in the other two the same button would answer a question the
+            user is not asking. */}
+        {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSourceError(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
+        {view === "repos" && addingSource ? <div className="dws-add-source-row">
+          <Input aria-label={t("addRepositorySource")} placeholder={t("addRepositoryManualPlaceholder")} value={sourcePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSourcePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSource() } }} />
+          <Button className="dws-button-primary" disabled={sourceBusy || sourcePath.trim() === ""} onClick={() => void addSource()}>{sourceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{sourceBusy ? t("addingRepository") : t("addRepositoryAdd")}</Button>
+          <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSource(false); setSourcePath(""); setSourceError("") }}><X size={14} /></Button>
+        </div> : null}
       </div>
+      {sourceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{sourceError}</span></div> : null}
       <div className="dws-list-controls">
         {/* The dialog form offers the three views here, as it always has, set off from
             the run that follows by the same `|` the filters and the fold button share. */}
@@ -317,6 +367,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
           </button>
+          <Button className="dws-button-ghost dws-add-repository" disabled={busy || !!action} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
           <Button className="dws-button-ghost dws-finish-task" disabled={busy || !!action} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
         {task.repositories.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
@@ -372,6 +423,14 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       })}
     </div> : null}
     </div> : null}
+    {extending ? <AddRepositoryDialog
+      taskPath={extending}
+      api={api}
+      workspaces={workspaces}
+      repositories={scannedRepositories(repos)}
+      onAdded={() => { void refresh() }}
+      onClose={() => setExtending(null)}
+    /> : null}
     {archiving ? <ArchiveTaskDialog
       path={archiving}
       api={api}

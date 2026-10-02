@@ -30,32 +30,32 @@
 export const ERROR_CODES = {
   // --- E1xxx container and isolation --------------------------------------
   E1001: 'paths.js - the tasks root is the repositories directory itself',
-  E1002: 'paths.js - the tasks root sits inside a source repository',
-  E1003: 'paths.js - the tasks root sits inside a linked worktree',
-  E1004: 'paths.js, container.js, archive.js, inspect.js - the tasks root is missing or empty',
+  E1002: 'paths.js, add.js - the container, or the task space, is inside a repository',
+  E1003: 'paths.js, add.js - the container, or the task space, holds a repository',
+  E1004: 'paths.js, container.js, archive.js, inspect.js, add.js - the tasks root is missing or empty',
   E1005: 'container.js - the tasks root was refused on creation',
 
   // --- E2xxx task space lifecycle -----------------------------------------
   E2001: 'create.js - the task name is taken by a different task space',
   E2002: 'create.js - the task space is this task own, left before its Workspace was registered',
-  E2003: 'archive.js - no task space at that path',
-  E2004: 'archive.js - the task space holds no git worktrees',
-  E2005: 'create.js - creating failed and everything was rolled back',
-  E2006: 'create.js - creating failed and the rollback left something behind',
+  E2003: 'archive.js, add.js - no task space at that path',
+  E2004: 'archive.js, add.js - the task space holds no git worktrees',
+  E2005: 'create.js, add.js - creating or extending failed and everything was rolled back',
+  E2006: 'create.js, add.js - creating or extending failed and the rollback left something behind',
 
   // --- E3xxx git and branches ---------------------------------------------
-  E3001: 'create.js - the branch to cut the worktree from is already in use',
-  E3002: 'create.js - the requested base ref does not exist in that repository',
+  E3001: 'create.js, add.js - the branch to cut the worktree from is already in use',
+  E3002: 'create.js, add.js - the requested base ref does not exist in that repository',
   E3003: 'git.js - a git command failed, for any reason not covered below',
   E3004: 'git.js - the directory is not a git repository',
   E3005: 'git.js - the worktree checkout has gone',
 
   // --- E4xxx arguments and validation -------------------------------------
-  E4001: 'create.js - no repository was selected for the task',
-  E4002: 'create.js - two selected repositories share a name',
+  E4001: 'create.js, add.js - no repository was selected',
+  E4002: 'create.js, add.js - two repositories in one task share a name',
   E4003: 'index.js - the task name is missing',
   E4004: 'index.js - the source root is missing',
-  E4005: 'index.js - a path is required, either a worktree or a task space',
+  E4005: 'index.js, add.js - a path is required, either a worktree, a task space or a repository',
   E4006: 'index.js - the workspace scan hit its directory limit',
   E4007: 'archive.js - deleting an unmerged branch was not forced',
   E4008: 'archive.js - the merge target is unusable',
@@ -67,7 +67,7 @@ export const ERROR_CODES = {
   E5003: 'archive.js - one repository could not be finished and needs another attempt',
 
   // --- E6xxx scanning and discovery ---------------------------------------
-  E6001: 'discover.js - a candidate directory is not a source repository',
+  E6001: 'discover.js, add.js - a candidate directory is not a source repository',
   E6002: 'index.js - a workspace was not selected',
 
   // --- E7xxx the package itself -------------------------------------------

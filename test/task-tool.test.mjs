@@ -66,7 +66,7 @@ describe("registerTaskTool", () => {
     const dispose = registerTaskTool(ctx)
     expect(captured).toHaveLength(1)
     expect(captured[0].name).toBe("task_worktree_space")
-    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "list", "done"])
+    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "done"])
     expect(typeof captured[0].execute).toBe("function")
     expect(typeof dispose).toBe("function")
   })
@@ -149,6 +149,53 @@ describe("registerTaskTool", () => {
     }
   })
 
+  it("adds a repository to a task that already exists, by path", async () => {
+    const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-add-"))
+    // `<container root>/<project>/<task>/<repository>`, as `create` writes it, with
+    // the record that says which branch the task is on.
+    const taskPath = join(container, "kratos-admin", "login")
+    const worktree = join(taskPath, "alpha")
+    await mkdir(worktree, { recursive: true })
+    await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
+    await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+      version: 1, task: "login", project: "kratos-admin", tasksRoot: container,
+      sourceRoot: "E:/source", branch: "task/login", baseRef: null,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      repositories: [{ name: "alpha", sourcePath: "E:/source/alpha", branch: "task/login" }],
+    }))
+    // A repository somewhere else entirely — the arrangement the action exists for.
+    const gamma = join(container, "..", "multi-worktree-tool-add-elsewhere", "gamma")
+    await mkdir(join(gamma, ".git"), { recursive: true })
+    const subprocess = {
+      spawn: ({ argv }) => ({
+        done: Promise.resolve({ exitCode: argv.slice(3).join(" ").startsWith("show-ref") ? 1 : 0, signal: null }),
+        collected: {
+          stdout: { readFrom: () => ({ text: argv.slice(3).join(" ").includes("--abbrev-ref") ? "task/login" : "" }) },
+          stderr: { readFrom: () => ({ text: "" }) },
+        },
+      }),
+    }
+    const { ctx, captured } = toolContext(subprocess)
+    try {
+      registerTaskTool(ctx, { configuredRoot: () => container })
+      // The project layer is named rather than derived: the repository being added
+      // need not live under the source root this task began from, so there may be
+      // no source root to take a directory name from.
+      const value = await captured[0].execute({ action: "add", task: "login", tasksRoot: container, project: "kratos-admin", repos: [gamma] }, {})
+      expect(value.action).toBe("add")
+      expect(value.container).toBe(taskPath)
+      expect(value.branch).toBe("task/login")
+      // The paths went through as given: nothing resolved a name against a source
+      // root, because there may not be one they share.
+      expect(value.repositories.map((row) => row.name)).toEqual(["gamma"])
+      expect(value.summary).toContain("gamma")
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await rm(container, { recursive: true, force: true })
+      await rm(join(container, "..", "multi-worktree-tool-add-elsewhere"), { recursive: true, force: true })
+    }
+  })
+
   it("reports an absent container instead of failing", async () => {
     const { ctx, captured } = toolContext()
     registerTaskTool(ctx)
@@ -205,6 +252,7 @@ describe("registerTaskTool", () => {
     await expect(definition.execute({ action: "create", task: "x" }, {})).rejects.toThrow(/sourceRoot is required/)
     await expect(definition.execute({ action: "create", sourceRoot: "/tmp" }, {})).rejects.toThrow(/task is required/)
     await expect(definition.execute({ action: "done" }, {})).rejects.toThrow(/task is required/)
+    await expect(definition.execute({ action: "add" }, {})).rejects.toThrow(/task is required/)
     await expect(definition.execute({ action: "list" }, {})).rejects.toThrow(/tasksRoot is required/)
     // The project layer is the caller's to name, or theirs to leave to `sourceRoot`,
     // whose own directory name it is.

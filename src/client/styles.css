@@ -115,6 +115,14 @@
   .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
   .dws-input:disabled, .dws-select:disabled { opacity: .5; }
   .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  /* One path and one button, so the field takes the room the row has rather than a
+     fixed width: the thing being typed is a path, and paths are all lengths. It
+     shares the row with the search field, so it yields first. */
+  .dws-add-source-row { display: flex; flex: 1 1 240px; align-items: center; gap: 8px; min-width: 0; }
+  .dws-add-source-row .dws-input { flex: 1 1 auto; min-width: 0; }
+  .dws-add-source-button { flex: none; }
+  .dws-add-source { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--wt-line); }
+  .dws-add-source .dws-field-label { display: block; margin-bottom: 6px; }
   .dws-filter-fold { margin-left: 20px; }
   /* The search field takes half the row and the refresh button follows it: a button
      that says what it does, not an icon parked at the far edge. */

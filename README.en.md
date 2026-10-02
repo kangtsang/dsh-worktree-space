@@ -68,6 +68,16 @@ top right.
   All three can be searched, and **Needs attention** narrows them to rows worth a look
   (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
   folds that row on its own; the button beside the filters folds or opens them all at once.
+- **Add a repository to a task** from its row, when the work turns out to need one the task
+  did not start with. The candidates are the Git repository view's own list, minus the ones the
+  task already has; a repository directory can also be typed in, and it is registered as a
+  Workspace so it joins that view too. The new repository gets a worktree on the branch the
+  task is already on, starting from its own HEAD or from a branch or commit you name.
+  An added repository may share no common directory with the ones the task began with, and may
+  not even be on the same volume: merging and finishing are unaffected, because each repository's
+  source is read from its own worktree. What it does affect is the working directory of a session
+  handed the commit — it cannot reach those source repositories' `.git`, so the elevation is
+  approved in that session. This release does **not** offer removing a repository from a task.
 - **Finish a task** from its row: each repository's branch is merged back into its target branch,
   the worktrees are removed, the task space's documents are filed under a selected directory,
   and the Workspace registration is removed — but not while a session in that Workspace is still

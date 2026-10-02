@@ -191,7 +191,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.suggest-root", "task.create", "task.list", "task.inspect", "task.plan", "task.done", "task.preference",
+      "task.classify-root", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.preference",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 

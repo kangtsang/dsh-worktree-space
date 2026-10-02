@@ -1,4 +1,5 @@
 import type {
+  AddRepositoriesResult,
   ConnectionService,
   CreateTaskResult,
   FinishTaskResult,
@@ -110,6 +111,16 @@ export function createWorktreeApi(connection: ConnectionService) {
     preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
+    /**
+     * Add repositories to a task that already exists.
+     *
+     * `repositories` are absolute paths rather than names under a source root: a
+     * repository added to a running task need not sit beside the ones it started
+     * with, so there is no directory to resolve a name against. They may be on
+     * another volume — the merge at the end reads each worktree's own source
+     * repository, so where it is makes no difference to that.
+     */
+    addRepositories: (payload: { task: string; project: string; tasksRoot: string; repositories: string[]; baseRef?: string }) => call<AddRepositoriesResult>("task.add-repositories", payload),
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
     /**

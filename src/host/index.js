@@ -6,7 +6,7 @@ import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabled
 import { coded, UNKNOWN } from './task/codes.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
-import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
+import { addTaskRepositories, classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { registerTaskTool } from './task/tool.js'
@@ -17,7 +17,7 @@ export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.preference']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.preference']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -684,6 +684,27 @@ export function apply(ctx, config = {}) {
         // A request that names no container root takes the configured one, which is
         // the same answer `task.suggest-root` just gave the dialog.
         configuredRoot: configuredTasksRoot(),
+      })
+    })
+
+    // A task that turned out to need one more repository after it started. The
+    // repositories are absolute paths rather than names under a source root,
+    // because a repository added here need not sit beside the ones the task
+    // began with - it may be under another source root, or on another volume.
+    if (endpoint === 'task.add-repositories') return recover(async () => {
+      const task = typeof payload.task === 'string' ? payload.task.trim() : ''
+      if (!task) throw coded('E4003', 'A task name is required.')
+      const repositories = Array.isArray(payload.repositories)
+        ? payload.repositories.filter((path) => typeof path === 'string' && path.trim() !== '').map((path) => path.trim())
+        : []
+      return addTaskRepositories(ctx.subprocess, {
+        task,
+        project: typeof payload.project === 'string' ? payload.project : '',
+        tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
+        repositories,
+        baseRef: typeof payload.baseRef === 'string' && payload.baseRef.trim() !== ''
+          ? payload.baseRef.trim()
+          : undefined,
       })
     })
 

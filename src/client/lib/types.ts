@@ -105,6 +105,31 @@ export interface CreateTaskResult {
   repositories: Array<{ name: string; path: string }>
 }
 
+/**
+ * Answer of `task.add-repositories`: the repositories one call added to a task
+ * that already existed.
+ *
+ * The repositories the task already had are not listed — nothing was taken away,
+ * and the caller can re-read the task for those — so this is only ever the new
+ * worktrees and where their source repositories live.
+ */
+export interface AddRepositoriesResult {
+  task: string
+  project: string
+  branch: string
+  path: string
+  tasksRoot: string
+  /** The commit the new worktrees started from; absent when each used its own HEAD. */
+  baseRef?: string
+  repositories: Array<{
+    name: string
+    /** The worktree inside the task space. */
+    path: string
+    /** The source repository it was cut from, wherever that is. */
+    sourcePath: string
+  }>
+}
+
 /** Per-repository outcome of `task.done`. */
 export interface FinishTaskRepository {
   name: string
@@ -147,6 +172,13 @@ export interface TaskInspection {
   tasksRoot: string
   branch?: string
   sourceRoot?: string
+  /**
+   * The commit every repository of this task started from, when the task named
+   * one rather than starting each repository at its own HEAD. Absent is a fact
+   * about the task, not an omission: it is how the caller tells "each at its own
+   * HEAD" from "a base this Host cannot name".
+   */
+  baseRef?: string
   repositories: string[]
 }
 
