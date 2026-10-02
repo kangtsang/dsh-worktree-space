@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { recover } from "../src/host/index.js"
-import { auditEnter, readAudit } from "../src/host/task/auditLog.js"
+import { auditEnter, readAudit } from "../src/host/task/audit-log.js"
 
 /**
  * `recover` is where a failure is turned into two things at once: the record the

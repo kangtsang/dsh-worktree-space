@@ -12,7 +12,7 @@
  * than throwing, and the exit code and diagnostic behind those answers are what
  * a report of "the merge did nothing" has to be read against.
  */
-import { recordGitCall } from './auditLog.js'
+import { recordGitCall } from './audit-log.js'
 
 /**
  * Which failure a git command that said something ran into.

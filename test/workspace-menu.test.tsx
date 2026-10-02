@@ -3,7 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMenuEntries } from "../src/client/components/WorkspaceMenuEntries"
 import { t } from "../src/client/lib/i18n"
-import { OWN_MENU_ITEM, workspaceIdFromRowKey } from "../src/client/lib/workspaceMenu"
+import { OWN_MENU_ITEM, workspaceIdFromRowKey } from "../src/client/lib/workspace-menu"
 
 const repositoryPath = "E:\\workspace\\public\\kratos-admin"
 const taskPath = "E:\\worktree-space\\antest"

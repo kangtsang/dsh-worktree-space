@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { auditEnter, recordError, recordEvent } from './auditLog.js'
+import { auditEnter, recordError, recordEvent } from './audit-log.js'
 import { coded } from './codes.js'
 import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'

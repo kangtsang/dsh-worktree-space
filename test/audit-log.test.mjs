@@ -14,7 +14,7 @@ import {
   recordEvent,
   recordWarning,
   setAuditEnabled,
-} from "../src/host/task/auditLog.js"
+} from "../src/host/task/audit-log.js"
 import { gitSucceeded, runGit, tryRunGit } from "../src/host/task/git.js"
 import { listTasks } from "../src/host/task/operations.js"
 

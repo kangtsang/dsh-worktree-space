@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
-import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finishScene"
+import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finish-scene"
 import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
 

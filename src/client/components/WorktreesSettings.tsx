@@ -7,7 +7,7 @@ import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
 import type { RememberedScan, SourceRootClassification, Workspace, Worktree, WorktreeList, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
-import { finishScenes } from "../lib/finishScene"
+import { finishScenes } from "../lib/finish-scene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 /** The three views this page has, in the order they are offered: a Workspace is where a

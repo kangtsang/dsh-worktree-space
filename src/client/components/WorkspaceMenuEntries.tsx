@@ -1,9 +1,9 @@
 import { useEffect } from "react"
 import type { createWorktreeApi } from "../lib/api"
 import { useT } from "../lib/i18n"
-import { archiveIconSvg, createIconSvg } from "../lib/menuIcons"
+import { archiveIconSvg, createIconSvg } from "../lib/menu-icons"
 import type { Workspace, WorkspacesService } from "../lib/types"
-import { OWN_MENU_ITEM, WORKSPACE_ROW, WORKSPACE_ROW_TRIGGER, workspaceIdFromRowKey } from "../lib/workspaceMenu"
+import { OWN_MENU_ITEM, WORKSPACE_ROW, WORKSPACE_ROW_TRIGGER, workspaceIdFromRowKey } from "../lib/workspace-menu"
 
 /** How long after a row's trigger a newly opened menu still counts as that row's. */
 const TRIGGER_WINDOW_MS = 1500

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Check, ChevronDown } from "./icons"
 import { Button, Input } from "./ui"
 import { format, useT } from "../lib/i18n"
-import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/configPreview"
+import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/config-preview"
 
 /** How many directory levels a scan may descend. */
 const DEPTHS = [1, 2, 3, 4, 5]

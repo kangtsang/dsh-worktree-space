@@ -45,3 +45,18 @@
 `package.json` 的 `dsh.compatibility.dshReleases` 是一个**对象**，键是 DSH 版本号、值是兼容性标记。写脚本读取它时必须用 `.PSObject.Properties.Name` 取键；用 `@($obj)` 会得到一个包着整个对象的单元素数组，插值出来形如 `@{0.1.7-rc.1=compatible; ...}`，导致 npm 报 `EINVALIDTAGNAME`。
 
 同时注意版本排序：预发布后缀不能剥掉再排，`rc.1` 和 `rc.2` 剥掉后排序键相同，"从新到旧"就失效了。
+
+## 4. 文件命名
+
+**多词文件名一律 kebab-case**：一个短横线，不是驼峰也不是下划线。
+
+| 目录 | 写法 | 例子 |
+| --- | --- | --- |
+| `src/**` | kebab-case | `scan-cache.js`、`config-preview.ts`、`repository-glyph.ts`、`audit-log.js` |
+| `test/**` | kebab-case | `create-flow.test.tsx`、`audit-log.test.mjs`、`recover-codes.test.mjs` |
+| `src/client/components/**` | PascalCase（组件） | `WorktreePanel.tsx`、`PluginConfigCard.tsx` |
+
+`test/` 本来就是这个规则；`src/` 里原先混着 `scanCache.js`、`configPreview.ts` 这样的驼峰，已统一成 kebab-case。
+**组件文件的 PascalCase 不在本次范围内**，保持不变。
+
+命名一律小写开头；短横线不重复，也不出现在开头或结尾。

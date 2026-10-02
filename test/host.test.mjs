@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
-import { setAuditEnabled } from "../src/host/task/auditLog.js"
-import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
+import { setAuditEnabled } from "../src/host/task/audit-log.js"
+import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js"
 
 // `handleFor` runs `apply`, which pushes the audit-log switch into a module-level
 // cell. A handler built with `auditLog: "off"` would otherwise leave the log off
