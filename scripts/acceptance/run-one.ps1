@@ -8,7 +8,11 @@ param(
   [string]$Tarball,
   # A fixed port, never the host's default 3080 (which collides with a running
   # app) and never 0 (which hides the port from the evidence record).
-  [int]$Port = 34800
+  [int]$Port = 34800,
+  # Seconds to keep the server up after arming the rollback probe, so the create
+  # dialog can be driven in a browser while the probe samples. 0 tears down at
+  # once, which is what a matrix run wants: it has no page to drive.
+  [int]$HoldSeconds = 0
 )
 
 # =============================================================================
@@ -373,12 +377,175 @@ if ($url) {
   }
 }
 
+# --- 7. rollback-on-registration-failure -------------------------------------
+#
+# The create dialog must leave nothing behind when Workspace registration fails:
+# not the container, not its worktrees, not the branch. Two of those three are
+# facts on disk rather than things anyone reads on screen, and one of them - the
+# branch - is the one a partial cleanup used to leave, which turned the next
+# attempt at the same name into `branch already exists`.
+#
+# The failure itself is a transient host race (EPERM renaming workspace.json) that
+# cannot be provoked on demand, so the dialog carries a switch that fails the
+# registration deterministically. Nothing here can click a button, so the facts are
+# collected two ways: a probe samples the container and the branch while the user
+# drives the page, and the same assertions are made here over plain RPC for the
+# create half. The probe is what makes the UI half checkable after the fact.
+#
+# ASCII-only, like every script in this folder. No Remove-Item: this stage creates
+# a repository and reads state, and the teardown below is bounded by the same
+# $disposableRoot rule as everything else.
+
+$probeRoot  = Join-Path $disposableRoot ('home-' + $v + '\probe')
+$fixtureRepo = Join-Path $probeRoot 'fixture-repo'
+$containerRoot = Join-Path $probeRoot 'container'
+$probeLog = Join-Path $safeLog 'rollback-probe.txt'
+
+foreach ($d in @($probeRoot, $containerRoot)) {
+  if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
+}
+
+# A real repository, because task.create runs git against it: a directory that is
+# not a repository would fail the first precondition and never reach the step under
+# test. One commit is enough - the create needs a HEAD to cut a worktree from.
+if (-not (Test-Path -LiteralPath (Join-Path $fixtureRepo '.git'))) {
+  New-Item -ItemType Directory -Path $fixtureRepo -Force | Out-Null
+  $g = @('-C', $fixtureRepo, '-c', 'user.email=acceptance@example.invalid', '-c', 'user.name=Acceptance',
+         '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false')
+  $null = & git @g init --quiet 2>&1
+  Set-Content -LiteralPath (Join-Path $fixtureRepo 'README.md') -Value 'acceptance fixture' -Encoding ASCII
+  $null = & git @g add README.md 2>&1
+  $null = & git @g commit --quiet -m 'fixture' 2>&1
+}
+$fixtureBranch = ((& git -C $fixtureRepo rev-parse --abbrev-ref HEAD) -join '').Trim()
+Emit "fixture_repo"    $fixtureRepo
+Emit "fixture_branch"  $fixtureBranch
+Emit "container_root"  $containerRoot
+
+# The probe samples the two facts the rollback is judged on, once a second, and
+# writes a line only when one of them CHANGES. A rollback that runs to completion
+# between two samples is still recorded, because the sample before it saw the
+# container and the sample after it does not. Written to the log directory, which
+# is evidence and is not deleted here.
+#
+# A Start-Job would die with this script, which defeats the point: the page is
+# driven after the script has finished its work. So the sampler is a separate pwsh
+# process writing to the same log, and the teardown kills it by its recorded PID.
+$probeTask = 'rollback-check'
+# The project layer is the SOURCE root's own directory name - that is how the Host
+# files a task - so it is the repository's leaf, never the string "fixture".
+$probeProject = Split-Path $fixtureRepo -Leaf
+$probeContainer = Join-Path (Join-Path $containerRoot $probeProject) $probeTask
+$probeBranchRef = 'refs/heads/task/' + $probeTask
+$probePidFile = Join-Path $safeLog 'rollback-probe.pid'
+if (Test-Path -LiteralPath $probeLog) { Remove-Item -LiteralPath $probeLog -Force }
+
+$probeScript = Join-Path $safeLog 'rollback-probe.ps1'
+$probeBody = @(
+  'Set-StrictMode -Version Latest',
+  '$container = $args[0]; $repo = $args[1]; $branchRef = $args[2]; $logPath = $args[3]',
+  '$last = ""',
+  'while ($true) {',
+  '  $dirThere = Test-Path -LiteralPath $container',
+  '  $brThere = $null -ne (& git -C $repo rev-parse --verify --quiet $branchRef)',
+  '  $state = "container=" + $(if ($dirThere) { "present" } else { "absent" }) + " branch=" + $(if ($brThere) { "present" } else { "absent" })',
+  '  if ($state -ne $last) {',
+  '    Add-Content -LiteralPath $logPath -Value ((Get-Date).ToString("HH:mm:ss") + "  " + $state)',
+  '    $last = $state',
+  '  }',
+  '  Start-Sleep -Seconds 1',
+  '}'
+) -join "`r`n"
+Set-Content -LiteralPath $probeScript -Value $probeBody -Encoding ASCII
+
+$pwshExe = (Get-Process -Id $PID).Path
+$probeProc = Start-Process -FilePath $pwshExe `
+  -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$probeScript,
+                  $probeContainer, $fixtureRepo, $probeBranchRef, $probeLog) `
+  -PassThru -WindowStyle Hidden
+$null = $probeProc.Handle   # without this, ExitCode is never populated
+Set-Content -LiteralPath $probePidFile -Value ([string]$probeProc.Id) -Encoding ASCII
+
+Emit "probe_log" $probeLog
+Emit "probe_container" $probeContainer
+Emit "probe_branch"    $probeBranchRef
+
+# The same three facts over RPC, for the create half a script can reach: a create
+# into a container root that does not exist must succeed and leave both the
+# container and the branch, which is the "all succeeded" half of the contract the
+# rollback half answers to. Driven here rather than by the user so the run stays
+# meaningful even if nobody opens the page.
+if ($base) {
+  $rpcId2 = [guid]::NewGuid().ToString('N')
+  $createEp = 'dsh-worktree-space/task.create'
+  $envl = @{
+    type='client-request'; rpcId=$rpcId2; method=$createEp
+    payload=@{ sourceRoot=$fixtureRepo; task='rpc-check'; tasksRoot=$containerRoot }
+  } | ConvertTo-Json -Compress -Depth 5
+  try {
+    $r = Invoke-WebRequest -Uri ($base + '/api/' + $createEp) -Method POST -Body $envl `
+               -ContentType 'application/json' -UseBasicParsing -TimeoutSec 120 -WebSession $sess
+    Emit "rpc_create_status" $r.StatusCode
+    Emit "rpc_create_body" (($r.Content -replace '\s+',' ').Trim())
+  } catch {
+    $code = $null; $raw = ''
+    try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+    try {
+      $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
+      $raw = $sr.ReadToEnd(); $sr.Close()
+    } catch { }
+    Emit "rpc_create_status" $(if ($code) { $code } else { 'ERR' })
+    Emit "rpc_create_body" (($raw -replace '\s+',' ').Trim())
+  }
+  $rpcDir = Join-Path (Join-Path $containerRoot (Split-Path $fixtureRepo -Leaf)) 'rpc-check'
+  Emit "rpc_create_dir"    (Test-Path -LiteralPath $rpcDir)
+  Emit "rpc_create_branch" ((& git -C $fixtureRepo rev-parse --verify --quiet 'refs/heads/task/rpc-check') -ne $null)
+}
+
+Emit "STAGE" "7 rollback probe armed; drive the page, then re-run to read the log"
+Write-Host ("probe is sampling: " + $probeContainer)
+Write-Host ("the server stays up on port " + $Port + " - open the url above and follow the steps")
+
+# --- leave the page to the user -------------------------------------------------
+#
+# The probe and the server both stay up after this script finishes: the page is
+# driven from here on, and the evidence is read afterwards from the probe log and
+# from the container directory. A matrix run passes -HoldSeconds 0, which tears
+# down immediately - because it has no page to drive.
+#
+# What is left behind, and only this:
+#   <RunRoot>\logs\log-<v>\rollback-probe.txt   the samples
+#   <RunRoot>\logs\log-<v>\rollback-probe.pid   the sampler's process id
+#   <RunRoot>\homes\home-<v>\probe\             the fixture repo and container root
+#   the dsh process holding the port
+# Re-running this script clears all of it: step 0 kills strays and deletes the
+# home and log directories after the guards have approved them.
+if ($HoldSeconds -gt 0) {
+  Write-Host ''
+  Write-Host ('  Server:  ' + $url)
+  Write-Host ('  Probe:   ' + $probeLog)
+  Write-Host ('  Pid:     ' + $probeProc.Id + '  (sampler)')
+  Write-Host ('  Source:  ' + $fixtureRepo)
+  Write-Host ('  Probe watches: ' + $probeContainer)
+  Write-Host ''
+  Write-Host ('  The server and the sampler stay up for ' + $HoldSeconds + 's.')
+  Write-Host '  Drive the create dialog in that window, then re-run to collect.'
+  Write-Host ''
+  $deadline = (Get-Date).AddSeconds($HoldSeconds)
+  while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+}
+
 # taskkill /T /F, not $proc.Kill($true): that overload does not exist on .NET
 # Framework, and swallowing the error leaves the server holding its port.
+if ($probeProc -and -not $probeProc.HasExited) {
+  $null = & taskkill /PID $probeProc.Id /T /F 2>&1
+}
 $tree = & taskkill /PID $proc.Id /T /F 2>&1
 $null = $proc.WaitForExit(15000)
+Emit "probe_final" $(if (Test-Path -LiteralPath $probeLog) { ((Get-Content -LiteralPath $probeLog) -join ' | ') } else { 'no samples' })
 Emit "boot_stopped" $proc.HasExited
 if (-not $proc.HasExited) { Emit "boot_kill_FAILED" ($tree -join ' ') }
+
 
 # --- 5. uninstall ------------------------------------------------------------
 

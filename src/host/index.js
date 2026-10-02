@@ -43,6 +43,11 @@ export const ok = (value) => ({ ok: true, value })
 const PUBLIC_ERROR_CODES = new Set([
   'bad-request',
   'cancelled',
+  // A task space that is already there, and the same one left behind by a create
+  // whose Workspace registration failed. The dialog needs the difference: one is a
+  // name clash to report, the other is a recovery it can offer.
+  'task-space-exists',
+  'task-space-unregistered',
 ])
 
 export const fail = (code, message, details = {}) => ({
@@ -252,10 +257,14 @@ export async function recover(operation, classify) {
   } catch (error) {
     const message = String(error?.message ?? error)
     // Everything below flattens a failure into one string, and maps every code
-    // but two onto `bad-request` - so the stack and the code are kept here,
-    // where a report of what went wrong can still be read against them.
+    // outside the public set onto `bad-request` - so the stack and the code are
+    // kept here, where a report of what went wrong can still be read against them.
     await recordError(error, { phase: 'endpoint' })
-    return fail(classify?.(message) ?? 'bad-request', message)
+    // An error that already carries a code keeps it: that is how an operation
+    // distinguishes its own failures from a caller's, rather than from its
+    // wording. Everything else falls back to the caller's classifier.
+    const own = typeof error?.code === 'string' ? error.code : undefined
+    return fail(own ?? classify?.(message) ?? 'bad-request', message)
   }
 }
 
@@ -581,6 +590,12 @@ export function apply(ctx, config = {}) {
       })
     })
 
+    // The task spaces sitting in a container root, with their identity. A create
+    // that failed after its worktrees were made leaves the container on disk with
+    // its branch intact, and nothing in the plugin remembers it once the dialog
+    // closes. The dialog lists these and compares them against the Workspaces it
+    // can see, so it can offer to register or clean up instead of reporting a name
+    // clash the user can only answer by hand.
     if (endpoint === 'task.list') return recover(async () => {
       const tasksRoot = typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : ''
       return listTasks(ctx.subprocess, { tasksRoot })

@@ -17,6 +17,10 @@ export const CHANNEL = "/api"
 function classifyError(code: unknown, message: string): string | undefined {
   if (code === "not-git-repository" || /not a git repository/i.test(message)) return "not-git-repository"
   if (code === "worktree-unavailable" || /is not a working tree|No such file or directory/i.test(message)) return "worktree-unavailable"
+  // Set by the host, never by matching wording: the container on disk is this
+  // task's own, left behind by a create that could not register its Workspace.
+  if (code === "task-space-unregistered") return "task-space-unregistered"
+  if (code === "task-space-exists") return "task-space-exists"
   return undefined
 }
 
