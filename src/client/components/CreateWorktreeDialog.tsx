@@ -244,34 +244,6 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     finally { endBusy() }
   }
 
-  /**
-   * Clear a task space an earlier version left behind unregistered.
-   *
-   * The branch goes with the directory, for the same reason the rollback deletes
-   * it: keeping it would make the next attempt at this name fail on the branch
-   * instead of succeeding. A leftover has no session in it, so nothing is lost -
-   * but the user is told which path and branch went, because the action is not
-   * reversible and the leftovers are not always the ones they remember making.
-   */
-  const cleanupCreated = async () => {
-    if (!recovery || busyRef.current) return
-    startBusy()
-    try {
-      await api.doneTask({
-        task: recovery.task,
-        project: recovery.project,
-        tasksRoot: recovery.tasksRoot,
-        deleteBranch: true,
-        force: true,
-        cause: "an earlier create left this task space behind before its Workspace was registered, and the user asked for it to be removed.",
-      })
-      setRecovery(null)
-      onClose()
-    } catch (reason: any) {
-      setError(format(t("cleanupFailed"), { error: String(reason?.message ?? reason), path: recovery.path }))
-    } finally { endBusy() }
-  }
-
   const create = async () => {
     if (busyRef.current || recovery || loading || !sourceReady) return
     if (!validSlug) {
@@ -523,7 +495,6 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
 
         <form className="dws-create-form" onSubmit={(event) => { event.preventDefault(); void create() }} aria-busy={busy}>
           <div className="dws-dialog-body">
-            {error ? <div className="dws-error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
             {!loading && sourceReady ? picker : null}
             {loading ? <div className="dws-dialog-loading" role="status">
               <div><Loader2 size={16} className="dws-spin" aria-hidden="true" /> {t("loadingSourceRoot")}</div>
@@ -538,9 +509,15 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             </div>}
           </div>
 
+          {/* Outside the scrolling body, so it cannot scroll away from the button
+              that acts on it. The body is the only part of this dialog that
+              scrolls, and with two repositories selected the form is taller than
+              the dialog - an error inside it was reachable only by scrolling up,
+              and the sticky heading covers the first line when you do. */}
+          {error ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
+
           <footer className="dws-dialog-footer">
             {recovery ? <>
-              <Button type="button" className="dws-button-danger" disabled={busy} onClick={() => void cleanupCreated()}>{t("cleanupTask")}</Button>
               <Button type="button" className="dws-button-primary" disabled={busy} onClick={() => void retryRegister()}>{busy ? <Loader2 size={16} className="dws-spin" aria-hidden="true" /> : null}{t("retryRegister")}</Button>
             </> : <>
               <Button type="button" className="dws-button-ghost" disabled={busy} onClick={dismiss}>{t("cancel")}</Button>

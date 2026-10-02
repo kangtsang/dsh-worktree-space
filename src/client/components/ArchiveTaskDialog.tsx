@@ -947,10 +947,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             {/* Forcing says what it will cost, and asking for the branch too costs
                 more: the commits that were never merged go with it. */}
             {options.force ? <p className="dws-notice dws-notice-danger" role="alert"><AlertCircle size={15} aria-hidden="true" /><span>{options.deleteBranch ? t("finishForceWarningBranch") : t("finishForceWarning")}</span></p> : null}
-            {running ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{t("archiveRunning")}</span></div> : null}
-            {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div> : null}
           </> : null}
         </div>
+        {/* Same as the create dialog: outside the scrolling body, so an error
+            cannot be scrolled away from - or hidden under the heading by - the
+            button that answers it. */}
+        {running ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{t("archiveRunning")}</span></div> : null}
+        {error ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
         <div className="dws-dialog-footer">
           {result
             ? <>

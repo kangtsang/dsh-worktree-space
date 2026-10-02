@@ -148,7 +148,36 @@ export function auditEnter(fields) {
  * because the setting's own default is that the log is on and a profile that has
  * never been configured has to behave like one that says so.
  */
-let enabled = true
+let overridden = true
+
+/**
+ * How the configuration is asked whether to keep writing.
+ *
+ * A function rather than a value, so this module does not have to be told when the
+ * answer changes. The Loader hands `apply` a snapshot rather than a live view, but
+ * it restarts a plugin when the configuration changes, so the snapshot is replaced
+ * then too and reading once per `apply` would have been correct. Reading per record
+ * removes the dependence on that pairing: the switch is right for the next line
+ * however the value got there - including the window after it has been written to
+ * the profile and before the plugin restarts - and it costs nothing beside the
+ * append it gates.
+ *
+ * Null means "no configuration to ask", and then {@link overridden} decides.
+ * @type {(() => boolean) | null}
+ */
+let reader = null
+
+/**
+ * Teach this module how to read the switch.
+ *
+ * Installed once, by the entry, from the same `settingValue` every other setting
+ * is read with - which matters, because a reference-only read treats a plain
+ * `'off'` as unset and the switch stays on.
+ * @param read - returns whether the configuration currently says to keep writing.
+ */
+export function setAuditEnabledReader(read) {
+  reader = typeof read === 'function' ? read : null
+}
 
 /**
  * Turn the log on or off for everything written from now on.
@@ -158,18 +187,25 @@ let enabled = true
  * account of what happened to work that is not in anybody's history, and taking it
  * away with a setting would make the setting the one destructive thing this plugin
  * does. Rotating the old file aside is the deliberate way to retire one.
+ *
+ * A reader, once installed, outranks this: the configuration is the thing the user
+ * changed from the page, and this cell only covers a caller with no configuration.
  * @param value - whether to keep writing.
  */
 export function setAuditEnabled(value) {
-  enabled = value !== false
+  overridden = value !== false
 }
 
 /**
  * Whether records are being written.
+ *
+ * Asked at the moment of the record, so a change lands on the next line written
+ * rather than on the next restart.
  * @returns `false` only when the configuration has switched the log off.
  */
 export function auditEnabled() {
-  return enabled
+  if (reader) return reader()
+  return overridden
 }
 
 /**
@@ -216,7 +252,7 @@ async function auditRecord(kind, level, fields) {
     // written whole or not at all, and there is nothing half a record would be
     // good for. Skipping before the work also skips the rotation check, so a log
     // switched off does not rename anything either.
-    if (!enabled) return
+    if (!auditEnabled()) return
     const carried = scope.getStore() ?? {}
     const tasksRoot = typeof carried.tasksRoot === 'string' ? carried.tasksRoot.trim() : ''
     if (tasksRoot === '') return

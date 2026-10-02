@@ -82,6 +82,16 @@ const TASKS_ROOT_DIRECTORY_FIELD = "tasksRootDirectory"
 /** The strategy in force when the Host serves none, which is the schema's own default. */
 const TASKS_ROOT_STRATEGY_FALLBACK = "default"
 
+/** The row that decides whether a record of every operation is written. */
+const AUDIT_LOG_FIELD = "auditLog"
+/**
+ * The two states, as the Host schema spells them. The default is on: a log that
+ * starts empty and is only turned on when something goes wrong arrives too late
+ * to be the record of what went wrong.
+ */
+const AUDIT_LOG_ON = "on"
+const AUDIT_LOG_OFF = "off"
+
 /**
  * The fields this plugin declares in its Host configuration.
  *
@@ -186,6 +196,22 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     hint: copyOr(t, ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK),
     allowEmpty: true,
   },
+  {
+    // Whether a record of every operation is written. Last, because it is the setting
+    // read least - the log is there, it is on, and nothing about using the plugin
+    // depends on it. Written as on/off rather than as a checkbox so the row cannot be
+    // read as "unchecked means off" without the words being there: turning this off
+    // stops new records and leaves the log already on disk, which is not what
+    // unticking something named "delete log" would suggest.
+    field: AUDIT_LOG_FIELD,
+    label: t("auditLog"),
+    fallback: AUDIT_LOG_ON,
+    hint: t("auditLogHint"),
+    choices: [
+      { value: AUDIT_LOG_ON, key: "auditLogOn" },
+      { value: AUDIT_LOG_OFF, key: "auditLogOff" },
+    ],
+  },
 ]
 
 /** The slice of the Host configuration form this card reads and writes. */
@@ -282,7 +308,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }

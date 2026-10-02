@@ -14,12 +14,26 @@ import {
   recordEvent,
   recordWarning,
   setAuditEnabled,
+  setAuditEnabledReader,
 } from "../src/host/task/audit-log.js"
 import { gitSucceeded, runGit, tryRunGit } from "../src/host/task/git.js"
 import { listTasks } from "../src/host/task/operations.js"
 
 /** The bound in `auditLog.js` moves a log aside at, repeated here so the test cannot drift from it. */
 const MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * Read a setting the way the entry does, for both shapes the Loader can hand over.
+ *
+ * Copied rather than imported: `settingValue` is private to `index.js`, and this
+ * is the whole of what the log needs to know about how a setting arrives.
+ * @param setting - the reference, or the value itself.
+ * @returns the value, or undefined when there is none.
+ */
+function settingValueOf(setting) {
+  if (setting !== null && typeof setting === "object" && typeof setting.get === "function") return setting.get()
+  return setting
+}
 
 /**
  * Subprocess double answering every call the same way.
@@ -629,5 +643,72 @@ describe("the log switch", () => {
     // a log is for.
     setAuditEnabled(true)
     expect(auditEnabled()).toBe(true)
+  })
+
+  describe("asked of the configuration rather than remembered", () => {
+    // The Loader restarts a plugin when its configuration changes, so reading the
+    // switch once per `apply` would have been correct and this accessor fixes no
+    // reported failure - the switch reported not to work had been turned while the
+    // turn only registered a session, which records nothing. What it pins is the
+    // property the original code leaned on the Loader honouring: the current answer
+    // is available at the moment of the record, not only when something remembered
+    // to refresh it.
+    afterEach(() => {
+      setAuditEnabledReader(null)
+      setAuditEnabled(true)
+    })
+
+    it("stops on the next record once the configuration says off", async () => {
+      const container = await containerFixture()
+      try {
+        // The Loader's shape: a reference, asked for the value each time.
+        let saved = "on"
+        setAuditEnabledReader(() => saved !== "off")
+
+        auditEnter({ op: "task.create", task: "a", project: "p", tasksRoot: container.root })
+        await recordEvent("info", "written while on", { phase: "create" })
+        expect(await readAudit(container.root)).toHaveLength(1)
+
+        // The page writes the setting. Nothing else happens - no apply, no reload.
+        saved = "off"
+        expect(auditEnabled()).toBe(false)
+
+        await recordEvent("info", "written while off", { phase: "create" })
+        expect(await readAudit(container.root)).toHaveLength(1)
+
+        saved = "on"
+        await recordEvent("info", "written again", { phase: "create" })
+        expect(await readAudit(container.root)).toHaveLength(2)
+      } finally {
+        await container.cleanup()
+      }
+    })
+
+    it("reads a plain value as well as a reference", () => {
+      // A caller passing a literal is legitimate, and the two shapes are read
+      // differently: `'off'.get` is undefined, so a reference-only read treats a
+      // plain 'off' as unset and the switch stays on - the opposite of the ask.
+      // That is the failure this accessor exists beside, so it is pinned here.
+      setAuditEnabledReader(() => settingValueOf("off") !== "off")
+      expect(auditEnabled()).toBe(false)
+      setAuditEnabledReader(() => settingValueOf("on") !== "off")
+      expect(auditEnabled()).toBe(true)
+    })
+
+    it("outranks the remembered value, which is what a caller without a profile gets", () => {
+      // No configuration installed: the cell answers, so a caller that has only
+      // ever called setAuditEnabled keeps working.
+      setAuditEnabledReader(null)
+      setAuditEnabled(false)
+      expect(auditEnabled()).toBe(false)
+      setAuditEnabled(true)
+      expect(auditEnabled()).toBe(true)
+
+      // With one installed, the configuration is the thing the user changed from
+      // the page, so it decides.
+      setAuditEnabledReader(() => false)
+      setAuditEnabled(true)
+      expect(auditEnabled()).toBe(false)
+    })
   })
 })

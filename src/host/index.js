@@ -2,7 +2,7 @@ import z from '@deepseek-ai/schemastery'
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { auditEnter, auditEnabled, recordError, setAuditEnabled } from './task/audit-log.js'
+import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabledReader } from './task/audit-log.js'
 import { coded, UNKNOWN } from './task/codes.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
@@ -511,18 +511,23 @@ export function apply(ctx, config = {}) {
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
   tasksRootDirectoryReference = config.tasksRootDirectory
-  // The audit log, unlike the others, is not held as a reference: it is pushed
-  // into the module that writes, because the writers are the many call sites and
-  // a reference would mean asking each of them. `apply` runs again on a change,
-  // so a turn takes effect without a reload.
+  // The audit log, unlike the others, is not read at use time: it is pushed into
+  // the module that writes, because the writers are the many call sites and a
+  // read there would mean asking every one of them for the setting.
   //
-  // The value has to come off the reference, as every other setting here does.
-  // Comparing the reference itself to 'off' is never true, so reading it that way
-  // left the switch permanently on: the one thing the setting exists to do, it
-  // could not do. A plain value is accepted too - optional chaining alone does
-  // not cover it, because `'off'.get` is undefined and the read silently yields
-  // undefined, which is the same as never having been set.
-  setAuditEnabled(settingValue(config.auditLog) !== 'off')
+  // What is pushed is a way to ASK, not the answer. `config` here is the snapshot
+  // `resolveConfig` produced when the Loader validated it, not a live view, so a
+  // value read from it stays right only as long as this closure is replaced - and
+  // it is, because the Loader restarts a plugin when its configuration changes
+  // (`Fiber.update` -> `restart` -> `apply` again). Reading per record therefore
+  // changes nothing in the normal path; it keeps the switch honest in the window
+  // where the value has been written to the profile but `apply` has not run again,
+  // and costs nothing beside the append it gates.
+  //
+  // The read goes through `settingValue`, as every other setting here does. Reading
+  // only the reference shape fails quietly: `'off'.get` is undefined, so a plain
+  // 'off' reads as unset and the switch stays on - the opposite of the ask.
+  setAuditEnabledReader(() => settingValue(config.auditLog) !== 'off')
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
