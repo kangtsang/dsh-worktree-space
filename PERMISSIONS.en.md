@@ -60,6 +60,8 @@ Declared baseline: `dsh-worktree-space@1.1.0`, at the fixed commit on this repos
   - Rehearsal: a finishing run that has to merge first rehearses the merge inside **that repository's own
     worktree in the task space**. A conflict is left there as it stands; a clean rehearsal is `reset --hard`
     back to the commit recorded before it, after which the step above records the merge on the target branch.
+  - Operation log: one line of JSON appended with `fs.appendFile` to **`worktree-space-log.jsonl` at the
+    container root**; described below.
   - git's own bookkeeping: `git worktree add/remove` writes git's own registration and index under
     `<source repo>/.git/worktrees/<name>/` (the `.git` marker, `HEAD`, `index`, …). That is git's doing; the
     plugin never edits files in a source repository's checkout.
@@ -78,14 +80,37 @@ Declared baseline: `dsh-worktree-space@1.1.0`, at the fixed commit on this repos
   separate session**, in which the **host's agent** runs `git add` / `git commit`: those commands are not
   issued by this plugin and are not part of its permission signals.
 
-- **Network**: the plugin itself issues **no HTTP request at all**. Its only network activity is
-  `git push -u origin <branch>` when the user explicitly ticks Push in the create dialog (unticked and not run
-  by default; `task.create` only carries it when `push === true`). Every other `git` subcommand is local.
-  Git's own credential helpers and proxy settings are outside this plugin's control.
+- **Network**: the plugin itself issues **no HTTP request at all** and runs **no `git push`**. Every `git`
+  subcommand it runs is local (see the table below) and writes no remote ref. Git's own credential helpers and
+  proxy settings are outside this plugin's control.
 
 - **Credentials/keys**: the plugin **does not read, store or forward** credentials. It does not read
   `process.env`, `~/.git-credentials`, `~/.ssh`, `.netrc` or an OS keychain, and it writes no credential into a
-  log or a response. Whether and which credentials `git push` uses is entirely up to the user's own Git setup.
+  log or a response.
+
+- **Operation log**: **`worktree-space-log.jsonl` at the container root**, a JSONL file that is only ever
+  appended to, never rewritten and never deleted. One line per `git` call that changes repository state, per
+  failing `git` call, and per error or warning: `ts` (ISO time), `kind` (`git` / `error` / `warning`), `op`
+  (the endpoint), `task`, `project`, and that record's own fields — `argv`, `cwd`, `exit` and `stderr` (past
+  2 KB truncated) for a command, `message`, `stack`, `code` and the repository and phase it happened in for an
+  error.
+  - **Only paths, commands and git's own diagnostic text are recorded. No file contents**, and no file
+    content is read in order to record one.
+  - Credentials inside a URL are replaced with `***` before the write (`https://user:token@host/x` becomes
+    `https://***@host/x`); an `@` in a path is left alone.
+  - A successful **read-only** `git` call is not recorded (`status`, `rev-parse`, `for-each-ref` and the
+  like); a state-changing command and **any failure** are, including one whose failure the caller was going
+  to swallow — such as the query that asks whether a branch already exists.
+  - **It writes only where the container root already exists, and never creates a directory.** There the
+    append fails and is ignored, so calls that belong to no task space — `worktree.scan`, `worktree.status` —
+    record nothing at all.
+  - Any failure of the write itself (file deleted, directory read-only, disk full) is swallowed and **changes
+    no outcome of any operation**. The write is `await`ed: the record is on disk when the call returns, in
+    the order the commands ended.
+  - Past 10 MB the current file is renamed to `worktree-space-log.<YYYYMMDD-HHMMSS>.jsonl` and a new one
+    starts; **the old file is kept**.
+  - **No endpoint reads it and it leaves this machine**: nothing is sent, uploaded or returned.
+  - Deleting the container root deletes the log with it. It is not a backup and not an audit record.
 
 - **External services**: none. No account, no server, no telemetry.
 
@@ -99,7 +124,6 @@ Declared baseline: `dsh-worktree-space@1.1.0`, at the fixed commit on this repos
 | Queries (read-only) | `rev-parse --show-toplevel`, `rev-parse --git-common-dir`, `rev-parse --abbrev-ref HEAD`, `rev-parse HEAD`, `rev-parse --verify --quiet <ref>^{commit}`, `rev-parse --verify --quiet MERGE_HEAD`, `symbolic-ref --quiet --short refs/remotes/origin/HEAD`, `for-each-ref --format=%(refname:short) <refs>`, `show-ref --verify --quiet`, `status --short`, `status --porcelain`, `status --short --branch`, `worktree list --porcelain`, `rev-list --count`, `merge-base --is-ancestor`, `diff --name-only HEAD`, `diff --name-only --diff-filter=U` |
 | Worktrees | `worktree add`, `worktree remove [--force]`, `worktree prune` |
 | Branches and merges | `branch -d`, `branch -D`, `merge --no-ff --no-edit <ref>`, `merge --abort`, `reset --hard <sha>` |
-| Network (explicit opt-in) | `push -u origin <branch>` |
 
 ## Dependencies
 

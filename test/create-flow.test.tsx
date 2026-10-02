@@ -34,7 +34,6 @@ const created = {
     { name: "alpha", path: "/tasks/repo/fix-login/alpha" },
     { name: "beta", path: "/tasks/repo/fix-login/beta" },
   ],
-  warnings: [],
 }
 
 function setup(config?: any) {

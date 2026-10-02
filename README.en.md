@@ -27,6 +27,7 @@ and the worktree branches and task spaces are cleaned up as needed.
 - [🚀 Install](#-install)
 - [✨ Features](#-features)
 - [📂 Layout of a task](#-layout-of-a-task)
+- [📝 The operation log](#-the-operation-log)
 - [🔧 Requirements](#-requirements)
 - [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
 - [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)　[Each combination](#what-each-combination-does)
@@ -82,6 +83,9 @@ top right.
   English only.
 - **No extra service needed.** The two entries, the scan depth and the directory limit all
   live in the plugin's own configuration (see Configuration). It follows DSH themes.
+- **An operation log that is always on.** `worktree-space-log.jsonl` at the container root holds one
+  line per `git` call and per failure; reading it is how a report gets reproduced. See
+  [The operation log](#-the-operation-log).
 
 ## 📂 Layout of a task
 
@@ -121,7 +125,8 @@ top right.
     ├── archived-docs/                  the archive root (default): non-Git output lands here
     │   └── project1/                   filed by project
     │       └── hotfix-20260926-020933/   `<task>-<YYYYMMDD-HHMMSS>`, one folder per task
-    └── README.md                       written once, on first use: this is the worktree-only area
+    ├── README.md                       written once, on first use: this is the worktree-only area
+    └── worktree-space-log.jsonl        the operation log: every git call, error and warning
 
 ~/my-archive/                           an archive root, chosen in the plugin's settings
 └── project2/                           same shape: a project layer, then a task name with its timestamp
@@ -147,7 +152,48 @@ creation is **refused**, and not a single directory is made.
 
 The archive root splits two levels further, `<project>/<task>-<YYYYMMDD-HHMMSS>/`, so its shape mirrors the
 Worktree Space container's and a project's documents stay in that project's own folder. By default it sits in the
-container root, adding exactly one directory — `archived-docs` — to the whole volume.
+container root, adding exactly one directory — `archived-docs` — and the operation log's one file to the
+whole volume. See [The operation log](#-the-operation-log).
+
+## 📝 The operation log
+
+A `worktree-space-log.jsonl` sits at the container root, always. Every `git` call that changes repository
+state, every `git` call that fails, and every error or warning appends one line of JSON to it. There is
+**no switch for it and it is always on**, and **nothing is sent anywhere**: it is a file in the container
+root.
+
+```json
+{"ts":"2026-09-28T04:00:01.234Z","kind":"git","op":"task.done","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["worktree","add","E:\\ws\\kratos-admin\\login","-b","task/login"],"exit":0,"ms":412}
+{"ts":"2026-09-28T04:00:03.998Z","kind":"error","op":"task.done","task":"login","project":"kratos-admin","phase":"done","repository":"kratos-admin","conflict":true,"message":"fatal: refusing to merge unrelated histories","stack":"Error: git merge --no-ff ... "}
+```
+
+**What is recorded:** every command that **changes repository state** (`worktree add/remove/prune`,
+`merge`, `merge --abort`, `branch -d/-D`, `reset --hard`), and **every failing command** — including a
+failing read, and including one whose failure the caller was going to swallow, such as the query that asks
+whether a branch already exists. A successful read is not recorded, or the file would be nothing but the
+echo of `git status`.
+
+**How to read it:** one JSON object per line, so filtering by task gives one task's whole story, from
+creation to finish:
+
+```sh
+# everything one task did
+jq -c 'select(.task == "login")' ~/workspace/worktree-space/worktree-space-log.jsonl
+# only the lines where something went wrong
+jq -c 'select(.kind == "error")' ~/workspace/worktree-space/worktree-space-log.jsonl
+```
+
+**What it holds to:**
+
+- **No file contents**, only paths, commands and git's own diagnostic text (truncated past 2 KB).
+- **Credentials in a URL are masked** first: `https://user:token@host/x` is recorded as `https://***@host/x`.
+- **It creates no directory.** It writes only where the container root already exists, so a call that
+  belongs to no task space — `worktree.scan` and the like — records nothing, and no container root is
+  brought into being just to hold a log.
+- **A failed write changes nothing.** A deleted file, a read-only directory or a full disk is ignored.
+- **Past 10 MB it is moved aside** to `worktree-space-log.<YYYYMMDD-HHMMSS>.jsonl` and a new one starts;
+  the old file is kept.
+- Delete the container root and the log goes with it. It is not a backup and not an audit record.
 
 Removing a worktree never deletes its Git branch; finishing a task merges the branch back
 before the worktree goes.
@@ -189,8 +235,9 @@ contacts no external service and reports no telemetry.
 | File reads | The selected Workspace directories (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); the record files in the task space and at the Worktree Space container root; each worktree's `.git` marker file; and, at finish, the contents of the files git lists, read only to decide whether a merge still carries conflict markers |
 | File writes | Only inside the task space, the Worktree Space container root, and the archive directory the configuration names (see Configuration); finishing a task removes only the worktrees and documents the plugin itself created, and a merge also `git worktree add`s one temporary checkout under the **system temporary directory** and deletes it right after. It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory |
 | Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository (see below), and a commit handed to an agent is run by the host's own session |
-| Network | Only `git push -u origin <branch>`, and only when a push is explicitly requested; the plugin itself makes no HTTP requests |
-| Credentials | Reads, stores and forwards none. A push uses whatever credentials the local Git is already configured with; the plugin never touches keys |
+| Operation log | `worktree-space-log.jsonl` at the container root: each `git` call's `argv`, `cwd`, exit code and git's own diagnostic, and each error's and warning's `message`, `stack` and `code`. **No file contents**, credentials in a URL masked before the write; past 10 MB it is moved aside and a new one starts; a failed write changes no outcome; nothing reads it back and it leaves this machine |
+| Network | None: the plugin itself makes no HTTP requests and runs no `git push`; every `git` subcommand it runs is local |
+| Credentials | Reads, stores and forwards none; the plugin never touches keys |
 | Global resources | No global installs, no daemon or resident service, no writes to system directories |
 
 The full account — what it reads, what it writes, which subcommands it runs and what happens when

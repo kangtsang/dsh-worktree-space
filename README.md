@@ -22,6 +22,7 @@ DeepSeek Harness 的 Worktree Space 插件——一个包含多个 Git 仓库的
 - [🚀 安装](#-安装)
 - [✨ 功能](#-功能)
 - [📂 任务目录结构](#-任务目录结构)
+- [📝 操作日志](#-操作日志)
 - [🔧 环境要求](#-环境要求)
 - [🔐 权限与失败边界](#-权限与失败边界)
 - [🛠️ 使用](#-使用)　[⚙️ 配置](#-配置) · [➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🏁 结束](#-结束-worktree-space)　[各选项组合](#各选项组合的行为)
@@ -65,6 +66,8 @@ dsh plugin --profile web add dsh-worktree-space
   只有英文一份。
 - **无额外服务依赖。** 入口开关、扫描深度和目录上限均由插件自身配置控制（见[配置](#-配置)）。支持 DSH
   主题。
+- **常驻操作日志。** 容器根下的 `worktree-space-log.jsonl` 逐行记录插件发的每条 `git` 命令和遇到的每个错误，
+  排查和复现直接读它；见[操作日志](#-操作日志)。
 
 ## 📂 任务目录结构
 
@@ -102,7 +105,8 @@ dsh plugin --profile web add dsh-worktree-space
     ├── archived-docs/                 归档根（默认）：非 Git 产物收在这里
     │   └── project1/                  按项目归档
     │       └── hotfix-20260926-020933/   「任务名-YYYYMMDD-HHMMSS」，每个任务一层
-    └── README.md                      第一次使用时由插件写入：这里是 Worktree 专用区
+    ├── README.md                      第一次使用时由插件写入：这里是 Worktree 专用区
+    └── worktree-space-log.jsonl   操作日志：插件发的每条 git 命令、每个错误与警告
 
 ~/my-archive/                          归档根：可以在插件设置改成指定的目录
 └── project2/                          结构一样：项目一层，任务名加时间戳一层
@@ -123,8 +127,41 @@ dsh plugin --profile web add dsh-worktree-space
 创建会被**拒绝**，且一个目录都不会建出来。
 
 归档根底下再分两层：`<项目>/<任务名>-<YYYYMMDD-HHMMSS>/`。归档结构因此与 Worktree Space 容器结构同形，一个项目的归档收在自己
-那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录。删掉 worktree 不会删除对应的 Git
+那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录和操作日志那个文件（见[操作日志](#-操作日志)）。删掉 worktree 不会删除对应的 Git
 分支；结束任务会先把分支合并回去，再删 worktree。
+
+## 📝 操作日志
+
+容器根下常驻一个 `worktree-space-log.jsonl`。插件每发出一条会改动仓库状态的 `git` 命令、每有一条命令失败、每遇到
+一个错误或警告，就往这个文件追加一行 JSON。它**没有开关，常开着**，也**不发送到任何地方**——它就是容器根下的一个文件。
+
+```json
+{"ts":"2026-09-28T04:00:01.234Z","kind":"git","op":"task.done","task":"login","project":"kratos-admin","cwd":"E:\\src\\kratos-admin","argv":["worktree","add","E:\\ws\\kratos-admin\\login","-b","task/login"],"exit":0,"ms":412}
+{"ts":"2026-09-28T04:00:03.998Z","kind":"error","op":"task.done","task":"login","project":"kratos-admin","phase":"done","repository":"kratos-admin","conflict":true,"message":"fatal: refusing to merge unrelated histories","stack":"Error: git merge --no-ff ... "}
+```
+
+**记什么：** 所有**改动仓库状态**的命令（`worktree add/remove/prune`、`merge`、`merge --abort`、
+`branch -d/-D`、`reset --hard`），**以及任何一条失败的命令**——哪怕失败的是只读命令，哪怕调用方本来会吞掉这个
+失败（比如「这个分支是不是已经存在」那种查询）。成功的只读查询不记，否则文件会被 `git status` 的回声淹没。
+
+**怎么查：** 一行一个 JSON 对象，按任务筛就是一个任务从建到收尾的完整来龙去脉：
+
+```sh
+# 某个任务做过什么
+jq -c 'select(.task == "login")' ~/workspace/worktree-space/worktree-space-log.jsonl
+# 只看出了什么的那些
+jq -c 'select(.kind == "error")' ~/workspace/worktree-space/worktree-space-log.jsonl
+```
+
+**几条约定：**
+
+- **不记文件内容**，只记路径、命令和 git 自己的报错文字（超过 2 KB 截断）。
+- **URL 里的凭据会先抹掉**：`https://user:token@host/x` 记成 `https://***@host/x`。
+- **不创建目录。** 只有容器根已经存在时才写，所以 `worktree.scan` 这类不属于任何任务空间的调用什么都不记，
+  也不会为了记日志而凭空造出一个容器根。
+- **写日志失败不影响任何操作。** 文件被删、目录只读、磁盘满了，插件都当没这回事。
+- **超过 10 MB 改名归档**成 `worktree-space-log.<YYYYMMDD-HHMMSS>.jsonl` 再重开，旧文件保留。
+- 容器根被删，日志一起没；它不是备份，也不是审计凭证。
 
 ## 🔧 环境要求
 
@@ -155,8 +192,9 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | 文件读取 | 所选工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间与 Worktree Space 容器根下的记录文件；各 worktree 的 `.git` 标记文件；结束任务时为判断合并是否仍留冲突而读回变更文件的内容 |
 | 文件写入 | 只写任务空间与 Worktree Space 容器根下的文件，以及配置选定的归档目录（见[配置](#-配置)），结束时删除的是插件自己创建的 worktree 与文档；合并时另在**系统临时目录**里建一份临时检出，用完即删。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录 |
 | 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下（见下表）；交给 agent 的提交由宿主里的那个会话自己执行 |
-| 网络 | 仅在显式选择推送时执行 `git push -u origin <分支>`；插件自身不发任何 HTTP 请求 |
-| 凭据 | 不读取、不保存、不转发；推送使用本机 Git 已配置的凭据，插件不接触密钥 |
+| 操作日志 | 容器根下的 `worktree-space-log.jsonl`：每条 `git` 命令的 `argv`/`cwd`/退出码/git 自己的报错文字，每个错误与警告的 `message`/`stack`/`code`。**不含任何文件内容**，URL 里的凭据写入前抹掉；超过 10 MB 改名归档后重开；写失败不影响任何操作；没有读它的端点，它不离开这台机器 |
+| 网络 | 无：插件自身不发任何 HTTP 请求，也不执行任何 `git push`；它发出的 `git` 子命令全是本地操作 |
+| 凭据 | 不读取、不保存、不转发；插件不接触密钥 |
 | 全局资源 | 不装全局包、不起常驻进程或服务、不写系统目录 |
 
 逐条说明（读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](PERMISSIONS.md)；

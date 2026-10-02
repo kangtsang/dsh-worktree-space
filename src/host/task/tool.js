@@ -349,7 +349,6 @@ export function registerTaskTool(ctx, options = {}) {
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           configuredRoot: configuredRoot(),
-          push: false,
         })
         const value = envelope(action)
         value.task = result.task
@@ -357,7 +356,9 @@ export function registerTaskTool(ctx, options = {}) {
         value.branch = result.branch
         value.container = result.path
         value.tasksRoot = result.tasksRoot
-        value.warnings = result.warnings
+        // `warnings` is left as the envelope's empty array: a create has none to
+        // report now that it no longer pushes, and the field is shared by all
+        // four actions' schemas rather than being this action's own.
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
         value.summary = summarize(action, value)
         return value

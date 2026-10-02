@@ -2,6 +2,7 @@ import z from '@deepseek-ai/schemastery'
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { auditEnter, recordError } from './task/audit.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
@@ -255,6 +256,10 @@ export async function recover(operation, classify) {
     return ok(await operation())
   } catch (error) {
     const message = String(error?.message ?? error)
+    // Everything below flattens a failure into one string, and maps every code
+    // outside the public set onto `bad-request` - so the stack and the code are
+    // kept here, where a report of what went wrong can still be read against them.
+    await recordError(error, { phase: 'endpoint' })
     // An error that already carries a code keeps it: that is how an operation
     // distinguishes its own failures from a caller's, rather than from its
     // wording. Everything else falls back to the caller's classifier.
@@ -453,6 +458,9 @@ export function apply(ctx, config = {}) {
 
   const handle = async (endpoint, payload = {}, signal) => {
     if (signal?.aborted) return fail('cancelled', 'The request was cancelled.')
+    // Which request the records it produces belong to. The task, the project and
+    // the container root are entered further down, where they are known.
+    auditEnter({ op: endpoint })
 
     const listRepository = async (path) => {
       if (!path) throw new Error('Select a DSH Workspace.')
@@ -579,7 +587,6 @@ export function apply(ctx, config = {}) {
         // A request that names no container root takes the configured one, which is
         // the same answer `task.suggest-root` just gave the dialog.
         configuredRoot: configuredTasksRoot(),
-        push: payload.push === true,
       })
     })
 
