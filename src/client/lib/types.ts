@@ -240,6 +240,14 @@ export interface TaskPreference {
   archiveDocumentsDirectory: string
   /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
   handoffEntry: string
+  /**
+   * `on` when the audit log is being written, `off` when it is not.
+   *
+   * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}:
+   * a Host that predates the setting answers without it, and absent reads as `on`,
+   * which is what such a Host does.
+   */
+  auditLog?: string
 }
 
 /** The sessions service face (`ctx.sessions`). */

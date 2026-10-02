@@ -14,13 +14,30 @@ import type {
 
 export const CHANNEL = "/api"
 
+/**
+ * Map a Host failure onto a code the dialog can act on.
+ *
+ * The Host sends `E` and four digits - `task/codes.js` is the index, and every
+ * code is written literally at the throw site so it can be grepped for. Only the
+ * ones that change what the dialog does are named here; the rest stay on the
+ * error as themselves and are shown as the Host's message.
+ *
+ * The message patterns are a fallback for a Host older than the codes, and for
+ * E9001 - the code that means "nothing here classifies this". Both leave only the
+ * wording to match on, which is why it is trusted only when no specific code came.
+ * @param code - the code the Host sent, if any.
+ * @param message - its message, used when no specific code came.
+ * @returns the code to put on the error, or undefined to leave it alone.
+ */
 function classifyError(code: unknown, message: string): string | undefined {
-  if (code === "not-git-repository" || /not a git repository/i.test(message)) return "not-git-repository"
-  if (code === "worktree-unavailable" || /is not a working tree|No such file or directory/i.test(message)) return "worktree-unavailable"
+  const unclassified = code === undefined || code === "E9001"
+  if (code === "E3004" || (unclassified && /not a git repository/i.test(message))) return "E3004"
+  if (code === "E3005" || (unclassified && /is not a working tree|No such file or directory/i.test(message))) return "E3005"
   // Set by the host, never by matching wording: the container on disk is this
   // task's own, left behind by a create that could not register its Workspace.
-  if (code === "task-space-unregistered") return "task-space-unregistered"
-  if (code === "task-space-exists") return "task-space-exists"
+  if (code === "E2002") return "task-space-unregistered"
+  if (code === "E2001") return "task-space-exists"
+  if (code === "E3001") return "branch-exists"
   return undefined
 }
 
@@ -30,9 +47,16 @@ export function createWorktreeApi(connection: ConnectionService) {
     const result = await (signal ? connection.rpc.call(...args, signal) : connection.rpc.call(...args)) as any
     if (!result?.ok) {
       const message = result?.error?.message ?? "worktree operation failed"
-      const code = classifyError(result?.error?.code, message)
-      const error = new Error(code ?? message)
-      ;(error as Error & { code?: string }).code = code ?? result?.error?.code
+      // The message stays the Host's, because that is the sentence the dialog
+      // shows and it is the one written for a person to read. The code is a
+      // separate field, not the message: it is for deciding what to do, and a
+      // dialog that renders it as the message shows someone "E3004" and nothing
+      // else. The two are deliberately different jobs - the message may be
+      // reworded or translated, the code may not, which is why it is the thing
+      // to grep the log with.
+      const code = classifyError(result?.error?.code, message) ?? result?.error?.code
+      const error = new Error(message)
+      ;(error as Error & { code?: string }).code = code
       throw error
     }
     return result.value as T
@@ -97,6 +121,6 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string }) => call<FinishTaskResult>("task.done", payload),
   }
 }

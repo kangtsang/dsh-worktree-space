@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { coded } from './codes.js'
 
 /** Provider name in the `ctx.skills` registry. */
 export const PROVIDER_NAME = 'dsh-worktree-space'
@@ -53,7 +54,7 @@ function packageRoot() {
     }
     const parent = dirname(directory)
     if (parent === directory) {
-      throw new Error(`${PACKAGE_NAME}: cannot locate the package root for the bundled skill`)
+      throw coded('E7001', `${PACKAGE_NAME}: cannot locate the package root for the bundled skill`)
     }
     directory = parent
   }
@@ -72,12 +73,12 @@ function packageRoot() {
  */
 export function parseSkillFile(raw, path) {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw)
-  if (frontmatter?.[1] === undefined) throw new Error(`${PACKAGE_NAME}: ${path} has no YAML frontmatter`)
+  if (frontmatter?.[1] === undefined) throw coded('E7002', `${PACKAGE_NAME}: ${path} has no YAML frontmatter`)
   const description = /^description:[ \t]*(.+?)[ \t]*$/mu.exec(frontmatter[1])?.[1]
   const declared = /^name:[ \t]*(.+?)[ \t]*$/mu.exec(frontmatter[1])?.[1]
-  if (description === undefined || description === '') throw new Error(`${PACKAGE_NAME}: ${path} has no description`)
+  if (description === undefined || description === '') throw coded('E7003', `${PACKAGE_NAME}: ${path} has no description`)
   if (declared !== SKILL_NAME) {
-    throw new Error(`${PACKAGE_NAME}: ${path} declares name '${declared}' where '${SKILL_NAME}' is served`)
+    throw coded('E7004', `${PACKAGE_NAME}: ${path} declares name '${declared}' where '${SKILL_NAME}' is served`)
   }
   return { description, content: raw.slice(frontmatter[0].length).trim() }
 }

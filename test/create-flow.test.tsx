@@ -335,6 +335,10 @@ describe("native task create flow", () => {
       tasksRoot: "/tasks",
       deleteBranch: true,
       force: true,
+      // The Host cannot see the dialog's registration failing, so the reason has
+      // to travel with the request or the log shows a task space and a branch
+      // deleted for no stated reason.
+      cause: expect.stringContaining("Workspace"),
     }))
     expect(next.workspaces.delete).not.toHaveBeenCalled()
     expect(screen.getByRole("alert").textContent).toContain(
@@ -390,6 +394,10 @@ describe("native task create flow", () => {
       tasksRoot: "/tasks",
       deleteBranch: true,
       force: true,
+      // The Host cannot see the dialog's registration failing, so the reason has
+      // to travel with the request or the log shows a task space and a branch
+      // deleted for no stated reason.
+      cause: expect.stringContaining("Workspace"),
     }))
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.onClose).not.toHaveBeenCalled()

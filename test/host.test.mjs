@@ -1,9 +1,17 @@
-import { describe, expect, it, beforeEach } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
+import { setAuditEnabled } from "../src/host/task/auditLog.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scanCache.js"
+
+// `handleFor` runs `apply`, which pushes the audit-log switch into a module-level
+// cell. A handler built with `auditLog: "off"` would otherwise leave the log off
+// for every test that runs after it, and the symptom would land somewhere
+// unrelated - a record missing, or a rotation that did not happen. Restored in
+// one place, because the switch is global state and so is its reset.
+afterEach(() => setAuditEnabled(true))
 
 function handleFor(outputs = {}, config) {
   const routes = new Map()
@@ -238,9 +246,17 @@ describe("worktree RPC contract", () => {
     }
   })
 
-  it("normalizes plugin-specific errors to the DSH public error contract", () => {    expect(fail("not-git-repository", "fatal: not a git repository")).toMatchObject({
+  it("keeps a public code and flattens one that is not public", () => {
+    // A code the caller may act on survives; anything else becomes E9001 rather
+    // than reaching a caller that would have to handle a distinction the host
+    // does not maintain. This is the filter that makes the codes greppable.
+    expect(fail("E3004", "fatal: not a git repository")).toMatchObject({
       ok: false,
-      error: { code: "bad-request", message: "fatal: not a git repository" },
+      error: { code: "E3004", message: "fatal: not a git repository" },
+    })
+    expect(fail("some-internal-code", "internal detail")).toMatchObject({
+      ok: false,
+      error: { code: "E9001", message: "internal detail" },
     })
   })
 
@@ -339,6 +355,32 @@ describe("worktree RPC contract", () => {
     expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "show" })
   })
 
+  it("writes the audit log unless the configuration says otherwise", async () => {
+    // The answer is read from the running state rather than the configured value,
+    // so `task.preference` cannot report `on` while the module is writing
+    // nothing - which is the disagreement a dialog reading this would act on.
+    const off = handleFor({}, { auditLog: { get: () => "off" } })
+    expect((await off("task.preference")).value).toMatchObject({ auditLog: "off" })
+
+    const on = handleFor({}, { auditLog: { get: () => "on" } })
+    expect((await on("task.preference")).value).toMatchObject({ auditLog: "on" })
+
+    // Anything but an explicit `off` writes. A profile row that has never been
+    // touched has no value at all, and it has to behave like one that says `on`
+    // or the log would be off everywhere until somebody went looking for it.
+    for (const unset of [{}, { auditLog: {} }, { auditLog: { get: () => undefined } }]) {
+      const handler = handleFor({}, unset)
+      expect((await handler("task.preference")).value).toMatchObject({ auditLog: "on" })
+    }
+
+    // And the string form, which is what `apply` receives when a profile row
+    // carries a plain value rather than a live reference. Reading the reference
+    // instead is the bug this pair pins down: `config.auditLog !== "off"` is
+    // never true for a `{ get }`, so the setting could not turn anything off.
+    expect((await handleFor({}, { auditLog: "off" })("task.preference")).value).toMatchObject({ auditLog: "off" })
+    expect((await handleFor({}, { auditLog: "on" })("task.preference")).value).toMatchObject({ auditLog: "on" })
+  })
+
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
       "status --short --branch": "## feat/antest",
@@ -355,9 +397,12 @@ describe("worktree RPC contract", () => {
 
   it("returns the stable error envelope for bad requests and cancellation", async () => {
     const handler = handleFor()
-    expect(await handler("worktree.status", {})).toMatchObject({ ok: false, error: { code: "bad-request", details: { issues: [] } } })
+    // A request with no path names its own failure rather than falling back to
+    // the catch-all, so the caller and the log can both say which argument was
+    // missing rather than that something was.
+    expect(await handler("worktree.status", {})).toMatchObject({ ok: false, error: { code: "E4005", details: { issues: [] } } })
     expect(await handler("worktree.status", {}, undefined, "dsh-worktree-space/worktree.unknown")).toMatchObject({
-      ok: false, error: { code: "bad-request", message: "RPC method does not match endpoint.", details: { issues: [] } },
+      ok: false, error: { code: "E9001", message: "RPC method does not match endpoint.", details: { issues: [] } },
     })
     expect(await handler("worktree.status", {}, { aborted: true })).toMatchObject({ ok: false, error: { code: "cancelled" } })
   })

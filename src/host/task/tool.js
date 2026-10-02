@@ -8,6 +8,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { projectNameFor } from './naming.js'
 import { createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
+import { coded } from './codes.js'
 
 /**
  * Model-facing description: what this is for, the order to drive it in, and the
@@ -125,7 +126,7 @@ function envelope(action) {
  */
 function required(value, name) {
   const text = typeof value === 'string' ? value.trim() : ''
-  if (text === '') throw new Error(`${name} is required for this action`)
+  if (text === '') throw coded('E7006', `${name} is required for this action`)
   return text
 }
 
@@ -147,7 +148,7 @@ async function containerFor(subprocess, tasksRoot, sourceRoot, configuredRoot = 
   const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
-  if (source === '') throw new Error('tasksRoot is required (or sourceRoot, to use its recommended task space)')
+  if (source === '') throw coded('E7006', 'tasksRoot is required (or sourceRoot, to use its recommended task space)')
   return (await suggestTaskRoot(subprocess, source, { configuredRoot })).suggested
 }
 
@@ -168,7 +169,7 @@ function projectFor(project, sourceRoot) {
   const explicit = typeof project === 'string' ? project.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
-  if (source === '') throw new Error('project is required (or sourceRoot, whose directory name it is)')
+  if (source === '') throw coded('E7006', 'project is required (or sourceRoot, whose directory name it is)')
   return projectNameFor(source)
 }
 
@@ -429,7 +430,7 @@ export function registerTaskTool(ctx, options = {}) {
         return value
       }
 
-      throw new Error(`unknown action: ${action}`)
+      throw coded('E7005', `unknown action: ${action}`)
     },
     // Both presenters are pure: the same arguments and the same result give the
     // same view on the live path and on a session-log replay. Neither reads a

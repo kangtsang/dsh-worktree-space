@@ -17,11 +17,19 @@ import { basename, resolve } from 'node:path'
 /** Branch prefix a task uses in every repository by default. */
 export const DEFAULT_BRANCH_PREFIX = 'task/'
 
-/** Raised when a task name or a branch prefix cannot become a directory and a branch. */
+/**
+ * Raised when a task name or a branch prefix cannot become a directory and a branch.
+ *
+ * One code for the class: every case here is the same thing from a caller's point
+ * of view - a name that cannot be used, fix the name - and the message says which
+ * character is at fault. Splitting it further would make codes for distinctions no
+ * caller acts on.
+ */
 export class TaskNameError extends Error {
   constructor(message) {
     super(message)
     this.name = 'TaskNameError'
+    this.code = 'E4009'
   }
 }
 

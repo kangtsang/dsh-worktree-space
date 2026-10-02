@@ -209,6 +209,12 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         tasksRoot: tasksRoot.trim(),
         deleteBranch: true,
         force: true,
+        // Without this the Host records a task space and a branch being deleted
+        // and can say nothing about why. It is the one thing that distinguishes
+        // this removal from a user finishing a task, and the audit log is where
+        // the next person looks when a create has left the disk in a state they
+        // did not expect.
+        cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
       })
     } catch (reason: any) {
       problems.push(String(reason?.message ?? reason))
@@ -257,6 +263,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         tasksRoot: recovery.tasksRoot,
         deleteBranch: true,
         force: true,
+        cause: "an earlier create left this task space behind before its Workspace was registered, and the user asked for it to be removed.",
       })
       setRecovery(null)
       onClose()

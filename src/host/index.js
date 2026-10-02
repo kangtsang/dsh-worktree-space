@@ -2,7 +2,8 @@ import z from '@deepseek-ai/schemastery'
 import { readdir, readFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { auditEnter, recordError } from './task/audit.js'
+import { auditEnter, auditEnabled, recordError, setAuditEnabled } from './task/auditLog.js'
+import { coded, UNKNOWN } from './task/codes.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { classifySourceRoot, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
@@ -40,20 +41,44 @@ export function readClientRequest(body) {
 }
 
 export const ok = (value) => ({ ok: true, value })
-const PUBLIC_ERROR_CODES = new Set([
-  'bad-request',
+// Every code a caller may be told about. They are the codes in task/codes.js,
+// plus the two ends of the range - E9001 for a failure with no code of its own,
+// and `cancelled` for a request that was abandoned.
+//
+// This list is a filter, not a vocabulary: `coded()` writes the codes literally at
+// the throw site so that `grep -n E2003` finds the line, and anything missing from
+// here is flattened to E9001 on the way out rather than reaching a caller that
+// would then have to handle a distinction this side does not maintain. A test
+// asserts the two lists stay in step.
+export const PUBLIC_ERROR_CODES = new Set([
+  'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
+  'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
+  'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009',
+  'E5001', 'E5002', 'E5003',
+  'E6001', 'E6002',
+  'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006',
+  'E9001',
   'cancelled',
-  // A task space that is already there, and the same one left behind by a create
-  // whose Workspace registration failed. The dialog needs the difference: one is a
-  // name clash to report, the other is a recovery it can offer.
-  'task-space-exists',
-  'task-space-unregistered',
 ])
 
 export const fail = (code, message, details = {}) => ({
   ok: false,
-  error: { code: PUBLIC_ERROR_CODES.has(code) ? code : 'bad-request', message, details: { issues: [], ...details } },
+  error: { code: publicCode(code), message, details: { issues: [], ...details } },
 })
+
+/**
+ * The code a caller is allowed to see.
+ *
+ * Anything outside the public set becomes E9001, so a code cannot reach a
+ * caller that promises a distinction this side does not maintain. `recover` runs
+ * this BEFORE writing the record, because a log carrying a code the caller never
+ * received is the one drift this arrangement exists to prevent - and a code read
+ * off the log would not be the one to act on.
+ * @param code - the code asked for.
+ * @returns the code to use, public or not.
+ */
+const publicCode = (code) => (PUBLIC_ERROR_CODES.has(code) ? code : UNKNOWN)
 
 export const cleanPath = (value) => {
   const text = String(value ?? '')
@@ -229,7 +254,7 @@ export async function discoverGitRoots(rootPath, { signal, maxDepth = DEFAULT_SC
     const batch = queue.slice(cursor, cursor + 8)
     cursor += batch.length
     inspected += batch.length
-    if (inspected > maxDirectories) throw new Error('Worktree scan limit reached; choose a more specific Workspace.')
+    if (inspected > maxDirectories) throw coded('E4006', 'Worktree scan limit reached; choose a more specific Workspace.')
     await Promise.all(batch.map(async ({ path, depth }) => {
       signal?.throwIfAborted()
       let entries
@@ -256,15 +281,29 @@ export async function recover(operation, classify) {
     return ok(await operation())
   } catch (error) {
     const message = String(error?.message ?? error)
-    // Everything below flattens a failure into one string, and maps every code
-    // outside the public set onto `bad-request` - so the stack and the code are
-    // kept here, where a report of what went wrong can still be read against them.
-    await recordError(error, { phase: 'endpoint' })
+    // The code is decided ONCE, before anything is written down, and the same one
+    // goes into the record and into the reply. That is what makes the log and the
+    // screen agree: a caller reading `task-space-exists` and a person grepping the
+    // log for it are looking at one condition, not at two renderings of a message
+    // that may have been reworded. Deciding it first also means the record carries
+    // the code the caller actually receives, rather than the pre-flattening one.
+    //
     // An error that already carries a code keeps it: that is how an operation
     // distinguishes its own failures from a caller's, rather than from its
-    // wording. Everything else falls back to the caller's classifier.
+    // wording. Everything else falls back to the caller's classifier, then to the
+    // catch-all.
     const own = typeof error?.code === 'string' ? error.code : undefined
-    return fail(own ?? classify?.(message) ?? 'bad-request', message)
+    const code = publicCode(own ?? classify?.(message) ?? UNKNOWN)
+    // The sentence says what the failure means, which only the module that threw
+    // it knows - that an unregistered task space is recoverable and a taken name
+    // is not. It travels on the error as `msg` so this layer need not know which
+    // endpoint was which.
+    await recordError(error, {
+      phase: 'endpoint',
+      code,
+      ...(typeof error?.msg === 'string' && error.msg.trim() !== '' ? { msg: error.msg } : {}),
+    })
+    return fail(code, message)
   }
 }
 
@@ -341,6 +380,21 @@ export const Config = z.object({
    */
   handoffEntry: z.union(['show', 'hide']).default('show').loose().volatile()
     .description('Offer the two experimental entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
+  /**
+   * Whether the audit log is written.
+   *
+   * On by default, and that is the setting being worth having: the log is the only
+   * account of what happened to a task space that survives the terminal, and a
+   * setting whose default was "off" would mean nobody had it until something went
+   * wrong and they went looking. Switched off, nothing new is written and the file
+   * already there is left alone - turning a log off is not a way to delete one,
+   * because the records are frequently the only copy.
+   *
+   * Read through `task.preference` as well, so a dialog that needs to say whether
+   * logging is on does not have to reach for the configuration form.
+   */
+  auditLog: z.union(['on', 'off']).default('on').loose().volatile()
+    .description('Write a record of every operation, git call and failure to the container root. Off stops new records and keeps the log already there.'),
   /** The Web UI's control is gone: this is the one place the depth is chosen. */
   scanDepth: z.number().min(MIN_SCAN_DEPTH).max(MAX_SCAN_DEPTH).step(1).default(DEFAULT_SCAN_DEPTH).volatile()
     .description('How many directory levels a scan descends from a Workspace root.'),
@@ -413,6 +467,27 @@ export const Config = z.object({
     .description('Where archived documents go under the custom strategy. Empty files them under the container root instead.'),
 })
 
+/**
+ * Read a setting that `apply` only needs the value of.
+ *
+ * The Loader hands over a live reference, so a value read once is a snapshot -
+ * which is why the settings a dialog can change are held as the reference and
+ * asked at use time. The switch is the one exception: it is pushed into a module
+ * and `apply` runs again on a change, so it is read here and not later.
+ *
+ * A plain value is accepted as well, because that is what a caller passing a
+ * literal means and there is nothing to be gained by refusing it. Both shapes
+ * matter, and reading only one of them fails quietly - `'off'.get` is undefined,
+ * so a reference-only read treats a plain `'off'` as unset and the switch stays
+ * on, which is the opposite of what was asked for.
+ * @param setting - the reference, or the value itself.
+ * @returns the value, or undefined when there is none.
+ */
+function settingValue(setting) {
+  if (setting !== null && typeof setting === 'object' && typeof setting.get === 'function') return setting.get()
+  return setting
+}
+
 export function apply(ctx, config = {}) {
   // The walk is the Host's, so these come from the configuration rather than from
   // the caller: a scan request carries paths, not limits.
@@ -436,6 +511,18 @@ export function apply(ctx, config = {}) {
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
   tasksRootDirectoryReference = config.tasksRootDirectory
+  // The audit log, unlike the others, is not held as a reference: it is pushed
+  // into the module that writes, because the writers are the many call sites and
+  // a reference would mean asking each of them. `apply` runs again on a change,
+  // so a turn takes effect without a reload.
+  //
+  // The value has to come off the reference, as every other setting here does.
+  // Comparing the reference itself to 'off' is never true, so reading it that way
+  // left the switch permanently on: the one thing the setting exists to do, it
+  // could not do. A plain value is accepted too - optional chaining alone does
+  // not cover it, because `'off'.get` is undefined and the read silently yields
+  // undefined, which is the same as never having been set.
+  setAuditEnabled(settingValue(config.auditLog) !== 'off')
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
@@ -463,7 +550,7 @@ export function apply(ctx, config = {}) {
     auditEnter({ op: endpoint })
 
     const listRepository = async (path) => {
-      if (!path) throw new Error('Select a DSH Workspace.')
+      if (!path) throw coded('E6002', 'Select a DSH Workspace.')
       const [topLevel, commonDir, porcelain] = await Promise.all([
         runGit(ctx.subprocess, path, ['rev-parse', '--show-toplevel']),
         runGit(ctx.subprocess, path, ['rev-parse', '--git-common-dir']),
@@ -510,7 +597,7 @@ export function apply(ctx, config = {}) {
 
     if (endpoint === 'worktree.status') return recover(async () => {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
-      if (!path) throw new Error('Worktree path is required.')
+      if (!path) throw coded('E4005', 'Worktree path is required.')
       const output = await runGit(ctx.subprocess, path, ['status', '--short', '--branch'])
       const lines = output ? output.split(/\r?\n/) : []
       // What this worktree would carry back: everything on its HEAD the named branch
@@ -533,13 +620,13 @@ export function apply(ctx, config = {}) {
 
     if (endpoint === 'task.classify-root') return recover(async () => {
       const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
-      if (!sourceRoot) throw new Error('A source root is required.')
+      if (!sourceRoot) throw coded('E4004', 'A source root is required.')
       return classifySourceRoot(sourceRoot)
     })
 
     if (endpoint === 'task.suggest-root') return recover(async () => {
       const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
-      if (!sourceRoot) throw new Error('A source root is required.')
+      if (!sourceRoot) throw coded('E4004', 'A source root is required.')
       return suggestTaskRoot(ctx.subprocess, sourceRoot, {
         tasksRoot: payload.tasksRoot,
         // An unnamed prefix is the configured one, not the built-in: the suggestion
@@ -562,14 +649,19 @@ export function apply(ctx, config = {}) {
         archiveDocumentsStrategy: configuredArchiveStrategy(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
         handoffEntry: configuredHandoffEntry(),
+        // So a dialog can tell someone that what just happened was not recorded
+        // rather than leave them to find an empty log and assume the plugin is
+        // broken. The answer is the running state, not the configured value, so
+        // it cannot disagree with what is actually being written.
+        auditLog: auditEnabled() ? 'on' : 'off',
       }
     })
 
     if (endpoint === 'task.create') return recover(async () => {
       const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
-      if (!sourceRoot) throw new Error('A source root is required.')
-      if (!task) throw new Error('A task name is required.')
+      if (!sourceRoot) throw coded('E4004', 'A source root is required.')
+      if (!task) throw coded('E4003', 'A task name is required.')
       const repos = Array.isArray(payload.repos)
         ? payload.repos.filter((name) => typeof name === 'string' && name.trim() !== '').map((name) => name.trim())
         : undefined
@@ -603,13 +695,13 @@ export function apply(ctx, config = {}) {
 
     if (endpoint === 'task.inspect') return recover(async () => {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
-      if (!path) throw new Error('A task path is required.')
+      if (!path) throw coded('E4005', 'A task path is required.')
       return inspectTask(path)
     })
 
     if (endpoint === 'task.plan') return recover(async () => {
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
-      if (!task) throw new Error('A task name is required.')
+      if (!task) throw coded('E4003', 'A task name is required.')
       return planTask(ctx.subprocess, {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
@@ -620,7 +712,7 @@ export function apply(ctx, config = {}) {
 
     if (endpoint === 'task.done') return recover(async () => {
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
-      if (!task) throw new Error('A task name is required.')
+      if (!task) throw coded('E4003', 'A task name is required.')
       return finishTask(ctx.subprocess, {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
@@ -634,10 +726,16 @@ export function apply(ctx, config = {}) {
         keep: Array.isArray(payload.keep) ? payload.keep.filter((name) => typeof name === 'string') : [],
         documentsDirectory: typeof payload.documentsDirectory === 'string' ? payload.documentsDirectory : undefined,
         discardDocuments: payload.discardDocuments === true,
+        // Why the dialog is finishing a task it never told the user existed. The
+        // rollback after a create whose Workspace would not register goes through
+        // this endpoint like any other, so without this the log would show the
+        // worktrees and the branch being deleted and never say that the reason
+        // was a create that had already half succeeded.
+        cause: typeof payload.cause === 'string' && payload.cause.trim() !== '' ? payload.cause.trim() : undefined,
       })
     })
 
-    return fail('bad-request', `Unknown endpoint: ${endpoint}`)
+    return fail(UNKNOWN, `Unknown endpoint: ${endpoint}`)
   }
 
   // Exact routes use Connection's authenticated /api carrier. In DSH rc.2,
@@ -660,7 +758,7 @@ export function apply(ctx, config = {}) {
         if (message === null) return new Response('invalid client-request message', { status: 400 })
         const result = message.method === `dsh-worktree-space/${endpoint}`
           ? await handle(endpoint, message.payload, request.signal)
-          : fail('bad-request', 'RPC method does not match endpoint.')
+          : fail(UNKNOWN, 'RPC method does not match endpoint.')
         return Response.json({ type: 'server-response', rpcId: message.rpcId, result })
       },
     }), `dsh-worktree-space ${endpoint} route`)

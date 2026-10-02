@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
+import { coded } from './codes.js'
 import { discoverSourceRepos, isSourceRepository } from './discover.js'
 import { tryRunGit } from './git.js'
 import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
@@ -127,7 +128,7 @@ export async function inspectTask(taskPath) {
 
 
 export async function listTasks(subprocess, { tasksRoot } = {}) {
-  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
+  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const root = tasksRoot.trim()
   if (!existsSync(root)) return { tasksRoot: root, tasks: [] }
 

@@ -77,7 +77,7 @@ describe.each([
         const body = await providers[skillBefore].get(candidates[0], {})
         expect(body.content).toContain("# Task Worktree Space")
         const mismatched = await carrier.fetch(requestFor("worktree.scan", { method: "worktree.status" }))
-        expect((await mismatched.json()).result).toMatchObject({ ok: false, error: { code: "bad-request" } })
+        expect((await mismatched.json()).result).toMatchObject({ ok: false, error: { code: "E9001" } })
         const invalid = await carrier.fetch(requestFor("worktree.scan", { type: "invalid" }))
         expect(invalid.status).toBe(400)
         const nonJson = await carrier.fetch(new Request("http://localhost/api/dsh-worktree-space/worktree.scan", { method: "POST", body: "not JSON" }))

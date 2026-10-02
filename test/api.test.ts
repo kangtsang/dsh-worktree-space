@@ -102,10 +102,18 @@ describe("worktree client API routing", () => {
   })
 
   it.each([
-    { result: { ok: false, error: { code: "bad-request", message: "fatal: not a git repository" } }, message: "not-git-repository", code: "not-git-repository" },
-    { result: { ok: false, error: { code: "bad-request", message: "No such file or directory" } }, message: "worktree-unavailable", code: "worktree-unavailable" },
+    // A Host that sends its codes. The dialog acts on these, so they have to
+    // survive the trip - the point of the codes is that the code a caller reads
+    // is the one to grep for.
+    { result: { ok: false, error: { code: "E3004", message: "fatal: not a git repository" } }, message: "fatal: not a git repository", code: "E3004" },
+    { result: { ok: false, error: { code: "E3005", message: "No such file or directory" } }, message: "No such file or directory", code: "E3005" },
+    { result: { ok: false, error: { code: "E2002", message: "task space already exists: E:/ws" } }, message: "task space already exists: E:/ws", code: "task-space-unregistered" },
+    // The message patterns below are a fallback for a Host older than the codes,
+    // which is what sent a flat code and left only the wording to match on.
+    { result: { ok: false, error: { code: "E9001", message: "fatal: not a git repository" } }, message: "fatal: not a git repository", code: "E3004" },
+    { result: { ok: false, error: { code: "E9001", message: "No such file or directory" } }, message: "No such file or directory", code: "E3005" },
     { result: { ok: false, error: { code: "cancelled", message: "The request was cancelled." } }, message: "The request was cancelled.", code: "cancelled" },
-    { result: { ok: false, error: { code: "bad-request", message: "Invalid path" } }, message: "Invalid path", code: "bad-request" },
+    { result: { ok: false, error: { code: "E9001", message: "Invalid path" } }, message: "Invalid path", code: "E9001" },
     { result: undefined, message: "worktree operation failed", code: undefined },
   ])("rejects unsuccessful results with $message", async ({ result, message, code }) => {
     const call = vi.fn().mockResolvedValue(result)

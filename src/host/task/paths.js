@@ -53,11 +53,19 @@ export function isInside(parent, child) {
   return inner.startsWith(outer.endsWith('/') ? outer : `${outer}/`)
 }
 
-/** Raised when a task container would nest with its source root. */
+/**
+ * Raised when a task container would nest with its source root.
+ *
+ * The code is per-case rather than one for the class: E1001, E1002 and E1003 are
+ * three layouts that read alike and are fixed differently - beside that
+ * directory, outside it, or not inside it at all - so a reader who has the code
+ * knows which one they are looking at without re-reading the message.
+ */
 export class IsolationError extends Error {
-  constructor(message) {
+  constructor(code, message) {
     super(message)
     this.name = 'IsolationError'
+    this.code = code
   }
 }
 
@@ -66,19 +74,21 @@ export class IsolationError extends Error {
  * contains it: work and source must stay isolated.
  * @param sourceRoot - the directory holding the source repositories.
  * @param tasksRoot - the proposed task container root.
- * @throws IsolationError when the two layouts nest.
+ * @throws IsolationError when the two layouts nest, carrying E1001, E1002 or E1003.
  */
 export function assertIsolated(sourceRoot, tasksRoot) {
   if (samePathLocation(sourceRoot, tasksRoot)) {
-    throw new IsolationError(`the tasks root must not be the repositories' directory itself: ${sourceRoot}`)
+    throw new IsolationError('E1001', `the tasks root must not be the repositories' directory itself: ${sourceRoot}`)
   }
   if (isInside(sourceRoot, tasksRoot)) {
     throw new IsolationError(
+      'E1002',
       `the tasks root ${tasksRoot} is inside the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
   }
   if (isInside(tasksRoot, sourceRoot)) {
     throw new IsolationError(
+      'E1003',
       `the tasks root ${tasksRoot} contains the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
   }

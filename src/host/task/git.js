@@ -12,7 +12,25 @@
  * than throwing, and the exit code and diagnostic behind those answers are what
  * a report of "the merge did nothing" has to be read against.
  */
-import { recordGitCall } from './audit.js'
+import { recordGitCall } from './auditLog.js'
+
+/**
+ * Which failure a git command that said something ran into.
+ *
+ * The two the caller can act on differently get their own code, because they are
+ * the two the UI already tells apart: a directory that is not a repository, and a
+ * worktree whose checkout has gone. Everything else is E3003 - one code for "git
+ * said no", with the subcommand in `argv` and git's own words in `stderr` to
+ * tell two of those apart.
+ * @param stderr - what git wrote to standard error.
+ * @returns the code to put on the error.
+ */
+function gitFailureCode(stderr) {
+  const text = String(stderr ?? '')
+  if (/not a git repository/i.test(text)) return 'E3004'
+  if (/is not a working tree|No such file or directory/i.test(text)) return 'E3005'
+  return 'E3003'
+}
 
 /**
  * Run git in a directory and fail on a non-zero exit.
@@ -47,7 +65,13 @@ export async function runGit(subprocess, cwd, args) {
     ms: Date.now() - startedAt,
   })
   if (outcome.exitCode !== 0 || outcome.signal !== null) {
-    throw new Error(`git ${args.join(' ')} failed${outcome.signal ? ` (${outcome.signal})` : ` (exit ${outcome.exitCode})`}: ${stderr.trim() || stdout.trim()}`)
+    // The code travels on the error so the record that describes this failure -
+    // whichever one catches it, and the log's own git record - names the same
+    // thing. A silent non-zero exit is a question that was answered, not a
+    // failure, and auditLog.js is the one that can tell them apart.
+    const error = new Error(`git ${args.join(' ')} failed${outcome.signal ? ` (${outcome.signal})` : ` (exit ${outcome.exitCode})`}: ${stderr.trim() || stdout.trim()}`)
+    error.code = gitFailureCode(stderr)
+    throw error
   }
   return stdout.trim()
 }

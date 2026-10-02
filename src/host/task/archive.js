@@ -7,7 +7,8 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readdir, readFile, rmdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { auditEnter, recordError, recordWarning } from './audit.js'
+import { auditEnter, recordError, recordEvent, recordWarning } from './auditLog.js'
+import { coded } from './codes.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated } from './paths.js'
@@ -109,16 +110,16 @@ export async function resolveMergeTarget(subprocess, mainRepo, requested, taskBr
   const explicit = typeof requested === 'string' ? requested.trim() : ''
   if (explicit !== '') {
     if (explicit === taskBranch) {
-      throw new Error(`merge target '${explicit}' is the branch being merged, so it cannot be the branch merged into`)
+      throw coded('E4008', `merge target '${explicit}' is the branch being merged, so it cannot be the branch merged into`)
     }
     if (!(await gitSucceeded(subprocess, mainRepo, ['show-ref', '--verify', '--quiet', `refs/heads/${explicit}`]))) {
-      throw new Error(`merge target '${explicit}' is not a local branch of '${name}'`)
+      throw coded('E4008', `merge target '${explicit}' is not a local branch of '${name}'`)
     }
     return explicit
   }
 
   if (!onBranch) {
-    throw new Error(`'${name}' has no branch checked out; name the branch to merge into`)
+    throw coded('E4008', `'${name}' has no branch checked out; name the branch to merge into`)
   }
   return checkedOut
 }
@@ -232,6 +233,13 @@ async function auditOutcome(repositories, warnings, phase) {
       worktree: entry.path ?? '',
       mainRepo: entry.mainRepo ?? '',
       branch: entry.branch ?? '',
+      // E5001 is the case with a way forward that is not "try again" - a merge
+      // has to be settled first - and E5003 is a plain failure to retry. They
+      // read alike in the message, which is why they are two codes.
+      code: entry.conflict === true ? 'E5001' : 'E5003',
+      msg: entry.conflict === true
+        ? `Finishing ${entry.name ?? 'this repository'} stopped on unmerged work, so nothing of that worktree was removed. The conflict has to be settled, or the branch deleted by hand, before the task space can be finished.`
+        : `Finishing ${entry.name ?? 'this repository'} failed, so that worktree and its branch are still on disk. The rest of the task space went as planned; this one needs a second attempt.`,
       ...(entry.conflict === true ? { conflict: true } : {}),
       ...(typeof entry.mergeSite === 'string' && entry.mergeSite !== '' ? { mergeSite: entry.mergeSite } : {}),
       ...(Array.isArray(entry.conflictedFiles) && entry.conflictedFiles.length > 0 ? { conflictedFiles: entry.conflictedFiles } : {}),
@@ -256,10 +264,10 @@ async function auditOutcome(repositories, warnings, phase) {
  * @throws Error when the task directory or its worktrees cannot be found.
  */
 export async function planTask(subprocess, { task, project, tasksRoot, targets } = {}) {
-  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
+  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
-  if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
   auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -286,7 +294,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       kind,
     })
   }
-  if (worktrees.length === 0) throw new Error(`no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
 
   const repositories = []
   let mergeTarget
@@ -412,6 +420,9 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
  * it runs outside any session, where git's own directory is in reach.
  * @param subprocess - the profile's subprocess service.
  * @param options - the task, its project, its root, and what to do with branches, documents and worktrees.
+ *   `cause` is a sentence saying why the dialog is finishing a task the user never
+ *   saw - "its Workspace registration failed" - so the log can say that instead of
+ *   only showing a task space disappearing.
  * @returns what each repository's worktree, branch and merge ended up as.
  * @throws Error when the task space is missing or the request contradicts itself.
  */
@@ -429,15 +440,16 @@ export async function finishTask(subprocess, options) {
     keep = [],
     documentsDirectory,
     discardDocuments = false,
+    cause,
   } = options
 
   // Deleting a branch that was merged is routine; deleting one that was not throws
   // its commits away, so it has to be asked for twice - with `deleteBranch` and with
   // `force`, which is also what makes git delete it without complaint.
   if (deleteBranch && !merge && !force) {
-    throw new Error('deleting a branch that was never merged requires force')
+    throw coded('E4007', 'deleting a branch that was never merged requires force')
   }
-  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
+  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
 
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
@@ -448,7 +460,7 @@ export async function finishTask(subprocess, options) {
   const destination = typeof documentsDirectory === 'string' ? documentsDirectory.trim() : ''
   if (destination !== '') assertIsolated(taskPath, destination)
 
-  if (!existsSync(taskPath)) throw new Error(`no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
   auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -458,7 +470,7 @@ export async function finishTask(subprocess, options) {
     const worktreePath = join(taskPath, entry.name)
     if (await isLinkedWorktree(worktreePath)) worktrees.push(worktreePath)
   }
-  if (worktrees.length === 0) throw new Error(`no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
 
   const repositories = []
   const warnings = []
@@ -657,6 +669,42 @@ export async function finishTask(subprocess, options) {
   }
 
   await auditOutcome(repositories, warnings, 'done')
+
+  // The one line that says what finishing a task actually did. The repositories
+  // and their errors are above it, but "three worktrees removed, the branch kept,
+  // the task space directory still there because documents were filed" is a
+  // conclusion, and this file records conclusions as well as facts.
+  const removedCount = repositories.filter((entry) => entry?.removed === true).length
+  if (!failed) {
+    await recordEvent(
+      cause ? 'warn' : 'info',
+      cause
+        ? `The task space was taken down because ${cause} The create had already made this work, so removing it is what makes the whole create fail as one thing: nothing of it is left behind.`
+        : `Finished the task: ${removedCount} worktree${removedCount === 1 ? '' : 's'} removed`
+          + `${deleteBranch ? ' and the branches deleted' : ', the branches kept'}`
+          + `${containerRemoved ? ', and the task space directory itself is gone' : ', with the task space directory left in place for what it still holds'}.`,
+      {
+        phase: 'done',
+        ...(cause ? { cause } : {}),
+        removed: repositories.filter((entry) => entry?.removed === true).map((entry) => entry.name),
+        ...(deleteBranch ? { branchesDeleted: true } : { branchesKept: true }),
+        ...(containerRemoved ? { containerRemoved: true } : {}),
+      },
+    )
+  } else {
+    const stuck = repositories.filter((entry) => entry?.removed !== true).map((entry) => entry.name)
+    await recordEvent(
+      'error',
+      `Finishing the task did not complete. ${stuck.length} of ${repositories.length} repositories could not be finished and are still on disk; the rest went as planned.`,
+      {
+        phase: 'done',
+        code: 'E5002',
+        ...(cause ? { cause } : {}),
+        ...(stuck.length > 0 ? { notRemoved: stuck } : {}),
+      },
+    )
+  }
+
   return {
     task,
     project: projectName,

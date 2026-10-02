@@ -6,7 +6,8 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { auditEnter, recordError } from './audit.js'
+import { auditEnter, recordError, recordEvent } from './auditLog.js'
+import { coded } from './codes.js'
 import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
@@ -118,13 +119,14 @@ export async function createTask(subprocess, options) {
   // An absent list means "every discovered repository"; an explicitly empty one
   // is a caller that selected nothing, which must not silently become all.
   if (Array.isArray(repos) && repos.length === 0) {
-    throw new Error('select at least one repository for the task')
+    throw coded('E4001', 'select at least one repository for the task')
   }
   const selected = Array.isArray(repos)
     ? await resolveSourceRepos(sourceRoot, repos)
     : await discoverSourceRepos(sourceRoot)
   if (selected.length === 0) {
-    throw new Error(
+    throw coded(
+      'E6001',
       `no source repositories found under ${sourceRoot}: expected a repository, or .git directories in its top-level subdirectories`,
     )
   }
@@ -132,7 +134,7 @@ export async function createTask(subprocess, options) {
   const names = selected.map((repoPath) => basename(repoPath))
   const duplicate = names.find((entry, index) => names.indexOf(entry) !== index)
   if (duplicate !== undefined) {
-    throw new Error(`two selected repositories are both named '${duplicate}'; select repositories with distinct names`)
+    throw coded('E4002', `two selected repositories are both named '${duplicate}'; select repositories with distinct names`)
   }
 
   const branch = branchNameFor(name, prefix)
@@ -153,20 +155,32 @@ export async function createTask(subprocess, options) {
       && existing.task === name
       && existing.project === project
       && existing.branch === branch
-    const error = new Error(`task space already exists: ${taskPath}`)
-    error.code = ours ? 'task-space-unregistered' : 'task-space-exists'
+    const error = coded('E2001', `task space already exists: ${taskPath}`)
+    // E2001 and E2002 are two situations behind one guard, and they are read
+    // apart by the dialog: one is a name clash to report, the other is a recovery
+    // it can offer. The code says which; the sentence says what it means and what
+    // can be done about it, which the message alone cannot.
+    if (ours) error.code = 'E2002'
+    error.msg = ours
+      ? `Nothing was created. A task space for exactly this task, project and branch is already on disk at ${taskPath}, which means an earlier create got as far as making it and stopped before its Workspace was registered. Creating again under this name will keep failing until that one is registered, finished or removed.`
+      : `Nothing was created. The name is already taken by a different task space at ${taskPath}, so this create would have overwritten somebody else's work. Pick another task name, or finish the existing task first.`
     throw error
   }
 
   for (const repoPath of selected) {
     if (await gitSucceeded(subprocess, repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])) {
-      throw new Error(`branch '${branch}' already exists in '${basename(repoPath)}'; pick another task name`)
+      throw coded(
+        'E3001',
+        `branch '${branch}' already exists in '${basename(repoPath)}'; pick another task name`,
+      ).withMsg(
+        `Nothing was created. The branch ${branch} already exists in ${basename(repoPath)}, so a new worktree could not be named after it and cutting one would have pointed this task's work at work already in progress. Pick another task name, or start from a branch that is free.`,
+      )
     }
   }
   if (baseRef !== undefined && `${baseRef}`.trim() !== '') {
     for (const repoPath of selected) {
       if (!(await gitSucceeded(subprocess, repoPath, ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]))) {
-        throw new Error(`base '${baseRef}' not found in '${basename(repoPath)}'`)
+        throw coded('E3002', `base '${baseRef}' not found in '${basename(repoPath)}'`)
       }
     }
   }
@@ -212,13 +226,29 @@ export async function createTask(subprocess, options) {
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
     // What the rollback could not undo is the part a create that failed leaves
     // behind, and it is not in the message the caller reads - so it is here.
+    // The sentence says which of the two outcomes this is, because "rolled back"
+    // and "left something behind" call for different amounts of attention and
+    // neither is visible in `exit` or `code` on their own.
     await recordError(error, {
       phase: 'create',
+      // Which of the two outcomes this is, as a code: "rolled back" and "left
+      // something behind" call for different amounts of attention, and neither is
+      // visible in the message or the stack on its own.
+      code: stranded.length === 0 ? 'E2005' : 'E2006',
+      msg: stranded.length === 0
+        ? 'Creating the task space failed. It was rolled back: no worktree, no branch and no task space were left behind, so the same name can be used again.'
+        : 'Creating the task space failed and the rollback could not remove everything. The leftovers named in `stranded` are still on disk and have to be dealt with by hand.',
       ...(created.length === 0 ? {} : { created: created.map((entry) => entry.name) }),
       ...(stranded.length === 0 ? {} : { stranded }),
     })
     throw new Error(`${error.message}${suffix}`)
   }
+
+  await recordEvent(
+    'info',
+    `Created the task space. Every selected repository has a worktree on ${branch} and the task metadata is written, so this is the point from which the task exists.`,
+    { phase: 'create', branch, path: taskPath, worktrees: created.map((entry) => entry.name) },
+  )
 
   return {
     task: name,

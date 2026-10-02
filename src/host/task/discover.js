@@ -9,6 +9,7 @@
  */
 import { readdir, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import { coded } from './codes.js'
 
 /**
  * Whether a directory is a source repository, that is, its `.git` is a real
@@ -68,7 +69,7 @@ export async function resolveSourceRepos(sourceRoot, names) {
   const repositories = []
   for (const name of names) {
     const candidate = name === selfName ? sourceRoot : join(sourceRoot, name)
-    if (!(await isSourceRepository(candidate))) throw new Error(`not a source repository: ${name}`)
+    if (!(await isSourceRepository(candidate))) throw coded('E6001', `not a source repository: ${name}`)
     repositories.push(candidate)
   }
   return repositories
