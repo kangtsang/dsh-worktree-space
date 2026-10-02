@@ -1111,6 +1111,35 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).not.toHaveBeenCalled()
   })
 
+  it("names the source repository under each worktree, and nothing when it cannot say", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task, tasksRoot, path: `${tasksRoot}\\${task}`, changedFiles: 0, commits: 2, strays: [],
+      repositories: [
+        // Two repositories added at different moments: one from the source root the
+        // task began from, one from somewhere with no directory in common with it.
+        // Both say which repository the merge runs in; that is the whole point.
+        { name: "alpha", path: `${tasksRoot}\\${task}\\alpha`, mainRepo: "E:\\wt-demo\\repos\\alpha", branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 0 },
+        { name: "gamma", path: `${tasksRoot}\\${task}\\gamma`, mainRepo: "E:\\wt-demo\\repos\\gamma", branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 0 },
+        // The Host could not resolve this one. An empty line would read as "there is
+        // no source repository", which is not what that means.
+        { name: "delta", path: `${tasksRoot}\\${task}\\delta`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 0, changedFiles: 0 },
+      ],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await waitFor(() => expect(document.querySelector(".dws-finish-repos.dws-plan")).toBeTruthy())
+
+    const rows = document.querySelectorAll(".dws-finish-repos.dws-plan li")
+    expect(rows).toHaveLength(3)
+    expect(rows[0].querySelector(".dws-plan-source code")?.textContent).toBe("E:/wt-demo/repos/alpha")
+    expect(rows[1].querySelector(".dws-plan-source code")?.textContent).toBe("E:/wt-demo/repos/gamma")
+    expect(rows[0].querySelector(".dws-plan-source")?.textContent).toContain(t("planSourceRepository"))
+    expect(rows[2].querySelector(".dws-plan-source")).toBeNull()
+    expect(document.querySelectorAll(".dws-plan-source code")).toHaveLength(2)
+  })
+
   it("turns red when abandoning a branch that still has commits", async () => {
     const user = userEvent.setup()
     const next = setup()

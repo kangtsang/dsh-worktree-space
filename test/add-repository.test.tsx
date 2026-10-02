@@ -152,6 +152,9 @@ describe("adding a repository to a task already under way", () => {
 
     await waitFor(() => expect(screen.getByText("/elsewhere/beta")).toBeTruthy())
     expect(screen.queryByText("/projects/alpha")).toBeNull()
+    // Each row names the branch its repository has checked out, the way the create
+    // dialog's rows do: that branch is what the worktree will be left behind on.
+    expect(screen.getAllByTitle(`${t("branch")}: main`).length).toBeGreaterThan(0)
     expect(next.api.inspectTask).toHaveBeenCalledExactlyOnceWith(TASK_PATH)
   })
 

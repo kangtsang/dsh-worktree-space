@@ -427,7 +427,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       taskPath={extending}
       api={api}
       workspaces={workspaces}
-      repositories={scannedRepositories(repos)}
+      // `repos` has already been through `scannedRepositories`, and a second pass
+      // over it finds no main worktree left to read a branch from — which is how a
+      // row here loses the branch the repository view and the create dialog both
+      // show. What the dialog wants is this list as it stands.
+      repositories={repos}
       onAdded={() => { void refresh() }}
       onClose={() => setExtending(null)}
     /> : null}

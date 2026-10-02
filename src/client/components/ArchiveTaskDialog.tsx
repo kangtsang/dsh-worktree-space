@@ -762,6 +762,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 ? <span className="dws-plan-detour">{t("planTemporaryWorktree")}</span>
                 : null}
               {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
+              {/* Which repository this worktree is a checkout of. It is the half of
+                  the write boundary the narrowest session in the task space cannot
+                  reach on its own, and it is the directory a merge runs in when the
+                  target is not the branch standing here - so it is named next to the
+                  row rather than left to be inferred from the worktree's own name.
+                  Omitted only while the Host cannot say: an empty line would read as
+                  "there is none", which is not what a missing field means. */}
+              {entry.mainRepo === undefined || entry.mainRepo === "" ? null : <span className="dws-plan-source">
+                <span>{t("planSourceRepository")}</span>
+                <code title={slashPath(entry.mainRepo)}>{slashPath(entry.mainRepo)}</code>
+              </span>}
             </li>)}
           </ul> : null}
           {/* What "clean other content" would remove, listed before the choice
