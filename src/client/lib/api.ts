@@ -7,9 +7,9 @@ import type {
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
+  ScanAnswer,
   TaskPreference,
   TaskRootSuggestion,
-  WorktreeList,
   WorktreeStatus,
 } from "./types"
 
@@ -81,7 +81,8 @@ export function createWorktreeApi(connection: ConnectionService) {
   }
 
   return {
-    scan: (paths: string[], signal?: AbortSignal) => read<WorktreeList[]>("worktree.scan", { paths }, signal),
+    scan: (paths: string[], signal?: AbortSignal, depth?: number) =>
+      read<ScanAnswer>("worktree.scan", depth === undefined ? { paths } : { paths, depth }, signal),
     /**
      * What the Host remembers of the last scan of these Workspaces.
      *
@@ -99,6 +100,18 @@ export function createWorktreeApi(connection: ConnectionService) {
 
     /** Whether a workspace can hold a task, and which repositories it would span. */
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),
+    /**
+     * Several source roots, classified as one request.
+     *
+     * The same walk the singular form performs, taken now for every path -
+     * nothing here is cached or reused across calls, because a user who has
+     * since made a repository must not be told it is not one. What it saves is
+     * the round trip and the wait between walks, not the reading.
+     * @param sourceRoots - the paths to classify.
+     * @param signal - an abort signal, when the caller has one.
+     * @returns one classification per path, in the order asked.
+     */
+    classifyRoots: (sourceRoots: string[], signal?: AbortSignal) => read<SourceRootClassification[]>("task.classify-roots", { paths: sourceRoots }, signal),
     /** The recommended container location for a source root, before creating anything. */
     suggestRoot: (sourceRoot: string, tasksRoot?: string, signal?: AbortSignal) => read<TaskRootSuggestion>("task.suggest-root", { sourceRoot, tasksRoot }, signal),
     /**

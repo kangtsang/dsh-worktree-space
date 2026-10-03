@@ -70,6 +70,41 @@ describe("discoverSourceRepos", () => {
   it("answers empty for a directory that does not exist", async () => {
     expect(await discoverSourceRepos(join(tmpdir(), "multi-worktree-absent-root"))).toEqual([])
   })
+
+  it("counts repositories one level down when the top level holds only containers", async () => {
+    // The shape that reported "no repositories" about a directory full of them:
+    // `E:\workspace` has containers at its top level and its repositories under
+    // them, so the old one-level walk found none while `worktree.scan` found
+    // ninety-four. The Workspace card counted this function, so the panel and the
+    // scan disagreed about the same directory.
+    const { root, cleanup } = await fixture()
+    try {
+      const container = join(root, "group")
+      const nested = join(container, "nested")
+      await mkdir(join(nested, ".git"), { recursive: true })
+      // One level is the historical contract for a caller that passes no bounds,
+      // and it still is what that caller gets.
+      expect(await discoverSourceRepos(root)).toEqual(expect.not.arrayContaining([nested]))
+      expect(await discoverSourceRepos(root, { maxDepth: 2 })).toEqual(expect.arrayContaining([nested]))
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("skips ignored directories at every level, not only the first", async () => {
+    const { root, cleanup } = await fixture()
+    try {
+      const hidden = join(root, "node_modules", "vendored")
+      await mkdir(join(hidden, ".git"), { recursive: true })
+      expect(await discoverSourceRepos(root, { maxDepth: 3, ignored: new Set(["node_modules"]) })).not.toContain(hidden)
+      // Without the name in the ignore set it is an ordinary directory, which is
+      // what makes the set the only thing standing between a scan and a dependency
+      // tree - so its absence has to be visible rather than assumed.
+      expect(await discoverSourceRepos(root, { maxDepth: 3 })).toContain(hidden)
+    } finally {
+      await cleanup()
+    }
+  })
 })
 
 describe("resolveSourceRepos", () => {

@@ -34,13 +34,29 @@ function gitFailureCode(stderr) {
 
 /**
  * Run git in a directory and fail on a non-zero exit.
+ *
+ * `log` decides what a call that worked leaves behind, and nothing else:
+ *
+ * - `true` (the default) records every call, subject to the read-only filter in
+ *   audit-log.js.
+ * - `false` records only the calls that failed.
+ *
+ * The scan passes `false`. It asks git five questions about every repository
+ * under a Workspace, so a ninety-four repository scan produces five hundred
+ * processes and - because `worktree` is deliberately absent from the read-only
+ * filter, since `worktree add` is a mutation - ninety-four records. That file is
+ * meant to be read by a person mid-incident, and it cannot be read with that in
+ * it. Failures are the other half of the bargain and stay: a repository that
+ * would not answer is exactly what somebody opening this log after a wrong panel
+ * needs, and it is a handful of records rather than hundreds.
  * @param subprocess - the profile's subprocess service.
  * @param cwd - directory the command runs in.
  * @param args - git arguments, after the implicit `-C <cwd>`.
+ * @param options - `log: false` to record failures only.
  * @returns the trimmed standard output.
  * @throws Error carrying git's own diagnostic when the command fails.
  */
-export async function runGit(subprocess, cwd, args) {
+export async function runGit(subprocess, cwd, args, { log = true } = {}) {
   const handle = subprocess.spawn({
     argv: ['git', '-C', cwd, ...args],
     cwd,
@@ -55,15 +71,17 @@ export async function runGit(subprocess, cwd, args) {
   const outcome = await handle.done
   const stdout = handle.collected.stdout?.readFrom(0).text ?? ''
   const stderr = handle.collected.stderr?.readFrom(0).text ?? ''
-  await recordGitCall({
-    cwd,
-    args,
-    exitCode: outcome.exitCode,
-    signal: outcome.signal,
-    stdout,
-    stderr,
-    ms: Date.now() - startedAt,
-  })
+  if (log || outcome.exitCode !== 0 || (outcome.signal ?? null) !== null) {
+    await recordGitCall({
+      cwd,
+      args,
+      exitCode: outcome.exitCode,
+      signal: outcome.signal,
+      stdout,
+      stderr,
+      ms: Date.now() - startedAt,
+    })
+  }
   if (outcome.exitCode !== 0 || outcome.signal !== null) {
     // The code travels on the error so the record that describes this failure -
     // whichever one catches it, and the log's own git record - names the same
@@ -81,11 +99,12 @@ export async function runGit(subprocess, cwd, args) {
  * @param subprocess - the profile's subprocess service.
  * @param cwd - directory the command runs in.
  * @param args - git arguments, after the implicit `-C <cwd>`.
+ * @param options - passed through to {@link runGit}.
  * @returns the trimmed standard output, or an empty string when git fails.
  */
-export async function tryRunGit(subprocess, cwd, args) {
+export async function tryRunGit(subprocess, cwd, args, options) {
   try {
-    return await runGit(subprocess, cwd, args)
+    return await runGit(subprocess, cwd, args, options)
   } catch {
     return ''
   }
@@ -96,11 +115,12 @@ export async function tryRunGit(subprocess, cwd, args) {
  * @param subprocess - the profile's subprocess service.
  * @param cwd - directory the command runs in.
  * @param args - git arguments, after the implicit `-C <cwd>`.
+ * @param options - passed through to {@link runGit}.
  * @returns whether the command exited zero.
  */
-export async function gitSucceeded(subprocess, cwd, args) {
+export async function gitSucceeded(subprocess, cwd, args, options) {
   try {
-    await runGit(subprocess, cwd, args)
+    await runGit(subprocess, cwd, args, options)
     return true
   } catch {
     return false

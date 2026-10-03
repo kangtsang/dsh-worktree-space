@@ -6,6 +6,7 @@ import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finish-scene"
 import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
+import { scanAnswer } from "./scan-answer.helper"
 
 const root = "E:\\worktree-space"
 // A task space is `<container root>/<project>/<task>`, the project being the source
@@ -21,7 +22,6 @@ function repository(name: string, rows: Worktree[]): WorktreeList {
   const repoPath = `E:\\workspace\\public\\kratos-admin\\${name}`
   return {
     repoPath,
-    commonDir: `${repoPath}\\.git`,
     currentBranch: "main",
     worktrees: [{ ...worktree(repoPath, "main"), isMain: true }, ...rows],
   }
@@ -56,8 +56,11 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
 function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
-    scan: vi.fn().mockResolvedValue(repos),
+    scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
     cachedScan: vi.fn().mockResolvedValue(null),
+    // These cases are about finishing, not about what each Workspace holds, so the
+    // page's classification is left unanswered rather than given a guess.
+    classifyRoots: vi.fn(() => new Promise(() => {})),
     // What the Host has configured: the archive reads the shipped strategy unless a test
     // asks for another one, its directory is empty unless a test sets one, and the agent
     // entries are offered unless a test hides them, which is what a case about the
@@ -739,7 +742,6 @@ describe("finishing a task", () => {
         ...scanned(),
         {
           repoPath: repo,
-          commonDir: `${repo}\\.git`,
           currentBranch: "main",
           worktrees: [{ ...worktree(repo, "main"), isMain: true }, worktree(site, "task/demo")],
         },

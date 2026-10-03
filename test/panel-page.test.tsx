@@ -6,6 +6,7 @@ import { WorktreePanelPage } from "../src/client/components/WorktreePanel"
 import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { t } from "../src/client/lib/i18n"
+import { scanAnswer } from "./scan-answer.helper"
 
 afterEach(cleanup)
 
@@ -18,7 +19,7 @@ const settle = () => act(async () => {})
 
 /** The page's own props: the shell's main column is what matters here, not the lists. */
 function mount(onBack: () => void) {
-  const api: any = { scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
+  const api: any = { scan: vi.fn().mockResolvedValue(scanAnswer([])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
   const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
   const props = {
     api,
@@ -96,7 +97,7 @@ describe("the management page as a main panel", () => {
   })
 
   it("switches the dialog's views from the same navigation the panel draws", async () => {
-    const api: any = { scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
+    const api: any = { scan: vi.fn().mockResolvedValue(scanAnswer([])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
     const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
     const onClose = vi.fn()
     render(<WorktreeManagePanel
@@ -128,7 +129,7 @@ describe("the management page as a main panel", () => {
   })
 
   it("leaves the dialog's own layout alone: without a navigation, the toolbar keeps the switcher", async () => {
-    const api: any = { scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
+    const api: any = { scan: vi.fn().mockResolvedValue(scanAnswer([])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
     const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
     render(<WorktreesSettings
       api={api}
@@ -181,7 +182,7 @@ describe("the management page as a main panel", () => {
     // The dialog is the same page, so it must not grow a second scroll area that
     // moves the toolbar with the rows.
     render(<WorktreeManagePanel
-      api={{ scan: vi.fn().mockResolvedValue([]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() } as any}
+      api={{ scan: vi.fn().mockResolvedValue(scanAnswer([])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() } as any}
       workspaces={{ list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() } as any}
       uiWorkspace={{ openWorkspace: vi.fn() } as any}
       sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
@@ -195,7 +196,7 @@ describe("the management page as a main panel", () => {
 
   it("renders a repository's worktrees as one set the parent owns", async () => {
     const api: any = {
-      scan: vi.fn().mockResolvedValue([{ repoPath: "/projects/alpha", currentBranch: "main", worktrees: [{ path: "/projects/alpha", branch: "main", isMain: true, locked: false, prunable: false }, { path: "/spaces/task/alpha", branch: "task/task", isMain: false, locked: false, prunable: false }] }]),
+      scan: vi.fn().mockResolvedValue(scanAnswer([{ repoPath: "/projects/alpha", currentBranch: "main", worktrees: [{ path: "/projects/alpha", branch: "main", isMain: true, detached: false, locked: false, prunable: false }, { path: "/spaces/task/alpha", branch: "task/task", isMain: false, detached: false, locked: false, prunable: false }] }])),
       cachedScan: vi.fn().mockResolvedValue(null),
       status: vi.fn().mockResolvedValue({ changedFiles: 0, branchLine: "", output: "" }),
     }

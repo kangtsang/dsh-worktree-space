@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth } from "../src/host/index.js"
+import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, ignoredScanDirectorySet, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth, topLevelRequestedPaths } from "../src/host/index.js"
 import { setAuditEnabled } from "../src/host/task/audit-log.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js"
 
@@ -13,11 +13,14 @@ import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js
 // one place, because the switch is global state and so is its reset.
 afterEach(() => setAuditEnabled(true))
 
-function handleFor(outputs = {}, config) {
+function handleFor(outputs = {}, config, asked) {
   const routes = new Map()
   const subprocess = {
     spawn({ argv }) {
       const key = argv.slice(3).join(" ")
+      // Opt-in, because "what did this scan ask git" is the question a scan test
+      // should be able to ask and nothing else needs to record anything.
+      if (asked !== undefined) asked.push(key)
       const result = outputs[key] ?? ""
       const stdout = typeof result === "string" ? result : result.stdout ?? ""
       const stderr = typeof result === "string" ? "" : result.stderr ?? ""
@@ -82,15 +85,24 @@ describe("worktree porcelain parser", () => {
     }
   })
 
-  it("inspects two levels by default and only descends further when asked", async () => {
+  it("inspects three levels by default and only descends further when asked", async () => {
     const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-depth-"))
     const depthTwo = join(root, "a", "two")
     const depthThree = join(root, "a", "b", "three")
+    const depthFour = join(root, "a", "b", "c", "four")
     const depthFive = join(root, "a", "b", "c", "d", "five")
     try {
-      for (const path of [depthTwo, depthThree, depthFive]) await mkdir(join(path, ".git"), { recursive: true })
+      for (const path of [depthTwo, depthThree, depthFour, depthFive]) await mkdir(join(path, ".git"), { recursive: true })
+      // The default reaches the second level and stops there: the third is one level
+      // too far, which is the whole of what a default is - far enough for the
+      // layouts people have, shallow enough that a home directory does not turn
+      // into a crawl. Two levels, not three: measured against a real Workspace,
+      // every repository the extra level found was two of ninety-six, and it costs
+      // a full extra breadth-first pass to find them. The order is the sorted one
+      // the walk settles on.
       expect(await discoverGitRoots(root)).toEqual([depthTwo])
-      expect((await discoverGitRoots(root, { maxDepth: 5 })).sort()).toEqual([depthTwo, depthThree, depthFive].sort())
+      expect(await discoverGitRoots(root, { maxDepth: 3 }).then((found) => found.sort())).toEqual([depthThree, depthTwo].sort())
+      expect((await discoverGitRoots(root, { maxDepth: 5 })).sort()).toEqual([depthTwo, depthThree, depthFour, depthFive].sort())
       expect(await discoverGitRoots(root, { maxDepth: 1 })).toEqual([])
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -101,7 +113,7 @@ describe("worktree porcelain parser", () => {
     expect(DEFAULT_SCAN_DEPTH).toBe(2)
     expect(MIN_SCAN_DEPTH).toBe(1)
     expect(MAX_SCAN_DEPTH).toBe(5)
-    expect(MAX_SCAN_DIRECTORIES).toBe(1000)
+    expect(MAX_SCAN_DIRECTORIES).toBe(2000)
 
     // No depth, or one that is not a number at all, keeps the default.
     expect(resolveScanDepth(undefined)).toBe(DEFAULT_SCAN_DEPTH)
@@ -132,12 +144,85 @@ describe("worktree porcelain parser", () => {
     }
   })
 
-  it("throws instead of returning a partial scan when the directory budget is exceeded", async () => {
+  it("skips the build output of the languages the built-in list covers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-builds-"))
+    try {
+      // One from each ecosystem in the list, all of them containing a repository
+      // so that finding it is the only evidence the directory was walked into.
+      for (const directory of ["__pycache__", "target", "obj", "DerivedData", "Pods", "_build", "zig-out", "Intermediate", "site-packages", "elm-stuff", "blib", "dist-newstyle", "Binaries", "DerivedDataCache", "deps", "packages", "coverage", "storybook-static"]) {
+        await mkdir(join(root, directory, "repo", ".git"), { recursive: true })
+      }
+      await mkdir(join(root, "src", "repo", ".git"), { recursive: true })
+      expect(await discoverGitRoots(root)).toEqual([join(root, "src", "repo")])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("skips a configured name and matches it without regard to case", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-extra-"))
+    try {
+      // Typed in the case a user would type it, against a filesystem that spells it
+      // the other way. The walk compares lower-cased names, and this is the function
+      // that puts a configured name in that shape, so the two halves have to agree
+      // or a configured name would silently never match.
+      await mkdir(join(root, "DerivedDataCache", "repo", ".git"), { recursive: true })
+      await mkdir(join(root, "output", "repo", ".git"), { recursive: true })
+      expect(await discoverGitRoots(root, { ignored: ignoredScanDirectorySet(["DERIVEDDATACACHE"]) })).toEqual([join(root, "output", "repo")])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps the built-in names in force under a configuration that adds others", async () => {
+    // Adding a name must not be a way to lose the ones already there: a user who
+    // typed `output` has not asked for `node_modules` to start being walked.
+    const set = ignoredScanDirectorySet(["Output"])
+    expect(set.has("node_modules")).toBe(true)
+    expect(set.has("__pycache__")).toBe(true)
+    // Lower case, because that is what the walk asks for: it lower-cases the
+    // directory name before it looks, so the set has to be in that shape too.
+    expect(set.has("output")).toBe(true)
+    // A name that is not a usable one is dropped rather than matched against
+    // everything: an empty entry would otherwise ignore every directory.
+    expect(ignoredScanDirectorySet(["", "   "]).has("")).toBe(false)
+  })
+
+  it("names a directory it could not read, because silence is indistinguishable from empty", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-unreadable-"))
+    try {
+      // A real repository, so a walk that works at all has something to return and
+      // the failure cannot be mistaken for "there was nothing here".
+      await mkdir(join(root, "repo", ".git"), { recursive: true })
+      const said = []
+      // A path that cannot be read stands in for a denied one: both reach the same
+      // catch, and both used to produce "no repositories" with nothing said. On
+      // Windows the real thing is a sandboxed token without access to the path the
+      // user pointed a Workspace at, which is how this was found.
+      expect(await discoverGitRoots(join(root, "missing"), { onIssue: (why) => said.push(why) })).toEqual([])
+      expect(said.join("\n")).toMatch(/Could not read .*missing/)
+      // And the sibling that does answer is untouched.
+      said.length = 0
+      expect(await discoverGitRoots(root, { onIssue: (why) => said.push(why) })).toEqual([join(root, "repo")])
+      expect(said).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("says it stopped at the directory budget instead of throwing the whole scan away", async () => {
     const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-budget-"))
     try {
       await mkdir(join(root, "repo", ".git"), { recursive: true })
-      await expect(discoverGitRoots(root, { maxDirectories: 1 })).rejects.toThrow(/scan limit reached.*more specific Workspace/)
-      expect(await discoverGitRoots(root, { maxDirectories: 2 })).toEqual([join(root, "repo")])
+      // Throwing here used to cost the caller every other path's repositories too,
+      // because the handler walked all paths in one `Promise.all`: a Workspace with
+      // three roots reported nothing because a fourth was too deep. The ceiling is a
+      // statement about how much was looked at, not about whether what was looked
+      // at exists, so it is reported and the walk keeps what it has.
+      const said = []
+      expect(await discoverGitRoots(root, { maxDirectories: 1, onIssue: (why) => said.push(why) })).toEqual([])
+      expect(said.join("\n")).toMatch(/Stopped after 1 directories/)
+      expect(await discoverGitRoots(root, { maxDirectories: 2, onIssue: () => {} })).toEqual([join(root, "repo")])
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -191,7 +276,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.preference",
+      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.preference",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -212,35 +297,49 @@ describe("worktree RPC contract", () => {
     return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
 
-  it("scans a repository, resolving its default branch from origin/HEAD", async () => {
+  it("asks git exactly one question per repository", async () => {
     const fixture = await scanFixture()
     try {
-      const handler = handleFor({
-        "worktree list --porcelain": porcelain,
-        "rev-parse --show-toplevel": join(fixture.root, "repo"),
-        "rev-parse --git-common-dir": ".git",
-        "symbolic-ref --quiet --short refs/remotes/origin/HEAD": "origin/main",
-      })
+      // The count is the whole assertion. Five processes per repository on Windows
+      // is ~95% process creation, and the scan of a ninety-four repository
+      // Workspace is what timed out; it now runs one `git worktree list --porcelain`
+      // and derives everything else from that one answer. A call added back here
+      // is a call the panel pays for on every refresh of every Workspace.
+      const asked = []
+      const handler = handleFor({ "worktree list --porcelain": porcelain }, undefined, asked)
       const scanned = (await handler("worktree.scan", { paths: [join(fixture.root, "repo")] })).value
-      expect(scanned).toHaveLength(1)
-      expect(scanned[0]).toMatchObject({ repoPath: "/repo", defaultBranch: "main", defaultRef: "origin/main" })
+      expect(scanned.lists).toHaveLength(1)
+      // The main working tree is the porcelain's first entry, so the repository
+      // path comes from there rather than from a `rev-parse` of its own.
+      expect(scanned.lists[0]).toMatchObject({ repoPath: "/repo" })
+      expect(asked).toEqual(["worktree list --porcelain"])
     } finally {
       await fixture.cleanup()
     }
   })
 
-  it("prefers a local default branch when both local and remote refs exist", async () => {
+  it("carries no field the panel does not read", async () => {
     const fixture = await scanFixture()
     try {
-      const handler = handleFor({
-        "worktree list --porcelain": porcelain,
-        "rev-parse --show-toplevel": join(fixture.root, "repo"),
-        "rev-parse --git-common-dir": ".git",
-        "symbolic-ref --quiet --short refs/remotes/origin/HEAD": "origin/main",
-        "for-each-ref --format=%(refname:short) refs/heads refs/remotes/origin": "main\norigin/main",
-      })
+      const handler = handleFor({ "worktree list --porcelain": porcelain })
       const scanned = (await handler("worktree.scan", { paths: [join(fixture.root, "repo")] })).value
-      expect(scanned[0]).toMatchObject({ defaultBranch: "main", defaultRef: "main" })
+      // `commonDir`, `defaultBranch` and `defaultRef` each cost a `git` process and
+      // were read by nothing - the branch the panel shows is derived on the client
+      // from the main worktree's row. Leaving them declared but always undefined
+      // would be worse than absent: the next reader trusts the field and wonders
+      // why it is empty.
+      expect(Object.keys(scanned.lists[0]).sort()).toEqual(["repoPath", "worktrees"])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("reports a complete scan", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = handleFor({ "worktree list --porcelain": porcelain })
+      const scanned = (await handler("worktree.scan", { paths: [join(fixture.root, "repo")] })).value
+      expect(scanned).toMatchObject({ complete: true, reason: "" })
     } finally {
       await fixture.cleanup()
     }
@@ -460,12 +559,17 @@ describe("the Host's memory of the last scan", () => {
     try {
       const handler = scannerFor(fixture.root)
       const paths = [join(fixture.root, "repo")]
-      expect((await handler("worktree.cached", { paths })).value).toBeNull()
+      // A miss is empty rows, not `null`. The bounds are a separate fact about the
+      // Host's configuration and are answered either way - a panel that has never
+      // scanned anything still needs to name the depth of its first scan.
+      const miss = (await handler("worktree.cached", { paths })).value
+      expect(miss.repositories).toEqual([])
+      expect(miss.current).toMatchObject({ depth: expect.any(Number), directories: expect.any(Number) })
 
       await handler("worktree.scan", { paths })
       const remembered = (await handler("worktree.cached", { paths })).value
       expect(remembered.repositories).toHaveLength(1)
-      expect(remembered.repositories[0]).toMatchObject({ repoPath: "/repo", defaultBranch: "main" })
+      expect(remembered.repositories[0]).toMatchObject({ repoPath: "/repo", worktrees: expect.any(Array) })
       // No worktree status has been asked about yet, so none is claimed.
       expect(remembered.statuses).toEqual({})
     } finally {
@@ -490,14 +594,68 @@ describe("the Host's memory of the last scan", () => {
     }
   })
 
-  it("answers nothing for Workspaces it has never scanned", async () => {
+  it("answers no rows for Workspaces it has never scanned, and still says what depth a scan would use", async () => {
     const fixture = await scanFixture()
     try {
       const handler = scannerFor(fixture.root)
       await handler("worktree.scan", { paths: [join(fixture.root, "repo")] })
-      expect((await handler("worktree.cached", { paths: [join(fixture.root, "other")] })).value).toBeNull()
+      const answer = (await handler("worktree.cached", { paths: [join(fixture.root, "other")] })).value
+      expect(answer.repositories).toEqual([])
+      expect(answer.current).toMatchObject({ depth: expect.any(Number), directories: expect.any(Number) })
     } finally {
       await fixture.cleanup()
+    }
+  })
+
+  it("answers with the paths that worked and a reason for the one that did not", async () => {
+    const fixture = await scanFixture()
+    try {
+      const handler = scannerFor(fixture.root)
+      // Two Workspaces in one scan, one of them a directory that is not there. The
+      // panel has to get the repository it can reach AND be told about the one it
+      // cannot: losing the row is how a workspace silently empties, and hiding the
+      // reason is what made that happen in the first place.
+      const good = join(fixture.root, "repo")
+      const answer = await handler("worktree.scan", { paths: [good, join(fixture.root, "gone")] })
+      expect(answer.value.complete).toBe(false)
+      // The repository that answered is still here; the path the mock reports is
+      // its own, which is why this asserts the count and not the joined path.
+      expect(answer.value.lists).toHaveLength(1)
+      expect(answer.value.reason).toMatch(/gone/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("counts a Workspace's nested repositories the way the scan does, through the endpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-classify-"))
+    try {
+      // The shape that reported "0 repositories" about a directory full of them: a
+      // top level of containers with the repositories one level below, which is
+      // what `E:\workspace` looks like.
+      await mkdir(join(root, "group", "nested", ".git"), { recursive: true })
+      const handler = handleFor({}, { scanDepth: 2 })
+      const answer = await handler("task.classify-roots", { paths: [root] })
+      // Asserted through the endpoint rather than against `discoverSourceRepos`,
+      // because the bug this guards was never in that function: it was in the names
+      // the handler hands the bounds under. Spreading `scanBounds` passed `depth`
+      // and `directories` where `maxDepth` and `maxDirectories` were read, so both
+      // fell back to one and the count stayed one level deep while the setting read
+      // as if it had been applied. Every test of the function passed.
+      expect(answer.value[0].repositoryCount).toBe(1)
+      expect(answer.value[0].repositories.map((entry) => entry.name)).toEqual(["nested"])
+
+      // And the setting is what decides it. A depth that cannot change the answer
+      // is a setting that does nothing: at depth 1 the only thing below this root is
+      // the container, and a container is not a repository, so the count must be 0.
+      // Pinning both ends is what makes "94 at every depth" a failure rather than
+      // something nobody notices until someone re-reads the setting and believes it.
+      const shallow = handleFor({}, { scanDepth: 1 })
+      expect((await shallow("task.classify-roots", { paths: [root] })).value[0].repositoryCount).toBe(0)
+      const deeper = handleFor({}, { scanDepth: 3 })
+      expect((await deeper("task.classify-roots", { paths: [root] })).value[0].repositoryCount).toBe(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 
@@ -513,7 +671,12 @@ describe("the Host's memory of the last scan", () => {
       // panel must not be handed the older list back.
       await rm(join(fixture.root, "repo"), { recursive: true, force: true })
       await handler("worktree.scan", { paths })
-      expect((await handler("worktree.cached", { paths })).value).toEqual({ repositories: [], statuses: {} })
+      const emptied = (await handler("worktree.cached", { paths })).value
+      expect(emptied.repositories).toEqual([])
+      expect(emptied.statuses).toEqual({})
+      // Unchanged by a scan that found nothing: the depth is read off the
+      // configuration on every call, never out of the remembered rows.
+      expect(emptied.current).toMatchObject({ depth: expect.any(Number), directories: expect.any(Number) })
     } finally {
       await fixture.cleanup()
     }
@@ -531,9 +694,14 @@ describe("the Host's memory of the last scan", () => {
       }
       for (const path of sets) await handler("worktree.scan", { paths: [path] })
 
-      expect((await handler("worktree.cached", { paths: [sets[0]] })).value).toBeNull()
+      expect((await handler("worktree.cached", { paths: [sets[0]] })).value.repositories).toEqual([])
       const last = sets[sets.length - 1]
-      expect((await handler("worktree.cached", { paths: [last] })).value).toEqual({ repositories: [], statuses: {} })
+      const held = (await handler("worktree.cached", { paths: [last] })).value
+      expect(held.repositories).toEqual([])
+      expect(held.statuses).toEqual({})
+      // The remembered rows were dropped, but the bounds still come back: they
+      // come off the configuration, which no amount of forgetting reaches.
+      expect(held.current).toMatchObject({ depth: expect.any(Number), directories: expect.any(Number) })
     } finally {
       await fixture.cleanup()
     }
@@ -553,7 +721,156 @@ describe("the Host's memory of the last scan", () => {
       const remembered = (await handler("worktree.cached", { paths: [other, `${repo}${separator}`] })).value
       expect(remembered.repositories).toHaveLength(1)
       // A set that only overlaps is a set this Host has never scanned.
-      expect((await handler("worktree.cached", { paths: [repo] })).value).toBeNull()
+      expect((await handler("worktree.cached", { paths: [repo] })).value.repositories).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})
+
+// A Workspace registered inside another one - `E:\workspace\public` under
+// `E:\workspace` - is walked by name and again as part of its parent. Both walks
+// that the panel depends on have to make the same decision about it, because the
+// badge on a Workspace and the list its row expands to are two walks over one path
+// list; pruning one and not the other leaves a count beside a list it no longer
+// describes.
+describe("a Workspace registered inside another Workspace", () => {
+  const parent = "/work"
+  const inner = "/work/public"
+
+  it("drops the nested path from the paths a request carries", () => {
+    expect(topLevelRequestedPaths([parent, inner])).toEqual([parent])
+    // Order in, order out: the caller's order is theirs to have chosen, and the
+    // nested path goes whichever way round they were named.
+    expect(topLevelRequestedPaths([inner, parent])).toEqual([parent])
+    // Only the nested one goes: the outer is walked whatever else was asked for.
+    expect(topLevelRequestedPaths([parent])).toEqual([parent])
+    expect(topLevelRequestedPaths([inner])).toEqual([inner])
+    expect(topLevelRequestedPaths([])).toEqual([])
+  })
+
+  it("does not mistake a shared name prefix for containment", () => {
+    // `workspaces` starts with `work`, and a string test says it is inside it.
+    // Walking it as part of `work` would attribute its repositories to the parent
+    // and hide them from the Workspace that actually holds them.
+    expect(topLevelRequestedPaths(["/work", "/workspaces"])).toEqual(["/work", "/workspaces"])
+  })
+
+  it("keeps siblings that only share a parent", () => {
+    expect(topLevelRequestedPaths(["/work/a", "/work/b"])).toEqual(["/work/a", "/work/b"])
+  })
+
+  it("treats a trailing separator as the same directory", () => {
+    expect(topLevelRequestedPaths([parent, `${inner}/`])).toEqual([parent])
+  })
+
+  it("still classifies a nested Workspace on its own account", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "dsh-ws-nested-"))
+    try {
+      const nested = join(fixture, "work", "public")
+      await mkdir(join(nested, "inner-repo", ".git"), { recursive: true })
+      await mkdir(join(fixture, "work", "outer-repo", ".git"), { recursive: true })
+
+      const handler = handleFor({}, {})
+      const classified = (await handler("task.classify-roots", { paths: [join(fixture, "work"), nested] })).value
+      const byPath = Object.fromEntries(classified.map(row => [row.path, row]))
+      // The nested Workspace is dropped from the parent's pass so it is not walked
+      // twice, and it is still walked as itself - pruning removes the duplicate, not
+      // the Workspace.
+      expect(byPath[nested].repositoryCount).toBe(1)
+      // The parent's own walk still descends into the nested directory, so its count
+      // includes what is under it. That is why the panel stopped reading a count
+      // from here: a Workspace reading "0" beside a list of twelve came from two
+      // walks measuring two different things, and the badge now counts the list the
+      // row actually shows.
+      expect(byPath[join(fixture, "work")].repositoryCount).toBe(2)
+    } finally {
+      await rm(fixture, { recursive: true, force: true })
+    }
+  })
+})
+// running, and what the Loader hands `apply` is a live reference rather than the
+// value. Reading that reference without unwrapping it is what pinned the depth to
+// the default: `Number({ get })` is NaN, and every helper here answers NaN with the
+// default rather than with a number. So a depth of 3 scanned as 2, and reported
+// itself as 2, no matter what was written - which reads exactly like a setting that
+// is simply ignored, and is why this is pinned from both directions.
+describe("the scan limits the running entry is held to", () => {
+  beforeEach(() => clearScanCache())
+
+  const live = (read) => ({ get: read })
+
+  /** A scan walks the disk before it asks git, so the root has to exist. */
+  async function scanFixture(prefix) {
+    const root = await mkdtemp(join(tmpdir(), `dsh-ws-${prefix}-`))
+    return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  const porcelainFor = (path) => [
+    `worktree ${path}`,
+    "HEAD abc",
+    "branch refs/heads/main",
+    "",
+  ].join("\n")
+
+  it("reads a depth held as a reference, and not as the default it fell back to", async () => {
+    const handler = handleFor({}, { scanDepth: live(() => 3) })
+    const answer = (await handler("worktree.cached", { paths: [] })).value
+    expect(answer.current.depth).toBe(3)
+  })
+
+  it("follows a depth written after the entry loaded, without apply running again", async () => {
+    let depth = 2
+    const handler = handleFor({}, { scanDepth: live(() => depth) })
+    expect((await handler("worktree.cached", { paths: [] })).value.current.depth).toBe(2)
+
+    // The Plugins page writes this while the entry is running. Nothing re-runs
+    // `apply`, because a volatile field is not a restart - so a value read once
+    // at load would still answer with the old depth, which is the whole bug.
+    depth = 5
+    expect((await handler("worktree.cached", { paths: [] })).value.current.depth).toBe(5)
+  })
+
+  it("honours a directory cap held as a reference", async () => {
+    const handler = handleFor({}, { maxScanDirectories: live(() => 250) })
+    expect((await handler("worktree.cached", { paths: [] })).value.current.directories).toBe(250)
+  })
+
+  it("scans at the requested depth rather than the configured one", async () => {
+    const fixture = await scanFixture("depth")
+    try {
+      const deep = join(fixture.root, "one", "two")
+      await mkdir(join(deep, ".git"), { recursive: true })
+      const handler = handleFor({ "worktree list --porcelain": porcelainFor(deep) }, { scanDepth: live(() => 5) })
+
+      // The payload wins over the configuration, which is what lets the panel name
+      // the depth it is waiting on before the setting has been written down.
+      // `one/two` sits two levels under the root, so one is the depth that stops
+      // short of it and five is the one that reaches it.
+      await handler("worktree.scan", { paths: [fixture.root], depth: 1 })
+      expect((await handler("worktree.cached", { paths: [fixture.root] })).value.repositories).toEqual([])
+
+      await handler("worktree.scan", { paths: [fixture.root] })
+      expect((await handler("worktree.cached", { paths: [fixture.root] })).value.repositories).toHaveLength(1)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("honours names added to the ignore list through a reference", async () => {
+    const fixture = await scanFixture("ignored")
+    try {
+      const hidden = join(fixture.root, "skipped")
+      await mkdir(join(hidden, ".git"), { recursive: true })
+      const handler = handleFor({ "worktree list --porcelain": porcelainFor(hidden) }, {
+        ignoredScanDirectories: live(() => ["skipped"]),
+        removedScanDirectories: live(() => []),
+      })
+      // `Array.isArray` on the reference is false, so a guard written against the
+      // reference itself skipped the whole block and left the built-in names in
+      // force. The directory walked into is the evidence that it did.
+      await handler("worktree.scan", { paths: [fixture.root] })
+      expect((await handler("worktree.cached", { paths: [fixture.root] })).value.repositories).toEqual([])
     } finally {
       await fixture.cleanup()
     }

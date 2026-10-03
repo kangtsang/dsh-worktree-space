@@ -35,26 +35,78 @@ export interface WorktreeStatus {
   output: string
 }
 
+/**
+ * One repository's worktrees, as the Host read them.
+ *
+ * `currentBranch` is filled in on the client from the main worktree's row rather
+ * than asked for over git: the scan used to send `defaultBranch` and `defaultRef`,
+ * read by nothing anywhere, and `commonDir` before them, also read by nothing. All
+ * three cost a `git` process per repository, which on Windows is ~95% process
+ * creation - the scan of a ninety-four repository Workspace went from about 3.9s
+ * to about 0.9s by dropping them. If a future feature needs one, it belongs on the
+ * endpoint that needs it, not back on the path every refresh walks.
+ */
 export interface WorktreeList {
   repoPath: string
-  commonDir: string
-  defaultBranch?: string
-  defaultRef?: string
   currentBranch?: string
   worktrees: Worktree[]
 }
 
 /**
- * Answer of `worktree.cached`: what the Host still remembers of a scan.
+ * Answer of `worktree.scan`: what was found, and whether that is all of it.
+ *
+ * A scan that found some of the repositories under a Workspace returns those and
+ * `complete: false` with a `reason`. It used to throw instead, which discarded
+ * every repository it had already read and left the panel showing whatever was
+ * remembered - so one repository refusing to answer turned ninety good rows into
+ * an error page.
+ */
+export interface ScanAnswer {
+  lists: WorktreeList[]
+  /** Whether `lists` is everything the scan was going to look at. */
+  complete: boolean
+  /** Why not, in one sentence. Empty when `complete`. */
+  reason: string
+  /**
+   * The bounds this scan really used, as the Host resolved them.
+   *
+   * Reported rather than guessed at on the client: the panel names the depth while
+   * the scan runs, and the Host is the only side that knows it - the config may
+   * have moved on, `resolveScanDepth` may have clamped what the caller sent, and a
+   * payload may have carried a depth of its own. A name assembled from the client's
+   * own copy of the setting is one that can disagree with the walk it is
+   * describing, which is the one thing a scanning message must not do.
+   */
+  bounds: { depth: number; directories: number }
+}
+
+/**
+ * Answer of `worktree.cached`: what the Host still remembers of a scan, and what
+ * a scan would run at right now.
  *
  * It is the previous scan's own answer, held in the Host's memory since that scan
  * and dropped when the DSH instance exits — never written down, and never the last
  * word, because the panel scans again as soon as it has painted this.
+ *
+ * Answered whether or not anything is remembered. A Host that remembers nothing
+ * about these paths has empty `repositories`, which is a different statement from
+ * "this Host cannot tell you the current bounds" — and the panel needs the bounds
+ * before its very first scan resolves, so a miss must not take them away.
  */
 export interface RememberedScan {
   repositories: WorktreeList[]
   /** The statuses the Host happens to hold, by worktree path; others are missing. */
   statuses: Record<string, WorktreeStatus>
+  /**
+   * The bounds a scan started *now* would use, read from the Host's configuration.
+   *
+   * Not the remembered scan's own bounds, and not derived from them: a panel that
+   * named a depth from a previous run would be showing the scan that just
+   * happened, not the one on screen. Read on the Host so the client cannot be the
+   * one deciding, and carried here so the panel learns it from a call it already
+   * makes rather than from a new round trip.
+   */
+  current: { depth: number; directories: number }
 }
 
 /** One repository a task would span. */

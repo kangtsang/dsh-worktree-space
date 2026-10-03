@@ -108,6 +108,11 @@ export async function createTask(subprocess, options) {
     baseRef,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
     configuredRoot = '',
+    // How far to look for the repositories a task covers. The same bounds the
+    // classification and the suggestion used, so the count on the Workspace card,
+    // the list in the create dialog, and what this actually takes are one number
+    // rather than three that happen to disagree.
+    scanBounds = {},
   } = options
 
   const name = validateTaskName(task)
@@ -129,11 +134,11 @@ export async function createTask(subprocess, options) {
   }
   const selected = Array.isArray(repos)
     ? await resolveSourceRepos(sourceRoot, repos)
-    : await discoverSourceRepos(sourceRoot)
+    : await discoverSourceRepos(sourceRoot, scanBounds)
   if (selected.length === 0) {
     throw coded(
       'E6001',
-      `no source repositories found under ${sourceRoot}: expected a repository, or .git directories in its top-level subdirectories`,
+      `no source repositories found under ${sourceRoot}: expected a repository, or .git directories within ${scanBounds.maxDepth ?? 1} level(s) below it`,
     )
   }
 

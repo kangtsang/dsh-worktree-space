@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { scanAnswer } from "./scan-answer.helper"
 
 const clean = { changedFiles: 0, branchLine: "", output: "" }
 const linkedPath = "/projects/alpha.worktrees/task"
@@ -12,11 +13,11 @@ function worktree(path: string, branch: string, extra = {}) {
 }
 function repository(name: string, rows: ReturnType<typeof worktree>[] = []) {
   const repoPath = `/projects/${name}`
-  return { repoPath, commonDir: `${repoPath}/.git`, worktrees: [worktree(repoPath, `main-${name}`, { isMain: true }), ...rows] }
+  return { repoPath, worktrees: [worktree(repoPath, `main-${name}`, { isMain: true }), ...rows] }
 }
 function setup({ repos = [repository("alpha", [worktree(linkedPath, "task/feature")])], items = [] as any[] } = {}) {
   const api = {
-    scan: vi.fn().mockResolvedValue(repos),
+    scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
     cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockImplementation(async (path: string) => ({ ...clean, changedFiles: path.includes("dirty") ? 2 : 0 })),
     remove: vi.fn().mockResolvedValue({}),

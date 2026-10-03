@@ -37,7 +37,7 @@ export function scannedRepositories(lists: WorktreeList[]): WorktreeList[] {
  * @param remembered - the Host's remembered answer.
  * @returns the repositories, ready to render.
  */
-export function rememberedRepositories(remembered: RememberedScan): WorktreeList[] {
+export function rememberedRepositories(remembered: Pick<RememberedScan, "repositories" | "statuses">): WorktreeList[] {
   return scannedRepositories(remembered.repositories).map(repository => ({
     ...repository,
     worktrees: repository.worktrees.map(row => {

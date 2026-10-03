@@ -766,7 +766,7 @@ describe("finishTask", () => {
           { merged: true, removed: true, branchDeleted: true },
         ])
       expect(keys().filter((key) => key === "merge --no-ff --no-edit task/login")).toHaveLength(2)
-      expect(keys().filter((key) => key === "branch -d task/login")).toHaveLength(2)
+      expect(keys().filter((key) => key === "branch -d -- task/login")).toHaveLength(2)
       expect(result.containerRemoved).toBe(true)
       expect(existsSync(fixture.taskPath)).toBe(false)
     } finally {
@@ -1146,7 +1146,7 @@ describe("finishTask", () => {
           { merged: false, removed: true, branchDeleted: true },
           { merged: false, removed: true, branchDeleted: true },
         ])
-      expect(keys().filter((key) => key === "branch -D task/login")).toHaveLength(2)
+      expect(keys().filter((key) => key === "branch -D -- task/login")).toHaveLength(2)
       expect(keys().filter((key) => key.startsWith("merge "))).toEqual([])
     } finally {
       await fixture.cleanup()
@@ -1174,6 +1174,28 @@ describe("finishTask", () => {
       // worktree is still in it.
       expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ removed: true })
       expect(result.containerRemoved).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a task space that carries no record of being one", async () => {
+    const fixture = await taskFixture()
+    const { subprocess } = subprocessMock(fixture.handlers)
+    try {
+      // The layout alone - two levels down, a linked worktree inside - is a fact
+      // about a path the caller named, not a claim on it. The record is the claim,
+      // and it lives in the directory, so it cannot be stale the way a registry
+      // can. Removed here, the finish refuses and names what is missing.
+      await rm(join(fixture.taskPath, "worktree-space.json"), { force: true })
+      await expect(fixture.finish(subprocess, { task: "login", merge: true, deleteBranch: true }))
+        .rejects.toThrow(/holds no worktree-space\.json/)
+      // Named, because a user reading the refusal has to be able to tell which
+      // file to put back.
+      await expect(fixture.finish(subprocess, { task: "login", merge: true }))
+        .rejects.toThrow(/What is missing: .*worktree-space\.json/)
+      // Nothing was removed on the way to the refusal.
+      expect(existsSync(fixture.taskPath)).toBe(true)
     } finally {
       await fixture.cleanup()
     }
