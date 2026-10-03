@@ -59,7 +59,9 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "node scripts/test/run-tests.mjs",
+    "test:unit:fast": "node scripts/test/run-tests.mjs unit",
+    "test:unit:git": "node scripts/test/run-tests.mjs git",
     "check:client-bundle": "node scripts/check-client-bundle.mjs",
     "check:tracked-bundle": "node scripts/check-tracked-bundle.mjs",
     "check:package": "node scripts/check-package-contents.mjs",

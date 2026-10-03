@@ -88,11 +88,35 @@ describe("filenames", () => {
   it("names every test after the thing it tests, in kebab-case", async () => {
     // `api.test.ts` is the shape: the module under test, kebab-cased, plus the
     // test suffix. A file called `tests.test.mjs` tells a reader nothing.
+    //
+    // The second accepted shape is `*.helper.*`, for the one thing that is not a
+    // test but has to live beside them: a small builder shared by several files,
+    // which is here as `scan-answer.helper.ts`. It exists because the same three
+    // lines were about to be written into seven files, and seven copies is seven
+    // places for them to drift apart - which is the exact failure this rule was
+    // written to prevent. Naming it `*.helper.*` rather than leaving it as a bare
+    // `scan-answer.ts` keeps the distinction readable at a glance: vitest collects
+    // `*.test.*` and never collects these, so the name says which is which without
+    // anyone having to know the collector's include pattern.
     const offenders = (await sourceFiles())
       .filter((path) => path.replace(/\\/g, "/").startsWith("test/"))
       .map((path) => basename(path))
-      .filter((name) => !/^[a-z0-9]+(?:-[a-z0-9]+)*\.test\.(mjs|ts|tsx)$/.test(name))
+      .filter((name) => !/^[a-z0-9]+(?:-[a-z0-9]+)*\.(test|helper)\.(mjs|ts|tsx)$/.test(name))
 
     expect(offenders).toEqual([])
+  })
+
+  it("does not let a helper pass for a test that runs nothing", async () => {
+    // The suffix is a claim, and a claim should be checked. A `*.helper.*` that
+    // vitest collects would either run as an empty suite or fail outright, and
+    // either way the name has stopped meaning what it says.
+    const helpers = (await sourceFiles())
+      .filter((path) => path.replace(/\\/g, "/").startsWith("test/"))
+      .map((path) => basename(path))
+      .filter((name) => name.endsWith(".helper.mjs") || name.endsWith(".helper.ts") || name.endsWith(".helper.tsx"))
+
+    for (const name of helpers) {
+      expect(name).not.toMatch(/\.(test|spec)\./)
+    }
   })
 })
