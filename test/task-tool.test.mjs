@@ -71,6 +71,45 @@ describe("registerTaskTool", () => {
     expect(typeof dispose).toBe("function")
   })
 
+  it("refuses force, which is the one request a model may not make for itself", async () => {
+    const { ctx, captured } = toolContext()
+    try {
+      registerTaskTool(ctx)
+      // Force is irreversible twice over - it discards uncommitted work and swaps
+      // `branch -d` for `branch -D` - so it is not gated on a flag the model also
+      // holds. It is refused outright, before the container root is even resolved.
+      await expect(captured[0].execute({ action: "done", task: "login", force: true }, {}))
+        .rejects.toMatchObject({ code: "E7007" })
+      await expect(captured[0].execute({ action: "done", task: "login", force: true }, {}))
+        .rejects.toThrow(/management page/)
+      // Abandoning a task reaches the same refusal by the other route: deleting a
+      // branch with no merge is exactly what needs force, and force is refused.
+      await expect(captured[0].execute({ action: "done", task: "login", force: true, deleteBranch: true, merge: false }, {}))
+        .rejects.toMatchObject({ code: "E7007" })
+      // With no force at all it is not E7007 - it falls through to the host's own
+      // rule, which needs a container to be resolved before it can even say so.
+      await expect(captured[0].execute({ action: "done", task: "login", deleteBranch: true, merge: false }, {}))
+        .rejects.toMatchObject({ code: "E7006" })
+    } finally { /* nothing was written: the refusal comes first */ }
+  })
+
+  it("leaves the recoverable parts of finishing alone", async () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    // Merging, and removing a branch once it has landed, are both available here:
+    // `git branch -d` refuses an unmerged branch on its own, so neither loses a
+    // commit. This asserts the refusal is scoped to `force` and nothing else.
+    await expect(captured[0].execute({ action: "done", task: "login", merge: true, deleteBranch: true, cleanStray: true }, {}))
+      .rejects.not.toMatchObject({ code: "E7007" })
+  })
+
+  it("describes force as unavailable, so the model is not asked to try it", () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    expect(captured[0].parameters.properties.force.description).toMatch(/Refused here/)
+    expect(captured[0].description).toMatch(/cannot do `force`/)
+  })
+
   it("stays out of the way when the deployment serves no tool runtime", () => {
     expect(registerTaskTool({ get: () => undefined })).toBeUndefined()
   })

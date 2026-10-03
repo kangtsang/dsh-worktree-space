@@ -220,17 +220,42 @@ function truncate(value, limit) {
 }
 
 /**
- * Hide a password or token that git would have been given inside a URL.
+ * The credential inside a URL's authority, of any scheme.
  *
- * A URL the plugin hands to git can carry credentials, and a failing call
- * repeats it in its own diagnostic, so both the argument and what git said
- * about it are replaced. Only the authority is touched: a path that merely
- * contains an `@` keeps it, because a repository path is not a secret.
+ * Only the authority is touched: a path that merely contains an `@` keeps it,
+ * because a repository path is not a secret. The authority is everything up to
+ * the next `/` or whitespace, so a user without a password
+ * (`https://bot@git.example.com/x`) is covered by the same rule as one with.
+ */
+const URL_CREDENTIALS = /\/\/[^\/\s@]*@/g
+
+/**
+ * A secret handed over as an assignment rather than in a URL.
+ *
+ * The authority rule cannot see these, and a credential does not only reach a
+ * command line inside a URL: a header, a query parameter and an
+ * `Authorization: bearer ...` echoed back by a failing call all carry the
+ * secret without one. Each key is matched only where it is being assigned a
+ * value, so a branch or a path that happens to be called `secret` is untouched.
+ *
+ * It over-redacts rather than under-redacts on purpose - this is an audit log,
+ * and a word that merely looked like a secret being hidden costs a reader
+ * nothing, while a secret that got through costs the user everything. That is
+ * also why a value runs to the end of its line rather than to the next space:
+ * an auth header is two words, and stopping at the first would hide the word
+ * `Bearer` and leave the token behind it in plain text.
+ */
+const ASSIGNED_SECRET = /((?:token|password|passwd|secret|authorization|api[-_]?key)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\r\n,;]+)/gi
+
+/**
+ * Hide a password or token, wherever git was given it.
  * @param value - an argument or a diagnostic.
- * @returns the text with any URL authority replaced.
+ * @returns the text with any credential replaced.
  */
 function redact(value) {
-  return String(value ?? '').replace(/\/\/[^/\s@]+@/g, '//***@')
+  return String(value ?? '')
+    .replace(URL_CREDENTIALS, '//***@')
+    .replace(ASSIGNED_SECRET, '$1***')
 }
 
 /**

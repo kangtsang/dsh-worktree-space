@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseSkillFile, PROVIDER_NAME, registerTaskSkill, SKILL_NAME } from "../src/host/task/skill.js"
 
@@ -75,6 +76,33 @@ describe("registerTaskSkill", () => {
     const second = await providers[0].get(candidate, {})
     expect(second.content).toBe(first.content)
     expect(second.content).toBe(parseSkillFile(readFileSync(skillFile, "utf8"), skillFile).content)
+  })
+
+  it("serves only the file it registered, and does not report what was probed", async () => {
+    const { ctx, providers } = skillContext()
+    registerTaskSkill(ctx)
+    const [candidate] = await providers[0].list({})
+
+    // A locator arriving in the request is a name to check, not a path to follow.
+    // This provider serves exactly one file and publishes its own locator, so
+    // anything else is a request to open a file it never offered.
+    const elsewhere = mkdtempSync(join(tmpdir(), "dsh-skill-probe-"))
+    const decoy = join(elsewhere, "SKILL.md")
+    writeFileSync(decoy, "---\nname: task-worktree-space\ndescription: secret\n---\nleaked\n")
+    try {
+      await expect(providers[0].get({ locator: decoy }, {})).rejects.toMatchObject({ code: "E7005" })
+      // The refusal names the basename only: answering with the path it was
+      // handed would report back what was probed, which is the half of the
+      // oracle that matters.
+      const refusal = await providers[0].get({ locator: decoy }, {}).catch((error) => error)
+      expect(refusal.message).toContain("SKILL.md")
+      expect(refusal.message).not.toContain(elsewhere)
+      // The one locator that is genuinely this provider's still resolves.
+      const served = await providers[0].get({ locator: candidate.locator }, {})
+      expect(served.content).toContain("# Task Worktree Space")
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
   })
 
   it("stays out of the way when the deployment serves no skill registry", () => {

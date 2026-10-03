@@ -453,7 +453,29 @@ describe("the audit log", () => {
     }
   })
 
-  it("hides credentials a URL carried", async () => {
+  it("hides a credential handed over outside a URL", async () => {
+      const container = await containerFixture()
+      try {
+        auditEnter({ op: "task.create", task: "login", project: "alpha", tasksRoot: container.root })
+        // A header, a parameter and a bearer token are three of the ways a secret
+        // reaches a command line without ever being a URL authority.
+        await expect(
+          runGit(subprocessDouble({ exitCode: 128, stderr: "Authorization: Bearer abc123 rejected" }), "E:/src/alpha", [
+            "-c", "http.extraHeader=Authorization: Bearer abc123", "fetch",
+          ]),
+        ).rejects.toThrow()
+
+        const [record] = await readAudit(container.root)
+        const text = JSON.stringify(record)
+        expect(text).not.toContain("abc123")
+        // A word that is only a word is left alone.
+        expect(text).toContain("fetch")
+      } finally {
+        await container.cleanup()
+      }
+    })
+
+    it("hides credentials a URL carried", async () => {
     const container = await containerFixture()
     try {
       auditEnter({ op: "task.create", task: "login", project: "alpha", tasksRoot: container.root })
