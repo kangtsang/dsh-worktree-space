@@ -1,7 +1,7 @@
 {
   "name": "dsh-worktree-space",
   "version": "1.1.0",
-  "description": "Worktree Space: A task that covers multiple Git repositories can give each repository its own worktree on one shared task branch under a single task space directory, then register that task space as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without interfering with one another; when the work is done they merge back into the target branch of each repository, and the worktree branches and task spaces are cleaned up as needed.",
+  "description": "Worktree Space：把多仓库任务放进独立任务空间，每个仓库一个 worktree、同一个任务分支，多任务可创建多个任务空间并行推进互不干扰；收尾合并回各仓库目标分支，发生冲突可交给 agent 处理。Put a multi-repository task in its own task space, give each repository a worktree and the same task branch, and let several tasks run in parallel in separate task spaces without interfering with one another; merge back into each repository's target branch when you are done, or hand conflicts to an agent.",
   "icon": "./icon.svg",
   "repository": {
     "type": "git",
