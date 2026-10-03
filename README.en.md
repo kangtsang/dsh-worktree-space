@@ -2,11 +2,12 @@
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
-Worktree Space for DeepSeek Harness: A task that covers multiple Git repositories can give each repository
-its own worktree on one shared task branch under a single task space directory, then register that task space
-as a workspace where agent sessions work on their own. Multiple tasks can go forward in parallel without
-interfering with one another; when the work is done they merge back into the target branch of each repository,
-and the worktree branches and task spaces are cleaned up as needed.
+Worktree Space: A task that involves one or more Git repositories goes into its own task space directory, where each
+participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH
+workspace, agent sessions start working inside it, and each task gets its own space, so several tasks can run in
+parallel without interfering with one another. When a task is finished you can merge the task branch back into the
+target branch, remove the worktrees, and file whatever documents were left in the task space into a directory you
+choose; you can also hand the uncommitted commits and merge conflicts to an agent.
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
@@ -52,11 +53,11 @@ top right.
 ## ✨ Features
 
 - **Create a task from a session.** Pick a source root, name the task, choose the branch prefix,
-  tick the repositories it should span, and say where the task space goes. Every repository gets a
+  tick the repositories to take part, and say where the task space goes. Every repository gets a
   worktree on `<branch prefix><task>` — `task/<task>` by default — starting from each repository's
   current HEAD, or from a named branch or commit.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
-  directory is the task space, so an agent can edit across repositories without touching the
+  directory is the task space, so an agent can edit inside the task space without touching the
   source checkouts.
 - **A management page**, with three views (both ways in, and their defaults, are described under Manage a Worktree Space):
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
@@ -242,7 +243,8 @@ data directory, which needs a DSH restart.
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
 | Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
 | Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
-| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 1000 | How many directories one scan may read; past it, a smaller Workspace is requested |
+| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, a smaller Workspace is requested |
+| Directories the scan skips | any list of directory names | the plugin's 24 | A scan never descends into directories with these names. The plugin ships 24 dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — and you can add your own or take one of those away. **Removing a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Up to 200 of your own. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
 | Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source Workspace by the rule below and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits, and their tasks cannot crowd each other. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
 | Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
@@ -277,7 +279,7 @@ a time per level. Any directory holding `.git` counts as a repository; `node_mod
    settings when the space is created, and the note below it states what that choice costs.
    For how the recommendation is worked out and what the container holds, see Layout of a
    task.
-5. Tick the repositories the task should span — each card names the branch its HEAD is on — and
+5. Tick the repositories the task should take part in — each card names the branch its HEAD is on — and
    choose the branch base.
 6. Click **Create and open**. The new Workspace opens a session whose working directory is the
    task space.
