@@ -12,7 +12,7 @@ import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
-import { assertIsolated } from './paths.js'
+import { assertIsolated, refuseDelete } from './paths.js'
 
 import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
@@ -73,12 +73,15 @@ function holdsOnlyOurs(leftovers, created) {
   return leftovers.every((name) => TASK_OWNED_FILES.includes(name) || created.some((entry) => basename(entry.path) === name))
 }
 
-async function rollbackTask(subprocess, taskPath, created) {
+async function rollbackTask(subprocess, tasksRoot, taskPath, created) {
   const stranded = []
   for (const entry of created) {
     // The worktree was created by this call and never handed to a caller, so a
     // forced removal is safe and is the only reliable way to clean a
-    // half-registered worktree.
+    // half-registered worktree - but only while it is still the directory this
+    // call put there, so it is asked first.
+    const refused = refuseDelete(tasksRoot, entry.path, `the worktree '${entry.name}'`)
+    if (refused !== '') { stranded.push(entry.name); continue }
     if (!(await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path]))) {
       stranded.push(entry.name)
     }
@@ -225,7 +228,7 @@ export async function createTask(subprocess, options) {
       })),
     }))
   } catch (error) {
-    const stranded = await rollbackTask(subprocess, taskPath, created)
+    const stranded = await rollbackTask(subprocess, tasksRoot, taskPath, created)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
     // What the rollback could not undo is the part a create that failed leaves
     // behind, and it is not in the message the caller reads - so it is here.

@@ -65,6 +65,7 @@ export const ERROR_CODES = {
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
   E5002: 'archive.js - finishing did not complete for every repository',
   E5003: 'archive.js - one repository could not be finished and needs another attempt',
+  E5004: 'archive.js - the source checkout has uncommitted work the merge would overwrite',
 
   // --- E6xxx scanning and discovery ---------------------------------------
   E6001: 'discover.js, add.js - a candidate directory is not a source repository',

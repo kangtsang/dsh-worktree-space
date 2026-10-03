@@ -1,6 +1,5 @@
 import z from '@deepseek-ai/schemastery'
-import { readdir, readFile, rm } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabledReader } from './task/audit-log.js'
 import { coded, UNKNOWN } from './task/codes.js'
@@ -55,7 +54,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
   'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009',
-  'E5001', 'E5002', 'E5003',
+  'E5001', 'E5002', 'E5003', 'E5004',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006',
   'E9001',
@@ -85,15 +84,14 @@ export const cleanPath = (value) => {
   return text.length > 1 ? text.replace(/[\\/]+$/, '') : text
 }
 
-async function removeOrphanedWorktree(path) {
-  if (!existsSync(path)) return false
-  let marker
-  try { marker = await readFile(`${path}/.git`, 'utf8') } catch { return false }
-  const gitdir = marker.match(/^gitdir:\s*(.+)\s*$/m)?.[1]
-  if (!gitdir || existsSync(gitdir)) return false
-  await rm(path, { recursive: true, force: false })
-  return true
-}
+// There is deliberately no cleanup pass here for a worktree directory whose git
+// directory is gone. One was drafted as `removeOrphanedWorktree` - it checked
+// for a `.git` file naming a metadata directory that no longer exists, and
+// removed the directory - and it was never called. Deleting it is the right
+// ending: such a directory holds working files that git can no longer reach, so
+// there is no `git checkout`, no `git stash` and no `git diff` that would recover
+// what is in there, and a recursive delete of it is unrecoverable. A scan is
+// asked to report what is on disk, not to decide what should not be.
 
 const IGNORED_SCAN_DIRECTORIES = new Set(['node_modules', 'Library', 'dist', 'build', 'vendor'])
 

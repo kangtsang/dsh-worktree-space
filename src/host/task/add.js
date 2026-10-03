@@ -26,7 +26,7 @@ import { sourceFacts } from './create.js'
 import { isSourceRepository } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
-import { isInside, samePathLocation } from './paths.js'
+import { isInside, refuseDelete, samePathLocation } from './paths.js'
 
 import { TASK_METADATA, TASK_README, listTaskWorktrees, readTaskMetadata, renderTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
@@ -131,9 +131,14 @@ function assertAddIsolated(taskPath, repoPath, name) {
  * @param created - the worktrees this call made, in the order it made them.
  * @returns the names of the worktrees that could not be removed.
  */
-async function rollbackAdded(subprocess, created) {
+async function rollbackAdded(subprocess, tasksRoot, created) {
   const stranded = []
   for (const entry of created) {
+    // Same fence as everywhere else: git does this removal, so nothing else in
+    // this plugin stands between it and a directory that is no longer the one
+    // this call created.
+    const refused = refuseDelete(tasksRoot, entry.path, `the worktree '${entry.name}'`)
+    if (refused !== '') { stranded.push(entry.name); continue }
     if (!(await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path]))) {
       stranded.push(entry.name)
     }
@@ -284,7 +289,7 @@ export async function addTaskRepositories(subprocess, options) {
       ],
     })
   } catch (error) {
-    const stranded = await rollbackAdded(subprocess, created)
+    const stranded = await rollbackAdded(subprocess, tasksRoot, created)
     await restoreMetadata(taskPath, previousJson, metadata)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
     // The two outcomes again, because "rolled back" and "left something behind"

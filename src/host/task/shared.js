@@ -8,6 +8,7 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tryRunGit } from './git.js'
 import { validateProjectName, validateTaskName } from './naming.js'
+import { assertTaskSpaceShape } from './paths.js'
 import { recommendTasksRoot } from './paths.js'
 
 /** File a task container carries so a session finds the task's own rules. */
@@ -114,7 +115,10 @@ export function resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot) {
  * @returns the task space directory.
  */
 export function taskSpacePath(tasksRoot, project, task) {
-  return join(String(tasksRoot ?? '').trim(), validateProjectName(project), validateTaskName(task))
+  const root = String(tasksRoot ?? '').trim()
+  const path = join(root, validateProjectName(project), validateTaskName(task))
+  assertTaskSpaceShape(root, path)
+  return path
 }
 
 

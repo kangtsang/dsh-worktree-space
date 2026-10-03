@@ -705,6 +705,13 @@ describe("finishTask", () => {
       mainRepos[name] = join(tmpdir(), `multi-worktree-main-${name}`)
       worktrees.add(join(taskPath, name))
     }
+    // The record a create leaves behind, and the only thing that says which branch
+    // this task made. A finish deletes no branch without it: `git branch -D` runs
+    // in the source repository, outside the container, so the name to delete comes
+    // from here rather than from whatever a worktree has checked out now.
+    await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+      task: "login", project: PROJECT, branch: "task/login",
+    }, null, 2) + "\n")
     const porcelain = (name) =>
       `worktree ${mainRepos[name]}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${join(taskPath, name)}\nHEAD bbb\nbranch refs/heads/task/login\n`
     const handlers = {

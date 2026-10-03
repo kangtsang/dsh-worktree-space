@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest"
 import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { finishTask, planTask } from "../src/host/task/operations.js"
@@ -215,6 +215,58 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       expect(result.repositories[0].error).toContain("elsewhere")
       expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "main"])).toBe(false)
       expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("names uncommitted work in the source checkout instead of calling it a conflict", async () => {
+    // A merge into the branch the source repository has checked out runs in that
+    // checkout, and git refuses it when the checkout holds changes the merge would
+    // overwrite. Git says so in words that name a conflict nobody created, so the
+    // refusal used to arrive as `conflict: true` - which sends the reader after
+    // conflict markers and a merge to conclude, in a repository where no merge was
+    // ever started.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      // The file the task branch also changed, so the merge really would overwrite it.
+      writeFileSync(join(source, "shared.txt"), "uncommitted work in the source checkout\n")
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(true)
+      // Not a conflict: nothing was reconciled and nothing is waiting to be.
+      expect(result.repositories[0].conflict).toBeFalsy()
+      // Named as what it is, with the path, so the reader knows where to look.
+      expect(result.repositories[0].error).toContain("shared.txt")
+      expect(result.repositories[0].error).toMatch(/uncommitted/i)
+      // The work is still there - refusing is the whole point.
+      expect(readFileSync(join(source, "shared.txt"), "utf8")).toBe("uncommitted work in the source checkout\n")
+      // And the branch did not move.
+      expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "develop"])).toBe(false)
+      expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("merges past untracked files, which a merge does not overwrite", async () => {
+    // The guard above refuses on tracked paths. An untracked file is the one kind of
+    // dirt a merge writes straight past, so refusing on it would send someone to
+    // commit a build output that was never in the way.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      writeFileSync(join(source, "scratch.log"), "not tracked\n")
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(false)
+      expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "develop"])).toBe(true)
+      expect(existsSync(join(source, "scratch.log"))).toBe(true)
     } finally {
       await fixtureUnderTest.cleanup()
     }

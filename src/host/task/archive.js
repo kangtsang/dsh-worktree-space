@@ -11,9 +11,9 @@ import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log
 import { coded } from './codes.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
-import { assertIsolated } from './paths.js'
+import { assertIsolated, refuseDelete } from './paths.js'
 
-import { TASK_OWNED_FILES, isLinkedWorktree, taskSpacePath } from './shared.js'
+import { TASK_OWNED_FILES, isLinkedWorktree, readTaskMetadata, taskSpacePath } from './shared.js'
 
 /**
  * Whether a merge is waiting to be concluded in a checkout.
@@ -81,6 +81,41 @@ async function conflictMarkers(subprocess, site) {
 async function uncommittedCount(subprocess, worktreePath) {
   const status = await tryRunGit(subprocess, worktreePath, ['status', '--short'])
   return status === '' ? 0 : status.split(/\r?\n/).filter((line) => line.trim() !== '').length
+}
+
+/**
+ * The tracked paths a checkout has changed but not committed.
+ *
+ * `git status --short` is read and its untracked lines are dropped, because those
+ * are the one kind of dirt a merge does not mind: git writes a tree of tracked
+ * files and leaves `??` alone. Naming them in a refusal would send someone to commit
+ * a build output that was never going to be in the way.
+ *
+ * Staged and unstaged both count, and both are reported: `A` against the first
+ * column is staged, `M` against the second is not, and a merge refuses over either.
+ *
+ * The columns are not read at a fixed offset, because `runGit` trims what it
+ * returns and the first status line of a dirty checkout begins with the blank in
+ * ` M path` - that leading blank is the unstaged column, and slicing three
+ * characters off a trimmed line turns `shared.txt` into `hared.txt`. What is
+ * needed from a line is only whether it is untracked and where the path starts, so
+ * both are asked of the pattern rather than of a position.
+ * @param subprocess - the profile's subprocess service.
+ * @param site - the checkout to read.
+ * @returns the paths, which is empty for a clean checkout.
+ */
+async function dirtyPaths(subprocess, site) {
+  const status = await tryRunGit(subprocess, site, ['status', '--short'])
+  return status
+    .split(/\r?\n/)
+    // `??` is the only two-column marker that means "not tracked", and it always
+    // sits at the front of the line whether or not a column was trimmed away.
+    .filter((line) => !line.startsWith('??'))
+    // The path begins after the status columns and the blank that follows them, so
+    // it is whatever remains once those are gone - matched rather than sliced, to
+    // survive the leading blank having been trimmed off the first line.
+    .map((line) => line.replace(/^\s*[MADRCU?!]{1,2}\s+/, '').trim())
+    .filter((path) => path !== '')
 }
 
 /**
@@ -171,6 +206,27 @@ async function mergeCandidates(subprocess, mainRepo, listed, taskBranch, checked
 async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
   const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (target === checkedOut) {
+    // Git refuses this merge when the checkout holds changes the merge would
+    // overwrite, and refuses it in words that name a conflict nobody created. Left
+    // to itself that refusal reaches the caller as a conflict: a file to resolve, a
+    // merge to conclude, an agent to send - none of which applies, because what is
+    // standing in the way is uncommitted work in the repository the user works in.
+    // So it is caught here, where the distinction is still visible, and named for
+    // what it is.
+    //
+    // Only this branch needs it. A target the source repository is not on is merged
+    // in a temporary worktree below, which never touches these files at all.
+    const pending = await dirtyPaths(subprocess, mainRepo)
+    if (pending.length > 0) {
+      // English here, as every other message this host produces: it reaches the
+      // page as-is behind a disclosure, and the page is not always in English. The
+      // code is what a caller should branch on; the sentence is for whoever is
+      // reading it.
+      throw coded(
+        'E5004',
+        `the checkout at ${mainRepo} has uncommitted work that this merge would overwrite: ${pending.join(', ')}. Commit or stash it, then finish the task.`,
+      )
+    }
     try {
       await runGit(subprocess, mainRepo, ['merge', '--no-ff', '--no-edit', branch])
     } catch (error) {
@@ -463,6 +519,18 @@ export async function finishTask(subprocess, options) {
   if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
   auditEnter({ task, project: projectName, tasksRoot })
 
+  // The branch this container was made for, as the record in the container says.
+  // It is the only branch a finish may delete: `git branch -D` runs in the source
+  // repository, outside the fence, so the name to delete is taken from what this
+  // plugin wrote rather than from whatever the worktree has checked out now. A
+  // container with no readable record deletes no branch at all, and says so.
+  const warnings = []
+  const recorded = await readTaskMetadata(taskPath)
+  const taskBranch = typeof recorded?.branch === 'string' ? recorded.branch : ''
+  if (taskBranch === '') {
+    warnings.push(`no task branch is recorded in ${taskPath}; no branch was deleted in any repository`)
+  }
+
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
   for (const entry of entries) {
@@ -473,7 +541,6 @@ export async function finishTask(subprocess, options) {
   if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
 
   const repositories = []
-  const warnings = []
   let failed = false
 
   for (const worktreePath of worktrees) {
@@ -574,7 +641,15 @@ export async function finishTask(subprocess, options) {
         // git's own words: the page explains the conflict in the user's language and
         // shows this behind a disclosure, and the answer's `conflict` flag plus
         // `removed: false` tell a caller the worktree and branch are still there.
-        outcome.conflict = true
+        //
+        // E5004 is the exception to that rule, and it is checked first because it is
+        // not a conflict at all. Marking it one sends the reader after conflict
+        // markers and a merge to conclude, in a checkout where no merge was ever
+        // started - the thing standing in the way is uncommitted work in the
+        // repository they work in. `mergeIntoBranch` refuses it by name; this
+        // recognises it even where that guard did not run.
+        const dirtyCheckout = error?.code === 'E5004' || /local changes .* would be overwritten/i.test(String(error?.message ?? ''))
+        outcome.conflict = !dirtyCheckout
         await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
         outcome.error = error.message
         repositories.push(outcome)
@@ -584,6 +659,19 @@ export async function finishTask(subprocess, options) {
     }
 
     const removeArgs = force ? ['worktree', 'remove', '--force', worktreePath] : ['worktree', 'remove', worktreePath]
+    // Fence. This is the one removal here performed by git rather than by this
+    // plugin, so none of the checks that guard the `rm` calls below reach it: git
+    // deletes the directory it is handed, and a link in that place would carry the
+    // delete straight out of the container. Refused the same way any other
+    // per-repository failure is - named, skipped, and reported - so one impossible
+    // path cannot strand the repositories after it half-finished.
+    const refused = refuseDelete(tasksRoot, worktreePath, `the worktree '${name}'`)
+    if (refused !== '') {
+      outcome.error = refused
+      repositories.push(outcome)
+      failed = true
+      continue
+    }
     if (!(await gitSucceeded(subprocess, mainRepo, removeArgs))) {
       outcome.error = 'failed to remove the worktree (uncommitted changes? force it deliberately)'
       repositories.push(outcome)
@@ -593,13 +681,28 @@ export async function finishTask(subprocess, options) {
     outcome.removed = true
 
     if (deleteBranch) {
-      const deleted = await gitSucceeded(
-        subprocess,
-        mainRepo,
-        force ? ['branch', '-D', branch] : ['branch', '-d', branch],
-      )
-      outcome.branchDeleted = deleted
-      if (!deleted) warnings.push(`branch '${branch}' was not deleted in '${name}'`)
+      // Only ever the branch this task made. `branch` is whatever the worktree
+      // happens to have checked out - it can be switched by hand, and a worktree
+      // that merged cleanly is no proof of which branch was merged - and
+      // `git branch -D` runs in the source repository, which is outside the
+      // container this fence covers. So the name has to match what the container
+      // recorded before it goes; anything else is named and left alone.
+      if (branch !== taskBranch) {
+        outcome.branchDeleted = false
+        warnings.push(
+          branch === ''
+            ? `'${name}' has no branch checked out, so no branch was deleted in '${mainRepo}'`
+            : `'${name}' is on '${branch}', not on the task branch '${taskBranch}', so that branch was left alone in '${mainRepo}'`,
+        )
+      } else {
+        const deleted = await gitSucceeded(
+          subprocess,
+          mainRepo,
+          force ? ['branch', '-D', branch] : ['branch', '-d', branch],
+        )
+        outcome.branchDeleted = deleted
+        if (!deleted) warnings.push(`branch '${branch}' was not deleted in '${name}'`)
+      }
     }
     repositories.push(outcome)
   }
@@ -618,6 +721,21 @@ export async function finishTask(subprocess, options) {
     if (entry.isDirectory() && await isLinkedWorktree(join(taskPath, entry.name))) continue
     strays.push(entry.name)
     if (strayKind(entry.name, entry.isDirectory()) === 'content') content.push(entry.name)
+    // Fence. A leftover is named, not vetted: it is whatever happens to sit in
+    // the task directory, and two of the three ways it is disposed of remove it
+    // recursively. `readdir` said it is a directory, which on Windows a junction
+    // also is, so it is asked directly whether it is a link - and a link is kept
+    // and named rather than deleted, because it is a name for somewhere else.
+    if (entry.isDirectory()) {
+      const refused = refuseDelete(tasksRoot, join(taskPath, entry.name), `the leftover '${entry.name}'`)
+      if (refused !== '') {
+        keep.push(entry.name)
+        warnings.push(refused)
+        strays.pop()
+        content.splice(content.indexOf(entry.name), 1)
+        continue
+      }
+    }
   }
 
   // The user's own content always leaves the container: filed into the documents

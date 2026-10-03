@@ -59,6 +59,12 @@ const ILLEGAL_BRANCH_CHARACTERS = /[\s~^:?*\[\]\\\u0000-\u001f\u007f]/
 export function validateTaskName(task) {
   const name = String(task ?? '')
   if (name === '') throw new TaskNameError('a task name is required')
+  // The two relative names, which {@link validateProjectName} already refuses and
+  // which FORBIDDEN cannot catch because they carry neither a separator nor a
+  // space. `taskSpacePath` joins this straight into `<root>/<project>/<task>`, so
+  // a task named `..` resolves back to the container root and one named `.` to the
+  // project layer - and finishing a task deletes what it finds under that path.
+  if (name === '.' || name === '..') throw new TaskNameError(`task name must not be '.' or '..': ${name}`)
   if (FORBIDDEN.test(name)) {
     throw new TaskNameError(`task name must not contain /, \\ or whitespace: ${name}`)
   }
