@@ -25,7 +25,7 @@ import { createWorktreeApi } from "./lib/api"
 import { previewValue, subscribePreview } from "./lib/config-preview"
 import { installLocale, NS, t } from "./lib/i18n"
 import { cleanPath } from "./lib/paths"
-import type { Workspace } from "./lib/types"
+import type { SourceRootClassification, Workspace } from "./lib/types"
 
 /** The client plugin context surface this plugin touches. */
 export type WorktreeClientContext = Context & {
@@ -126,18 +126,29 @@ export const WorktreePlugin = {
     // before the overlay mounted, without re-registering on every render.
     const requestCreate = (target: Pick<Workspace, "path" | "title">) => openCreate(target)
     const requestArchive = (path: string) => openArchive(path)
+    const requestManage = () => openManage()
 
     const refreshClassification = async () => {
       if (!active) return
       const generation = ++refreshGeneration
       const items = workspaces.list.getSnapshot().items as Workspace[]
-      const classified = await Promise.all(items.map(async (workspace) => {
-        try {
-          return await api.classifyRoot(workspace.path)
-        } catch {
-          return undefined
-        }
-      }))
+      const paths = items.map(workspace => workspace.path)
+      if (paths.length === 0) {
+        classification = { sourceRootPaths: new Set<string>() }
+        for (const listener of classificationListeners) listener()
+        return
+      }
+      // One request for the whole list. It walks every path now and answers now,
+      // which is what decides whether a row offers to create a task space here -
+      // so it is exactly the answer that must not be reused from last time. What
+      // the single form cost was the round trip, one per Workspace, every time
+      // the list changed at all.
+      let classified: SourceRootClassification[]
+      try {
+        classified = await api.classifyRoots(paths)
+      } catch {
+        classified = []
+      }
       if (!active || generation !== refreshGeneration) return
       const sourceRootPaths = new Set<string>()
       for (const item of classified) {
@@ -250,7 +261,7 @@ export const WorktreePlugin = {
     // id means, and a hidden row is a preference, not an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={(target) => openCreate(target)} onBack={() => ctx.layout.selectPanel(null)} />,
+      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={requestCreate} onBack={() => ctx.layout.selectPanel(null)} />,
     ))
 
     // The plugin's two ways in, each shown or hidden by this plugin's own
@@ -280,7 +291,7 @@ export const WorktreePlugin = {
       if (value?.sidebarEntry !== "hide") {
         disposeEntries.push(ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register(
           { name: "sidebar.footer.action", id: "dsh-worktree-space", order: SIDEBAR_FOOTER_ORDER, label: () => t("worktrees") },
-          (props: PropsRuntime<"sidebar.footer.action">) => <WorktreeFooterAction wide={props.wide} onOpen={() => openManage()} />,
+          (props: PropsRuntime<"sidebar.footer.action">) => <WorktreeFooterAction wide={props.wide} onOpen={requestManage} />,
         )))
       }
     }

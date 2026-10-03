@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
-import { sameLocation, slashPath } from "../lib/paths"
+import { previewValue, subscribePreview } from "../lib/config-preview"
+import { mapWithLimit } from "../lib/concurrency"
+import { cleanPath, isInsideDirectory, sameLocation, slashPath } from "../lib/paths"
 import { addRepositorySource } from "../lib/repositories"
 import { rememberedRepositories, scannedRepositories } from "../lib/scan"
 import { groupTasks, type TaskGroup, type TaskRepository } from "../lib/tasks"
@@ -56,6 +58,16 @@ type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
 const FILTERS = [['all', 'filterAll'], ['attention', 'filterAttention']] as const
 const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
+
+/**
+ * Worktrees asked about at once.
+ *
+ * Each one is a `git` process on the Host - `status` and a `rev-list` - so the
+ * ceiling is on how many are in flight, not on how fast they answer. Six is the
+ * same figure the Host scans with, so the two stages of one refresh add up to a
+ * known load instead of to each other.
+ */
+const STATUS_CONCURRENCY = 6
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
 export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave }: Props) {
@@ -65,6 +77,28 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const setView = control?.onView ?? setOwnView
   const [repos, setRepos] = useState<WorktreeList[]>([])
   const [busy, setBusy] = useState(false)
+  // What the Host last reported as in force, kept apart from the pending choice so
+  // that one can outrank the other without erasing it: once a choice is gone -
+  // accepted or refused - the Host's answer is the truth again.
+  const [servedDepth, setServedDepth] = useState<number | null>(null)
+  // The depth on screen, and the one sent with the scan.
+  //
+  // Derived rather than stored, because a stored copy is a copy that can go stale:
+  // the number has to be right from a scan's first millisecond, and the two things
+  // that can change it mid-scan - a pending choice, and the Host answering a call
+  // that was already in flight - both land while the scan is still running.
+  //
+  // Pending choice first, then what the Host last reported. The Host still answers
+  // every scan with what it really used, because `resolveScanDepth` can clamp what
+  // it is given; that answer becomes the served value for the next scan.
+  const intendedDepth = () => {
+    const pending = previewValue("scanDepth")
+    if (typeof pending === "string" && pending.trim() !== "") {
+      const parsed = Number(pending)
+      if (Number.isFinite(parsed)) return parsed
+    }
+    return servedDepth
+  }
   const [error, setError] = useState("")
   const [action, setAction] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -77,6 +111,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   // change them, re-run the effect, and abort the very requests whose answers it is
   // waiting for - which left every row saying so forever.
   const [classifications, setClassifications] = useState<Record<string, SourceRootClassification | "checking" | "failed">>({})
+  // Bumped to ask the classification effect below to start over. Its cache of
+  // already-asked paths is scoped to one run of the effect, so a new run asks every
+  // Workspace again - which is the point when what changed was the scan depth, since
+  // every one of those counts depends on it.
+  const [reclassifyToken, setReclassifyToken] = useState(0)
   useEffect(() => {
     if (view !== "spaces") return
     const controller = new AbortController()
@@ -91,15 +130,28 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       if (pending.length === 0) return
       for (const path of pending) answered.add(path)
       setClassifications(current => ({ ...current, ...Object.fromEntries(pending.map(path => [path, "checking" as const])) }))
-      void Promise.all(pending.map(async path => {
-        try {
-          return [path, await api.classifyRoot(path, controller.signal)] as const
-        } catch {
-          return [path, "failed"] as const
-        }
-      })).then(results => {
+      // One request for the page rather than one per row. Every path is still
+      // walked now and answered now - nothing is carried over from the last time
+      // this ran - so this is one round trip instead of N, not a cheaper answer.
+      //
+      // A path the Host left out failed, and says so on its own: the answer omits
+      // what it could not read rather than reporting it as empty, because a row
+      // with no answer is drawn unreadable, which is a claim about the read, while
+      // a row reading zero is a claim about the Workspace, and only one of those
+      // rules the Workspace out.
+      void api.classifyRoots(pending, controller.signal).then((classified: SourceRootClassification[]) => {
         if (controller.signal.aborted) return
-        setClassifications(current => ({ ...current, ...Object.fromEntries(results) }))
+        const answered = new Map(classified.map(entry => [entry.path, entry] as const))
+        setClassifications(current => ({
+          ...current,
+          ...Object.fromEntries(pending.map(path => [path, answered.get(path) ?? "failed"] as const)),
+        }))
+      }).catch(() => {
+        if (controller.signal.aborted) return
+        setClassifications(current => ({
+          ...current,
+          ...Object.fromEntries(pending.map(path => [path, "failed" as const])),
+        }))
       })
     }
     // Subscribed rather than run once. Registering a Workspace is what makes the list
@@ -109,7 +161,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     classifyMissing()
     const dispose = workspaces.list.subscribe(() => classifyMissing())
     return () => { controller.abort(); dispose() }
-  }, [view, api, workspaces])
+  }, [view, api, workspaces, reclassifyToken])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
   /** Path of the task whose add-repository dialog is open, if any. */
@@ -153,18 +205,44 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     try {
       const registered = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
       const paths = extra.reduce((all, path) => (all.some((known) => sameLocation(known, path)) ? all : [...all, path]), registered)
-      const lists: WorktreeList[] = await api.scan(paths, controller.signal)
+      // The number that goes on screen goes into the request, so the walk and the
+      // label are one decision rather than two that can disagree. Null when the
+      // panel has not been told yet, and then the Host falls back to its own
+      // configuration - which is the same thing said more slowly.
+      const depth = intendedDepth()
+      const answer = await api.scan(paths, controller.signal, depth ?? undefined)
       if (controller.signal.aborted) return
-      const discovered = scannedRepositories(lists)
+      // What the Host actually walked, which is what it resolved the request to.
+      // A clamp here is the one case where the label was briefly ahead of the
+      // walk, and adopting it keeps the next scan honest.
+      setServedDepth(answer.bounds.depth)
+      // An incomplete answer is still an answer. The repositories that were read
+      // go on screen and the reason goes beside them; the error path below is for
+      // when there is nothing to show at all, which is the only case where an
+      // error and an empty list are the same thing to a reader.
+      setError(answer.complete ? "" : answer.reason)
+      const discovered = scannedRepositories(answer.lists)
       paintedFresh.current = true
       setRepos(discovered.map(list => ({ ...list, worktrees: list.worktrees.map(row => ({ ...row, checking: true })) })))
-      const next = await Promise.all(discovered.map(async list => ({
-        ...list,
-        worktrees: await Promise.all(list.worktrees.map(async row => {
-          try { return { ...row, ...(await api.status(row.path, list.currentBranch, controller.signal)) } }
-          catch (reason: any) { return { ...row, statusError: String(reason?.message ?? reason) } }
-        })),
-      })))
+      // Flattened, because the limit has to mean something concrete: every entry
+      // here is a `git` process on the Host, and a ceiling counted in
+      // repositories would let one repository with twenty worktrees spend twenty
+      // times what a repository with one does. The nesting this replaced put no
+      // bound on anything - every worktree of every repository was asked for at
+      // once, which is the same crowd arriving faster, not less work.
+      const wanted = discovered.flatMap((list, repo) =>
+        list.worktrees.map(row => ({ repo, row, target: list.currentBranch })))
+      const answered = await mapWithLimit(wanted, STATUS_CONCURRENCY, async ({ repo, row, target }) => {
+        try { return { repo, row: { ...row, ...(await api.status(row.path, target, controller.signal)) } } }
+        catch (reason: any) { return { repo, row: { ...row, statusError: String(reason?.message ?? reason) } } }
+      })
+      const byRepo = new Map<number, WorktreeList["worktrees"]>()
+      for (const { repo, row } of answered) {
+        const rows = byRepo.get(repo)
+        if (rows === undefined) byRepo.set(repo, [row])
+        else rows.push(row)
+      }
+      const next = discovered.map((list, repo) => ({ ...list, worktrees: byRepo.get(repo) ?? [] }))
       if (!controller.signal.aborted) setRepos(next)
     } catch (reason: any) {
       if (!controller.signal.aborted) setError(String(reason?.message ?? reason))
@@ -172,6 +250,38 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       if (!controller.signal.aborted) setBusy(false)
     }
   }, [api, workspaces, t])
+  // A scan setting that changes while the panel is open has to reach the panel.
+  //
+  // Without this the depth control answers nothing: the scan only re-ran on mount,
+  // on a Workspace being added, and on the refresh button, so choosing a different
+  // depth left the previous scan's rows and counts on screen. "The setting does not
+  // work" and "the panel did not look again" look identical from here, and the first
+  // is the conclusion everyone reaches - which is how a depth that was wired up
+  // correctly still read as broken.
+  //
+  // What is watched is the *pending* choice, not the served value: the Host has not
+  // applied it yet at this point, and the preview is dropped the moment it does.
+  // So the settle that follows a successful write is not a second change, and a
+  // refused write is not a change at all.
+  useEffect(() => {
+    const fields = ['scanDepth', 'maxScanDirectories', 'ignoredScanDirectories', 'removedScanDirectories']
+    const acted = new Map<string, string>()
+    return subscribePreview(() => {
+      for (const field of fields) {
+        const value = previewValue(field)
+        if (value === undefined || acted.get(field) === value) continue
+        acted.set(field, value)
+        void refresh()
+        // Both halves have to be asked again: the repository list comes from
+        // `worktree.scan`, the count on each Workspace card from
+        // `task.classify-roots`, and they are separate requests over separate walks.
+        // Refreshing only the first leaves the cards showing the depth that was in
+        // force when they were last asked.
+        setReclassifyToken((current) => current + 1)
+        return
+      }
+    })
+  }, [refresh])
   // The panel is unmounted whenever it is closed, so every opening starts here.
   // It paints what the Host remembers of the last scan - which is the whole point
   // of that memory - and scans again regardless: the remembered rows are replaced
@@ -180,7 +290,16 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     const controller = new AbortController()
     const paths = workspaces.list.getSnapshot().items.map((workspace: Workspace) => workspace.path)
     void api.cachedScan(paths, controller.signal).then((remembered: RememberedScan | null) => {
-      if (!remembered || controller.signal.aborted || paintedFresh.current) return
+      if (!remembered || controller.signal.aborted) return
+      // Taken whether or not any rows came back, because the two are unrelated
+      // facts: what the Host remembers is about the scan that already happened,
+      // and this is about the one on screen now. Skipping it when the repaint is
+      // skipped is how a panel with nothing remembered ends up unable to name the
+      // depth of its first scan.
+      setServedDepth(remembered.current.depth)
+      // The remembered rows are still a shortcut, never a fallback: an empty list
+      // paints nothing, which is what a Host that remembers nothing deserves.
+      if (paintedFresh.current || remembered.repositories.length === 0) return
       setRepos(rememberedRepositories(remembered))
     }).catch(() => {
       // Remembered rows are a shortcut, never a fallback the panel depends on: a
@@ -197,12 +316,33 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   // though the working tree is clean, which is why it counts as attention.
   const needsAttention = (row: Worktree) => !!(row.changedFiles || row.commits || row.locked || row.prunable || (row.statusError && !row.checking))
   const needle = query.trim().toLocaleLowerCase()
+  /**
+   * Whether a value is one the search is looking for.
+   *
+   * The one test every row in all three views shares, so that a repository, a
+   * worktree under it, and a task space are matched by the same rule rather than
+   * by three rules that agree today.
+   */
+  const mentions = (...values: (string | undefined)[]) =>
+    needle === "" || values.some(value => value?.toLocaleLowerCase().includes(needle))
+
+  /** The worktrees of a repository a search is on screen, and no others. */
+  const visibleWorktrees = (repo: WorktreeList) =>
+    needle === "" ? repo.worktrees : repo.worktrees.filter(row => mentions(row.path, row.branch))
+
+  /** The repositories of a task space a search is on screen, and no others. */
+  const visibleTaskRepositories = (task: TaskGroup) =>
+    needle === "" ? task.repositories : task.repositories.filter((repository: TaskRepository) => mentions(repository.path, repository.name))
+
   const visibleRepos = repos.filter(repo => {
     if (filter === "attention" && !repo.worktrees.some(needsAttention)) return false
-    return !needle || [repo.repoPath, repo.currentBranch, ...repo.worktrees.flatMap(row => [row.path, row.branch])].some(value => value?.toLocaleLowerCase().includes(needle))
+    return mentions(repo.repoPath, repo.currentBranch, ...repo.worktrees.flatMap(row => [row.path, row.branch]))
   })
   const totalWorktrees = repos.reduce((count, repo) => count + repo.worktrees.length, 0)
-  const shownWorktrees = visibleRepos.reduce((count, repo) => count + repo.worktrees.length, 0)
+  // Counted after the same filter the rows are drawn with, or the summary reports a
+  // larger number than the list holds - and a count that disagrees with what is on
+  // screen is the one thing a reader cannot tell from the screen alone.
+  const shownWorktrees = visibleRepos.reduce((count, repo) => count + visibleWorktrees(repo).length, 0)
   /** `shown / total` while something narrows the list, the total alone otherwise. */
   const counted = (shown: number, total: number) => (shown === total ? String(total) : `${shown} / ${total}`)
   // The same two filters in both views: every task holds worktrees by
@@ -235,28 +375,92 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return !needle || [task.name, task.path, task.branch, ...task.repositories.map(repository => repository.path)].some(value => value?.toLocaleLowerCase().includes(needle))
   })
   const taskRepositoryCount = tasks.reduce((count, task) => count + task.repositories.length, 0)
-  const shownTaskRepositoryCount = visibleTasks.reduce((count, task) => count + task.repositories.length, 0)
+  const shownTaskRepositoryCount = visibleTasks.reduce((count, task) => count + visibleTaskRepositories(task).length, 0)
+  // Declared before the fold button below, which reads it: the three views share one
+  // set of collapsed paths, and the Workspace rows are in it now that they expand.
+  const workspaceItems = workspaces.list.getSnapshot().items as Workspace[]
+  /**
+   * Which Workspace owns each repository: the most specific registered Workspace that
+   * contains it, and exactly one.
+   *
+   * Containment alone is not enough. A Workspace registered inside another one -
+   * `E:\workspace\public` under `E:\workspace` - contains every repository under the
+   * inner one, so listing by containment showed those repositories twice: once
+   * under the Workspace that actually scanned them, and once under the parent that
+   * reached them only by walking through. The parent then had two numbers that
+   * disagreed - a badge from `classify-roots`, which does not skip the nested
+   * Workspace, and a list from the scan, which does - and no way on the page to tell
+   * which of the two was the real one.
+   *
+   * One owner settles it. The Host no longer walks the nested path as part of its
+   * parent either, so the parent's badge and its list are counting the same set.
+   */
+  const ownerOfRepository = new Map<string, string>()
+  {
+    const bySpecificity = [...workspaceItems].sort((left, right) => right.path.length - left.path.length)
+    for (const repo of repos) {
+      for (const workspace of bySpecificity) {
+        if (sameLocation(repo.repoPath, workspace.path) || isInsideDirectory(workspace.path, repo.repoPath)) {
+          ownerOfRepository.set(cleanPath(repo.repoPath), workspace.path)
+          break
+        }
+      }
+    }
+  }
   // One set of collapsed paths drives both views, so the button beside the filters
   // says what the next click does to all of them.
   const collapsiblePaths = [
     ...visibleRepos.filter(repo => repo.worktrees.length > 0).map(repo => repo.repoPath),
     ...visibleTasks.filter(task => task.repositories.length > 0).map(task => task.path),
+    // Workspaces too, now that they expand: the button says what the next click does
+    // to everything on the page, and leaving the third view out makes it lie about
+    // the view the user is looking at.
+    ...workspaceItems.filter(workspace => {
+      const answer = classifications[workspace.path]
+      return answer !== undefined && answer !== "checking" && answer !== "failed" && repositoriesUnder(workspace).length > 0
+    }).map(workspace => workspace.path),
   ]
   const everythingCollapsed = collapsiblePaths.length > 0 && collapsiblePaths.every(path => collapsed.has(path))
   const toggleAll = () => setCollapsed(everythingCollapsed ? new Set() : new Set(collapsiblePaths))
-  const workspaceItems = workspaces.list.getSnapshot().items as Workspace[]
+  // A search is asked two separate questions - which Workspaces to keep, and which
+  // of each one's repositories to list inside it - so both read the one `needle`.
   const visibleWorkspaces = workspaceItems.filter(workspace => {
     const state = classifications[workspace.path]
     const ready = state !== undefined && state !== "checking" && state !== "failed"
     // The filter keeps the Workspaces that hold a repository, which is exactly the
-    // question the row's own badge answers: how many repositories the Workspace spans.
+    // question the row's own badge answers - and it asks the same list the badge
+    // counts, so the two can never disagree about which Workspaces are empty.
     // One that has not answered yet stays visible rather than disappearing for the
     // length of a scan.
-    if (filter === "attention" && ready && state.repositoryCount === 0) return false
-    const needle = query.trim().toLowerCase()
+    if (filter === "attention" && ready && repositoriesUnder(workspace).length === 0) return false
     if (needle === "") return true
     return workspace.title.toLowerCase().includes(needle) || workspace.path.toLowerCase().includes(needle)
+      // A repository the Workspace spans is a thing to search for by name, the same
+      // way a task is searchable by the repositories it holds. Without this the
+      // row a search matched and the rows it expands to disagree about what the
+      // Workspace contains.
+      || repositoriesUnder(workspace).some(repo => repo.repoPath.toLowerCase().includes(needle))
   })
+  /**
+   * The repositories a Workspace spans, as the scan found them.
+   *
+   * Taken from the scan rather than from the number the classification reports,
+   * because those are two different answers and a Workspace reading "12
+   * repositories" must expand to those twelve and not to some other set. The scan
+   * and the classification are two walks over the same bounds - the classification
+   * counts through `discoverSourceRepos`, the scan lists through
+   * `discoverGitRoots` - and both prune a nested Workspace the same way, so what
+   * this returns is what the badge counted.
+   *
+   * One Workspace each, and the most specific one: a repository under a Workspace
+   * registered inside this one belongs to the inner Workspace and is not listed here.
+   * See `ownerOfRepository` for why it cannot be both.
+   * @param workspace - the Workspace whose repositories to list.
+   * @returns the repositories under it, in the order the scan returned them.
+   */
+  function repositoriesUnder(workspace: Workspace) {
+    return repos.filter(repo => ownerOfRepository.get(cleanPath(repo.repoPath)) === workspace.path)
+  }
   const taskRepoStatus = (repository: TaskRepository) => {
     if (repository.checking) return { state: "checking", label: t("checkingStatus") }
     if (repository.unknown) return { state: "unavailable", label: t("statusUnknown") }
@@ -394,7 +598,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       </div>
       <p className="dws-view-description">{viewDescription}</p>
       {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span><Button className="dws-button-ghost" disabled={busy} onClick={() => void refresh()}>{t("retry")}</Button></div> : null}
-      {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{t("scanning")}</span></div> : null}
+      {busy ? <div className="dws-loading-message" role="status"><Loader2 size={14} className="dws-spin" /><span>{intendedDepth() === null ? t("scanningUnknown") : format(t("scanning"), { depth: String(intendedDepth()) })}</span></div> : null}
       {!busy && view === "repos" && visibleRepos.length === 0 ? <div className="dws-empty"><FolderGit size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : null}
       {!busy && view === "tasks" && visibleTasks.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{tasks.length ? t("noMatches") : t("noTasks")}</h3>{tasks.length ? null : <p>{t("noTasksHint")}</p>}</div> : null}
     </div>
@@ -402,18 +606,23 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     {busy && repos.length === 0 ? <div className="dws-skeleton-list" aria-hidden="true">{[0, 1, 2].map(index => <div className="dws-skeleton-row" key={index}><span /><div><span /><span /></div></div>)}</div> : null}
     {view === "repos" ? <div className="dws-repo-list">
       {visibleRepos.map(repo => {
-        const canExpand = repo.worktrees.length > 0
+        // What the row expands to. A search lists what it matched, not everything
+        // the repository holds: the row staying because one worktree matched and
+        // then listing all of them says the search found all of them, and the badge
+        // beside the name counts the same list, so it has to be counted the same way.
+        const listed = visibleWorktrees(repo)
+        const canExpand = listed.length > 0
         const expanded = canExpand && !collapsed.has(repo.repoPath)
         return <article className="dws-repo" key={repo.repoPath}>
           <header className="dws-repo-header">
             <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(repo.repoPath)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>
               {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit size={24} className="dws-repo-icon" />
-              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label"><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{repo.worktrees.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(repo.worktrees.length) })}>{repo.worktrees.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
+              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repo.currentBranch ?? t("detached")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{listed.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             </button>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
           {expanded ? <div className="dws-worktree-list">
-            {repo.worktrees.map(row => {
+            {listed.map(row => {
               const state = row.checking ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
                 <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
@@ -425,17 +634,21 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       })}
     </div> : null}
     {view === "tasks" ? <div className="dws-repo-list">
-      {visibleTasks.map(task => <article className="dws-task" key={task.path}>
+      {visibleTasks.map(task => {
+        // Same rule as the repository rows: a search lists what it matched, and the
+        // badge counts that same list.
+        const listed = visibleTaskRepositories(task)
+        return <article className="dws-task" key={task.path}>
         <header className="dws-task-header">
-          <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={task.repositories.length === 0} aria-expanded={task.repositories.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>
-          {task.repositories.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-task-icon" />
+          <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={listed.length === 0} aria-expanded={listed.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>
+          {listed.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-task-icon" />
           <span className="dws-task-heading">
             <span className="dws-task-title">
               <h3>{task.name}</h3>
-              <span className="dws-branch-label" title={`${t("branch")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
+              <span className="dws-branch-label" title={`${t("taskBranchLabel")}: ${task.branch ?? t("branchesDiffer")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
               {/* The same hint the repository rows carry: both numbers answer "how many
                   worktrees", one under a repository and one under a task space. */}
-              <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(task.repositories.length) })}>{task.repositories.length}</span>
+              <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span>
               {pendingBadge(task.commits)}
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
@@ -444,8 +657,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
           <Button className="dws-button-ghost dws-add-repository" disabled={busy || !!action} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
           <Button className="dws-button-ghost dws-finish-task" disabled={busy || !!action} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
-        {task.repositories.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
-          {task.repositories.map(repository => {
+        {listed.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
+          {listed.map(repository => {
             const state = taskRepoStatus(repository)
             return <div className="dws-worktree" key={repository.path}>
               <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
@@ -453,18 +666,35 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             </div>
           })}
         </div> : null}
-      </article>)}
+      </article>
+      })}
     </div> : null}
     {view === "spaces" ? <div className="dws-repo-list">
       {workspaceItems.length === 0 ? <p className="dws-no-linked">{t("workspaceEmpty")}</p> : visibleWorkspaces.length === 0 ? <div className="dws-empty"><FolderClosed size={24} strokeWidth={1.5} /><h3>{t("noMatches")}</h3></div> : visibleWorkspaces.map(workspace => {
         const state = classifications[workspace.path]
         const ready = state !== undefined && state !== "checking" && state !== "failed"
+        // What this Workspace owns, from the scan. Not from the classification: that
+        // is a second walk measuring a slightly different thing, and the two numbers
+        // came to disagree - a Workspace reading "0 repositories" beside a row
+        // listing twelve, with nothing on the page to say which was the real one.
+        // The badge counts the list the row shows, so it cannot.
+        const owned = ready ? repositoriesUnder(workspace) : []
+        // A search lists what it matched, not what the Workspace happens to hold.
+        // Matching the row and then expanding it to every repository underneath says
+        // the search found all of them, and the panel is the only place the reader
+        // is told which of a Workspace's repositories are on screen.
+        const spanned = owned.filter(repo => needle === "" || repo.repoPath.toLowerCase().includes(needle))
         const canHost = ready && state.isSourceRoot
-        // Every Workspace that has answered says what it spans, right after its name,
-        // a count of zero included. The sentence explaining that no task space can
-        // start there is not a count, so it takes the row's right edge instead: the
-        // edge the creation button of the rows that can host one ends on.
-        const empty = ready && state.repositoryCount === 0
+        // The sentence explaining that no task space can start there is not a count, so it
+        // takes the row's right edge instead: the edge the creation button of the rows
+        // that can host one ends on. Judged on what it owns rather than on what the
+        // search left on screen - "nothing here can host a task space" is a fact about
+        // the Workspace, not about the query.
+        //
+        // Still guarded on `ready`: a Workspace the Host could not answer has an empty
+        // list because nothing came back, not because there is nothing there, and
+        // saying it cannot host a task space rules out a directory nobody looked in.
+        const empty = ready && owned.length === 0
         // A Workspace the Host could not answer is neither a count nor a verdict:
         // saying "cannot host a task space" about a read that never came back would
         // rule out a Workspace that may well hold three repositories. It gets the
@@ -472,27 +702,55 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         const badge = state === "checking"
           ? { className: "dws-status-checking", label: t("workspaceChecking") }
           : ready
-            ? { className: canHost ? "dws-status-clean" : "dws-status-zero", label: format(t("workspaceSpans"), { count: String(state.repositoryCount) }) }
+            ? { className: canHost ? "dws-status-clean" : "dws-status-zero", label: format(t("workspaceSpans"), { count: String(spanned.length) }) }
             : { className: "dws-status-unavailable", label: t("workspaceUnreadable") }
+        // What the row expands to. A Workspace the Host has not answered has nothing
+        // to show, so it stays closed - "cannot check" is already on its badge, and an
+        // expandable row would promise a list that cannot be produced.
+        const canExpand = spanned.length > 0
+        const expanded = canExpand && !collapsed.has(workspace.path)
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
             {/* A Workspace is a folder like a task is, and it wears the same closed one:
                 both name a place work starts from rather than something the plugin made.
-                No chevron and no placeholder, because these rows do not expand. */}
-            <FolderClosed size={24} className="dws-repo-icon" />
-            <span className="dws-repo-heading">
-              <span className="dws-repo-title">
-                <h3>{workspace.title}</h3>
-                <span className={"dws-status " + badge.className}>
-                  <span className="dws-status-dot" />
-                  {badge.label}
+                It does expand now - to the repositories the scan found under it - so it
+                takes the chevron and the toggle the other two views' rows already use.
+                A Workspace holding nothing keeps the placeholder rather than a chevron
+                that would open onto an empty list. */}
+            <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(workspace.path)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleWorkspace")} ${workspace.title}`}>
+              {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-repo-icon" />
+              <span className="dws-repo-heading">
+                <span className="dws-repo-title">
+                  <h3>{workspace.title}</h3>
+                  <span className={"dws-status " + badge.className}>
+                    <span className="dws-status-dot" />
+                    {badge.label}
+                  </span>
                 </span>
+                <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
               </span>
-              <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
-            </span>
+            </button>
             {empty ? <span className="dws-status dws-space-status">{t("workspaceCannot")}</span> : null}
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
+          {/* The repositories the Workspace spans, in the row shape the worktrees below a
+              repository use - that is the shape this panel already reads as "something
+              inside something". The icon is the repository view's own rather than the
+              worktree's: these are repositories, and a repository shown here that wore
+              a worktree's icon would be the one row in the panel wearing the wrong one. */}
+          {expanded ? <div className="dws-worktree-list">
+            {spanned.map(repository => <div className="dws-worktree" key={repository.repoPath}>
+              <FolderGit size={18} className="dws-tree-icon" aria-hidden="true" />
+              <div className="dws-worktree-info">
+                <div className="dws-worktree-title">
+                  <strong>{repoName(repository.repoPath)}</strong>
+                  <span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repository.currentBranch ?? t("detached")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.currentBranch ?? t("detached")}</span></span>
+                  {repository.worktrees.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(repository.worktrees.length) })}>{repository.worktrees.length}</span> : null}
+                </div>
+                <div className="dws-worktree-path" title={slashPath(repository.repoPath)}>{slashPath(relativePath(workspace.path, repository.repoPath))}</div>
+              </div>
+            </div>)}
+          </div> : null}
         </article>
       })}
     </div> : null}

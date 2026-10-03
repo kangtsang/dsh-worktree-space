@@ -11,7 +11,7 @@ import { t } from "../src/client/lib/i18n"
  * round trip.
  */
 function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "container",
-  tasksRootStrategy = "default", tasksRootDirectory = "") {
+  tasksRootStrategy = "default", tasksRootDirectory = "", ignoredScanDirectories: string[] = [], removedScanDirectories: string[] = []) {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
@@ -20,13 +20,15 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "", ha
     // Host that does not would show. `null` rather than `undefined`, which would fall
     // back to this parameter's own default.
     ...(handoffEntry === null ? {} : { handoffEntry }),
-    scanDepth: 3,
-    maxScanDirectories: 3000,
+    scanDepth: 2,
+    maxScanDirectories: 2000,
     defaultBranchPrefix: prefix,
     archiveDocumentsStrategy: archiveStrategy,
     archiveDocumentsDirectory: archiveDirectory,
     tasksRootStrategy,
     tasksRootDirectory,
+    ignoredScanDirectories,
+    removedScanDirectories,
   }
   const listeners = new Set<() => void>()
   return {

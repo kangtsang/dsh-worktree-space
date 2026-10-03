@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { format, t } from "../src/client/lib/i18n"
+import { scanAnswer } from "./scan-answer.helper"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 
 /**
@@ -19,7 +20,6 @@ const TASK_PATH = "/spaces/kratos-admin/login"
 function repository(repoPath: string, linked: Array<{ path: string; branch: string }> = []) {
   return {
     repoPath,
-    commonDir: `${repoPath}/.git`,
     worktrees: [
       { path: repoPath, branch: "main", isMain: true, detached: false, locked: false, prunable: false },
       ...linked.map((entry) => ({ ...entry, isMain: false, detached: false, locked: false, prunable: false })),
@@ -28,13 +28,20 @@ function repository(repoPath: string, linked: Array<{ path: string; branch: stri
 }
 
 function setup() {
+  const classifyRoot = vi.fn()
   const api = {
     scan: vi.fn(),
     cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn().mockResolvedValue({ changedFiles: 0, branchLine: "", output: "" }),
     remove: vi.fn(),
     prune: vi.fn(),
-    classifyRoot: vi.fn(),
+    classifyRoot,
+    // The page classifies a page of Workspaces in one request; the Host answers it
+    // by walking each path now. Derived from the same per-path mock the tests set
+    // up, so telling it what one path holds still decides what the row draws. A
+    // path that fails is left out of the answer, exactly as the Host leaves it out.
+    classifyRoots: vi.fn((paths: string[]) =>
+      Promise.all(paths.map((path) => classifyRoot(path).catch(() => undefined))).then((entries) => entries.filter(Boolean))),
     inspectTask: vi.fn(),
     addRepositories: vi.fn(),
   }
@@ -89,7 +96,7 @@ describe("the workspace view registers a directory as a Workspace", () => {
 
   it("registers a directory that exists, whatever it holds", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     // A Workspace may hold no repository at all — one the user is about to clone
     // into is the ordinary case — so only "is this a directory" is asked.
     next.api.classifyRoot.mockImplementation(async (path: string) => ({ isDirectory: path !== "/notes", isRepository: false }))
@@ -109,9 +116,22 @@ describe("the workspace view registers a directory as a Workspace", () => {
 
   it("classifies a Workspace it registered, without leaving and coming back to", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    // The badge counts the repositories the row lists, so the scan has to be holding
+    // the two the row is about to say about. It used to be told the number instead
+    // and to be asked for nothing, which is how the two came to be able to disagree.
+    next.api.scan.mockResolvedValue(scanAnswer([
+      { repoPath: "/spaces/one", worktrees: [] },
+      { repoPath: "/spaces/two", worktrees: [] },
+      // The Workspace this test goes on to register. It never reaches `classify-roots`
+      // (the page asks about it one path at a time), so the scan is the only thing
+      // that can put a repository under it and give its row something to say.
+      { repoPath: "/work/one", worktrees: [] },
+    ]))
+    // `path` is part of the answer, not a courtesy: the page matches each row to
+    // the classification that describes it, and a batch is only readable because
+    // the Host says which entry is which.
     next.api.classifyRoot.mockImplementation(async (path: string) => ({
-      isDirectory: true, isRepository: false, isSourceRoot: path === "/spaces", repositoryCount: path === "/spaces" ? 2 : 1, repositories: [],
+      path, isDirectory: true, isRepository: false, isSourceRoot: path === "/spaces", repositoryCount: path === "/spaces" ? 2 : 1, repositories: [],
     }))
     next.mount()
     showSpaces()
@@ -127,13 +147,13 @@ describe("the workspace view registers a directory as a Workspace", () => {
     await waitFor(() => expect(screen.getByText(format(t("workspaceSpans"), { count: "1" }))).toBeTruthy())
     expect(screen.queryByText(t("workspaceUnreadable"))).toBeNull()
     // And the row that was already fine is not put back to "checking" to achieve it.
-    expect(next.api.classifyRoot).toHaveBeenCalledWith("/spaces", expect.any(AbortSignal))
+    expect(next.api.classifyRoots).toHaveBeenCalledWith(["/spaces"], expect.any(AbortSignal))
     expect(screen.queryByText(t("workspaceChecking"))).toBeNull()
   })
 
   it("refuses a path that is not a directory, and registers nothing", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     next.api.classifyRoot.mockResolvedValue({ isDirectory: false })
     next.mount()
     showSpaces()
@@ -149,7 +169,7 @@ describe("the workspace view registers a directory as a Workspace", () => {
 
   it("says plainly that a directory already in the list needs nothing done to it", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     next.api.classifyRoot.mockResolvedValue({ isDirectory: true })
     next.mount()
     showSpaces()
@@ -172,7 +192,7 @@ describe("the repository view adds a repository by registering it as a Workspace
 
   it("registers the path the Host says is a repository, and closes the field", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     // The page classifies its own Workspaces too, so the answer is per path rather
     // than one blanket "yes": the assertion below is about the path that was typed.
     next.api.classifyRoot.mockImplementation(async (path: string) => ({ isRepository: path !== "/notes" }))
@@ -195,7 +215,7 @@ describe("the repository view adds a repository by registering it as a Workspace
 
   it("says plainly that a repository already in the list needs nothing done to it", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     next.api.classifyRoot.mockResolvedValue({ isRepository: true })
     next.mount()
     showRepositories()
@@ -211,7 +231,7 @@ describe("the repository view adds a repository by registering it as a Workspace
 
   it("refuses a directory that is not a repository, and registers nothing", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue([])
+    next.api.scan.mockResolvedValue(scanAnswer([]))
     next.api.classifyRoot.mockImplementation(async (path: string) => ({ isRepository: path !== "/notes" }))
     next.mount()
     showRepositories()
@@ -228,10 +248,10 @@ describe("adding a repository to a task already under way", () => {
   /** A task holding `alpha`, with two repositories the repository view also lists. */
   function mountedTask(extra: string[] = ["/elsewhere/beta"]) {
     const next = setup()
-    next.api.scan.mockResolvedValue([
+    next.api.scan.mockResolvedValue(scanAnswer([
       repository("/projects/alpha", [ALPHA_WORKTREE]),
       ...extra.map((path) => repository(path)),
-    ])
+    ]))
     next.api.inspectTask.mockResolvedValue(inspection)
     next.api.addRepositories.mockResolvedValue({ repositories: [] })
     next.api.classifyRoot.mockResolvedValue({ isRepository: true })
@@ -251,7 +271,7 @@ describe("adding a repository to a task already under way", () => {
     expect(screen.queryByText("/projects/alpha")).toBeNull()
     // Each row names the branch its repository has checked out, the way the create
     // dialog's rows do: that branch is what the worktree will be left behind on.
-    expect(screen.getAllByTitle(`${t("branch")}: main`).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(`${t("currentBranchLabel")}: main`).length).toBeGreaterThan(0)
     expect(next.api.inspectTask).toHaveBeenCalledExactlyOnceWith(TASK_PATH)
   })
 

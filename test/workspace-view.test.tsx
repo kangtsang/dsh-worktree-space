@@ -3,14 +3,31 @@ import { format, t } from "../src/client/lib/i18n"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { scanAnswer } from "./scan-answer.helper"
 
 /** One classification per workspace path, as the host would answer. */
 function setup(classification: (path: string) => unknown) {
   const api: any = {
-    scan: vi.fn().mockResolvedValue([]),
+    // The repositories the badges count are the ones the rows list, so the fixture
+    // has to answer both. It used to answer only `classify-roots` and the badges came
+    // from there, which is how a Workspace came to read "0" beside a list of twelve.
+    scan: vi.fn().mockResolvedValue(scanAnswer([
+      { repoPath: "/projects/one", worktrees: [] },
+      { repoPath: "/projects/two", worktrees: [] },
+      { repoPath: "/projects/three", worktrees: [] },
+      { repoPath: "/projects/alpha", worktrees: [] },
+    ])),
     cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn(),
     classifyRoot: vi.fn().mockImplementation((path: string) => Promise.resolve(classification(path))),
+    // The page asks for a page of Workspaces in one request now. Answered from
+    // the same per-path classifier so a test that says what one path holds still
+    // decides what the row draws - the batch is a request shape, not a rule. A
+    // path that fails is left out, as the Host leaves it out.
+    classifyRoots: vi.fn().mockImplementation((paths: string[]) =>
+      Promise.all(paths.map(async (path) => {
+        try { return await classification(path) } catch { return undefined }
+      })).then((entries) => entries.filter(Boolean))),
   }
   const items = [
     { workspaceId: "single", path: "/projects/alpha", title: "Alpha" },

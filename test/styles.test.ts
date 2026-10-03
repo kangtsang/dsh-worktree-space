@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest"
 
 const styles = readFileSync(new URL("../src/client/styles.css", import.meta.url), "utf8")
 
+/**
+ * The selector that defines the surface tokens, by its exact text.
+ *
+ * Matched literally rather than looked up, because the point of the rules that
+ * read this is that a rule anywhere else computes against an undefined variable -
+ * and `border: 1px solid var(--wt-line)` does not fall back to a faint border, it
+ * drops the declaration whole. So the list is pinned as written, and adding a
+ * surface to it is a decision this file makes the reader look at.
+ */
+const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action, .dws-plugin-config"
+
 /** One rule's declarations, by its exact selector. */
 function rule(selector: string) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -22,7 +33,7 @@ describe("floating panel surface", () => {
     // error red to read twice on one row. They name a single token now, so the tone is set
     // in one place instead of in every rule that wears it. The exact hex is checked so the
     // token cannot silently lose its value or be re-pointed back at the alias amber.
-    const root = rule(".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action")
+    const root = rule(TOKEN_SCOPE)
     expect(root).toContain("--wt-warn: #fe9a00")
     expect(styles).not.toContain("amber-600")
     for (const selector of [".dws-status-unavailable", ".dws-status-pending .dws-status-dot", ".dws-space-status"]) {
@@ -91,10 +102,16 @@ describe("floating panel surface", () => {
 
   it("keeps every surface token the dialog reads defined on the dialog itself", () => {
     // The dialog renders in the shell overlay, outside the settings panel, so it
-    // cannot inherit the settings scope's custom properties.
-    const scope = rule(".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action")
+    // cannot inherit the settings scope's custom properties. The configuration card
+    // is the third surface that draws its own: it goes into the Plugins page's own
+    // slot, which is none of the others, and without the tokens its buttons lost
+    // their borders entirely rather than gaining faint ones.
+    const scope = rule(TOKEN_SCOPE)
     expect(scope).not.toBe("")
     for (const token of ["--wt-surface", "--wt-line", "--wt-text"]) expect(scope).toContain(`${token}:`)
+    for (const surface of [".dws-dialog-content", ".dws-plugin-config"]) {
+      expect(TOKEN_SCOPE).toContain(surface)
+    }
   })
 
   it("draws one navigation for both hosts of the page", () => {

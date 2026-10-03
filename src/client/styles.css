@@ -1,8 +1,15 @@
 @layer dsh-worktree-space {
   /* DSH owns typography and colour. Keep these aliases local to our surfaces. The page
      is listed here as well as the dialog it is usually drawn in: a dialog's content is
-     its parent, but the page also scrolls as a root of its own in the panel. */
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action {
+     its parent, but the page also scrolls as a root of its own in the panel.
+
+     The configuration card is listed for a reason worth keeping in mind: it is drawn
+     into the Plugins page's own slot, which is none of the surfaces below, so
+     without it every rule here that reads one of these aliases computes to nothing.
+     `border: 1px solid var(--wt-line)` does not fall back to an initial value when
+     `--wt-line` is undefined - the declaration is dropped whole - so the card's
+     buttons came out with no border at all rather than with a faint one. */
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action, .dws-plugin-config {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
     --wt-muted: var(--dsw-alias-label-tertiary);
@@ -289,6 +296,19 @@
      are the two values a reader types: one field width for both, rather than one stretching
      across the line and one not. The picked rows keep their own size. */
   .dws-plugin-config-text { display: grid; grid-template-columns: auto 236px; justify-content: end; align-items: center; gap: 10px; }
+  /* The typed rows keep `auto 236px` - value first, editor second. This row is
+     the other way round (actions first, count last), so it declares its own two
+     columns at the same widths: a grid places children in source order, so
+     swapping the children without swapping the columns puts the buttons in the
+     narrow column meant for the value. */
+  .dws-plugin-config-row:has(.dws-plugin-config-actions) .dws-plugin-config-text { grid-template-columns: 236px auto; }
+  /* The buttons of one row travel together.
+     The value sits in the first column and the controls in the second, so a row
+     with more than two controls has somewhere to put them that is not the next
+     grid cell: as children of the grid itself they wrapped, and a row of three
+     dropped its third button onto a line of its own below the first two. That is
+     what put 恢复默认 somewhere other than next to 修改. */
+  .dws-plugin-config-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
   /* Locked wears the same pill as every other row's value, so the card reads as one list. */
   .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* Editing: the wrapper draws the box, not the input.
@@ -300,6 +320,75 @@
   .dws-plugin-config-edit { display: flex; align-items: center; box-sizing: border-box; height: 36px; min-height: 36px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 9px; padding: 0 10px; background: var(--wt-surface); }
   .dws-plugin-config-edit .dws-input { flex: 1; width: auto; min-width: 0; height: 100% !important; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0; background: transparent; color: var(--wt-text); }
   .dws-plugin-config-save { flex: none; height: 36px; }
+  /* The card's buttons carry a border, and the primary one carries it too.
+     The primary everywhere else is a fill with no edge, which is right on a page
+     whose other buttons are ghosted and wrong here: on this card the neighbours
+     are outlined, and a filled button with no edge between them and the fill is
+     the one that looks unfinished. The edge is a shade of the fill itself, so it
+     reads as the same button rather than as a new one. */
+  .dws-plugin-config .dws-button { border-color: var(--wt-line); }
+  .dws-plugin-config .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }
+
+  /* A dialog's buttons are the settings page's buttons - same 13px on the same 34px,
+     no per-dialog sizing. Squeezing them to 12px on a 26px box was tried and it
+     made them read as footnotes: below the 14px directory names they act on and
+     level with the 12px note above them, so the control was the smallest thing in
+     its own dialog. A control that small is hard to hit and easy to miss, and the
+     one thing a dialog's buttons must not be is quiet.
+
+     `.dws-confirm-dialog` is in the list because the question about removing a name
+     is a second dialog drawn as a portal sibling rather than a child, so it inherits
+     none of the first one's rules and matched none of them. */
+  .dws-ignore-dialog .dws-button-primary, .dws-confirm-dialog .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }
+
+  /* A confirmation dialog has no heading - its one sentence is the body - so the
+     sentence needs the size a heading would have given it. One step above the
+     buttons, which is the order a sentence and its own buttons read in. */
+  .dws-confirm-body { margin: 0; color: var(--wt-secondary); font-size: 14px; line-height: 22px; }
+  /* The tag list drops its own cap and lets the dialog body scroll instead. The body
+     already scrolls and already takes the dialog's height, so a second scrollbar
+     inside it only made the list shorter than the frame built to hold it. */
+  .dws-ignore-dialog .dws-ignore-tags { max-height: none; }
+  /* The tag name wears the label's size too, for the same reason. */
+  .dws-ignore-dialog .dws-ignore-tag { font-size: 14px; min-height: 30px; border-radius: 15px; }
+  .dws-ignore-dialog .dws-ignore-tag .dws-icon-button { width: 22px; height: 22px; border-radius: 11px; }
+
+  /* The directory-name list. Tags rather than rows because the list is a set of
+     short names with nothing else to say about them, and the only action on one is
+     taking it off. Every tag carries a cross, so the list wants to be wide enough
+     to hold a row of them without wrapping into a column: 676px is 520 by one and
+     three-tenths, written out rather than as a factor so the intent survives being
+     read next to the number. Width alone, because the padding comes from the
+     heading/body/footer sections every dialog here is built from. */
+  /* 800 by 560, written as `min()` against the viewport rather than as fixed
+     pixels: on a screen narrower or shorter than that, the dialog takes what is
+     left instead of overflowing, and the `max-height` the base rule already
+     carries still governs. The height is what the number of tags needs - a list
+     of twenty-odd names stops being something the eye scans when it is the
+     scrollbar that decides what is on screen - so the body keeps its own scroll
+     and the dialog frame stays put. */
+  .dws-ignore-dialog { width: min(800px, calc(100vw - 32px)); max-width: 800px; height: min(560px, calc(100dvh - 40px)); }
+  /* The search row and the tags are one flow inside .dws-dialog-body, and the
+     space between them is the body doing its job rather than a rule of their own. */
+  .dws-ignore-dialog .dws-ignore-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; max-height: 220px; overflow-y: auto; }
+  .dws-ignore-tag { display: inline-flex; align-items: center; gap: 4px; box-sizing: border-box; min-height: 28px; padding: 3px 4px 3px 10px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 14px; background: var(--wt-surface); color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-ignore-name { align-self: center; }
+  /* A name the Host ships wears the module tint, a name the user added does not.
+     The difference is colour only - same list, same tag, same one click to take a
+     user-added one away - because the thing a reader should learn from seeing it
+     is not "this is built-in" but "this one will ask before it goes". Colour
+     carries that as a hint; the question is what actually enforces it, and a hint
+     that could be missed is allowed to be. */
+  .dws-ignore-tag-shipped { border-color: transparent; background: var(--dsw-alias-bg-module-platform); }
+  .dws-ignore-tag .dws-icon-button { flex: none; width: 20px; height: 20px; border-radius: 10px; }
+  /* Taking a built-in name off is asked about in a dialog of its own rather than
+     inline in the tag. The tag row is a wrapping grid of chips; an expanded row
+     with a sentence and two buttons in it breaks the run of tags, and at this width
+     the sentence wraps to three lines inside a 28px-tall row it has grown. A second
+     modal over the first is the normal thing - each is its own portal, and Radix
+     marks the one underneath inert, so the page behind cannot be reached either
+     way. */
+  .dws-confirm-dialog { width: min(420px, calc(100vw - 32px)); }
   /* Geometry copied from the row the neighbouring plugin draws in the same slot,
      measured off its own stylesheet rather than guessed: same height, radius,
      padding, type size, and the same 4px bleed with 2px insets. */
