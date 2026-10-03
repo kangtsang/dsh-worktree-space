@@ -134,7 +134,7 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
             <span className="dws-check-copy">
               <span className="dws-check-name">
                 <span className="dws-check-label">{name}</span>
-                {entry.currentBranch === undefined ? null : <span className="dws-branch-label" title={`${t("branch")}: ${entry.currentBranch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{entry.currentBranch}</span></span>}
+                {entry.currentBranch === undefined ? null : <span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${entry.currentBranch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{entry.currentBranch}</span></span>}
               </span>
               <span className="dws-check-path" title={slashPath(entry.repoPath)}>{slashPath(entry.repoPath)}</span>
             </span>

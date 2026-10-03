@@ -381,7 +381,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
           <span className="dws-check-copy">
             <span className="dws-check-name">
               <span className="dws-check-label">{repository.name}</span>
-              {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("branch")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
+              {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
             </span>
             <span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span>
           </span>
