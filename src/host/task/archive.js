@@ -13,7 +13,7 @@ import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, refuseDelete } from './paths.js'
 
-import { TASK_OWNED_FILES, isLinkedWorktree, readTaskMetadata, taskSpacePath } from './shared.js'
+import { TASK_METADATA, TASK_OWNED_FILES, isLinkedWorktree, readTaskMetadata, taskSpacePath } from './shared.js'
 
 /**
  * Whether a merge is waiting to be concluded in a checkout.
@@ -88,8 +88,8 @@ async function uncommittedCount(subprocess, worktreePath) {
  *
  * `git status --short` is read and its untracked lines are dropped, because those
  * are the one kind of dirt a merge does not mind: git writes a tree of tracked
- * files and leaves `??` alone. Naming them in a refusal would send someone to commit
- * a build output that was never going to be in the way.
+ * files and leaves `??` alone. A build output that was never going to be in the way
+ * is not one of the paths a refusal should name.
  *
  * Staged and unstaged both count, and both are reported: `A` against the first
  * column is staged, `M` against the second is not, and a merge refuses over either.
@@ -116,6 +116,43 @@ async function dirtyPaths(subprocess, site) {
     // survive the leading blank having been trimmed off the first line.
     .map((line) => line.replace(/^\s*[MADRCU?!]{1,2}\s+/, '').trim())
     .filter((path) => path !== '')
+}
+
+/**
+ * The dirty paths a merge of `branch` into `target` would actually overwrite.
+ *
+ * Git refuses such a merge only when the checkout holds changes in a file the merge
+ * writes. Refusing on every dirty path instead blocks merges git would have made
+ * perfectly well: a repository carrying unrelated work in progress cannot finish a
+ * task that touches none of it, and the reader is told to commit or stash work that
+ * has nothing to do with the merge.
+ *
+ * What the merge writes is the paths the task branch changed since the two diverged:
+ * those are the ones the merge brings across into the target's working tree. A path
+ * only the target changed is not written - the merge result for it is what is
+ * already checked out - so uncommitted work in one of those rides straight through,
+ * which is exactly what git does with it.
+ *
+ * A repository with no merge base between the two - unrelated histories - reports
+ * nothing here, and the merge that follows is git's to accept or refuse.
+ * @param subprocess - the profile's subprocess service.
+ * @param site - the source repository, where the merge would run.
+ * @param branch - the task branch being merged.
+ * @param target - the local branch merged into.
+ * @returns the paths that are both dirty and written, empty when none are.
+ */
+async function dirtyPathsInTheWay(subprocess, site, branch, target) {
+  const dirty = await dirtyPaths(subprocess, site)
+  if (dirty.length === 0) return []
+  const base = await tryRunGit(subprocess, site, ['merge-base', target, branch])
+  if (base === '') return []
+  const written = new Set(
+    (await tryRunGit(subprocess, site, ['diff', '--name-only', base, branch]))
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter((path) => path !== ''),
+  )
+  return dirty.filter((path) => written.has(path))
 }
 
 /**
@@ -214,9 +251,13 @@ async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
     // So it is caught here, where the distinction is still visible, and named for
     // what it is.
     //
+    // Only the files the merge writes count. Git would carry unrelated work in the
+    // checkout through untouched, and refusing there too would stop a task that had
+    // nothing to do with that work, on the reader's word to commit or stash it.
+    //
     // Only this branch needs it. A target the source repository is not on is merged
     // in a temporary worktree below, which never touches these files at all.
-    const pending = await dirtyPaths(subprocess, mainRepo)
+    const pending = await dirtyPathsInTheWay(subprocess, mainRepo, branch, target)
     if (pending.length > 0) {
       // English here, as every other message this host produces: it reaches the
       // page as-is behind a disclosure, and the page is not always in English. The
@@ -519,6 +560,27 @@ export async function finishTask(subprocess, options) {
   if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
   auditEnter({ task, project: projectName, tasksRoot })
 
+  // The record is what makes this directory one of ours, and it is asked before
+  // anything else because everything below this line removes something. Without
+  // it the only thing standing between a finish and an arbitrary directory is
+  // that the directory happens to hold a linked worktree - which is a fact about
+  // a path the caller named, not a claim on it. The record is a claim this
+  // plugin wrote, and it lives inside the directory, so no registry anywhere can
+  // be stale about it: a reinstall, a moved container and a copied task space
+  // all answer the same.
+  //
+  // Presence is the question, not parseability: `readTaskMetadata` below still
+  // reports a half-written or hand-edited file as no branch recorded, and that
+  // narrows the finish to the merges and the removals a merge already justified.
+  if (!existsSync(join(taskPath, TASK_METADATA))) {
+    throw coded(
+      'E2005',
+      `${taskPath} holds no ${TASK_METADATA}, so this plugin has no record of creating it and nothing in it will be deleted.\n`
+      + `  What is missing: ${join(taskPath, TASK_METADATA)}\n`
+      + '  If this really is a task space this plugin made and its record was removed by hand, restore the file from a backup before finishing it.',
+    )
+  }
+
   // The branch this container was made for, as the record in the container says.
   // It is the only branch a finish may delete: `git branch -D` runs in the source
   // repository, outside the fence, so the name to delete is taken from what this
@@ -698,7 +760,11 @@ export async function finishTask(subprocess, options) {
         const deleted = await gitSucceeded(
           subprocess,
           mainRepo,
-          force ? ['branch', '-D', branch] : ['branch', '-d', branch],
+          // `--` because this is the one git call that leaves the container: a
+          // branch name git itself will not start with a dash is read here, but
+          // `--` costs nothing and closes the shape of argument where a
+          // different name someday might.
+          force ? ['branch', '-D', '--', branch] : ['branch', '-d', '--', branch],
         )
         outcome.branchDeleted = deleted
         if (!deleted) warnings.push(`branch '${branch}' was not deleted in '${name}'`)
@@ -707,20 +773,49 @@ export async function finishTask(subprocess, options) {
     repositories.push(outcome)
   }
 
-  // The files this plugin wrote into the container - the JSON record, the note
-  // rendered from it, and the note older containers still carry - are always
-  // cleared; other leftovers are kept unless the caller asked for them to go,
-  // minus whatever it named to keep. Both metadata files go: the JSON describes
-  // a task space that is being removed, and the Markdown is generated from it.
-  for (const name of TASK_OWNED_FILES) await rm(join(taskPath, name), { force: true })
-
   const leftovers = await readdir(taskPath, { withFileTypes: true })
-  const strays = []
-  const content = []
+
+  // The files this plugin wrote into the container - the JSON record, the note
+  // rendered from it, and the note older containers still carry - go once nothing
+  // this plugin opened is still open. The JSON describes a task space that is being
+  // taken down, and the Markdown is generated from it, so neither outlives the last
+  // worktree it accounts for.
+  //
+  // A repository that stopped keeps its worktree, and that worktree is what the
+  // reader comes back to. Clearing the record while it is still there strands the
+  // task: the answer invites a second attempt, and the second attempt cannot start
+  // because nothing is left saying what this directory is or which branch it was
+  // filed under. Clearing on a finish that failed some repositories made every
+  // partial finish permanent - and a partial finish is the ordinary way one ends
+  // badly, not an edge case.
+  let stillOpen = false
   for (const entry of leftovers) {
+    if (entry.isDirectory() && await isLinkedWorktree(join(taskPath, entry.name))) { stillOpen = true; break }
+  }
+  if (!stillOpen) {
+    for (const name of TASK_OWNED_FILES) await rm(join(taskPath, name), { force: true })
+  }
+  // Re-read either way, so the cleanup below reasons about what is actually left
+  // rather than about files that may have just gone.
+  const remainingEntries = await readdir(taskPath, { withFileTypes: true })
+
+  const strays = []
+  // A set, so that taking a name back out is a removal of that name rather
+  // than an index lookup that can miss: `splice(indexOf(x), 1)` on a name that
+  // was never in the list removes the *last* element instead, and the list here
+  // is built and pruned in the same loop.
+  const content = new Set()
+  for (const entry of remainingEntries) {
     if (entry.isDirectory() && await isLinkedWorktree(join(taskPath, entry.name))) continue
+    // The plugin's own files are not leftovers of anything. The record is kept on
+    // purpose - a repository that stopped still needs it to be finished a second
+    // time - and `strayKind` files it as content, so without this it would be
+    // swept into the disposal below: filed into the documents directory or
+    // discarded, either of which ends the task the same way clearing it does.
+    // `planTask` skips them for the same reason and has always had to.
+    if (TASK_OWNED_FILES.includes(entry.name)) continue
     strays.push(entry.name)
-    if (strayKind(entry.name, entry.isDirectory()) === 'content') content.push(entry.name)
+    if (strayKind(entry.name, entry.isDirectory()) === 'content') content.add(entry.name)
     // Fence. A leftover is named, not vetted: it is whatever happens to sit in
     // the task directory, and two of the three ways it is disposed of remove it
     // recursively. `readdir` said it is a directory, which on Windows a junction
@@ -732,7 +827,7 @@ export async function finishTask(subprocess, options) {
         keep.push(entry.name)
         warnings.push(refused)
         strays.pop()
-        content.splice(content.indexOf(entry.name), 1)
+        content.delete(entry.name)
         continue
       }
     }
