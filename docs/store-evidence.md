@@ -152,8 +152,9 @@ dsh --profile evidence --dump-config
 
 ## 5. 生命周期实测矩阵
 
-四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口（`0.1.7-rc.1` → 34800、
-`0.1.7-rc.2` → 34801、`0.2.0-rc.1` → 34802、`0.2.0-rc.2` → 34803，避开宿主默认的 3080）。
+四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口。端口按**从新到旧**分配
+（`run-all.ps1` 依版本顺序取号）：`0.2.0-rc.2` → 34800、`0.2.0-rc.1` → 34801、`0.1.7-rc.2` → 34802、
+`0.1.7-rc.1` → 34803，避开宿主默认的 3080。
 被测产物是 `dsh-worktree-space-1.1.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件。
 
 | DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
@@ -168,6 +169,17 @@ dsh --profile evidence --dump-config
 
 `desktop` 端由作者实测确认，命令行走不通、也不需要重跑。
 
+### 汇总列曾经恒为假
+
+`run-all.ps1` 早期用 `$out = & run-one.ps1` 的返回值判定完成度，但 `run-one.ps1` 的每一条结论都由
+`Emit` 经 `Write-Host` 输出——这个宿主不把 `Write-Host` 放进输出流，于是 `$out` 恒为空，
+汇总那一列对**任何**版本都显示 `False`，无论实际发生了什么。方向恰好是唯一没人会去核对的
+那一种：全绿时它报失败，真有失败时它也报失败，只是没人分得清。
+
+现在改为读每个版本的 `logs\log-<版本>\summary.txt`——那是 `Emit` 同一批调用写进磁盘的副本，
+而日志目录每轮开头会被清空，不会读到上一轮的残留。修复后本轮四个版本均输出 `True`。
+逐版本的权威记录始终是 `summary.txt`，不是控制台汇总。
+
 ### 逐条对照
 
 | 判据（第 2 节） | 实测 | 说明 |
@@ -176,9 +188,9 @@ dsh --profile evidence --dump-config
 | 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.1.0` | |
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
 | 2.3 进程正常启动 | 四次均 `boot_alive: True` | |
-| 2.3 页面可达 | 四次均 HTTP 200（33544 / 34825 / 35333 / 35367 字节），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**213710 字节**，内容含 `id: "dsh-worktree-space"` | |
-| 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show"}}` | 编造的 endpoint → **404** |
+| 2.3 页面可达 | 四次均 HTTP 200（35367 / 35333 / 34825 / 33544 字节，按 0.2.0-rc.2 到 0.1.7-rc.1），页面中出现插件 5 次 | |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**233359 字节**，内容含 `id: "dsh-worktree-space"` | |
+| 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
 | 2.4 再次 `--dump-config` 无 `worktree-space` | 四次均 0 处命中，且行数回到安装前 | |
@@ -190,7 +202,8 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
 `RPC method does not match endpoint.`。
 
 **bundle 地址是页面相对的**：`plugins/??dsh-worktree-space/client.js&rev=<rev>`，`rev` 每个版本各不相同
-（`37a15226d7a9` / `a891e0ed576d` / `b4c4e30ed039` / `3c02e8695ba5`），字节数四个版本一致。
+（`86aaab027255` / `4c7530a47842` / `bebf947663e5` / `acd5af9bb3b8`，按 0.2.0-rc.2 到 0.1.7-rc.1），
+字节数四个版本一致。
 
 ## 6. 必须逐条回应的边界情形
 

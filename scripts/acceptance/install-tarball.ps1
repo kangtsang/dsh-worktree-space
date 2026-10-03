@@ -26,6 +26,16 @@ if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
 Write-Host ('packing ' + $repo + ' -> ' + $target)
 Push-Location $repo
 try {
+  # Build first, always. The pack is what the matrix installs, so it has to be
+  # the artifact the release workflow would publish - and that one builds:
+  # npm publish runs prepublishOnly, which runs pnpm test, which runs pnpm build.
+  # Without this a source edit that was never built packs cleanly, the six
+  # stages all pass, and every one of them is measuring the *committed* bundle
+  # with the old strings in it. Exactly the trap this repo has already hit twice.
+  Write-Host 'building before packing'
+  & pnpm build
+  if ($LASTEXITCODE -ne 0) { throw "pnpm build failed with exit $LASTEXITCODE" }
+
   & pnpm pack --pack-destination $runRoot
   if ($LASTEXITCODE -ne 0) { throw "pnpm pack failed with exit $LASTEXITCODE" }
 } finally {

@@ -62,12 +62,12 @@ $dshHome = Join-Path $disposableRoot ("home-" + $v)
 $logDir  = Join-Path $logRoot ("log-" + $v)
 $leaf    = "home-" + $v
 
-if (-not (Test-Path -LiteralPath $binJs)) {
-  throw ("no DSH build at " + $binJs + " - run install-hosts.ps1 first")
-}
-if (-not (Test-Path -LiteralPath $tarball)) {
-  throw ("no tarball at " + $tarball + " - run install-tarball.ps1 first")
-}
+# NOTE: the two existence checks for $binJs and $tarball used to sit here, before
+# anything else. They were duplicates of the ones in the preconditions section and
+# every one of them is a throw - and a throw before the log directory is cleared
+# leaves the *previous* run's summary.txt in place for the driver to read as this
+# run's verdict. They live in the preconditions now, and the log is cleared before
+# those too.
 
 # --- the guard ---------------------------------------------------------------
 
@@ -159,12 +159,31 @@ function Run-Dsh {
   return $r
 }
 
+# --- the log directory, cleared first ----------------------------------------
+
+# This is the first thing in the run that touches the filesystem, and it has to
+# be. The driver decides whether a version completed by reading this directory's
+# summary.txt, so anything that throws before this point leaves the *previous*
+# run's verdict sitting where a reader will take it for this one's - and a
+# version that never booted reports as a pass. Clearing first means every way
+# this run can fail from here on leaves an empty summary.txt instead, which
+# reads as "did not finish" - the answer a failed run deserves.
+#
+# Same shape of rule as the two deletes below it, same guard: a direct child of
+# $logRoot named log-<v>, never a wildcard and never a path computed here.
+
+if (-not (Test-Path -LiteralPath $logRoot)) { New-Item -ItemType Directory -Path $logRoot -Force | Out-Null }
+$safeLog = Assert-LogDir -Path $logDir -Label 'logDir'
+if (Test-Path -LiteralPath $safeLog) { Remove-Item -LiteralPath $safeLog -Recurse -Force }
+New-Item -ItemType Directory -Path $safeLog | Out-Null
+$script:summaryFile = Join-Path $safeLog 'summary.txt'
+
 # --- preconditions -----------------------------------------------------------
 
 if ($v -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw "refusing odd version string '$v'" }
 if (-not (Test-Path -LiteralPath $binJs))    { throw "missing DSH at $binJs" }
 if (-not (Test-Path -LiteralPath $tarball))  { throw "missing tarball at $tarball" }
-foreach ($d in @($disposableRoot, $logRoot)) { if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null } }
+if (-not (Test-Path -LiteralPath $disposableRoot)) { New-Item -ItemType Directory -Path $disposableRoot -Force | Out-Null }
 
 # --- 0. fresh, isolated DSH_HOME ---------------------------------------------
 
@@ -189,11 +208,6 @@ foreach ($s in $stray) {
   $null = & taskkill /PID $s.ProcessId /T /F 2>&1
 }
 if ($stray) { Start-Sleep -Seconds 2 }
-
-$safeLog = Assert-LogDir -Path $logDir -Label 'logDir'
-if (Test-Path -LiteralPath $safeLog) { Remove-Item -LiteralPath $safeLog -Recurse -Force }
-New-Item -ItemType Directory -Path $safeLog | Out-Null
-$script:summaryFile = Join-Path $safeLog 'summary.txt'
 
 Emit "version"     $v
 Emit "node"        (node -v)

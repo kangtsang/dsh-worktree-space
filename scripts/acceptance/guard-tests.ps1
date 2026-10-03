@@ -20,18 +20,39 @@ $ErrorActionPreference = 'Stop'
 $runnerPath = Join-Path $PSScriptRoot 'run-one.ps1'
 if (-not (Test-Path -LiteralPath $runnerPath)) { throw ("runner not found at " + $runnerPath) }
 
-$runRoot        = [System.IO.Path]::GetFullPath($RunRoot)
-$evidenceRoot   = Split-Path $runRoot -Parent
-$disposableRoot = Join-Path $runRoot 'homes'
-$logRoot        = Join-Path $runRoot 'logs'
-$v              = '0.1.7-rc.2'
-$leaf           = "home-" + $v
+$runRoot  = [System.IO.Path]::GetFullPath($RunRoot)
+$v        = '0.1.7-rc.2'
 
-# --- extract the real guards --------------------------------------------------
+# The scope variables the guards read are TAKEN FROM THE RUNNER, not restated
+# here. Copying them would be a second answer to the same question: widen
+# $disposableRoot in run-one.ps1, or set $leaf to something that is not this
+# version's home, and a test carrying its own copies would still print GUARD-OK
+# while the runner deleted whatever the new values named. Only the two script
+# *inputs* are supplied above; everything else follows the runner.
+#
+# Order is the list's, and it is the runner's: $runRoot feeds the two roots and
+# $evidenceRoot, and $v feeds $leaf.
+$scopeNames = @('runRoot', 'evidenceRoot', 'disposableRoot', 'logRoot', 'leaf')
 
 $errors = $null
 $ast    = [System.Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$null, [ref]$errors)
 if ($errors -and $errors.Count) { throw ("runner does not parse: " + $errors[0].Message) }
+
+# Bind the extracted guards to the runner's own scope before anything calls them.
+# Evaluated in $scopeNames order, which is the runner's: $runRoot feeds the two
+# roots and $evidenceRoot, and $v feeds $leaf.
+$assigned = @{}
+foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $false)) {
+  $target = $node.Left
+  if ($target -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+  $varName = $target.VariablePath.UserPath
+  if ($scopeNames -contains $varName) { $assigned[$varName] = $node.Extent.Text }
+}
+$unassigned = @($scopeNames | Where-Object { -not $assigned.ContainsKey($_) })
+if ($unassigned.Count) {
+  throw ("run-one.ps1 no longer assigns: " + ($unassigned -join ', ') + " - the guard tests cannot run")
+}
+foreach ($scopeName in $scopeNames) { Invoke-Expression $assigned[$scopeName] }
 
 $found = @{}
 foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {

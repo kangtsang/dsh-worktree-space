@@ -77,7 +77,19 @@ foreach ($v in $ordered) {
   }
   $sw.Stop()
   $out | ForEach-Object { Write-Host $_ }
-  $ok = @($out | Where-Object { $_ -match 'STAGE: all six steps done' }).Count -gt 0
+  # The runner reports through Write-Host, which this host does not put on the
+  # output stream, so $out arrives empty - reading it answered "incomplete" for
+  # every version whatever actually happened. The per-version summary.txt holds
+  # the same lines, written by the same calls to disk, so that is what is read.
+  #
+  # run-one.ps1 clears that directory before anything that can throw, so a file
+  # here was written by this run: a version that failed before booting leaves it
+  # absent, and one that failed part-way leaves it short of the final line.
+  $ok = $false
+  $verdictFile = Join-Path (Join-Path ([System.IO.Path]::GetFullPath($RunRoot)) 'logs') ('log-' + $v + '\summary.txt')
+  if (Test-Path -LiteralPath $verdictFile) {
+    $ok = @(Select-String -LiteralPath $verdictFile -Pattern 'STAGE: all six steps done').Count -gt 0
+  }
   $summary += [pscustomobject]@{ version = $v; port = $port; completed = $ok; seconds = [int]$sw.Elapsed.TotalSeconds }
   Write-Host ('---- ' + $v + ' completed=' + $ok + ' in ' + [int]$sw.Elapsed.TotalSeconds + 's')
 }
