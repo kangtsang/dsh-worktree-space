@@ -50,7 +50,7 @@ function RemoveConfirmDialog({ name, busy, onConfirm, onCancel }: {
 }) {
   const t = useT()
   return <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
-    <DialogContent className="dws-confirm-dialog" busy={busy} showClose={false}>
+    <DialogContent className="dws-confirm-dialog dws-confirm-narrow" busy={busy} showClose={false}>
       {/* No heading at all. The question is one sentence, and a 16px title above it
           read as two things to read rather than one - the sentence was doing the work
           the heading was taking credit for. It is the body now. */}

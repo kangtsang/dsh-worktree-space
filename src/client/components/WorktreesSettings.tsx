@@ -615,10 +615,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         const expanded = canExpand && !collapsed.has(repo.repoPath)
         return <article className="dws-repo" key={repo.repoPath}>
           <header className="dws-repo-header">
-            <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(repo.repoPath)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>
-              {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderGit size={24} className="dws-repo-icon" />
-              <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repo.currentBranch ?? t("detached")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{listed.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
-            </button>
+            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(repo.repoPath)} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+            <FolderGit size={24} className="dws-repo-icon" />
+            <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repo.currentBranch ?? t("detached")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{listed.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
           {expanded ? <div className="dws-worktree-list">
@@ -640,8 +639,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         const listed = visibleTaskRepositories(task)
         return <article className="dws-task" key={task.path}>
         <header className="dws-task-header">
-          <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(task.path)} disabled={listed.length === 0} aria-expanded={listed.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>
-          {listed.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-task-icon" />
+          <button type="button" className="dws-chevron-toggle" disabled={listed.length === 0} onClick={() => toggleRepo(task.path)} aria-expanded={listed.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>{listed.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+          <FolderClosed size={24} className="dws-task-icon" />
           <span className="dws-task-heading">
             <span className="dws-task-title">
               <h3>{task.name}</h3>
@@ -653,7 +652,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
-          </button>
           <Button className="dws-button-ghost dws-add-repository" disabled={busy || !!action} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
           <Button className="dws-button-ghost dws-finish-task" disabled={busy || !!action} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
@@ -717,19 +715,18 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
                 takes the chevron and the toggle the other two views' rows already use.
                 A Workspace holding nothing keeps the placeholder rather than a chevron
                 that would open onto an empty list. */}
-            <button type="button" className="dws-repo-toggle" onClick={() => toggleRepo(workspace.path)} disabled={!canExpand} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleWorkspace")} ${workspace.title}`}>
-              {canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}<FolderClosed size={24} className="dws-repo-icon" />
-              <span className="dws-repo-heading">
-                <span className="dws-repo-title">
-                  <h3>{workspace.title}</h3>
-                  <span className={"dws-status " + badge.className}>
-                    <span className="dws-status-dot" />
-                    {badge.label}
-                  </span>
+            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(workspace.path)} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleWorkspace")} ${workspace.title}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+            <FolderClosed size={24} className="dws-repo-icon" />
+            <span className="dws-repo-heading">
+              <span className="dws-repo-title">
+                <h3>{workspace.title}</h3>
+                <span className={"dws-status " + badge.className}>
+                  <span className="dws-status-dot" />
+                  {badge.label}
                 </span>
-                <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
               </span>
-            </button>
+              <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
+            </span>
             {empty ? <span className="dws-status dws-space-status">{t("workspaceCannot")}</span> : null}
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>

@@ -348,7 +348,7 @@ function ResetConfirmDialog({ busy, onConfirm, onCancel }: {
 }) {
   const t = useT()
   return <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
-    <DialogContent className="dws-confirm-dialog" busy={busy} showClose={false}>
+    <DialogContent className="dws-confirm-dialog dws-confirm-narrow" busy={busy} showClose={false}>
       {/* One sentence, so no heading at all - see the same dialog in
           `ScanIgnoreEditor`. The sentence is the body. */}
       <div className="dws-dialog-body">

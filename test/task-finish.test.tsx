@@ -1238,6 +1238,33 @@ describe("finishing a task", () => {
     expect(screen.getByText(t("archiveWorkspaceRemoved"))).toBeTruthy()
   })
 
+  it("finds the registration when the two sides spell the path differently", async () => {
+    // The Host answers with the platform's separators; a workspace list can carry
+    // the other style. Comparing the raw strings missed the registration, so nothing
+    // was unregistered and the finished task space stayed registered at a directory
+    // that no longer existed - which every later scan then reported as ENOENT.
+    const spellings = [
+      ["forward slashes", container.replace(/\\/g, "/")],
+      ["a trailing separator", `${container}\\`],
+      ["a different drive-letter case", container.replace(/^([a-z]):/, (m) => m.toUpperCase())],
+    ] as const
+    for (const [label, registeredPath] of spellings) {
+      const user = userEvent.setup()
+      const next = setup({
+        items: [{ workspaceId: "ws-antest", path: registeredPath, title: "worktree-space/antest" }],
+        result: finishResult({ containerRemoved: true }),
+      })
+      await ready()
+      await user.click(screen.getByRole("button", { name: t("finishTask") }))
+      await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+      await waitFor(() => {
+        expect(next.workspaces.delete, `not unregistered for ${label}`).toHaveBeenCalledWith("ws-antest")
+      })
+      cleanup()
+    }
+  })
+
   it("surfaces a failed finish without closing the dialog or losing the choice", async () => {
     const user = userEvent.setup()
     const next = setup()

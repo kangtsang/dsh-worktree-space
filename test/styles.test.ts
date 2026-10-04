@@ -168,7 +168,7 @@ describe("floating panel surface", () => {
     expect(tokens).toContain("--dws-row-gap: 9px")
     expect(tokens).toContain("--dws-lead-icon: 24px")
     expect(rule(".dws-chevron-placeholder")).toContain("width: var(--dws-chevron-size)")
-    expect(rule(".dws-repo-toggle")).toContain("gap: var(--dws-row-gap)")
+    expect(rule(".dws-repo-header")).toContain("gap: var(--dws-row-gap)")
     const list = rule(".dws-worktree-list")
     expect(list).toContain("padding: 4px 12px 5px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap))")
   })

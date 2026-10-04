@@ -3,7 +3,7 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, commonAncestor, containerRootOf, nameOf, projectOf, slashPath } from "../lib/paths"
+import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
 import { BetaNotice } from "./BetaNotice"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
@@ -70,7 +70,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
-  const workspace = workspaces.list.getSnapshot().items.find((item) => cleanPath(item.path) === cleanPath(path))
+  // Matched by location, not by string: the Host answers with the platform's own
+  // separators and DSH's workspace list may carry the other style, so a plain
+  // comparison missed the registration whenever the two spelled the same directory
+  // differently. A miss is silent and permanent - `workspace` came back undefined,
+  // nothing was ever unregistered, and the task space stayed registered at a path
+  // the finish had just deleted. Every later scan then tried to read that path and
+  // reported ENOENT for a workspace the plugin itself had finished.
+  const workspace = workspaces.list.getSnapshot().items.find((item) => sameLocation(item.path, path))
   const [plan, setPlan] = useState<TaskPlan | null>(null)
   const [loadError, setLoadError] = useState("")
   // Merging is what a task is for, so it is on; deleting the branch and forcing

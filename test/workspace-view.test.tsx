@@ -80,6 +80,50 @@ describe("WorktreesSettings workspace view", () => {
     expect(next.onCreate).toHaveBeenCalledWith({ path: "/projects", title: "Projects" })
   })
 
+  it("leaves the name and the path outside the button, so they can be selected and copied", async () => {
+    // The row used to be one button - clicking anywhere on it folded the repositories -
+    // which put the name, the branch, the count and the path inside a button. Text
+    // inside a button is not selectable in the browser's own stylesheet, so a path you
+    // could read was a path you could not copy. Only the arrow is the control now.
+    const next = setup(() => ({ path: "/projects", isDirectory: true, isRepository: false, isSourceRoot: true, repositoryCount: 1, repositories: [] }))
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+
+    const name = (await screen.findByText("Projects")).closest("h3")
+    expect(name).toBeTruthy()
+    // Walk up to the row and check every element on the way: a single button anywhere
+    // between the name and the row puts the name back out of reach.
+    for (let node: HTMLElement | null = name; node && node !== document.body; node = node.parentElement) {
+      expect(node.tagName).not.toBe("BUTTON")
+      if (node.className === "dws-repo-header") break
+    }
+    const path = name?.closest(".dws-repo-header")?.querySelector(".dws-repo-path")
+    expect(path?.closest("button")).toBeNull()
+    expect(path?.textContent).toBe("/projects")
+    // The arrow is still the control, and it still folds the row.
+    const arrow = name?.closest(".dws-repo-header")?.querySelector(".dws-chevron-toggle")
+    expect(arrow?.getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("keeps a disabled arrow on a Workspace that holds nothing, rather than no control at all", async () => {
+    // Dropping the button entirely for a row that cannot fold reads as an absence in
+    // the row's place. What a screen reader has to be told is that this row is not
+    // foldable, and the name on the control is how it is told.
+    const next = setup((path) => ({ path, isDirectory: true, isRepository: false, isSourceRoot: false, repositoryCount: 0, repositories: [] }))
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+
+    // The fixture scans four repositories, all under /projects, so `Notes` is the
+    // Workspace that spans none of them.
+    const name = (await screen.findByText("Notes")).closest("h3")
+    const arrow = name?.closest(".dws-repo-header")?.querySelector(".dws-chevron-toggle")
+    expect(arrow?.tagName).toBe("BUTTON")
+    expect(arrow?.hasAttribute("disabled")).toBe(true)
+    expect(arrow?.getAttribute("aria-expanded")).toBeNull()
+    // And the name still sits outside it, so it can still be selected.
+    expect(name?.closest("button")).toBeNull()
+  })
+
   it("says a Workspace it could not read is unreadable, not unable to host a task space", async () => {
     // The Host cannot answer for one of them. Reporting that Workspace as unable to
     // host a task space would rule out a directory the plugin never managed to look

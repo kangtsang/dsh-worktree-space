@@ -116,7 +116,7 @@
   .dws-button-danger-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-danger) 20%, transparent); }
   .dws-icon-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--wt-secondary); }
   .dws-delete-action:hover:not(:disabled) { color: var(--wt-danger); background: var(--dsw-alias-interactive-bg-hover-danger); }
-  .dws-button:focus-visible, .dws-repo-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+  .dws-button:focus-visible, .dws-chevron-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
   .dws-input, .dws-select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--wt-line); border-radius: 9px; padding: 7px 10px; outline: none; background: var(--wt-surface); color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; }
   .dws-input::placeholder { color: var(--wt-muted); }
   .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
@@ -170,15 +170,25 @@
   /* The list's vertical rhythm. Rows are separated by their own padding, kept
      just wide enough that two rows still read as two rows: a branch line and the
      path under it belong together, so their gap is the smaller one. */
-  .dws-repo-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 0; }
-  .dws-repo-toggle { display: flex; align-items: center; gap: var(--dws-row-gap); flex: 1; min-width: 0; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--wt-text); font: inherit; text-align: left; cursor: pointer; }
-  .dws-repo-toggle > svg { flex: none; }
-  .dws-repo-toggle:disabled { opacity: 1; cursor: default; }
-  .dws-chevron-placeholder { display: block; flex: none; width: var(--dws-chevron-size); }
+  .dws-repo-header { display: flex; align-items: center; gap: var(--dws-row-gap); min-width: 0; padding: 7px 0; }
+  /* Only the arrow folds the row. It used to be the whole row, which put the name,
+     the branch, the count and the path inside a button - and text inside a button is
+     not selectable in the browser's own stylesheet, so a path you could read was a
+     path you could not copy. Making the arrow the control leaves the text outside a
+     button, where selecting it is ordinary rather than worked around, and clicking a
+     name to select it no longer folds the row underneath. */
+  .dws-chevron-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--dws-chevron-size); border: 0; padding: 0; background: transparent; color: var(--wt-muted); cursor: pointer; }
+  /* A row holding nothing keeps a disabled control rather than losing it: the name
+     it would have had is what tells a screen reader that this row cannot be folded
+     open, and the test that clicks it to prove it stays closed needs something to
+     click. Only the browser's own dimming is taken back - the row beside it is not
+     greyed out just because it has nothing in it. */
+  .dws-chevron-toggle:disabled { opacity: 1; cursor: default; }
+  .dws-repo-icon { flex: none; color: var(--wt-secondary); }
   .dws-branch-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .dws-chevron { color: var(--wt-muted); transition: transform .14s ease; }
-  .dws-repo-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }
-  .dws-repo-icon { color: var(--wt-secondary); }
+  .dws-chevron-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }
+  .dws-chevron-placeholder { display: block; flex: none; width: var(--dws-chevron-size); }
   .dws-repo-heading { display: block; flex: 1; min-width: 0; }
   .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
   .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
@@ -345,6 +355,13 @@
      sentence needs the size a heading would have given it. One step above the
      buttons, which is the order a sentence and its own buttons read in. */
   .dws-confirm-body { margin: 0; color: var(--wt-secondary); font-size: 14px; line-height: 22px; }
+  /* ...and the frame around it has to be the width of one sentence. This is a
+     class of its own rather than a width on `.dws-confirm-dialog`, because that
+     name says "this is a confirmation" and the finish dialog is one too - it just
+     is not a one-sentence one. Reading "confirm" as "narrow" put a 420px frame on
+     a dialog carrying a heading, a form and a footer, which needs 690. A width
+     that belongs to one shape of dialog has to be named after that shape. */
+  .dws-confirm-narrow { width: min(420px, calc(100vw - 32px)); }
   /* The tag list drops its own cap and lets the dialog body scroll instead. The body
      already scrolls and already takes the dialog's height, so a second scrollbar
      inside it only made the list shorter than the frame built to hold it. */
@@ -388,7 +405,6 @@
      modal over the first is the normal thing - each is its own portal, and Radix
      marks the one underneath inert, so the page behind cannot be reached either
      way. */
-  .dws-confirm-dialog { width: min(420px, calc(100vw - 32px)); }
   /* Geometry copied from the row the neighbouring plugin draws in the same slot,
      measured off its own stylesheet rather than guessed: same height, radius,
      padding, type size, and the same 4px bleed with 2px insets. */
