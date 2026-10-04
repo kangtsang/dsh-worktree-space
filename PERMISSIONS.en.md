@@ -3,7 +3,7 @@
 This file exists for DSH STORE's automated review and for human re-review: it states plainly what this
 plugin does at runtime, what it does not do, and where it stops.
 
-Declared baseline: `dsh-worktree-space@1.1.0`, at the fixed commit on this repository's default branch. The plugin version, `engines` and `dsh` fields are in `package.json`.
+Declared baseline: `dsh-worktree-space@1.2.0`, at the fixed commit on this repository's default branch. The plugin version, `engines` and `dsh` fields are in `package.json`.
 
 ## Runtime behaviour
 
@@ -181,7 +181,10 @@ executable artifact.
   signals. The point of this file is to declare those signals completely and honestly for human re-review and
   for the listing details — the correct state for a high-capability project is "declared high capability",
   not "apparently no capability".
-- **Fixed commit**: to be filled — once the `v1.1.0` tag exists, put the commit it points at here (checkable on GitHub).
+- **Fixed commit**: `57bf17b` (`build: bundles for 1.2.0`) — the commit the compatibility matrix actually
+  installed; every row in section 5 of `store-evidence.md` comes from that run. The tag `v1.2.0` has
+  **not been pushed**, so the hash is not yet checkable on GitHub. When `v1.2.0` is pushed it must point
+  at this same commit, or the evidence describes an artifact other than the one released.
 - **Lifecycle**: the disposable-profile install, start and uninstall steps, with the evidence available today,
   are in `docs/store-evidence.md`.
 

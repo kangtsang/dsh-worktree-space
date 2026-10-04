@@ -4,7 +4,7 @@
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
 [`PERMISSIONS.md`](../PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
 
-声明基线：`dsh-worktree-space@1.1.0`，对应本仓库默认分支上的固定提交。下面的清单现状、验收方法、
+声明基线：`dsh-worktree-space@1.2.0`，对应本仓库默认分支上的固定提交。下面的清单现状、验收方法、
 验收结果与边界情形都以它为准，不引用其它版本。
 
 ---
@@ -116,7 +116,7 @@ dsh --profile evidence --dump-config
 
 | 字段 | 值 |
 | --- | --- |
-| `version` | `1.1.0` |
+| `version` | `1.2.0` |
 | `engines.node` | `>=22.19.0` |
 | `engines.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
 | `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.1.7-rc.1 <0.3.0-0` |
@@ -155,7 +155,12 @@ dsh --profile evidence --dump-config
 四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口。端口按**从新到旧**分配
 （`run-all.ps1` 依版本顺序取号）：`0.2.0-rc.2` → 34800、`0.2.0-rc.1` → 34801、`0.1.7-rc.2` → 34802、
 `0.1.7-rc.1` → 34803，避开宿主默认的 3080。
-被测产物是 `dsh-worktree-space-1.1.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件。
+被测产物是 `dsh-worktree-space-1.2.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件，
+sha256 `C82F4F24F135230FFC9462A89677A503725044A020BAB97BFF46E9113DBFA432`（422635 字节）。
+本轮测的就是提交 `57bf17b`（`build: bundles for 1.2.0`），运行时间 2026-10-04 14:58:57 +08:00，
+判定 `PASS`（4 通过 0 失败），总耗时 29 秒，退出码 0。矩阵报告写在
+`<RunRoot>\logs\matrix-report.md` 与同名 `.json`，报告里带着 `Commit: 57bf17b`——
+**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
 
 | DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -165,9 +170,24 @@ dsh --profile evidence --dump-config
 | `0.1.7-rc.1` | `v24.18.0` | 通过 | 通过（1237 行 / 3 处命中） | 通过 | 通过 | 通过（1234 行 / 0 处命中） |
 
 四个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
-`version` 均为 `1.1.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
+`version` 均为 `1.2.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
 
-`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。
+回滚是**逐字节**回到安装前，不是"看起来干净"：每个版本的 `06-dump-after-remove.txt` 与
+`01-create.txt` 行数完全相同（45660/45660、45065/45065、44712/44712），
+`cordis.patch.yml` 提及数为 0，`node_modules` 已删除。
+
+### 这份证据是循环的，如实记下
+
+`package.json` 的 `files` 白名单**包含本文档**，所以改本文档就改了被测产物的 sha256。
+上面那个哈希描述的是**装着旧版本文档的包**。这不是疏漏，是打包范围决定的：
+证据文档和被它描述的产物住在同一个 tarball 里，谁先谁后都有代价。
+
+因此补一句可复核的话：**本文档的任何一次修改，都会让上面那个 sha256 失效**，需要重跑矩阵。
+判断包对不对，看 `lib\index.js` 和 `client\client.js` 的哈希，不看 tarball 的——
+那两个是构建产物，改文档不会动它们。
+
+`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。**1.2.0 的桌面端尚无实测记录**，
+上面这一行说的是 1.1.0。
 
 ### 汇总列曾经恒为假
 
@@ -185,11 +205,12 @@ dsh --profile evidence --dump-config
 | 判据（第 2 节） | 实测 | 说明 |
 | --- | --- | --- |
 | 2.1 安装以 0 退出、无 `incompatible` | 四个版本均满足 | pnpm 12.6.0，`Packages: +1` |
-| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.1.0` | |
+| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.2.0` | |
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
-| 2.3 进程正常启动 | 四次均 `boot_alive: True` | |
+| 2.3 进程正常启动 | 四次均 `boot_alive: True`，stderr 文件均 0 字节，`boot_stopped: True` | |
 | 2.3 页面可达 | 四次均 HTTP 200（35367 / 35333 / 34825 / 33544 字节，按 0.2.0-rc.2 到 0.1.7-rc.1），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**233359 字节**，内容含 `id: "dsh-worktree-space"` | |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**258782 字节**，内容含 `id: "dsh-worktree-space"` | 服务端字节比仓库的 `client\client.js`（258706）多 **76**，两轮都是 76，是宿主加的固定外壳，不是产物变了 |
+| 2.3 bundle 的 rev 逐版本不同 | `b2693514cba9` / `333d4d84068e` / `9a8ecfa438ec` / `c36b96f125b4` | 内容寻址，四份不同的宿主缓存各自一份 |
 | 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
