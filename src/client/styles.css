@@ -165,6 +165,12 @@
      caption clears the divider by one gap. Below it is 4px, not 8px: the loading
      message brings 8px of its own padding, and 8 + 8 stacks to a hole. */
   .dws-settings .dws-view-description { margin: 8px 0 4px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The feedback link after the plugin description. It carries no size of its own: the
+     link wears whatever the sentence it follows is set in, which differs between the
+     manage dialog and the settings page. It underlines at rest rather than on hover -
+     it is the one link on this screen, and a reader who has decided to report a
+     problem should not also have to work out which words are pressable. */
+  .dws-feedback-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
   .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; }
   .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
   /* The list's vertical rhythm. Rows are separated by their own padding, kept

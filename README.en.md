@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
-Worktree Space: A task that involves one or more Git repositories goes into its own task space directory, where each
+Worktree Space: One task, one space — agents in parallel, never in conflict. A task that involves one or more Git repositories goes into its own task space directory, where each
 participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH
 workspace, agent sessions start working inside it, and each task gets its own space, so several tasks can run in
 parallel without interfering with one another. When a task is finished you can merge the task branch back into the

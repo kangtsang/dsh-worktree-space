@@ -2,7 +2,7 @@
 
 **简体中文** · [English](README.en.md) · [更新日志](CHANGELOG.md)
 
-Worktree Space：把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，agent 会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。任务完成时可把任务分支合并回目标分支、移除 worktree，并将任务空间里遗留的文档归档到
+Worktree Space：一任务一空间，Agent 并行不悖。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，agent 会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。任务完成时可把任务分支合并回目标分支、移除 worktree，并将任务空间里遗留的文档归档到
 指定目录；也可选择把未处理的提交和合并冲突交给 agent 处理。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
