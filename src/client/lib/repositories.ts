@@ -1,4 +1,5 @@
 import { sameLocation, slashPath } from "./paths"
+import { failure } from "./error-text"
 import type { WorkspacesService } from "./types"
 
 /** What adding a repository source by hand can end in. */
@@ -42,7 +43,9 @@ type Classifier = { classifyRoot: (path: string) => Promise<{ isRepository: bool
  * @param path - the directory the user named.
  * @param listed - the repository paths the last scan already returned.
  * @returns what happened, for the caller to report.
- * @throws Error carrying the Host's message when the path is not a source repository.
+ * @throws Error carrying `repository-path-required` or `not-a-git-repository`, so the
+ * page can say it in the interface language: this runs below every page and has no
+ * dictionary of its own to word either refusal in.
  */
 export async function addRepositorySource(
   api: Classifier,
@@ -51,13 +54,13 @@ export async function addRepositorySource(
   listed: readonly string[],
 ): Promise<AddRepositoryOutcome> {
   const target = String(path ?? "").trim()
-  if (target === "") throw new Error("A repository path is required.")
+  if (target === "") throw failure("repository-path-required")
   if (listed.some((known) => sameLocation(known, target))) {
     return { added: false, reason: "listed" }
   }
   const state = await api.classifyRoot(target)
   if (!state.isRepository) {
-    throw new Error(`${slashPath(target)} is not a git repository, so a task cannot hold a worktree of it.`)
+    throw failure("not-a-git-repository", { path: slashPath(target) })
   }
   await workspaces.create({ path: target })
   return { added: true, path: target }

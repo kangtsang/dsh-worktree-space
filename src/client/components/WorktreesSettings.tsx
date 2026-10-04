@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
+import { errorText } from "../lib/error-text"
 import { previewValue, subscribePreview } from "../lib/config-preview"
 import { mapWithLimit } from "../lib/concurrency"
 import { cleanPath, isInsideDirectory, sameLocation, slashPath } from "../lib/paths"
@@ -100,7 +101,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     return servedDepth
   }
   const [error, setError] = useState("")
-  const [action, setAction] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("all")
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
@@ -240,7 +240,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         list.worktrees.map(row => ({ repo, row, target: list.currentBranch })))
       const answered = await mapWithLimit(wanted, STATUS_CONCURRENCY, async ({ repo, row, target }) => {
         try { return { repo, row: { ...row, ...(await api.status(row.path, target, controller.signal)) } } }
-        catch (reason: any) { return { repo, row: { ...row, statusError: String(reason?.message ?? reason) } } }
+        catch (reason: any) { return { repo, row: { ...row, statusError: errorText(t, reason) } } }
       })
       const byRepo = new Map<number, WorktreeList["worktrees"]>()
       for (const { repo, row } of answered) {
@@ -251,7 +251,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       const next = discovered.map((list, repo) => ({ ...list, worktrees: byRepo.get(repo) ?? [] }))
       if (!controller.signal.aborted) setRepos(next)
     } catch (reason: any) {
-      if (!controller.signal.aborted) setError(String(reason?.message ?? reason))
+      if (!controller.signal.aborted) setError(errorText(t, reason))
     } finally {
       if (!controller.signal.aborted) setBusy(false)
     }
@@ -372,7 +372,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   })
   // A repository still being read is flagged as such, so a read in flight is not
   // reported as a read that could not be answered.
-  const tasks = groupTasks(repos)
+  //
+  // Grouping walks every repository and every worktree, and it answered to nothing
+  // that had changed since the last render — the search box below re-renders this on
+  // every keystroke while asking a question only the query affects. So the grouping
+  // is derived from the scan and the narrowing is left to the filter under it.
+  const tasks = useMemo(() => groupTasks(repos), [repos])
   // A task needs attention when any of its repositories does, which is the same
   // condition the repository view filters on, one level up.
   const taskNeedsAttention = (task: TaskGroup) => task.changedFiles > 0 || task.commits > 0 || task.lockedRepositories > 0 || task.prunableRepositories > 0 || task.unknownRepositories > 0
@@ -386,8 +391,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   // set of collapsed paths, and the Workspace rows are in it now that they expand.
   const workspaceItems = workspaces.list.getSnapshot().items as Workspace[]
   /**
-   * Which Workspace owns each repository: the most specific registered Workspace that
-   * contains it, and exactly one.
+   * Which Workspace owns each repository (`owner`), and which repositories each one
+   * owns (`under`).
    *
    * Containment alone is not enough. A Workspace registered inside another one -
    * `E:\workspace\public` under `E:\workspace` - contains every repository under the
@@ -400,19 +405,55 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
    *
    * One owner settles it. The Host no longer walks the nested path as part of its
    * parent either, so the parent's badge and its list are counting the same set.
+   *
+   * The answer and its reverse are derived in the same pass and remembered together:
+   * a Workspace row asks what it owns on every render, and a render is every
+   * keystroke of the search box. A Workspace of ninety-odd repositories against a
+   * handful of Workspaces is a few thousand comparisons per character typed, for an
+   * answer that only the scan and the Workspace list can change - so it is derived
+   * from exactly those two, and the search keeps its own filter over the result.
    */
-  const ownerOfRepository = new Map<string, string>()
-  {
+  const owned = useMemo(() => {
+    const owner = new Map<string, string>()
+    const under = new Map<string, WorktreeList[]>()
     const bySpecificity = [...workspaceItems].sort((left, right) => right.path.length - left.path.length)
     for (const repo of repos) {
       for (const workspace of bySpecificity) {
         if (sameLocation(repo.repoPath, workspace.path) || isInsideDirectory(workspace.path, repo.repoPath)) {
-          ownerOfRepository.set(cleanPath(repo.repoPath), workspace.path)
+          owner.set(cleanPath(repo.repoPath), workspace.path)
+          const list = under.get(workspace.path)
+          if (list === undefined) under.set(workspace.path, [repo])
+          else list.push(repo)
           break
         }
       }
     }
-  }
+    return { owner, under }
+  }, [repos, workspaceItems])
+  /**
+   * The repositories a Workspace spans, as the scan found them.
+   *
+   * Taken from the scan rather than from the number the classification reports,
+   * because those are two different answers and a Workspace reading "12
+   * repositories" must expand to those twelve and not to some other set. The scan
+   * and the classification are two walks over the same bounds - the classification
+   * counts through `discoverSourceRepos`, the scan lists through
+   * `discoverGitRoots` - and both prune a nested Workspace the same way, so what
+   * this returns is what the badge counted.
+   *
+   * One Workspace each, and the most specific one: a repository under a Workspace
+   * registered inside this one belongs to the inner Workspace and is not listed here.
+   * See `owned` for why it cannot be both. The lists are built in the order the scan
+   * returned them, which is the order the rows were listed in.
+   *
+   * An arrow rather than a declaration because `collapsiblePaths` below reads it while
+   * the component body is still being built, and a `const` read above its own
+   * definition throws at runtime without `tsc` noticing: the file used a hoisted
+   * function here, and nothing says it has to stay one.
+   * @param workspace - the Workspace whose repositories to list.
+   * @returns the repositories under it, in the order the scan returned them.
+   */
+  const repositoriesUnder = (workspace: Workspace) => owned.under.get(workspace.path) ?? []
   // One set of collapsed paths drives both views, so the button beside the filters
   // says what the next click does to all of them.
   const collapsiblePaths = [
@@ -447,26 +488,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       // Workspace contains.
       || repositoriesUnder(workspace).some(repo => repo.repoPath.toLowerCase().includes(needle))
   })
-  /**
-   * The repositories a Workspace spans, as the scan found them.
-   *
-   * Taken from the scan rather than from the number the classification reports,
-   * because those are two different answers and a Workspace reading "12
-   * repositories" must expand to those twelve and not to some other set. The scan
-   * and the classification are two walks over the same bounds - the classification
-   * counts through `discoverSourceRepos`, the scan lists through
-   * `discoverGitRoots` - and both prune a nested Workspace the same way, so what
-   * this returns is what the badge counted.
-   *
-   * One Workspace each, and the most specific one: a repository under a Workspace
-   * registered inside this one belongs to the inner Workspace and is not listed here.
-   * See `ownerOfRepository` for why it cannot be both.
-   * @param workspace - the Workspace whose repositories to list.
-   * @returns the repositories under it, in the order the scan returned them.
-   */
-  function repositoriesUnder(workspace: Workspace) {
-    return repos.filter(repo => ownerOfRepository.get(cleanPath(repo.repoPath)) === workspace.path)
-  }
   const taskRepoStatus = (repository: TaskRepository) => {
     if (repository.checking) return { state: "checking", label: t("checkingStatus") }
     if (repository.unknown) return { state: "unavailable", label: t("statusUnknown") }
@@ -508,7 +529,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       setAddingSource(false)
       await refresh([path])
     } catch (reason: any) {
-      setSourceError(String(reason?.message ?? reason))
+      setSourceError(errorText(t, reason))
     } finally {
       setSourceBusy(false)
     }
@@ -540,7 +561,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       setAddingSpace(false)
       await refresh([path])
     } catch (reason: any) {
-      setSpaceError(String(reason?.message ?? reason))
+      setSpaceError(errorText(t, reason))
     } finally {
       setSpaceBusy(false)
     }
@@ -579,11 +600,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       </header> : null}
       <div className="dws-toolbar">
         <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
-        <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy || !!action} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
+        <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
         {/* Offered only in the repository view: it is this view's list being added
             to, and in the other two the same button would answer a question the
             user is not asking. */}
-        {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSourceError(""); setSourceNotice(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
+        {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy} onClick={() => { setSourceError(""); setSourceNotice(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
         {view === "repos" && addingSource ? <div className="dws-add-source-row">
           <Input aria-label={t("addRepositorySource")} placeholder={t("addRepositoryManualPlaceholder")} value={sourcePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSourcePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSource() } }} />
           <Button className="dws-button-primary" disabled={sourceBusy || sourcePath.trim() === ""} onClick={() => void addSource()}>{sourceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{sourceBusy ? t("addingRepository") : t("addRepositoryAdd")}</Button>
@@ -594,7 +615,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             the list of them is. It sits next to the refresh rather than with the
             repository button, which is a different act — that one adds a
             repository to a Workspace list this one is what extends. */}
-        {view === "spaces" && !addingSpace ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSpaceError(""); setAddingSpace(true) }}><Plus size={14} />{t("addWorkspace")}</Button> : null}
+        {view === "spaces" && !addingSpace ? <Button className="dws-button dws-add-source-button" disabled={busy} onClick={() => { setSpaceError(""); setAddingSpace(true) }}><Plus size={14} />{t("addWorkspace")}</Button> : null}
         {view === "spaces" && addingSpace ? <div className="dws-add-source-row">
           <Input aria-label={t("addWorkspace")} placeholder={t("addWorkspacePlaceholder")} value={spacePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSpacePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSpace() } }} />
           <Button className="dws-button-primary" disabled={spaceBusy || spacePath.trim() === ""} onClick={() => void addSpace()}>{spaceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{spaceBusy ? t("addingWorkspace") : t("addWorkspaceConfirm")}</Button>
@@ -669,8 +690,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
-          <Button className="dws-button-ghost dws-add-repository" disabled={busy || !!action} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
-          <Button className="dws-button-ghost dws-finish-task" disabled={busy || !!action} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
+          <Button className="dws-button-ghost dws-add-repository" disabled={busy} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
+          <Button className="dws-button-ghost dws-finish-task" disabled={busy} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
         {listed.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
           {listed.map(repository => {

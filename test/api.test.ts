@@ -25,7 +25,9 @@ describe("worktree client API routing", () => {
     const api = createWorktreeApi({ rpc: { call } })
     const invoke = api[operation] as (...call: any[]) => Promise<unknown>
     const request = invoke(...args)
-    const rejected = expect(request).rejects.toThrow(/timed out/)
+    // Named rather than worded: there is no dictionary under this call to word it in,
+    // so the code is what a page matches on and says in the interface language.
+    const rejected = expect(request).rejects.toMatchObject({ code: "worktree-timeout" })
     const signal = call.mock.calls[0][3] as AbortSignal
     expect(signal.aborted).toBe(false)
     expect(vi.getTimerCount()).toBe(1)
@@ -44,7 +46,7 @@ describe("worktree client API routing", () => {
     const api = createWorktreeApi({ rpc: { call } })
     const controller = new AbortController()
     const request = operation === "status" ? api.status("/repo", undefined, controller.signal) : api[operation](["/repo"], controller.signal)
-    const rejected = expect(request).rejects.toThrow(/cancelled/)
+    const rejected = expect(request).rejects.toMatchObject({ code: "worktree-cancelled" })
     controller.abort()
     await rejected
     expect(call.mock.calls[0][3].aborted).toBe(true)
@@ -120,7 +122,9 @@ describe("worktree client API routing", () => {
     { result: { ok: false, error: { code: "E9001", message: "No such file or directory" } }, message: "No such file or directory", code: "E3005" },
     { result: { ok: false, error: { code: "cancelled", message: "The request was cancelled." } }, message: "The request was cancelled.", code: "cancelled" },
     { result: { ok: false, error: { code: "E9001", message: "Invalid path" } }, message: "Invalid path", code: "E9001" },
-    { result: undefined, message: "worktree operation failed", code: undefined },
+    // A Host that answered with no sentence at all: there is nothing of its to keep,
+    // so the failure is named rather than worded here in this plugin's own English.
+    { result: undefined, message: "worktree-failed", code: "worktree-failed" },
   ])("rejects unsuccessful results with $message", async ({ result, message, code }) => {
     const call = vi.fn().mockResolvedValue(result)
     const api = createWorktreeApi({ rpc: { call } })

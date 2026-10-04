@@ -264,8 +264,15 @@ export interface TaskPlanRepository {
    * mean moving a checkout someone else is using.
    */
   branches: string[]
-  /** Commits that merge would bring. */
-  commits: number
+  /**
+   * Commits that merge would bring, or nothing when git would not say.
+   *
+   * The Host omits the field rather than reporting a zero it did not count: a caller
+   * has to be able to tell "there is nothing to merge" from "this could not be
+   * counted", and only the first is a zero. The row's own `error` is what says which
+   * happened, so a missing count is shown by leaving it out.
+   */
+  commits?: number
   changedFiles: number
   error?: string
 }

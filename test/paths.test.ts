@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanPath, commonAncestor, nameOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
+import { cleanPath, commonAncestor, nameOf, normalizedSlugOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
 
 describe("worktree path helpers", () => {
   it("normalizes trailing separators without changing root paths", () => {
@@ -12,6 +12,24 @@ describe("worktree path helpers", () => {
     expect(slugOf(" Login fix ")).toBe("login-fix")
     expect(slugOf("タスク")).toBe("task")
     expect(slugOf("")).toBe("task")
+  })
+
+  it("normalizes a name once, so the slug and the emptiness check cannot drift", () => {
+    // The two used to spell the same rule out separately: the form validated against
+    // one and asked the other whether anything was left, and a change to one was not a
+    // change to the other - which is how a field comes to show a name as valid and
+    // send a different one. The rule is stated once here and the placeholder is the
+    // only thing added to it.
+    for (const value of [" Login fix ", "タスク", "", "   ", "!!!", "a..b", "task.", "-x-", 0, false, null, undefined]) {
+      expect(slugOf(value)).toBe(normalizedSlugOf(value) || "task")
+    }
+    expect(normalizedSlugOf("")).toBe("")
+    expect(normalizedSlugOf("   ")).toBe("")
+    // The emptiness check is the rule too, so a name it cannot reduce is refused
+    // rather than turned into the placeholder.
+    expect(normalizedSlugOf("タスク")).toBe("")
+    expect(normalizedSlugOf("!!!")).toBe("")
+    expect(normalizedSlugOf(" Login fix ")).toBe("login-fix")
   })
 
   it("places the task directory inside the container, matching its separator style", () => {

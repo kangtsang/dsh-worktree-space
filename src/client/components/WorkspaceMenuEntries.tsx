@@ -67,6 +67,22 @@ export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onA
     }
 
     /**
+     * The same record from the keyboard, because the trigger is a button.
+     *
+     * A pointer records the row on the way down and the shell opens its menu on the
+     * click after it; a keyboard user activates the same button and gets the same
+     * menu, with nothing for this adapter to hear. Without this the row is whatever
+     * the mouse was last used on, so a keyboard user who opened one row's menu
+     * within the window after using the mouse on another gets that other Workspace's
+     * actions — on a Workspace they never pointed at.
+     */
+    const rememberRowOnKey = (event: KeyboardEvent) => {
+      // `Spacebar` is what older engines report for the key now named ` `.
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return
+      rememberRow(event)
+    }
+
+    /**
      * The items that belong in this Workspace's menu.
      *
      * `canCreate` is the same classification the composer's own button reads, so
@@ -172,11 +188,13 @@ export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onA
     }
 
     document.addEventListener("pointerdown", rememberRow, true)
+    document.addEventListener("keydown", rememberRowOnKey, true)
     const observer = new MutationObserver(schedule)
     observer.observe(document.body, { childList: true, subtree: true })
     return () => {
       active = false
       document.removeEventListener("pointerdown", rememberRow, true)
+      document.removeEventListener("keydown", rememberRowOnKey, true)
       observer.disconnect()
       for (const item of document.querySelectorAll(`[${OWN_MENU_ITEM}]`)) item.remove()
     }

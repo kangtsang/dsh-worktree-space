@@ -1,3 +1,4 @@
+import { failure } from "./error-text"
 import type {
   AddRepositoriesResult,
   ConnectionService,
@@ -47,16 +48,21 @@ export function createWorktreeApi(connection: ConnectionService) {
     const args = [CHANNEL, `dsh-worktree-space/${endpoint}`, payload] as const
     const result = await (signal ? connection.rpc.call(...args, signal) : connection.rpc.call(...args)) as any
     if (!result?.ok) {
-      const message = result?.error?.message ?? "worktree operation failed"
-      // The message stays the Host's, because that is the sentence the dialog
-      // shows and it is the one written for a person to read. The code is a
-      // separate field, not the message: it is for deciding what to do, and a
-      // dialog that renders it as the message shows someone "E3004" and nothing
-      // else. The two are deliberately different jobs - the message may be
-      // reworded or translated, the code may not, which is why it is the thing
-      // to grep the log with.
-      const code = classifyError(result?.error?.code, message) ?? result?.error?.code
-      const error = new Error(message)
+      // The Host's own message, because that is the sentence the dialog shows and it
+      // is the one written for a person to read. The code is a separate field, not
+      // the message: it is for deciding what to do, and a dialog that renders it as
+      // the message shows someone "E3004" and nothing else. The two are deliberately
+      // different jobs - the message may be reworded or translated, the code may not,
+      // which is why it is the thing to grep the log with.
+      const sent = result?.error?.message
+      if (sent === undefined) {
+        // A Host that answered with no sentence at all leaves nothing to translate and
+        // nothing to show; the failure is named instead, and said in the interface
+        // language where it is displayed.
+        throw failure("worktree-failed")
+      }
+      const code = classifyError(result?.error?.code, String(sent)) ?? result?.error?.code
+      const error = new Error(String(sent))
       ;(error as Error & { code?: string }).code = code
       throw error
     }
@@ -67,11 +73,13 @@ export function createWorktreeApi(connection: ConnectionService) {
   // a timeout must not encourage retrying a creation that may have succeeded.
   async function read<T>(endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const controller = new AbortController()
-    const timeoutError = new Error('Worktree request timed out. Refresh or select a more specific Workspace.')
+    // Named rather than worded: there is no dictionary down here to word it in, and
+    // these two are shown in whatever language the interface is in.
+    const timeoutError = failure("worktree-timeout")
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: () => void = () => {}
     const cancelled = new Promise<never>((_, reject) => {
-      onAbort = () => { controller.abort(); reject(new Error('Worktree request cancelled.')) }
+      onAbort = () => { controller.abort(); reject(failure("worktree-cancelled")) }
       timer = setTimeout(() => { controller.abort(); reject(timeoutError) }, 15000)
       signal?.addEventListener('abort', onAbort, { once: true })
       if (signal?.aborted) onAbort()

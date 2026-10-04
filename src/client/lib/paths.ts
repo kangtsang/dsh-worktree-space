@@ -3,8 +3,29 @@ export function cleanPath(value: unknown) {
   return text.length > 1 ? text.replace(/[\\/]+$/, "") : text
 }
 
+/**
+ * A name reduced to what a Git ref and a directory may both be called.
+ *
+ * Everything that is not a letter, a digit, a dot, a hyphen or an underscore becomes
+ * a hyphen, and hyphens are trimmed off both ends. This is the one rule, and
+ * `slugOf` is this plus the placeholder a caller that insists on a name needs: the
+ * two used to spell the same regex out separately, so a form that validated against
+ * one and asked the other whether anything was left could drift and end up showing
+ * a name as valid while submitting a different one.
+ * @param value - the name as typed.
+ * @returns the normalized name, or "" when nothing usable is left.
+ */
+export function normalizedSlugOf(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
+}
+
+/**
+ * {@link normalizedSlugOf}, with a placeholder in place of an empty name.
+ * @param value - the name as typed.
+ * @returns the normalized name, or "task" when nothing usable is left.
+ */
 export function slugOf(value: unknown) {
-  return String(value || "task").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "task"
+  return normalizedSlugOf(value) || "task"
 }
 
 /**

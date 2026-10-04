@@ -265,6 +265,12 @@ const zh: Dict = {
   locked: "已锁定",
   prunable: "可清理",
   operationError: "操作失败：",
+  // 这几条是插件自己发起的失败，库层只给出错误码，句子在这里拼。
+  worktreeRequestTimedOut: "请求 15 秒没有响应。请刷新，或换用范围更小的工作区。",
+  worktreeRequestCancelled: "请求已取消。",
+  worktreeOperationFailed: "Worktree 操作失败。",
+  repositoryPathRequired: "请填写仓库路径。",
+  repositoryNotGitRepository: "{path} 不是 Git 仓库，任务空间无法为它创建 worktree。",
   unavailable: "路径不存在",
   statusUnknown: "状态未知",
   registerFailed: "任务空间已创建，但 Workspace 注册失败。",
@@ -531,6 +537,13 @@ const en: Dict = {
   locked: "locked",
   prunable: "prunable",
   operationError: "Operation failed: ",
+  // These are the failures this plugin raises itself: the library names them and
+  // only the page, which has a dictionary, says them.
+  worktreeRequestTimedOut: "The request did not answer within 15 seconds. Refresh, or pick a more specific Workspace.",
+  worktreeRequestCancelled: "The request was cancelled.",
+  worktreeOperationFailed: "The worktree operation failed.",
+  repositoryPathRequired: "Enter a repository path.",
+  repositoryNotGitRepository: "{path} is not a Git repository, so a task space cannot hold a worktree of it.",
   unavailable: "path does not exist",
   statusUnknown: "status unknown",
   registerFailed: "The task space was created, but workspace registration failed.",

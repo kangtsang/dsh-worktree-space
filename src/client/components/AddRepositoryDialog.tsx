@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, GitPullRequest, InformationCircle, Loader2 } from "./icons"
 import { format, useT } from "../lib/i18n"
+import { errorText } from "../lib/error-text"
 import { isInsideDirectory, nameOf, slashPath } from "../lib/paths"
 import { HoverHint } from "./HoverHint"
 import type { TaskInspection, WorktreeList, WorkspacesService } from "../lib/types"
@@ -59,7 +60,7 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
       // field empty rather than putting a guess in it.
       setNamedBase(next.baseRef ?? "")
     }).catch((reason) => {
-      if (alive) setError(String(reason?.message ?? reason))
+      if (alive) setError(errorText(t, reason))
     }).finally(() => {
       if (alive) setLoading(false)
     })
@@ -103,7 +104,7 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
       onAdded()
       onClose()
     } catch (reason: any) {
-      setError(String(reason?.message ?? reason))
+      setError(errorText(t, reason))
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -125,10 +126,15 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
     </legend>
     <div className="dws-repo-picker">
       <div className="dws-repo-choices">
-        {candidates.map((entry) => {
+        {/* Keyed and identified by position, not by name: the candidates come from every
+            Workspace, so two of them can be the same repository directory reached from
+            two places and would share an id — clicking the second label would then toggle
+            the first checkbox — and a directory name is not something to put in an element
+            id anyway, a space among them being one reason. The label still reads the name. */}
+        {candidates.map((entry, index) => {
           const name = nameOf(entry.repoPath)
-          return <label key={entry.repoPath} className="dws-check-option" htmlFor={`${id}-repo-${name}`}>
-            <input id={`${id}-repo-${name}`} className="dws-checkbox" type="checkbox" checked={picked.includes(entry.repoPath)} onChange={(event) => toggle(entry.repoPath, event.target.checked)} />
+          return <label key={entry.repoPath} className="dws-check-option" htmlFor={`${id}-repo-${index}`}>
+            <input id={`${id}-repo-${index}`} className="dws-checkbox" type="checkbox" checked={picked.includes(entry.repoPath)} onChange={(event) => toggle(entry.repoPath, event.target.checked)} />
             {/* The same name-then-branch line the repository view renders, so a
                 repository reads the same wherever this plugin lists it. */}
             <span className="dws-check-copy">

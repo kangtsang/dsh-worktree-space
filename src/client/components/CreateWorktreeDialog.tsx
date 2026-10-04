@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, GitPullRequest, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { nameOf, slashPath, slugOf, taskDirectory } from "../lib/paths"
+import { errorText } from "../lib/error-text"
+import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
@@ -124,7 +125,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       // Every discovered repository is in the task until the user narrows it.
       setSelected(next.repositories.map((repository) => repository.path))
     }).catch((reason) => {
-      if (alive) setError(String(reason?.message ?? reason))
+      if (alive) setError(errorText(t, reason))
     }).finally(() => {
       if (alive) setLoading(false)
     })
@@ -140,20 +141,29 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const prefixProblem = branchPrefixProblem(typedPrefix)
   // The checkbox promises a new default for the *next* task space, so it is offered
   // only for a prefix that could actually become one: an unset one has nothing to
-  // save, and an unusable one would be refused by the Host. The field is prefilled
-  // with the current default, so the box starts clear rather than already ticked.
-  const canSaveDefault = typedPrefix !== "" && prefixProblem === "" && typedPrefix !== configuredPrefix
+  // save, an unusable one would be refused by the Host, and there is nothing to save
+  // it into when the shell serves no configuration form at all — which the entry that
+  // mounts this dialog promises. The field is prefilled with the current default, so
+  // the box starts clear rather than already ticked.
+  const hasForm = config !== undefined
+  const canSaveDefault = hasForm && typedPrefix !== "" && prefixProblem === "" && typedPrefix !== configuredPrefix
   // The suggestion carries the container root the configuration names, when it names
   // one, so this is one comparison rather than a second read of the settings: a field
-  // left where the dialog put it is already the default, and one that was moved is a
-  // location the user may want next time too.
+  // left where the dialog put it is already the default, one that was moved is a
+  // location the user may want next time too, and neither is anything without a form
+  // to write it through.
   const typedRoot = tasksRoot.trim()
   const defaultRoot = suggestion === null ? "" : slashPath(suggestion.suggested)
-  const canSaveDefaultRoot = typedRoot !== "" && defaultRoot !== "" && typedRoot !== defaultRoot
+  const canSaveDefaultRoot = hasForm && typedRoot !== "" && defaultRoot !== "" && typedRoot !== defaultRoot
   // The host refuses separators and whitespace; this form additionally keeps the
   // name a valid Git ref, so the branch cannot fail later.
-  const normalizedName = taskName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
-  const taskSlug = normalizedName ? slugOf(taskName) : ""
+  //
+  // One rule decides both what is submitted and whether there is anything to submit:
+  // the same normalization `slugOf` uses, without its placeholder. Spelling it a
+  // second time is how a name comes to be shown as valid here and sent as another
+  // one there — the emptiness check was reading a copy that could drift away from
+  // the validation.
+  const taskSlug = normalizedSlugOf(taskName)
   const validSlug = /^[a-z0-9_][a-z0-9._-]*$/.test(taskSlug)
     && !taskSlug.includes("..") && !taskSlug.endsWith(".") && !taskSlug.endsWith(".lock")
   const taskBranch = validSlug && prefixProblem === "" ? `${effectivePrefix}${taskSlug}` : ""
@@ -200,7 +210,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     const problems: string[] = []
     if (workspace?.workspaceId) {
       try { await workspaces.delete(workspace.workspaceId) }
-      catch (reason: any) { problems.push(String(reason?.message ?? reason)) }
+      catch (reason: any) { problems.push(errorText(t, reason)) }
     }
     try {
       await api.doneTask({
@@ -217,7 +227,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
       })
     } catch (reason: any) {
-      problems.push(String(reason?.message ?? reason))
+      problems.push(errorText(t, reason))
     }
     return problems.length === 0 ? { ok: true } : { ok: false, error: problems.join("; ") }
   }
@@ -240,8 +250,29 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     if (!recovery || busyRef.current) return
     startBusy()
     try { await registerAndOpen(recovery.path, recovery.task); setRecovery(null) }
-    catch (reason: any) { setError(`${t("registerFailed")} ${String(reason?.message ?? reason)}`) }
+    catch (reason: any) { setError(`${t("registerFailed")} ${errorText(t, reason)}`) }
     finally { endBusy() }
+  }
+
+  /**
+   * Write one preference, answering a refusal and a failure the same way.
+   *
+   * The configuration form reports the Host's verdict two ways: `false` when the
+   * Host turned the write down, and a rejection when there was never a verdict at
+   * all - a connection dropped mid round trip rejects every write still queued on it.
+   * Only the first is a refusal, but neither is a reason to undo the task space that
+   * has just been created, and the second is the one that used to: it escaped into
+   * the catch around the whole create, which cannot tell a preference write that
+   * failed from a registration that did and would take the worktrees and the branch
+   * down with it. So it is caught here, where the only thing left to do is report the
+   * setting as unsaved - which is exactly what the refusal does.
+   * @param field - the configuration field to write.
+   * @param value - the value to put in it.
+   * @returns whether the Host now has it.
+   */
+  const writePreference = async (field: string, value: string) => {
+    try { return (await config?.set(field, value)) === true }
+    catch { return false }
   }
 
   const create = async () => {
@@ -278,9 +309,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       created = { path: result.path, task: result.task, project: result.project }
       // Ticking the box is a promise about the *next* task space, so the new default
       // is written only once this one exists - and a form that refuses it cannot
-      // undo the task that was just created.
+      // undo the task that was just created. Nor can one that fails to answer: both
+      // arrive here as `false`, having stopped at `writePreference`.
       if (saveAsDefault && canSaveDefault) {
-        const accepted = await config?.set("defaultBranchPrefix", typedPrefix)
+        const accepted = await writePreference("defaultBranchPrefix", typedPrefix)
         setSaveAsDefault(false)
         if (!accepted) setError(t("branchPrefixNotSaved"))
       }
@@ -290,12 +322,12 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       // with a strategy that would read it, and a directory it accepted while the
       // strategy write failed stays inert under the default.
       if (saveRootAsDefault && canSaveDefaultRoot) {
-        const savedDirectory = await config?.set("tasksRootDirectory", typedRoot)
-        const savedStrategy = savedDirectory === true
-          ? await config?.set("tasksRootStrategy", "custom")
+        const savedDirectory = await writePreference("tasksRootDirectory", typedRoot)
+        const savedStrategy = savedDirectory
+          ? await writePreference("tasksRootStrategy", "custom")
           : false
         setSaveRootAsDefault(false)
-        if (savedStrategy !== true) setError(t("tasksRootNotSaved"))
+        if (!savedStrategy) setError(t("tasksRootNotSaved"))
       }
       phase = "register"
       workspace = await workspaces.create({ path: result.path })
@@ -306,7 +338,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       onCreated(result.path)
       onClose()
     } catch (reason: any) {
-      const detail = String(reason?.message ?? reason)
+      const detail = errorText(t, reason)
       if (phase === "open") {
         // The task and its registration are fine; only showing the Session failed.
         if (created) onCreated(created.path)

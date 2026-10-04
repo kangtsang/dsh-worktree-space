@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK, PluginConfigCard } from "../src/client/components/PluginConfigCard"
-import { setPreview, settlePreview } from "../src/client/lib/config-preview"
+import { previewValue, setPreview, settlePreview } from "../src/client/lib/config-preview"
 import { t } from "../src/client/lib/i18n"
 
 /**
@@ -168,6 +168,30 @@ describe("the configuration card's agent handoff row", () => {
     render(<PluginConfigCard form={form} />)
 
     expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
+  })
+
+  it("takes the choice back when the Host never answers, rather than keeping it pending", async () => {
+    // The choice rows show the pick at once and settle into the served value once the
+    // Host has it, which the form answers two ways: `false` when the Host turned the
+    // write down, and a rejection when there was never a verdict at all. Only the
+    // first is handled by the `then`, so a dropped connection left the pending value
+    // set for good - and two readers trust it: this row's own display, and the
+    // sidebar, which asks the same store whether to show the entries it governs. Both
+    // went on showing a setting that was never in force, with no notice at all.
+    const { form } = configForm()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(form.set as any).mockRejectedValue(new Error("connection closed"))
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("entryHandoffLabel")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("configShow") }))
+
+    // Shown at once while the answer is on its way - the row never looks frozen.
+    expect(previewValue("handoffEntry")).toBe("show")
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(t("configNotSaved")))
+    // And given up as soon as it is clear there will be no answer.
+    expect(previewValue("handoffEntry")).toBeUndefined()
+    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).not.toContain(t("configShow"))
   })
 
   it("saves the choice through the form the other display choices use", async () => {

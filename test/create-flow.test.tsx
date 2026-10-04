@@ -272,6 +272,10 @@ describe("native task create flow", () => {
     ["", "fillTaskName"],
     ["   ", "fillTaskName"],
     ["!!!", "invalidNameEmpty"],
+    // A name the normalizer can reduce to nothing must not quietly become the
+    // placeholder `slugOf` falls back to: one rule decides both whether there is a
+    // name and what it is, so nothing here is ever submitted as `task` by accident.
+    ["タスク", "invalidNameEmpty"],
     [".hidden", "invalidNameLeadingDot"],
     ["a..b", "invalidNameConsecutiveDots"],
     ["task.", "invalidNameTrailingDot"],
@@ -452,6 +456,34 @@ describe("the default branch prefix this dialog may record", () => {
   }
   const remember = () => screen.queryByRole("checkbox", { name: t("rememberPrefix") }) as HTMLInputElement | null
 
+  /**
+   * A form whose writes are never answered.
+   *
+   * `ConfigFormController.mutate` propagates what the transport threw to the caller,
+   * so `form.set` rejects as well as resolving `false` — a connection dropped mid
+   * round trip rejects every write still queued on it. `false` is a verdict and a
+   * rejection is the absence of one, and neither is a reason to undo a task space.
+   */
+  function unreachableForm(prefix: string) {
+    return {
+      getSnapshot: () => ({ status: "ready", value: { defaultBranchPrefix: prefix } }),
+      subscribe: () => () => {},
+      set: vi.fn(async () => { throw new Error("connection closed") }),
+    }
+  }
+
+  it("offers no checkbox at all when the shell serves no configuration form", async () => {
+    // Nothing to save a new default into, so there is nothing to offer: ticking would
+    // reach `config?.set` on nothing, come back `undefined` and report the setting as
+    // unsaved — a refusal the user never asked for and cannot do anything about.
+    const next = setup()
+    next.mount()
+    await ready()
+
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    expect(remember()).toBeNull()
+  })
+
   it("offers the checkbox only once the typed prefix is one worth keeping", async () => {
     const { form: form0 } = configForm("task/")
     const next = setup(form0)
@@ -526,6 +558,32 @@ describe("the default branch prefix this dialog may record", () => {
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.workspaces.create).toHaveBeenCalledTimes(1)
   })
+
+  it("creates the task space even when the form never answers the write at all", async () => {
+    // The same outcome, reached the other way: a refusal resolves `false`, while a
+    // dropped connection rejects. The rejection used to escape into the catch around
+    // the whole create, which cannot tell a preference that never saved from a
+    // registration that failed - and `created` was already assigned by then, so it
+    // took the task space, its worktrees and its branch back down with it. A
+    // transport hiccup cost a task that had actually succeeded.
+    const next = setup(unreachableForm("task/"))
+    next.mount()
+    await ready()
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    fireEvent.click(remember()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.api.createTask).toHaveBeenCalledTimes(1)
+    expect(next.workspaces.create).toHaveBeenCalledTimes(1)
+    // Nothing undone: the rollback is what a failed registration is for, and this was
+    // not one.
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+    expect(next.workspaces.delete).not.toHaveBeenCalled()
+    // And it is reported the way a refusal is, rather than as a create that failed.
+    expect(screen.getByRole("alert").textContent).toBe(t("branchPrefixNotSaved"))
+  })
 })
 
 describe("the default task space location this dialog may record", () => {
@@ -557,6 +615,25 @@ describe("the default task space location this dialog may record", () => {
   // The label line carries the field's own explanation, so the control is looked up by
   // the name it starts with - the same way the name and prefix fields are.
   const containerField = () => screen.getByRole("textbox", { name: new RegExp(`^${t("containerLocation")}`) }) as HTMLInputElement
+
+  /** A form whose writes are never answered; see the same helper in the suite above. */
+  const unreachableForm = () => ({
+    getSnapshot: () => ({ status: "ready", value: { tasksRootStrategy: "default", tasksRootDirectory: "" } }),
+    subscribe: () => () => {},
+    set: vi.fn(async () => { throw new Error("connection closed") }),
+  })
+
+  it("offers no checkbox at all when the shell serves no configuration form", async () => {
+    // The same offer as the prefix above, on the same terms: there is nothing to write
+    // the location into, so a moved field cannot promise to become the next default.
+    const next = setup()
+    next.mount()
+    await ready()
+    expect(containerField().value).toBe("/tasks")
+
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    expect(rememberRoot()).toBeNull()
+  })
 
   it("offers the checkbox only once the typed location is one worth keeping", async () => {
     const next = setup(configForm().form)
@@ -635,6 +712,26 @@ describe("the default task space location this dialog may record", () => {
     // The directory landed but nothing reads it now, which is the inert half of the
     // pair - the strategy is still the derived default, so the setting is not in force.
     expect(read()).toMatchObject({ tasksRootStrategy: "default", tasksRootDirectory: "E:\\worktree-space" })
+    expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
+  })
+
+  it("creates the task space even when the form never answers the write at all", async () => {
+    // Both writes go through the same guard, so the second one is covered by the same
+    // reasoning: the directory write rejects, the strategy write is never reached, and
+    // neither rejection may reach the catch that rolls a create back.
+    const next = setup(unreachableForm())
+    next.mount()
+    await ready()
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    fireEvent.click(rememberRoot()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.workspaces.create).toHaveBeenCalledTimes(1)
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+    // The strategy is not paired with a directory that never landed, and the pair is
+    // reported as unsaved the way a refusal is.
     expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
   })
 })

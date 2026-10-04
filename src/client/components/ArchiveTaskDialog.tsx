@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
+import { errorText } from "../lib/error-text"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
@@ -176,7 +177,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       setLoadError("")
     } catch (reason: any) {
       if (generation !== planGeneration.current) return
-      setLoadError(String(reason?.message ?? reason))
+      setLoadError(errorText(t, reason))
     }
   }, [api, path])
 
@@ -462,7 +463,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         try {
           await workspaces.delete(workspace.workspaceId)
         } catch (reason: any) {
-          setRegistrationError(String(reason?.message ?? reason))
+          setRegistrationError(errorText(t, reason))
         }
       }
       setResult(archived)
@@ -471,7 +472,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // on a repository is a decision, and the panel asks for it in as many words. What
       // is done with the answer is to report it.
     } catch (reason: any) {
-      setError(`${t("operationError")}${String(reason?.message ?? reason)}`)
+      setError(`${t("operationError")}${errorText(t, reason)}`)
     } finally {
       setBusy(false)
     }
@@ -615,7 +616,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // The session could not be opened at all, so nothing in this batch was handed on.
         for (const entry of batch.entries) {
           claimed.current.delete(`${kind}:${entry.name}`)
-          failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
+          failures.push(`${entry.name}: ${errorText(t, reason)}`)
         }
         continue
       }
@@ -632,7 +633,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       } catch (reason: any) {
         for (const entry of batch.entries) {
           claimed.current.delete(`${kind}:${entry.name}`)
-          failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
+          failures.push(`${entry.name}: ${errorText(t, reason)}`)
         }
       }
     }
@@ -761,7 +762,12 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     {candidates(entry).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
                   </Select>
                 </>}
-              <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>
+              {/* Left out rather than printed as a number when the Host could not
+                  count: it omits the field instead of reporting a zero it never
+                  counted, so `String` here would have written "undefined commits"
+                  beside a row whose own error line is what says why. The headline
+                  above still carries a total, because there the Host keeps one. */}
+              {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
               <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
               {/* Saying it before the merge, not after: a target the source
                   repository is not on is merged in a checkout of its own. */}

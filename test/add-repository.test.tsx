@@ -265,7 +265,11 @@ describe("the repository view adds a repository by registering it as a Workspace
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: t("addRepositoryAdd") })) })
 
     expect(next.workspaces.create).not.toHaveBeenCalled()
-    expect(screen.getByRole("alert").textContent).toContain("/notes")
+    // Said through the dictionary, in the interface language: this refusal is raised
+    // two layers below the page, where there is no `t` to word it in, so the library
+    // names it and the page says it. A sentence assembled down there is English and
+    // reaches a Chinese interface verbatim.
+    expect(screen.getByRole("alert").textContent).toBe(format(t("repositoryNotGitRepository"), { path: "/notes" }))
   })
 })
 
@@ -379,6 +383,41 @@ describe("adding a repository to a task already under way", () => {
     // step, and the one that came with it never showed the repository on the page.
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.queryByRole("button", { name: t("addRepositoryAdd") })).toBeNull()
+  })
+
+  it("tells two repositories of the same name apart, and names one a space carries", async () => {
+    // The candidates come from every Workspace, so the same repository directory name
+    // can appear twice - reached through two different Workspaces - and building the
+    // element ids out of the name wrote the same id twice. The browser then resolved
+    // `for` to the first of them, so choosing the second card ticked the first one.
+    // The same shape of id is not even legal for a name with a space in it.
+    const next = mountedTask(["/elsewhere/beta", "/elsewhere/delta", "/other/delta", "/elsewhere/my repo"])
+    await waitFor(() => expect(screen.getByRole("heading", { name: "login" })).toBeTruthy())
+    openDialog()
+    await waitFor(() => expect(screen.getByText("/other/delta")).toBeTruthy())
+
+    const cards = () => [...document.querySelectorAll(".dws-check-option")] as HTMLLabelElement[]
+    /** The control a card is wired to, found the way the browser resolves `for`. */
+    const boxOf = (path: string) => document.getElementById(
+      cards().find((card) => card.textContent?.includes(path))!.htmlFor) as HTMLInputElement
+
+    expect(cards()).toHaveLength(4)
+    expect(boxOf("/elsewhere/delta").id).not.toBe(boxOf("/other/delta").id)
+    // An id has to be a usable id as well as a unique one.
+    for (const card of cards()) {
+      expect(card.htmlFor).not.toBe("")
+      expect(card.htmlFor).not.toMatch(/\s/)
+    }
+
+    // Clicking the second card's label therefore ticks the second repository's own box,
+    // and leaves the first one alone.
+    const second = cards().find((card) => card.textContent?.includes("/other/delta"))!
+    fireEvent.click(second)
+    expect(boxOf("/other/delta").checked).toBe(true)
+    expect(boxOf("/elsewhere/delta").checked).toBe(false)
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: t("addRepositoriesConfirm") })) })
+    expect(next.api.addRepositories).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ repositories: ["/other/delta"] }))
   })
 
   it("says nothing about where a repository sits, only that it can be added", async () => {

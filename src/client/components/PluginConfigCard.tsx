@@ -595,8 +595,16 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     // Shown at once, and the sidebar follows through the same store.
     setPreview(field, choice.value)
     setNotice(t("configSaved"))
+    // The Host's verdict is `false`; there being no verdict at all is a rejection,
+    // and it answers about this row exactly as a refusal does. Only the first is
+    // handled by the callback below, so without the `catch` a dropped connection
+    // left the pending value set for good: this row and the sidebar's entry-visibility
+    // both read it, and nothing on screen said the setting was never in force.
     void form.set(field, numeric ? Number(choice.value) : choice.value).then((accepted) => {
       if (accepted) return
+      setPreview(field, undefined)
+      setNotice(t("configNotSaved"))
+    }).catch(() => {
       setPreview(field, undefined)
       setNotice(t("configNotSaved"))
     })

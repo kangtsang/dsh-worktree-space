@@ -875,6 +875,41 @@ describe("finishing a task", () => {
     expect(document.querySelector(".dws-remove-target")).toBeNull()
   })
 
+  it("leaves a count out rather than printing one the Host never counted", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    // The Host omits `commits` for a repository git would not answer about, rather
+    // than reporting a zero it did not count: the two are different facts, and only
+    // the first is a zero. Read unguarded, the row printed "undefined commits" right
+    // beside the error line that explains why the number is missing.
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task,
+      tasksRoot,
+      path: `${tasksRoot}\\${task}`,
+      changedFiles: 1,
+      // The total is still a number, which is why the headline keeps its own.
+      commits: 1,
+      strays: [],
+      repositories: [
+        { name: "alpha", path: `${tasksRoot}\\${task}\\alpha`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 1 },
+        { name: "beta", path: `${tasksRoot}\\${task}\\beta`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], changedFiles: 0, error: "fatal: unable to read object" },
+      ],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    const rows = () => [...document.querySelectorAll(".dws-finish-repos li")].map((row) => row.textContent ?? "")
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // The row that could be counted says so; the row that could not says why, and
+    // nothing else — no `String(undefined)` anywhere on the dialog.
+    expect(rows()[0]).toContain(format(t("planCommits"), { count: "1" }))
+    expect(rows()[1]).not.toContain(t("planCommits"))
+    expect(rows()[1]).toContain("fatal: unable to read object")
+    expect(document.body.textContent).not.toContain("undefined")
+    // The headline keeps its own total, which the Host always reports.
+    expect(document.querySelector(".dws-dialog-status")?.textContent).toContain(format(t("planCommits"), { count: "1" }))
+  })
+
   it("points one repository at another branch, previews it, and merges there", async () => {
     const user = userEvent.setup()
     const next = setup()
