@@ -294,6 +294,22 @@ if (-not (Test-Path -LiteralPath $binJs)) {
   throw ("no DSH build at {0} - run scripts/acceptance/install-hosts.ps1 first" -f $binJs)
 }
 
+# The port is checked before anything is created or removed, not merely before the
+# server starts. This run used to check it after the home wipe, so a port still held
+# by the previous run's server was discovered only once the profile it was serving
+# from had been deleted - leaving a live server whose every plugin 404s, which looks
+# like a working page because the page itself still answers. Failing here costs a
+# keystroke; failing there costs the environment the last good run was using.
+#
+# The PID is named because the process holding the port is usually a server this
+# script started and nobody stopped. Nothing has been touched when this throws, so
+# killing that PID by hand and starting again is safe.
+$busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+if ($busy) {
+  $holders = (($busy | Select-Object -ExpandProperty OwningProcess) -join ',')
+  throw ("REFUSED: port {0} is in use by PID {1}. Nothing was changed - stop that process (it is usually the previous run's server) and start again." -f $Port, $holders)
+}
+
 foreach ($d in @($caseRoot, $logDir, $pluginRoot)) {
   if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
@@ -345,11 +361,6 @@ if ([System.IO.Path]::GetFullPath($env:DSH_HOME) -eq [Environment]::GetFolderPat
 # cannot reach them - and the container root is derived from them.
 $fixtureRoot = Join-Path $pluginRoot 'source'
 if (-not (Test-Path -LiteralPath $fixtureRoot)) { New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null }
-
-$busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if ($busy) {
-  throw ("REFUSED: port {0} is in use by PID {1}" -f $Port, (($busy | Select-Object -ExpandProperty OwningProcess) -join ','))
-}
 
 Write-Host ('DSH_HOME : ' + $safeHome)
 Write-Host ('dsh      : ' + $DshVersion)
