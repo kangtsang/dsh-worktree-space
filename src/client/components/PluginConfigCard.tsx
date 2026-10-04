@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, ChevronDown } from "./icons"
-import { Button, Input } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, Input } from "./ui"
 import { format, useT } from "../lib/i18n"
-import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/configPreview"
+import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/config-preview"
+import { ScanIgnoreEditor } from "./ScanIgnoreEditor"
+import { DEFAULT_IGNORED_SCAN_DIRECTORIES, forcedIgnoreNames, sameIgnoreNames } from "../lib/scan-ignore"
 
 /** How many directory levels a scan may descend. */
 const DEPTHS = [1, 2, 3, 4, 5]
@@ -46,7 +48,24 @@ interface TextField {
   allowEmpty?: boolean
 }
 
-type Field = ChoiceField | TextField
+/**
+ * A row whose value is a list of names rather than one choice or one string.
+ *
+ * It gets a row of its own shape - a button that opens a dialog - because a list
+ * cannot be shown in a pill without either truncating it or turning the control
+ * into something that has to be scrolled. The dialog is the only place it is
+ * edited, and nothing reaches the Host until that dialog is saved.
+ */
+interface ListField {
+  kind: "list"
+  field: string
+  label: string
+  /** The names the Host ships, shown read-only beneath the ones a user added. */
+  builtIn: string[]
+  hint?: string
+}
+
+type Field = ChoiceField | TextField | ListField
 
 /**
  * Copy for a key the dictionary in force may not carry.
@@ -76,11 +95,24 @@ const ARCHIVE_STRATEGY_FIELD = "archiveDocumentsStrategy"
 /** The strategy in force when the Host serves none, which is the schema's own default. */
 const ARCHIVE_STRATEGY_FALLBACK = "container"
 
+/** The row that names the directories a scan walks past. */
+const IGNORED_SCAN_DIRECTORIES_FIELD = "ignoredScanDirectories"
+const REMOVED_SCAN_DIRECTORIES_FIELD = "removedScanDirectories"
+
 /** The row that decides where a new task space goes, and the directory it may name. */
 const TASKS_ROOT_STRATEGY_FIELD = "tasksRootStrategy"
 const TASKS_ROOT_DIRECTORY_FIELD = "tasksRootDirectory"
 /** The strategy in force when the Host serves none, which is the schema's own default. */
 const TASKS_ROOT_STRATEGY_FALLBACK = "default"
+
+/** The row that decides whether a record of every operation is written. */
+const AUDIT_LOG_FIELD = "auditLog"/**
+ * The two states, as the Host schema spells them. The default is on: a log that
+ * starts empty and is only turned on when something goes wrong arrives too late
+ * to be the record of what went wrong.
+ */
+const AUDIT_LOG_ON = "on"
+const AUDIT_LOG_OFF = "off"
 
 /**
  * The fields this plugin declares in its Host configuration.
@@ -116,7 +148,7 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
   {
     field: "scanDepth",
     label: t("scanDepth"),
-    fallback: "3",
+    fallback: "2",
     numeric: true,
     hint: t("scanDepthHint"),
     choices: DEPTHS.map((depth) => ({ value: String(depth), text: format(t("scanDepthOption"), { count: String(depth) }) })),
@@ -124,10 +156,20 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
   {
     field: "maxScanDirectories",
     label: t("maxScanDirectories"),
-    fallback: "3000",
+    fallback: "2000",
     numeric: true,
     hint: t("maxScanDirectoriesHint"),
     choices: DIRECTORY_LIMITS.map((limit) => ({ value: String(limit), text: String(limit) })),
+  },
+  {
+    // The one row that is neither a choice nor a single string. A list of
+    // directory names does not fit a pill, and the part of it worth showing in
+    // the row is only how many the scan skips beyond its own.
+    kind: "list",
+    field: IGNORED_SCAN_DIRECTORIES_FIELD,
+    label: t("ignoredScanDirectories"),
+    builtIn: DEFAULT_IGNORED_SCAN_DIRECTORIES,
+    hint: t("ignoredScanDirectoriesHint"),
   },
   {
     kind: "text",
@@ -185,6 +227,22 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     fallback: "",
     hint: copyOr(t, ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK),
     allowEmpty: true,
+  },
+  {
+    // Whether a record of every operation is written. Last, because it is the setting
+    // read least - the log is there, it is on, and nothing about using the plugin
+    // depends on it. Written as on/off rather than as a checkbox so the row cannot be
+    // read as "unchecked means off" without the words being there: turning this off
+    // stops new records and leaves the log already on disk, which is not what
+    // unticking something named "delete log" would suggest.
+    field: AUDIT_LOG_FIELD,
+    label: t("auditLog"),
+    fallback: AUDIT_LOG_ON,
+    hint: t("auditLogHint"),
+    choices: [
+      { value: AUDIT_LOG_ON, key: "auditLogOn" },
+      { value: AUDIT_LOG_OFF, key: "auditLogOff" },
+    ],
   },
 ]
 
@@ -274,6 +332,176 @@ function TextFieldRow({ field, label, fallback, hint, allowEmpty, form, notify }
   </div>
 }
 
+/**
+ * The question behind 恢复默认.
+ *
+ * A dialog rather than the button turning into 确认 with a 取消 beside it. That
+ * pattern was here first and it failed quietly: the sentence explaining what the
+ * click will undo lived in a `title`, which only exists on a hover, so on a
+ * touchscreen the second click restored the defaults with nothing on screen having
+ * said so. The words have to be visible at the moment of the click.
+ */
+function ResetConfirmDialog({ busy, onConfirm, onCancel }: {
+  busy: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const t = useT()
+  return <Dialog open onOpenChange={(open) => { if (!open) onCancel() }}>
+    <DialogContent className="dws-confirm-dialog dws-confirm-narrow" busy={busy} showClose={false}>
+      {/* One sentence, so no heading at all - see the same dialog in
+          `ScanIgnoreEditor`. The sentence is the body. */}
+      <div className="dws-dialog-body">
+        <DialogDescription className="dws-confirm-body">{t("ignoredScanDirectoriesResetConfirm")}</DialogDescription>
+      </div>
+      <footer className="dws-dialog-footer">
+        <Button disabled={busy} onClick={onCancel}>{t("cancel")}</Button>
+        <Button className="dws-button-primary" disabled={busy} onClick={onConfirm}>{t("configConfirm")}</Button>
+      </footer>
+    </DialogContent>
+  </Dialog>
+}
+
+/**
+ * A row whose value is a list of directory names.
+ *
+ * The row itself carries no list: it carries how many names differ from what the
+ * Host ships, because that is the only part of the answer that changes. The names
+ * are in the dialog, which is the only place they are edited, and which is why
+ * nothing here writes to the Host - a button that opens a dialog cannot half-save
+ * a list.
+ *
+ * Two settings, because the dialog edits two: names added, and built-in names
+ * switched back on. They are written together, because a user who turned a
+ * built-in off and a user who added one made the same single decision - what the
+ * scan walks past - and a dialog that saved half of it would be a dialog that
+ * saved something nobody asked for. Both writes are awaited before the row closes,
+ * so a refusal on either leaves it open with what it actually holds.
+ */
+function ListFieldRow({ field, removedField, label, hint, builtIn, form, notify }: {
+  field: string
+  removedField: string
+  label: string
+  hint?: string
+  builtIn: string[]
+  form: ConfigFormLike
+  notify: (message: string | null) => void
+}) {
+  const t = useT()
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  // Restore defaults throws away every name in both settings at once, and up to
+  // two hundred of them can be names a person typed. There is no undo for that,
+  // so it is two clicks with the question in between - the same shape the dialog
+  // uses for removing one built-in name, for the same reason.
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const list = (name: string): string[] => {
+    const value = (form.getSnapshot().value as Record<string, unknown>)[name]
+    if (!Array.isArray(value)) return []
+    return value.map((entry) => String(entry ?? "")).filter((entry) => entry !== "")
+  }
+  // How many directories the scan skips, not how many settings differ from the
+  // shipped ones. The row answers "how big is this list", and the count has to be
+  // read off the same list the dialog opens on - hence forcedIgnoreNames rather
+  // than a sum of the two array lengths, which would count a name twice.
+  const [forced, setForced] = useState(() => forcedIgnoreNames(builtIn, list(field), list(removedField)))
+  useEffect(() => {
+    const read = () => setForced((current) => {
+      const next = forcedIgnoreNames(builtIn, list(field), list(removedField))
+      return sameIgnoreNames(current, next) ? current : next
+    })
+    read()
+    return form.subscribe(read)
+  }, [form, builtIn, field, removedField])
+  const changed = list(field).length > 0 || list(removedField).length > 0
+  const save = async (added: string[], removed: string[]) => {
+    setBusy(true)
+    // The count moves now, the way every other row in this card shows a choice
+    // the moment it is made rather than a round trip later.
+    setForced(forcedIgnoreNames(builtIn, added, removed))
+    notify(null)
+    try {
+      const accepted = await form.set(field, added)
+      // The second write only follows a first that landed. A dialog that added a
+      // name and failed to switch a built-in on would leave the scan doing neither,
+      // which is a state the user never asked for and cannot see.
+      const switched = accepted && await form.set(removedField, removed)
+      setBusy(false)
+      if (!switched) {
+        setForced(forcedIgnoreNames(builtIn, list(field), list(removedField)))
+        notify(t("configNotSaved"))
+        return
+      }
+      setEditing(false)
+      notify(t("configSaved"))
+    } catch {
+      setBusy(false)
+      setForced(forcedIgnoreNames(builtIn, list(field), list(removedField)))
+      notify(t("configNotSaved"))
+    }
+  }
+  // Both settings emptied, which is not a shorter list but the shipped one: the
+  // names the user removed come back and the names they added go away.
+  const reset = async () => {
+    setConfirmingReset(false)
+    setBusy(true)
+    notify(null)
+    try {
+      const accepted = await form.set(field, [])
+      const switched = accepted && await form.set(removedField, [])
+      setBusy(false)
+      if (!switched) {
+        setForced(forcedIgnoreNames(builtIn, list(field), list(removedField)))
+        notify(t("configNotSaved"))
+        return
+      }
+      setForced(forcedIgnoreNames(builtIn, [], []))
+      notify(t("configSaved"))
+    } catch {
+      setBusy(false)
+      setForced(forcedIgnoreNames(builtIn, list(field), list(removedField)))
+      notify(t("configNotSaved"))
+    }
+  }
+  return <>
+    <div className="dws-plugin-config-row">
+      <span className="dws-plugin-config-label">{label}
+        {hint === undefined ? null : <span className="dws-plugin-config-hint">{hint}</span>}
+      </span>
+      <span className="dws-plugin-config-field">
+        <span className="dws-plugin-config-text">
+          {/* Order: the two actions, then the count. The count is a fact about the
+              list rather than a control, and trailing it keeps the two buttons
+              together instead of putting a number between them. */}
+          <span className="dws-plugin-config-actions">
+          {/* Offered only when there is something to undo, and it disables itself
+              while nothing is on the list. A button that is always there and always
+              inert is one more thing to read past on every visit. */}
+          <Button className="dws-plugin-config-save" disabled={busy || !changed}
+            aria-label={t("ignoredScanDirectoriesReset")}
+            title={t("ignoredScanDirectoriesReset")}
+            onClick={() => { notify(null); setConfirmingReset(true) }}>
+            {t("ignoredScanDirectoriesReset")}
+          </Button>
+          <Button className="dws-plugin-config-save" aria-label={t("ignoredScanDirectoriesEdit")} title={t("ignoredScanDirectoriesEdit")} disabled={busy}
+            onClick={() => { notify(null); setEditing(true) }}>
+            {t("configEdit")}
+          </Button>
+          </span>
+          <span className="dws-plugin-config-locked" aria-label={label}>{format(t("ignoredScanDirectoriesCount"), { count: String(forced.length) })}</span>
+        </span>
+      </span>
+    </div>
+    {editing
+      ? <ScanIgnoreEditor builtIn={builtIn} configured={list(field)} disabled={list(removedField)} busy={busy}
+        onSave={(added, removed) => { void save(added, removed) }} onClose={() => { if (!busy) setEditing(false) }} />
+      : null}
+    {confirmingReset
+      ? <ResetConfirmDialog busy={busy} onConfirm={() => { void reset() }} onCancel={() => { if (!busy) setConfirmingReset(false) }} />
+      : null}
+  </>
+}
+
 interface PluginConfigCardProps {
   /** The form the Host serves for this plugin, or undefined when there is none. */
   form?: ConfigFormLike
@@ -282,7 +510,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory"]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -318,6 +546,17 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
   const [chosen, setChosen] = useState<Record<string, string>>(() => previewValues())
   const [open, setOpen] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // The notice is dismissed on a timer, and the timer belongs to whichever
+  // notice is on screen right now. It is scheduled here rather than in the
+  // render body below, because a body runs on every render: each pass would
+  // leave behind another timer it can never cancel, and the toast would then be
+  // cleared by the *earliest* of them, well before the time it asks for. Above
+  // the early return, so the hook count does not change with `form`.
+  useEffect(() => {
+    if (notice === null) return
+    const timer = window.setTimeout(() => setNotice(null), 2400)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   const card = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (form === undefined) return
@@ -356,13 +595,20 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     // Shown at once, and the sidebar follows through the same store.
     setPreview(field, choice.value)
     setNotice(t("configSaved"))
+    // The Host's verdict is `false`; there being no verdict at all is a rejection,
+    // and it answers about this row exactly as a refusal does. Only the first is
+    // handled by the callback below, so without the `catch` a dropped connection
+    // left the pending value set for good: this row and the sidebar's entry-visibility
+    // both read it, and nothing on screen said the setting was never in force.
     void form.set(field, numeric ? Number(choice.value) : choice.value).then((accepted) => {
       if (accepted) return
       setPreview(field, undefined)
       setNotice(t("configNotSaved"))
+    }).catch(() => {
+      setPreview(field, undefined)
+      setNotice(t("configNotSaved"))
     })
   }
-  if (notice !== null) window.setTimeout(() => setNotice(null), 2400)
   // The strategy in force decides whether the custom destination is worth a row, so it
   // is read here rather than inside the map, which filters on it. The pending value is
   // read first, so the row appears the moment the choice is made rather than a round
@@ -378,6 +624,9 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
     {fieldsFor(t).filter(shown).map((field) => {
       if (field.kind === "text") {
         return <TextFieldRow key={field.field} field={field.field} label={field.label} fallback={field.fallback} hint={field.hint} allowEmpty={field.allowEmpty} form={form} notify={setNotice} />
+      }
+      if (field.kind === "list") {
+        return <ListFieldRow key={field.field} field={field.field} removedField={REMOVED_SCAN_DIRECTORIES_FIELD} label={field.label} hint={field.hint} builtIn={field.builtIn} form={form} notify={setNotice} />
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
       const current = chosen[name] ?? served[name] ?? fallback

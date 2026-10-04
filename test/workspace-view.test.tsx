@@ -3,14 +3,31 @@ import { format, t } from "../src/client/lib/i18n"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { scanAnswer } from "./scan-answer.helper"
 
 /** One classification per workspace path, as the host would answer. */
 function setup(classification: (path: string) => unknown) {
   const api: any = {
-    scan: vi.fn().mockResolvedValue([]),
+    // The repositories the badges count are the ones the rows list, so the fixture
+    // has to answer both. It used to answer only `classify-roots` and the badges came
+    // from there, which is how a Workspace came to read "0" beside a list of twelve.
+    scan: vi.fn().mockResolvedValue(scanAnswer([
+      { repoPath: "/projects/one", worktrees: [] },
+      { repoPath: "/projects/two", worktrees: [] },
+      { repoPath: "/projects/three", worktrees: [] },
+      { repoPath: "/projects/alpha", worktrees: [] },
+    ])),
     cachedScan: vi.fn().mockResolvedValue(null),
     status: vi.fn(),
     classifyRoot: vi.fn().mockImplementation((path: string) => Promise.resolve(classification(path))),
+    // The page asks for a page of Workspaces in one request now. Answered from
+    // the same per-path classifier so a test that says what one path holds still
+    // decides what the row draws - the batch is a request shape, not a rule. A
+    // path that fails is left out, as the Host leaves it out.
+    classifyRoots: vi.fn().mockImplementation((paths: string[]) =>
+      Promise.all(paths.map(async (path) => {
+        try { return await classification(path) } catch { return undefined }
+      })).then((entries) => entries.filter(Boolean))),
   }
   const items = [
     { workspaceId: "single", path: "/projects/alpha", title: "Alpha" },
@@ -61,6 +78,50 @@ describe("WorktreesSettings workspace view", () => {
     expect(create).toHaveLength(2)
     fireEvent.click(create[1])
     expect(next.onCreate).toHaveBeenCalledWith({ path: "/projects", title: "Projects" })
+  })
+
+  it("leaves the name and the path outside the button, so they can be selected and copied", async () => {
+    // The row used to be one button - clicking anywhere on it folded the repositories -
+    // which put the name, the branch, the count and the path inside a button. Text
+    // inside a button is not selectable in the browser's own stylesheet, so a path you
+    // could read was a path you could not copy. Only the arrow is the control now.
+    const next = setup(() => ({ path: "/projects", isDirectory: true, isRepository: false, isSourceRoot: true, repositoryCount: 1, repositories: [] }))
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+
+    const name = (await screen.findByText("Projects")).closest("h3")
+    expect(name).toBeTruthy()
+    // Walk up to the row and check every element on the way: a single button anywhere
+    // between the name and the row puts the name back out of reach.
+    for (let node: HTMLElement | null = name; node && node !== document.body; node = node.parentElement) {
+      expect(node.tagName).not.toBe("BUTTON")
+      if (node.className === "dws-repo-header") break
+    }
+    const path = name?.closest(".dws-repo-header")?.querySelector(".dws-repo-path")
+    expect(path?.closest("button")).toBeNull()
+    expect(path?.textContent).toBe("/projects")
+    // The arrow is still the control, and it still folds the row.
+    const arrow = name?.closest(".dws-repo-header")?.querySelector(".dws-chevron-toggle")
+    expect(arrow?.getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("keeps a disabled arrow on a Workspace that holds nothing, rather than no control at all", async () => {
+    // Dropping the button entirely for a row that cannot fold reads as an absence in
+    // the row's place. What a screen reader has to be told is that this row is not
+    // foldable, and the name on the control is how it is told.
+    const next = setup((path) => ({ path, isDirectory: true, isRepository: false, isSourceRoot: false, repositoryCount: 0, repositories: [] }))
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+
+    // The fixture scans four repositories, all under /projects, so `Notes` is the
+    // Workspace that spans none of them.
+    const name = (await screen.findByText("Notes")).closest("h3")
+    const arrow = name?.closest(".dws-repo-header")?.querySelector(".dws-chevron-toggle")
+    expect(arrow?.tagName).toBe("BUTTON")
+    expect(arrow?.hasAttribute("disabled")).toBe(true)
+    expect(arrow?.getAttribute("aria-expanded")).toBeNull()
+    // And the name still sits outside it, so it can still be selected.
+    expect(name?.closest("button")).toBeNull()
   })
 
   it("says a Workspace it could not read is unreadable, not unable to host a task space", async () => {

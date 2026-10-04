@@ -34,7 +34,6 @@ const created = {
     { name: "alpha", path: "/tasks/repo/fix-login/alpha" },
     { name: "beta", path: "/tasks/repo/fix-login/beta" },
   ],
-  warnings: [],
 }
 
 function setup(config?: any) {
@@ -139,7 +138,7 @@ describe("native task create flow", () => {
     expect(offered().every((box) => box.checked)).toBe(true)
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
-    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["alpha", "beta"] })))
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["/repo/alpha", "/repo/beta"] })))
   })
 
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
@@ -161,7 +160,11 @@ describe("native task create flow", () => {
     expect(document.querySelector(".dws-preview")?.getAttribute("aria-live")).toBe("polite")
     await user.keyboard("{Enter}")
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledExactlyOnceWith("ws-task"))
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined, branchPrefix: "task/" })
+    // Paths, not names: the picker selected two repositories that sit directly in
+    // the source root, and what identifies them is where they are. The Host cannot
+    // rebuild a repository from a directory name when discovery reached it through
+    // a level in between.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)
@@ -241,11 +244,38 @@ describe("native task create flow", () => {
     expect(document.querySelectorAll(".dws-check-option .dws-branch-label")).toHaveLength(0)
   })
 
+  it("submits the paths of repositories that sit below the source root", async () => {
+    // The shape that broke: discovery walks to maxDepth, so a Workspace registered
+    // one level above its repositories reports `repos/alpha`. The dialog used to send
+    // back the leaf name, and the Host could only rebuild it as `sourceRoot/alpha` -
+    // so every repository it had just listed was refused on create.
+    const nested = setup()
+    nested.api.suggestRoot.mockResolvedValue({
+      ...suggestion,
+      repositories: [
+        { name: "alpha", path: "/workspace/repos/alpha", branch: "main" },
+        { name: "beta", path: "/workspace/repos/beta", branch: "main" },
+      ],
+    })
+    nested.mount()
+    const user = userEvent.setup()
+    await ready()
+    fireEvent.change(nameField(), { target: { value: "fix-login" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(nested.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      repos: ["/workspace/repos/alpha", "/workspace/repos/beta"],
+    })))
+  })
+
   // Each invalid input, and the one rule it breaks.
   it.each([
     ["", "fillTaskName"],
     ["   ", "fillTaskName"],
     ["!!!", "invalidNameEmpty"],
+    // A name the normalizer can reduce to nothing must not quietly become the
+    // placeholder `slugOf` falls back to: one rule decides both whether there is a
+    // name and what it is, so nothing here is ever submitted as `task` by accident.
+    ["タスク", "invalidNameEmpty"],
     [".hidden", "invalidNameLeadingDot"],
     ["a..b", "invalidNameConsecutiveDots"],
     ["task.", "invalidNameTrailingDot"],
@@ -321,63 +351,86 @@ describe("native task create flow", () => {
     expect(next.onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("retries registration without re-creating the task and guards recovery while busy", async () => {
+  it("rolls the whole create back when registration fails, leaving nothing to retry", async () => {
     const next = setup()
-    const registration = deferred<{ workspaceId: string; path: string; title: string }>()
-    next.workspaces.create.mockRejectedValueOnce(new Error("Workspace service unavailable")).mockReturnValueOnce(registration.promise)
+    next.workspaces.create.mockRejectedValue(new Error("Workspace service unavailable"))
     next.mount()
     await ready()
     fireEvent.change(nameField(), { target: { value: "Fix login" } })
     fireEvent.submit(form())
-    const retry = await screen.findByRole("button", { name: t("retryRegister") })
-    expect(screen.getByRole("alert").textContent).toContain(t("registerFailed"))
-    expect(nameField()).toHaveProperty("disabled", true)
-    expect(screen.getByText(created.path)).toBeTruthy()
-    expect(screen.queryByRole("button", { name: t("createAndOpen") })).toBeNull()
-    // A programmatic submit must not escape the recovery-only flow.
-    fireEvent.submit(form())
-    act(() => { fireEvent.click(retry); fireEvent.click(retry) })
-    expect(next.workspaces.create).toHaveBeenCalledTimes(2)
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole("button", { name: t("cleanupTask") })).toHaveProperty("disabled", true)
-    expect(screen.getByRole("button", { name: t("close") })).toHaveProperty("disabled", true)
-    await act(async () => { registration.resolve({ workspaceId: "ws-retry", path: created.path, title: "fix-login" }) })
-    expect(next.workspaces.rename).toHaveBeenCalledWith("ws-retry", "App/fix-login")
-    expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledExactlyOnceWith("ws-retry")
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
-  })
-
-  it("preserves cleanup recovery after failure and closes only after finishing the task succeeds", async () => {
-    const next = setup()
-    next.workspaces.create.mockRejectedValue(new Error("Registration unavailable"))
-    next.api.doneTask.mockRejectedValueOnce(new Error("Task is locked"))
-    next.mount()
-    await ready()
-    fireEvent.change(nameField(), { target: { value: "Fix login" } })
-    fireEvent.submit(form())
-    fireEvent.click(await screen.findByRole("button", { name: t("cleanupTask") }))
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Task is locked"))
+    // A create is one thing or the other: the task space and its branch go back with
+    // the registration that failed, so there is no half-made task to offer a retry on.
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith({
+      task: "fix-login",
+      project: "repo",
+      tasksRoot: "/tasks",
+      deleteBranch: true,
+      force: true,
+      // The Host cannot see the dialog's registration failing, so the reason has
+      // to travel with the request or the log shows a task space and a branch
+      // deleted for no stated reason.
+      cause: expect.stringContaining("Workspace"),
+    }))
+    expect(next.workspaces.delete).not.toHaveBeenCalled()
+    expect(screen.getByRole("alert").textContent).toContain(
+      format(t("createRolledBack"), { error: "Workspace service unavailable" }),
+    )
+    // The dialog is back to its normal state: the fields are live again and the user
+    // can simply submit the same name a second time.
+    expect(nameField()).toHaveProperty("disabled", false)
+    expect(screen.getByRole("button", { name: t("createAndOpen") })).toHaveProperty("disabled", false)
     expect(next.onClose).not.toHaveBeenCalled()
-    expect(screen.getByText(created.path)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: t("cleanupTask") }))
-    await waitFor(() => expect(next.onClose).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "fix-login", project: "repo", tasksRoot: "/tasks" })
-    expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.uiWorkspace.openWorkspace).not.toHaveBeenCalled()
   })
 
-  it("rolls back partial Workspace registration on both initial failure and retry failure", async () => {
+  it("names what the rollback could not remove when it fails partway", async () => {
+    const next = setup()
+    next.workspaces.create.mockRejectedValue(new Error("Workspace service unavailable"))
+    next.api.doneTask.mockRejectedValue(new Error("Task is locked"))
+    next.mount()
+    await ready()
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+    const alert = await screen.findByRole("alert")
+    await waitFor(() => expect(alert.textContent).toContain(
+      format(t("rollbackIncomplete"), {
+        error: "Workspace service unavailable",
+        undo: "Task is locked",
+        path: created.path,
+        branch: "task/fix-login",
+      }),
+    ))
+    // Both the original failure and the one that stopped the rollback, and the exact
+    // path and branch still on disk - the three things manual cleanup needs.
+    expect(alert.textContent).toContain("Workspace service unavailable")
+    expect(alert.textContent).toContain("Task is locked")
+    expect(alert.textContent).toContain(created.path)
+    expect(alert.textContent).toContain("task/fix-login")
+    expect(next.onClose).not.toHaveBeenCalled()
+  })
+
+  it("removes a partially registered Workspace when the rename fails, and rolls the task back too", async () => {
     const next = setup()
     next.workspaces.rename.mockRejectedValue(new Error("Rename unavailable"))
     next.mount()
     await ready()
     fireEvent.change(nameField(), { target: { value: "Fix login" } })
     fireEvent.submit(form())
-    fireEvent.click(await screen.findByRole("button", { name: t("retryRegister") }))
-    await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledTimes(2))
+    // The row exists but is not usable, so it is deleted rather than left pointing at
+    // a container that is about to go.
+    await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith({
+      task: "fix-login",
+      project: "repo",
+      tasksRoot: "/tasks",
+      deleteBranch: true,
+      force: true,
+      // The Host cannot see the dialog's registration failing, so the reason has
+      // to travel with the request or the log shows a task space and a branch
+      // deleted for no stated reason.
+      cause: expect.stringContaining("Workspace"),
+    }))
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
-    expect(next.api.doneTask).not.toHaveBeenCalled()
-    expect(screen.getByRole("button", { name: t("retryRegister") })).toBeTruthy()
     expect(next.onClose).not.toHaveBeenCalled()
   })
 })
@@ -402,6 +455,34 @@ describe("the default branch prefix this dialog may record", () => {
     }
   }
   const remember = () => screen.queryByRole("checkbox", { name: t("rememberPrefix") }) as HTMLInputElement | null
+
+  /**
+   * A form whose writes are never answered.
+   *
+   * `ConfigFormController.mutate` propagates what the transport threw to the caller,
+   * so `form.set` rejects as well as resolving `false` — a connection dropped mid
+   * round trip rejects every write still queued on it. `false` is a verdict and a
+   * rejection is the absence of one, and neither is a reason to undo a task space.
+   */
+  function unreachableForm(prefix: string) {
+    return {
+      getSnapshot: () => ({ status: "ready", value: { defaultBranchPrefix: prefix } }),
+      subscribe: () => () => {},
+      set: vi.fn(async () => { throw new Error("connection closed") }),
+    }
+  }
+
+  it("offers no checkbox at all when the shell serves no configuration form", async () => {
+    // Nothing to save a new default into, so there is nothing to offer: ticking would
+    // reach `config?.set` on nothing, come back `undefined` and report the setting as
+    // unsaved — a refusal the user never asked for and cannot do anything about.
+    const next = setup()
+    next.mount()
+    await ready()
+
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    expect(remember()).toBeNull()
+  })
 
   it("offers the checkbox only once the typed prefix is one worth keeping", async () => {
     const { form: form0 } = configForm("task/")
@@ -477,6 +558,32 @@ describe("the default branch prefix this dialog may record", () => {
     expect(next.api.createTask).toHaveBeenCalledTimes(1)
     expect(next.workspaces.create).toHaveBeenCalledTimes(1)
   })
+
+  it("creates the task space even when the form never answers the write at all", async () => {
+    // The same outcome, reached the other way: a refusal resolves `false`, while a
+    // dropped connection rejects. The rejection used to escape into the catch around
+    // the whole create, which cannot tell a preference that never saved from a
+    // registration that failed - and `created` was already assigned by then, so it
+    // took the task space, its worktrees and its branch back down with it. A
+    // transport hiccup cost a task that had actually succeeded.
+    const next = setup(unreachableForm("task/"))
+    next.mount()
+    await ready()
+    fireEvent.change(prefixField(), { target: { value: "feat/" } })
+    fireEvent.click(remember()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.api.createTask).toHaveBeenCalledTimes(1)
+    expect(next.workspaces.create).toHaveBeenCalledTimes(1)
+    // Nothing undone: the rollback is what a failed registration is for, and this was
+    // not one.
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+    expect(next.workspaces.delete).not.toHaveBeenCalled()
+    // And it is reported the way a refusal is, rather than as a create that failed.
+    expect(screen.getByRole("alert").textContent).toBe(t("branchPrefixNotSaved"))
+  })
 })
 
 describe("the default task space location this dialog may record", () => {
@@ -508,6 +615,25 @@ describe("the default task space location this dialog may record", () => {
   // The label line carries the field's own explanation, so the control is looked up by
   // the name it starts with - the same way the name and prefix fields are.
   const containerField = () => screen.getByRole("textbox", { name: new RegExp(`^${t("containerLocation")}`) }) as HTMLInputElement
+
+  /** A form whose writes are never answered; see the same helper in the suite above. */
+  const unreachableForm = () => ({
+    getSnapshot: () => ({ status: "ready", value: { tasksRootStrategy: "default", tasksRootDirectory: "" } }),
+    subscribe: () => () => {},
+    set: vi.fn(async () => { throw new Error("connection closed") }),
+  })
+
+  it("offers no checkbox at all when the shell serves no configuration form", async () => {
+    // The same offer as the prefix above, on the same terms: there is nothing to write
+    // the location into, so a moved field cannot promise to become the next default.
+    const next = setup()
+    next.mount()
+    await ready()
+    expect(containerField().value).toBe("/tasks")
+
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    expect(rememberRoot()).toBeNull()
+  })
 
   it("offers the checkbox only once the typed location is one worth keeping", async () => {
     const next = setup(configForm().form)
@@ -586,6 +712,26 @@ describe("the default task space location this dialog may record", () => {
     // The directory landed but nothing reads it now, which is the inert half of the
     // pair - the strategy is still the derived default, so the setting is not in force.
     expect(read()).toMatchObject({ tasksRootStrategy: "default", tasksRootDirectory: "E:\\worktree-space" })
+    expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
+  })
+
+  it("creates the task space even when the form never answers the write at all", async () => {
+    // Both writes go through the same guard, so the second one is covered by the same
+    // reasoning: the directory write rejects, the strategy write is never reached, and
+    // neither rejection may reach the catch that rolls a create back.
+    const next = setup(unreachableForm())
+    next.mount()
+    await ready()
+    fireEvent.change(containerField(), { target: { value: "E:\\worktree-space" } })
+    fireEvent.click(rememberRoot()!)
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.onCreated).toHaveBeenCalledExactlyOnceWith(created.path))
+    expect(next.workspaces.create).toHaveBeenCalledTimes(1)
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+    // The strategy is not paired with a directory that never landed, and the pair is
+    // reported as unsaved the way a refusal is.
     expect(screen.getByRole("alert").textContent).toBe(t("tasksRootNotSaved"))
   })
 })

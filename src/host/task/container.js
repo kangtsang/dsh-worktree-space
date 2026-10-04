@@ -15,6 +15,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { coded } from './codes.js'
 
 /**
  * The note the plugin leaves in a container root.
@@ -83,9 +84,10 @@ not already present, and is never overwritten.
  */
 export async function prepareContainerRoot(tasksRoot) {
   const root = String(tasksRoot ?? '').trim()
-  if (root === '') throw new Error('a tasks root is required')
+  if (root === '') throw coded('E1004', 'a tasks root is required')
   if (existsSync(join(root, '.git'))) {
-    throw new Error(
+    throw coded(
+      'E1005',
       `the tasks root ${root} is a git repository\n  worktree spaces must be filed under a directory that is not one, or every task would be committed into it; put the container beside the repositories instead`,
     )
   }

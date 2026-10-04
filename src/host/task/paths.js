@@ -11,6 +11,7 @@
  * source root.
  */
 import { dirname, join, parse, resolve } from 'node:path'
+import { lstatSync } from 'node:fs'
 
 /** Windows compares paths case-insensitively; POSIX does not. */
 const CASE_INSENSITIVE = process.platform === 'win32'
@@ -53,11 +54,19 @@ export function isInside(parent, child) {
   return inner.startsWith(outer.endsWith('/') ? outer : `${outer}/`)
 }
 
-/** Raised when a task container would nest with its source root. */
+/**
+ * Raised when a task container would nest with its source root.
+ *
+ * The code is per-case rather than one for the class: E1001, E1002 and E1003 are
+ * three layouts that read alike and are fixed differently - beside that
+ * directory, outside it, or not inside it at all - so a reader who has the code
+ * knows which one they are looking at without re-reading the message.
+ */
 export class IsolationError extends Error {
-  constructor(message) {
+  constructor(code, message) {
     super(message)
     this.name = 'IsolationError'
+    this.code = code
   }
 }
 
@@ -66,21 +75,142 @@ export class IsolationError extends Error {
  * contains it: work and source must stay isolated.
  * @param sourceRoot - the directory holding the source repositories.
  * @param tasksRoot - the proposed task container root.
- * @throws IsolationError when the two layouts nest.
+ * @throws IsolationError when the two layouts nest, carrying E1001, E1002 or E1003.
  */
 export function assertIsolated(sourceRoot, tasksRoot) {
   if (samePathLocation(sourceRoot, tasksRoot)) {
-    throw new IsolationError(`the tasks root must not be the repositories' directory itself: ${sourceRoot}`)
+    throw new IsolationError('E1001', `the tasks root must not be the repositories' directory itself: ${sourceRoot}`)
   }
   if (isInside(sourceRoot, tasksRoot)) {
     throw new IsolationError(
+      'E1002',
       `the tasks root ${tasksRoot} is inside the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
   }
   if (isInside(tasksRoot, sourceRoot)) {
     throw new IsolationError(
+      'E1003',
       `the tasks root ${tasksRoot} contains the repositories' directory ${sourceRoot}\n  work and source must be isolated; put the container beside that directory`,
     )
+  }
+}
+
+/**
+ * Raised when a delete would reach outside the container root.
+ *
+ * A separate class from {@link IsolationError} because it is not a layout the
+ * caller can fix by naming a different container: by the time it is raised the
+ * container is known and the delete is about to happen. One code, E1005, for the
+ * class - every case here is the same thing from a caller's point of view: this
+ * delete is refused, nothing was removed.
+ */
+export class FenceError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.name = 'FenceError'
+    this.code = code
+  }
+}
+
+/**
+ * Refuse a delete whose target is not strictly inside the container root.
+ *
+ * The container root is the fence every removal in this plugin is held to, and
+ * this is where that is enforced rather than assumed. Callers build paths from a
+ * caller-supplied root and two caller-supplied names, and a name is a string
+ * until it is checked; `../..` in any of the three places a path is assembled is
+ * enough to put a recursive delete somewhere else entirely. Rather than trust
+ * each call site to have got the arithmetic right, every removal states where it
+ * is about to remove from and is refused unless the answer is a strict descendant
+ * of the root.
+ *
+ * Deliberately lexical, and checked immediately before the removal rather than
+ * once at the start: the fence is about the path this plugin is holding, and a
+ * check that ran at entry would still be describing a path some other call may
+ * have moved since.
+ * @param tasksRoot - the container root.
+ * @param target - the path about to be deleted.
+ * @param what - the thing being deleted, named in the refusal.
+ * @throws FenceError carrying E1005 when `target` is the root itself or sits outside it.
+ */
+export function assertInsideContainer(tasksRoot, target, what = 'this path') {
+  const root = canonicalPath(tasksRoot)
+  const inner = canonicalPath(target)
+  const inside = inner.startsWith(root.endsWith('/') ? root : `${root}/`)
+  if (!inside) {
+    throw new FenceError('E1005', `${what} is outside the container root and will not be deleted: ${target}\n  the container root is ${tasksRoot}`)
+  }
+}
+
+/**
+ * Refuse a task space that is not exactly two levels below the container root.
+ *
+ * The layout is `<container root>/<project>/<task>`, and finishing a task deletes
+ * what it finds under that path - so a path that resolved to one level, or to
+ * zero, is not a task space at all but the container or the project layer, and
+ * deleting what is under it would take every other task with it. The name
+ * validators already refuse the input that could produce such a path; this is
+ * the invariant asserted on the result rather than on the inputs, so relaxing a
+ * validator later cannot quietly widen what a delete reaches.
+ * @param tasksRoot - the container root.
+ * @param taskPath - the joined task space path.
+ * @throws FenceError carrying E1005 when the path is not two levels below the root.
+ */
+export function assertTaskSpaceShape(tasksRoot, taskPath) {
+  const rest = canonicalPath(taskPath).slice(canonicalPath(tasksRoot).replace(/\/+$/, '').length)
+  const segments = rest.split('/').filter((segment) => segment !== '')
+  if (segments.length !== 2 || segments.some((segment) => segment === '.' || segment === '..')) {
+    throw new FenceError('E1005', `a task space must be <container root>/<project>/<task>; this path is not one and will not be deleted: ${taskPath}`)
+  }
+}
+
+/**
+ * Ask whether a deletion is allowed, and answer with the refusal if it is not.
+ *
+ * The same two checks {@link assertInsideContainer} and {@link assertRealDirectory}
+ * make, shaped for the call sites that must not abort: finishing a task removes one
+ * directory at a time, and a refusal is one directory's problem, not the end of the
+ * run. An empty string means the delete may go ahead.
+ * @param tasksRoot - the container root.
+ * @param target - the path about to be deleted.
+ * @param what - the thing being deleted, named in the refusal.
+ * @returns the reason the delete is refused, or an empty string when it may proceed.
+ */
+export function refuseDelete(tasksRoot, target, what = 'this path') {
+  try {
+    assertInsideContainer(tasksRoot, target, what)
+    assertRealDirectory(target, what)
+    return ''
+  } catch (error) {
+    return error instanceof FenceError ? error.message : `refusing to delete ${what}: ${target}`
+  }
+}
+
+/**
+ * Refuse to delete a directory that is really a link somewhere else.
+ *
+ * A junction or symbolic link inside the container is a name, not a location:
+ * reading through one reaches the target, and a delete that walked through it
+ * would remove files the fence never covered. Node's own recursive removal
+ * unlinks such an entry rather than descending it, so this guards the removals
+ * git performs, which are its own and answer to none of this plugin's checks.
+ * @param path - the directory about to be deleted.
+ * @param what - the thing being deleted, named in the refusal.
+ * @throws FenceError carrying E1005 when the path is a reparse point.
+ */
+export function assertRealDirectory(path, what = 'this directory') {
+  let stats
+  try {
+    // `lstat`, not `stat`: `stat` follows the link and answers for the target, so
+    // the one question being asked here - is this name a link - comes back false
+    // for exactly the entries it exists to catch.
+    stats = lstatSync(path)
+  } catch {
+    // Gone already: there is nothing to delete and nothing to walk into.
+    return
+  }
+  if (stats.isSymbolicLink()) {
+    throw new FenceError('E1005', `${what} is a link, not a directory, and will not be deleted: ${path}`)
   }
 }
 

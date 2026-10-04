@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { CreateWorktreeDialog } from "../src/client/components/CreateWorktreeDialog"
+import { scanAnswer } from "./scan-answer.helper"
 import { NewSessionWorktreeButton } from "../src/client/components/NewSessionWorktreeButton"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 
@@ -66,7 +67,7 @@ describe("CreateWorktreeDialog", () => {
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledWith("ws-wt"))
-    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined, branchPrefix: "task/" })
+    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: "/tasks/fix-login" })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-wt", "apple/fix-login")
     expect(onClose).toHaveBeenCalled()
@@ -83,7 +84,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha"], baseRef: undefined, branchPrefix: "task/" }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha"], baseRef: undefined, branchPrefix: "task/" }))
   })
 
   it("starts every branch from the named ref the user chose", async () => {
@@ -98,7 +99,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: "main", branchPrefix: "task/" }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: "main", branchPrefix: "task/" }))
   })
 
   it("refuses to create without a valid name or a selected repository", async () => {
@@ -177,7 +178,7 @@ describe("NewSessionWorktreeButton", () => {
 describe("WorktreesSettings", () => {
   function renderSettings(rows: any[], items: any[] = []) {
     const workspaces: any = { list: { getSnapshot: () => ({ items }), subscribe: () => () => {} }, create: vi.fn().mockResolvedValue({ workspaceId: "new", path: rows[1]?.path, title: "" }), rename: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) }
-    const api: any = { list: vi.fn().mockResolvedValue({ repoPath: "/repo", worktrees: rows }), scan: vi.fn().mockResolvedValue([{ repoPath: "/repo", worktrees: rows }]), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn().mockImplementation((path: string) => Promise.resolve({ changedFiles: path.includes("dirty") ? 1 : 0, branchLine: "", output: "" })), remove: vi.fn().mockResolvedValue({}), prune: vi.fn().mockResolvedValue({}) }
+    const api: any = { list: vi.fn().mockResolvedValue({ repoPath: "/repo", worktrees: rows }), scan: vi.fn().mockResolvedValue(scanAnswer([{ repoPath: "/repo", worktrees: rows }])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn().mockImplementation((path: string) => Promise.resolve({ changedFiles: path.includes("dirty") ? 1 : 0, branchLine: "", output: "" })), remove: vi.fn().mockResolvedValue({}), prune: vi.fn().mockResolvedValue({}) }
     const uiWorkspace: any = { openWorkspace: vi.fn().mockResolvedValue(undefined) }
     render(<WorktreesSettings api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any} />)
     // The page opens on tasks; these cases cover the repository list.

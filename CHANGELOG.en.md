@@ -4,6 +4,115 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.2.0 — 2026-10-04
+
+Everything in this release is about things that could be seen but not done: a path you
+could read but not copy, a Workspace registered above a deeper layout that read as an
+empty directory, and a repository that was already in the list being pushed back at you
+as an error.
+
+### Added
+
+- **"Add repository" is decided by the scan.** What decides whether a repository is added
+  is **whether the scan already lists it**, not whether some ancestor directory happens
+  to be a registered Workspace. Those are different questions and the page only answers
+  the first: a repository under a registered Workspace is in the list through that
+  Workspace, so refusing to add it because an ancestor was registered refuses the very
+  thing that was asked for.
+
+### Fixed
+
+- **The name and the path on a row can be selected.** The whole row was one button, so
+  clicking anywhere on it folded the list, and text inside a button is not selectable in
+  the browser's own stylesheet — **a path you could read, you could not copy**. The rows
+  the fold revealed were outside that button, which is why those copied and their parents
+  did not. The arrow is the control now, which leaves the text outside a button where
+  selecting it is ordinary rather than worked around. Asking for `user-select: text` on
+  the button would produce the same selection and drag a guard along with it: a drag
+  that selects a path also lands on the click that folds the row, so the row would fold
+  and unfold while its own path was being copied out of it. Nothing here has to be
+  defended when there is no button to defend.
+- **A nested Workspace is no longer scanned twice.** The containment test built its prefix
+  from a backslash path and appended a forward slash, so on Windows it matched nothing —
+  its own comment promised case-insensitivity and both separator spellings, and the code
+  did neither. Registering both `E:/workspace` and `E:/workspace/public` walked the same
+  tree twice and reported the inner one's repositories twice.
+- **The default scan depth is three, not two.** It was two on a measurement — against a
+  real Workspace the third level found two repositories out of ninety-six. But a
+  repository is a leaf of that walk, so depth only buys the directories holding none
+  between the source root and the repositories; on a source root whose repositories all
+  sit within two levels the extra level walks nothing at all. What bounds a walk is the
+  directory budget rather than the depth. Two levels meant a Workspace registered above a
+  deeper layout reported none of its repositories and read as an empty directory rather
+  than one it could not reach.
+- **A repository one level below its Workspace can be created.** It was named by string;
+  it is named by path now, through the same normalisation that decides where a directory
+  is, so the two cannot disagree about the same directory.
+- **A task space is found by location, not by string.** Two spellings of one directory —
+  separators, a trailing slash, a different case on Windows — are the same place, and a
+  comparison that treats them as different cannot find a task space that exists.
+- **The 420px confirm width no longer reaches the finish dialog.** That width was wider
+  than the dialog it sat in. Percentages follow the dialog rather than insisting on one
+  size.
+
+
+### Fixed (the review round)
+
+A review pass re-ranked everything by severity and turned up one shape repeated
+throughout: a guard written for a failure path that was never reached on it.
+
+- **A task's commits were silently dropped when its worktree sat on a detached HEAD.**
+  `rev-parse --abbrev-ref HEAD` returns the literal string `HEAD` there, and merging that
+  merges the target branch into itself - "Already up to date.", exit 0, target unmoved.
+  The commits never merged, the worktree was clean so it was removed, and the user was
+  told the merge succeeded. They became unreachable objects, gone after one `git gc`.
+  The branch-deletion path already refused this; the merge path did not. It now refuses
+  explicitly rather than reporting success.
+- **A failed create left its branch behind.** A branch made by `worktree add -b` does not
+  go away with `worktree remove`, so the same retry hit "branch already exists". The
+  rollback now takes the branch with it, and names it when it cannot.
+- **One create error, two different codes.** Rebuilding the error dropped its `.code`, so
+  every git failure inside a create reached the caller as `E9001` while the audit log
+  recorded `E2005`. One code is decided once and used by both.
+- **`E7007` was raised but absent from the code table**, so it was flattened to `E9001`
+  on the way out - a refusal written down carefully, reported as "something failed".
+- **Ticking "save as default" and having the form throw deleted the task space that had
+  just been created.** The refusal path was handled; the throw path was not, and it
+  landed in the outer catch. The comment twelve lines above promised the opposite.
+  Same shape in the plugin's own settings: when the host never accepted a value the
+  preview stayed pending forever with no notice.
+- **Two workspaces with same-named repositories: the checkboxes crossed over.** The
+  element ids were built from directory names, and a space in one made an invalid id.
+- **Opening a task menu from the keyboard attached its actions to whatever row a mouse
+  had used recently.** Row ownership was tracked on `pointerdown` only.
+- **"Nothing was left behind" was written without checking in two cases.** A container
+  that could not be read or removed still produced that sentence. Only ENOENT now proves
+  the container is gone; everything else is named.
+
+The acceptance scripts lost evidence in ways worth naming: paths containing spaces broke
+across the board, because `Start-Process -ArgumentList` joins its array with spaces and
+does not quote an element containing one. `$page` was assigned inside a try and read
+outside it, under StrictMode, with no finally - so the server leaked holding its port and
+the uninstall and rollback evidence were lost. Version ranking once put a final release
+below its own release candidate. And the matrix report carried a BOM on 5.1 but not on 7,
+while the json twin exists precisely for a gate that does not read prose.
+
+Section 5 of `store-evidence.md` is rewritten from this run. **4/4 covers install, config
+composition, visibility, uninstall and rollback only - not task-space creation or
+finishing, container validation, or the interface fields.**
+### Changed
+
+- **"Already there" is a notice, not an error.** The user asked for a repository to be in
+  the list, and it is; making that an error sends them looking for something to fix that
+  is not broken. It is a notice — drawn in the warn colour, announced as a status, with
+  the field left open — because a field that stays open under a red error tells the
+  reader the last thing they did was wrong. It was not.
+- **The scan prunes; the classification does not.** Pruning both looked tidier and was
+  wrong: a nested Workspace pruned from the classification loses its `isSourceRoot`, and
+  with it the answer to whether a task space can be created there. So the walk takes an
+  exclusion list and each root excludes the subtrees nested under it, while the
+  classification still sees every path it was asked about.
+
 ## 1.1.0 — 2026-10-01
 
 This release changes wording and layout only; the plugin behaves as it did in 1.0.8.

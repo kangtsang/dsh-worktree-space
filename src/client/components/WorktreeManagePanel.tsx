@@ -1,6 +1,7 @@
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { WorktreesPage } from "./WorktreePanel"
+import { PluginDescription } from "./PluginDescription"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
 import type { createWorktreeApi } from "../lib/api"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -32,7 +33,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
       <DialogContent className="dws-manage-dialog">
         <header className="dws-manage-heading">
           <DialogTitle className="dws-dialog-title">{t("worktreesTitle")}</DialogTitle>
-          <DialogDescription className="dws-form-note">{t("panelDescription")}</DialogDescription>
+          <DialogDescription className="dws-form-note"><PluginDescription /></DialogDescription>
         </header>
         <WorktreesPage
           api={api}

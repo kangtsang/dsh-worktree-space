@@ -51,7 +51,7 @@ function setup() {
   const snapshot = { items: [workspace] }
   const workspaceListeners = new Set<() => void>()
   const effects: Array<() => void> = []
-  const requests: Array<ReturnType<typeof deferred<{ ok: true; value: Classification }>>> = []
+  const requests: Array<ReturnType<typeof deferred<{ ok: true; value: Classification[] }>>> = []
   let Dock!: ComponentType<any>
   const useWorkspaces = vi.fn((selector: (state: typeof snapshot) => unknown) => selector(snapshot))
   const locale = {
@@ -61,7 +61,7 @@ function setup() {
     subscribe: vi.fn(() => () => {}),
   }
   const call = vi.fn(() => {
-    const request = deferred<{ ok: true; value: Classification }>()
+    const request = deferred<{ ok: true; value: Classification[] }>()
     requests.push(request)
     return request.promise
   })
@@ -100,7 +100,8 @@ function setup() {
     refresh: () => { for (const listener of workspaceListeners) listener() },
     resolve: async (index: number, classification: Classification) => {
       await act(async () => {
-        requests[index].resolve({ ok: true, value: classification })
+        // The Host answers a batch of Workspaces with one classification each.
+        requests[index].resolve({ ok: true, value: [classification] })
         await requests[index].promise
       })
     },
@@ -115,7 +116,7 @@ describe("registered task dock classification reactivity", () => {
     render(host.element)
     expect(button()).toBeNull()
     expect(host.call).toHaveBeenCalledTimes(1)
-    expect(host.call.mock.calls[0].slice(0, 3)).toEqual(["/api", "dsh-worktree-space/task.classify-root", { sourceRoot: "/repo/" }])
+    expect(host.call.mock.calls[0].slice(0, 3)).toEqual(["/api", "dsh-worktree-space/task.classify-roots", { paths: ["/repo/"] }])
     await host.resolve(0, container("/repo/", 2))
     expect(button()).not.toBeNull()
     expect(host.call).toHaveBeenCalledTimes(1)

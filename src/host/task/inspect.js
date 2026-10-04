@@ -4,21 +4,27 @@
  * Looking at a workspace or a task: what it is, what it holds, and whether it is a source root or a task container.
  */
 import { existsSync } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
-import { discoverSourceRepos, isSourceRepository, resolveSourceRepos } from './discover.js'
-import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, validateBranchPrefix, validateTaskName } from './naming.js'
-import { assertIsolated, recommendTasksRoot } from './paths.js'
+import { coded } from './codes.js'
+import { mapWithLimit } from './concurrency.js'
+import { discoverSourceRepos, isSourceRepository } from './discover.js'
+import { tryRunGit } from './git.js'
+import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
+import { assertIsolated, isInside } from './paths.js'
 
-import { breadcrumb } from './create.js'
 import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot } from './shared.js'
 
-export async function classifySourceRoot(sourceRoot) {
-  const repositories = await discoverSourceRepos(sourceRoot)
+export async function classifySourceRoot(sourceRoot, { signal, ...bounds } = {}) {
+  const repositories = await discoverSourceRepos(sourceRoot, { signal, ...bounds })
   return {
     path: sourceRoot,
+    // Whether the path is a directory at all. `isSourceRoot` cannot answer it: a
+    // directory that holds no repositories and a path that is not there both come
+    // back as false, and a caller registering a Workspace needs to tell those two
+    // apart before it makes one out of the path.
+    isDirectory: await isExistingDirectory(sourceRoot),
     isRepository: await isSourceRepository(sourceRoot),
     isSourceRoot: repositories.length > 0,
     repositoryCount: repositories.length,
@@ -26,12 +32,101 @@ export async function classifySourceRoot(sourceRoot) {
   }
 }
 
+/**
+ * A trailing separator is noise for path identity.
+ *
+ * The entry module's `cleanPath` would say the same, but importing it from here
+ * would close a cycle back from the module that owns this one - the same reason
+ * `scan-cache.js` carries its own.
+ * @param value - the path a caller named.
+ * @returns the key two spellings of one path agree on.
+ */
+const pathKey = (value) => {
+  const text = String(value ?? '')
+  return text.length > 1 ? text.replace(/[\\/]+$/, '') : text
+}
 
-export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX, configuredRoot = '' } = {}) {
+/**
+ * Classify several source roots as one question rather than as several.
+ *
+ * This is a batch of the same work, not a cache of it. Every path is walked now
+ * and answered now: the callers that ask for a page of Workspaces want to know
+ * what all of them hold this second, and what they cannot have is an answer from
+ * the last time they looked - a user who has since made a repository would be
+ * told it is not one. So nothing here is remembered, and the only thing that
+ * changes is that N walks cost one round trip instead of N, and run beside each
+ * other rather than one after another.
+ *
+ * Duplicates are dropped by identity rather than by spelling, so `C:\src` and
+ * `C:\src\` are one walk - the same rule the scan applies. What the answer carries
+ * is the path as the caller spelled it, because that is what the caller matches
+ * its rows against; the cleaning is for deciding what to walk, not what to say.
+ *
+ * The order is the caller's, so the rows they asked about come back in the order
+ * they listed them.
+ *
+ * A path that cannot be classified is left OUT of the answer rather than
+ * reported as an empty one. Reporting it as empty would tell the caller a
+ * directory that could not be read holds no repositories, which is a claim about
+ * a read that never happened - and the caller needs to draw those two apart,
+ * because "no repositories here" rules a Workspace out where "could not tell"
+ * does not. Leaving it out is what tells them: an asked-for path missing from
+ * the answer is the one that failed.
+ * @param paths - the source roots to classify.
+ * @param signal - an abort signal, when the caller has one.
+ * @returns one classification per path that could be classified, in the order asked.
+ */
+export async function classifySourceRoots(paths, { signal, concurrency = 6, ...bounds } = {}) {
+  const asked = []
+  const seen = new Set()
+  for (const raw of paths ?? []) {
+    const path = String(raw ?? '').trim()
+    if (path === '') continue
+    const key = pathKey(path)
+    if (seen.has(key)) continue
+    seen.add(key)
+    asked.push(path)
+  }
+  const classified = await mapWithLimit(asked, concurrency, async (path) => {
+    try {
+      // Every path asked about is classified, including one that sits inside
+      // another - that Workspace needs its own answer, because `isSourceRoot` is
+      // what decides whether a task space can be started from it. What it does not
+      // need is its repositories discovered a second time inside the parent's
+      // walk, so the parent's walk steps over it.
+      const nested = asked.filter((other) => other !== path && isInside(path, other))
+      return await classifySourceRoot(path, { signal, ...bounds, exclude: nested })
+    } catch {
+      // The same reasoning the scan follows: a directory that cannot be read is
+      // not a reason to abandon the other twenty.
+      return undefined
+    }
+  })
+  return classified.filter((entry) => entry !== undefined)
+}
+
+/**
+ * Whether a path is a directory that exists.
+ * @param {string} directory - the candidate path.
+ * @returns {Promise<boolean>} whether it is a directory.
+ */
+async function isExistingDirectory(directory) {
+  try {
+    return (await stat(directory)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+
+export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX, configuredRoot = '', ...bounds } = {}) {
   const requested = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   const suggested = resolveTasksRoot(sourceRoot, requested, configuredRoot)
   assertIsolated(sourceRoot, suggested)
-  const repositories = await discoverSourceRepos(sourceRoot)
+  // The same walk the classification and the create perform, with the same bounds:
+  // this dialog lists what a create would take, and a preview of 94 repositories
+  // beside a create that finds none is worse than either number alone.
+  const repositories = await discoverSourceRepos(sourceRoot, bounds)
   return {
     sourceRoot,
     suggested,
@@ -67,20 +162,6 @@ export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branc
 async function currentBranchOf(subprocess, repoPath) {
   const branch = await tryRunGit(subprocess, repoPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
   return branch === '' || branch === 'HEAD' ? undefined : branch
-}
-
-
-export function parseBreadcrumb(text) {
-  const source = String(text ?? '')
-  const task = /^# Task:\s*(.+)$/m.exec(source)?.[1]?.trim()
-  if (task === undefined || task === '') return undefined
-  const branch = /^-\s*Branch:\s*`([^`]+)`/m.exec(source)?.[1]?.trim()
-  const sourceRoot = /^-\s*Source root:\s*`([^`]+)`/m.exec(source)?.[1]?.trim()
-  return {
-    task,
-    ...(branch === undefined || branch === '' ? {} : { branch }),
-    ...(sourceRoot === undefined || sourceRoot === '' ? {} : { sourceRoot }),
-  }
 }
 
 
@@ -128,7 +209,7 @@ export async function inspectTask(taskPath) {
 
 
 export async function listTasks(subprocess, { tasksRoot } = {}) {
-  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw new Error('a tasks root is required')
+  if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const root = tasksRoot.trim()
   if (!existsSync(root)) return { tasksRoot: root, tasks: [] }
 

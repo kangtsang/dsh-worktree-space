@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
+import { errorText } from "../lib/error-text"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
-import { cleanPath, commonAncestor, containerRootOf, nameOf, projectOf, slashPath } from "../lib/paths"
-import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finishScene"
+import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
+import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
 import { BetaNotice } from "./BetaNotice"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions, SessionTarget } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -70,7 +71,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
-  const workspace = workspaces.list.getSnapshot().items.find((item) => cleanPath(item.path) === cleanPath(path))
+  // Matched by location, not by string: the Host answers with the platform's own
+  // separators and DSH's workspace list may carry the other style, so a plain
+  // comparison missed the registration whenever the two spelled the same directory
+  // differently. A miss is silent and permanent - `workspace` came back undefined,
+  // nothing was ever unregistered, and the task space stayed registered at a path
+  // the finish had just deleted. Every later scan then tried to read that path and
+  // reported ENOENT for a workspace the plugin itself had finished.
+  const workspace = workspaces.list.getSnapshot().items.find((item) => sameLocation(item.path, path))
   const [plan, setPlan] = useState<TaskPlan | null>(null)
   const [loadError, setLoadError] = useState("")
   // Merging is what a task is for, so it is on; deleting the branch and forcing
@@ -169,7 +177,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       setLoadError("")
     } catch (reason: any) {
       if (generation !== planGeneration.current) return
-      setLoadError(String(reason?.message ?? reason))
+      setLoadError(errorText(t, reason))
     }
   }, [api, path])
 
@@ -455,7 +463,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         try {
           await workspaces.delete(workspace.workspaceId)
         } catch (reason: any) {
-          setRegistrationError(String(reason?.message ?? reason))
+          setRegistrationError(errorText(t, reason))
         }
       }
       setResult(archived)
@@ -464,7 +472,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // on a repository is a decision, and the panel asks for it in as many words. What
       // is done with the answer is to report it.
     } catch (reason: any) {
-      setError(`${t("operationError")}${String(reason?.message ?? reason)}`)
+      setError(`${t("operationError")}${errorText(t, reason)}`)
     } finally {
       setBusy(false)
     }
@@ -608,7 +616,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // The session could not be opened at all, so nothing in this batch was handed on.
         for (const entry of batch.entries) {
           claimed.current.delete(`${kind}:${entry.name}`)
-          failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
+          failures.push(`${entry.name}: ${errorText(t, reason)}`)
         }
         continue
       }
@@ -625,7 +633,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       } catch (reason: any) {
         for (const entry of batch.entries) {
           claimed.current.delete(`${kind}:${entry.name}`)
-          failures.push(`${entry.name}: ${String(reason?.message ?? reason)}`)
+          failures.push(`${entry.name}: ${errorText(t, reason)}`)
         }
       }
     }
@@ -754,7 +762,12 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     {candidates(entry).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
                   </Select>
                 </>}
-              <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>
+              {/* Left out rather than printed as a number when the Host could not
+                  count: it omits the field instead of reporting a zero it never
+                  counted, so `String` here would have written "undefined commits"
+                  beside a row whose own error line is what says why. The headline
+                  above still carries a total, because there the Host keeps one. */}
+              {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
               <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
               {/* Saying it before the merge, not after: a target the source
                   repository is not on is merged in a checkout of its own. */}
@@ -762,6 +775,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 ? <span className="dws-plan-detour">{t("planTemporaryWorktree")}</span>
                 : null}
               {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
+              {/* Which repository this worktree is a checkout of. It is the half of
+                  the write boundary the narrowest session in the task space cannot
+                  reach on its own, and it is the directory a merge runs in when the
+                  target is not the branch standing here - so it is named next to the
+                  row rather than left to be inferred from the worktree's own name.
+                  Omitted only while the Host cannot say: an empty line would read as
+                  "there is none", which is not what a missing field means. */}
+              {entry.mainRepo === undefined || entry.mainRepo === "" ? null : <span className="dws-plan-source">
+                <span>{t("planSourceRepository")}</span>
+                <code title={slashPath(entry.mainRepo)}>{slashPath(entry.mainRepo)}</code>
+              </span>}
             </li>)}
           </ul> : null}
           {/* What "clean other content" would remove, listed before the choice
@@ -947,10 +971,13 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             {/* Forcing says what it will cost, and asking for the branch too costs
                 more: the commits that were never merged go with it. */}
             {options.force ? <p className="dws-notice dws-notice-danger" role="alert"><AlertCircle size={15} aria-hidden="true" /><span>{options.deleteBranch ? t("finishForceWarningBranch") : t("finishForceWarning")}</span></p> : null}
-            {running ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{t("archiveRunning")}</span></div> : null}
-            {error ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div> : null}
           </> : null}
         </div>
+        {/* Same as the create dialog: outside the scrolling body, so an error
+            cannot be scrolled away from - or hidden under the heading by - the
+            button that answers it. */}
+        {running ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{t("archiveRunning")}</span></div> : null}
+        {error ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
         <div className="dws-dialog-footer">
           {result
             ? <>

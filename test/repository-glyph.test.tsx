@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { BrandGlyph, FolderGit2 } from "../src/client/components/icons"
-import { repositoryGlyphMask } from "../src/client/components/repositoryGlyph"
+import { repositoryGlyphMask } from "../src/client/components/repository-glyph"
 
 const PREFIX = 'url("data:image/svg+xml,'
 

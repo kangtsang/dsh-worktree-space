@@ -3,6 +3,10 @@ import { createWorktreeApi } from "../src/client/lib/api"
 
 describe("worktree client API routing", () => {
   const taskPayload = { sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha"], baseRef: "main" }
+  // Absolute paths, not names: a repository added to a task under way need not sit
+  // under the source root that task began from, so there is nothing to resolve one
+  // against. The routing test below is what holds that to the wire.
+  const addPayload = { task: "fix-login", project: "repo", tasksRoot: "/tasks", repositories: ["/elsewhere/gamma"], baseRef: "release" }
 
   afterEach(() => vi.useRealTimers())
 
@@ -21,7 +25,9 @@ describe("worktree client API routing", () => {
     const api = createWorktreeApi({ rpc: { call } })
     const invoke = api[operation] as (...call: any[]) => Promise<unknown>
     const request = invoke(...args)
-    const rejected = expect(request).rejects.toThrow(/timed out/)
+    // Named rather than worded: there is no dictionary under this call to word it in,
+    // so the code is what a page matches on and says in the interface language.
+    const rejected = expect(request).rejects.toMatchObject({ code: "worktree-timeout" })
     const signal = call.mock.calls[0][3] as AbortSignal
     expect(signal.aborted).toBe(false)
     expect(vi.getTimerCount()).toBe(1)
@@ -40,7 +46,7 @@ describe("worktree client API routing", () => {
     const api = createWorktreeApi({ rpc: { call } })
     const controller = new AbortController()
     const request = operation === "status" ? api.status("/repo", undefined, controller.signal) : api[operation](["/repo"], controller.signal)
-    const rejected = expect(request).rejects.toThrow(/cancelled/)
+    const rejected = expect(request).rejects.toMatchObject({ code: "worktree-cancelled" })
     controller.abort()
     await rejected
     expect(call.mock.calls[0][3].aborted).toBe(true)
@@ -62,6 +68,7 @@ describe("worktree client API routing", () => {
 
   it.each([
     { operation: "createTask", args: [taskPayload] },
+    { operation: "addRepositories", args: [addPayload] },
   ] as const)("does not time out or automatically retry $operation mutations", async ({ operation, args }) => {
     vi.useFakeTimers()
     let reject!: (reason: Error) => void
@@ -89,6 +96,7 @@ describe("worktree client API routing", () => {
     { operation: "classifyRoot", endpoint: "task.classify-root", args: ["/repo"], payload: { sourceRoot: "/repo" } },
     { operation: "suggestRoot", endpoint: "task.suggest-root", args: ["/repo"], payload: { sourceRoot: "/repo", tasksRoot: undefined } },
     { operation: "createTask", endpoint: "task.create", args: [taskPayload], payload: taskPayload },
+    { operation: "addRepositories", endpoint: "task.add-repositories", args: [addPayload], payload: addPayload },
   ] as const)("routes $operation through the shared /api channel", async ({ operation, endpoint, args, payload }) => {
     const value = { response: endpoint }
     const call = vi.fn().mockResolvedValue({ ok: true, value })
@@ -102,11 +110,21 @@ describe("worktree client API routing", () => {
   })
 
   it.each([
-    { result: { ok: false, error: { code: "bad-request", message: "fatal: not a git repository" } }, message: "not-git-repository", code: "not-git-repository" },
-    { result: { ok: false, error: { code: "bad-request", message: "No such file or directory" } }, message: "worktree-unavailable", code: "worktree-unavailable" },
+    // A Host that sends its codes. The dialog acts on these, so they have to
+    // survive the trip - the point of the codes is that the code a caller reads
+    // is the one to grep for.
+    { result: { ok: false, error: { code: "E3004", message: "fatal: not a git repository" } }, message: "fatal: not a git repository", code: "E3004" },
+    { result: { ok: false, error: { code: "E3005", message: "No such file or directory" } }, message: "No such file or directory", code: "E3005" },
+    { result: { ok: false, error: { code: "E2002", message: "task space already exists: E:/ws" } }, message: "task space already exists: E:/ws", code: "task-space-unregistered" },
+    // The message patterns below are a fallback for a Host older than the codes,
+    // which is what sent a flat code and left only the wording to match on.
+    { result: { ok: false, error: { code: "E9001", message: "fatal: not a git repository" } }, message: "fatal: not a git repository", code: "E3004" },
+    { result: { ok: false, error: { code: "E9001", message: "No such file or directory" } }, message: "No such file or directory", code: "E3005" },
     { result: { ok: false, error: { code: "cancelled", message: "The request was cancelled." } }, message: "The request was cancelled.", code: "cancelled" },
-    { result: { ok: false, error: { code: "bad-request", message: "Invalid path" } }, message: "Invalid path", code: "bad-request" },
-    { result: undefined, message: "worktree operation failed", code: undefined },
+    { result: { ok: false, error: { code: "E9001", message: "Invalid path" } }, message: "Invalid path", code: "E9001" },
+    // A Host that answered with no sentence at all: there is nothing of its to keep,
+    // so the failure is named rather than worded here in this plugin's own English.
+    { result: undefined, message: "worktree-failed", code: "worktree-failed" },
   ])("rejects unsuccessful results with $message", async ({ result, message, code }) => {
     const call = vi.fn().mockResolvedValue(result)
     const api = createWorktreeApi({ rpc: { call } })

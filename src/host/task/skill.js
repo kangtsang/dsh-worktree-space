@@ -6,10 +6,11 @@
  * through the `task_worktree_space` tool — so the skill directory carries no scripts,
  * which also keeps it usable on a platform where the plugin's shell seam is not.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs'
+import { open } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { coded } from './codes.js'
 
 /** Provider name in the `ctx.skills` registry. */
 export const PROVIDER_NAME = 'dsh-worktree-space'
@@ -53,9 +54,70 @@ function packageRoot() {
     }
     const parent = dirname(directory)
     if (parent === directory) {
-      throw new Error(`${PACKAGE_NAME}: cannot locate the package root for the bundled skill`)
+      throw coded('E7001', `${PACKAGE_NAME}: cannot locate the package root for the bundled skill`)
     }
     directory = parent
+  }
+}
+
+/**
+ * How many bytes of instruction file are read.
+ *
+ * A skill is prose, not a payload: the bundled one is a few kilobytes, and a
+ * file past this is not one whatever it opens with. The cap is on the read
+ * rather than on the parse, because the read is the part that can be asked for
+ * an arbitrary file and the part that answers in memory.
+ */
+const SKILL_MAX_BYTES = 256 * 1024
+
+/**
+ * Read an instruction file, refusing to read more than it should ever hold.
+ *
+ * `readFile` sizes the buffer from the file and there is no way to bound it, so
+ * the read is opened and asked for a fixed window instead; a file that would
+ * fill it is refused rather than truncated, because a half-read skill is
+ * neither a skill nor an error the caller can act on.
+ * @param path - the file to read.
+ * @param signal - an abort signal, when the caller has one.
+ * @returns the file's contents.
+ * @throws Error carrying E7005 when the file is larger than {@link SKILL_MAX_BYTES}.
+ */
+async function readBounded(path, signal) {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(SKILL_MAX_BYTES + 1)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    if (bytesRead > SKILL_MAX_BYTES) {
+      throw coded('E7005', `${PACKAGE_NAME}: ${basename(path)} is larger than the ${SKILL_MAX_BYTES} bytes a skill may hold`)
+    }
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * {@link readBounded}, for the one read that has to have happened by the time
+ * registration returns.
+ *
+ * Registration is synchronous - the caller installs the provider with whatever
+ * it gets back - so the description cannot be awaited into existence. The bound
+ * is the same one, for the same reason.
+ * @param path - the file to read.
+ * @returns the file's contents.
+ * @throws Error carrying E7005 when the file is larger than {@link SKILL_MAX_BYTES}.
+ */
+function readBoundedSync(path) {
+  const handle = openSync(path, 'r')
+  try {
+    const buffer = Buffer.alloc(SKILL_MAX_BYTES + 1)
+    const bytesRead = readSync(handle, buffer, 0, buffer.length, 0)
+    if (bytesRead > SKILL_MAX_BYTES) {
+      throw coded('E7005', `${PACKAGE_NAME}: ${basename(path)} is larger than the ${SKILL_MAX_BYTES} bytes a skill may hold`)
+    }
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } finally {
+    closeSync(handle)
   }
 }
 
@@ -72,12 +134,12 @@ function packageRoot() {
  */
 export function parseSkillFile(raw, path) {
   const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw)
-  if (frontmatter?.[1] === undefined) throw new Error(`${PACKAGE_NAME}: ${path} has no YAML frontmatter`)
+  if (frontmatter?.[1] === undefined) throw coded('E7002', `${PACKAGE_NAME}: ${path} has no YAML frontmatter`)
   const description = /^description:[ \t]*(.+?)[ \t]*$/mu.exec(frontmatter[1])?.[1]
   const declared = /^name:[ \t]*(.+?)[ \t]*$/mu.exec(frontmatter[1])?.[1]
-  if (description === undefined || description === '') throw new Error(`${PACKAGE_NAME}: ${path} has no description`)
+  if (description === undefined || description === '') throw coded('E7003', `${PACKAGE_NAME}: ${path} has no description`)
   if (declared !== SKILL_NAME) {
-    throw new Error(`${PACKAGE_NAME}: ${path} declares name '${declared}' where '${SKILL_NAME}' is served`)
+    throw coded('E7004', `${PACKAGE_NAME}: ${path} declares name '${declared}' where '${SKILL_NAME}' is served`)
   }
   return { description, content: raw.slice(frontmatter[0].length).trim() }
 }
@@ -100,7 +162,7 @@ export function registerTaskSkill(ctx) {
 
   const directory = join(packageRoot(), 'assets', 'skill', SKILL_NAME)
   const skillPath = join(directory, SKILL_FILE)
-  const { description } = parseSkillFile(readFileSync(skillPath, 'utf8'), skillPath)
+  const { description } = parseSkillFile(readBoundedSync(skillPath), skillPath)
 
   const candidate = {
     name: SKILL_NAME,
@@ -118,9 +180,18 @@ export function registerTaskSkill(ctx) {
     name: PROVIDER_NAME,
     list: () => Promise.resolve([candidate]),
     async get(requested, options) {
-      const path = typeof requested?.locator === 'string' ? requested.locator : skillPath
-      const raw = await readFile(path, { encoding: 'utf8', signal: options?.signal })
-      const loaded = parseSkillFile(raw, path)
+      // A locator arriving in the request is a name to check, not a path to
+      // follow. This provider serves exactly one file, and it publishes that
+      // file's own locator - so a request naming anything else is asking this
+      // plugin to open a file it never offered, on the say-so of whoever made
+      // the request. The refusal names the basename rather than the path it
+      // was handed, so answering it does not report back what was probed.
+      const asked = typeof requested?.locator === 'string' ? requested.locator : ''
+      if (asked !== '' && resolve(asked) !== resolve(skillPath)) {
+        throw coded('E7005', `${PACKAGE_NAME}: not a skill this provider serves: ${basename(asked)}`)
+      }
+      const raw = await readBounded(skillPath, options?.signal)
+      const loaded = parseSkillFile(raw, skillPath)
       const { rank: _rank, locator: _locator, ...summary } = candidate
       return { ...summary, description: loaded.description, content: loaded.content }
     },

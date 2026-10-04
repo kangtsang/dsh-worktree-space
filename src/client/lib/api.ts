@@ -1,4 +1,6 @@
+import { failure } from "./error-text"
 import type {
+  AddRepositoriesResult,
   ConnectionService,
   CreateTaskResult,
   FinishTaskResult,
@@ -6,17 +8,38 @@ import type {
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
+  ScanAnswer,
   TaskPreference,
   TaskRootSuggestion,
-  WorktreeList,
   WorktreeStatus,
 } from "./types"
 
 export const CHANNEL = "/api"
 
+/**
+ * Map a Host failure onto a code the dialog can act on.
+ *
+ * The Host sends `E` and four digits - `task/codes.js` is the index, and every
+ * code is written literally at the throw site so it can be grepped for. Only the
+ * ones that change what the dialog does are named here; the rest stay on the
+ * error as themselves and are shown as the Host's message.
+ *
+ * The message patterns are a fallback for a Host older than the codes, and for
+ * E9001 - the code that means "nothing here classifies this". Both leave only the
+ * wording to match on, which is why it is trusted only when no specific code came.
+ * @param code - the code the Host sent, if any.
+ * @param message - its message, used when no specific code came.
+ * @returns the code to put on the error, or undefined to leave it alone.
+ */
 function classifyError(code: unknown, message: string): string | undefined {
-  if (code === "not-git-repository" || /not a git repository/i.test(message)) return "not-git-repository"
-  if (code === "worktree-unavailable" || /is not a working tree|No such file or directory/i.test(message)) return "worktree-unavailable"
+  const unclassified = code === undefined || code === "E9001"
+  if (code === "E3004" || (unclassified && /not a git repository/i.test(message))) return "E3004"
+  if (code === "E3005" || (unclassified && /is not a working tree|No such file or directory/i.test(message))) return "E3005"
+  // Set by the host, never by matching wording: the container on disk is this
+  // task's own, left behind by a create that could not register its Workspace.
+  if (code === "E2002") return "task-space-unregistered"
+  if (code === "E2001") return "task-space-exists"
+  if (code === "E3001") return "branch-exists"
   return undefined
 }
 
@@ -25,10 +48,22 @@ export function createWorktreeApi(connection: ConnectionService) {
     const args = [CHANNEL, `dsh-worktree-space/${endpoint}`, payload] as const
     const result = await (signal ? connection.rpc.call(...args, signal) : connection.rpc.call(...args)) as any
     if (!result?.ok) {
-      const message = result?.error?.message ?? "worktree operation failed"
-      const code = classifyError(result?.error?.code, message)
-      const error = new Error(code ?? message)
-      ;(error as Error & { code?: string }).code = code ?? result?.error?.code
+      // The Host's own message, because that is the sentence the dialog shows and it
+      // is the one written for a person to read. The code is a separate field, not
+      // the message: it is for deciding what to do, and a dialog that renders it as
+      // the message shows someone "E3004" and nothing else. The two are deliberately
+      // different jobs - the message may be reworded or translated, the code may not,
+      // which is why it is the thing to grep the log with.
+      const sent = result?.error?.message
+      if (sent === undefined) {
+        // A Host that answered with no sentence at all leaves nothing to translate and
+        // nothing to show; the failure is named instead, and said in the interface
+        // language where it is displayed.
+        throw failure("worktree-failed")
+      }
+      const code = classifyError(result?.error?.code, String(sent)) ?? result?.error?.code
+      const error = new Error(String(sent))
+      ;(error as Error & { code?: string }).code = code
       throw error
     }
     return result.value as T
@@ -38,11 +73,13 @@ export function createWorktreeApi(connection: ConnectionService) {
   // a timeout must not encourage retrying a creation that may have succeeded.
   async function read<T>(endpoint: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const controller = new AbortController()
-    const timeoutError = new Error('Worktree request timed out. Refresh or select a more specific Workspace.')
+    // Named rather than worded: there is no dictionary down here to word it in, and
+    // these two are shown in whatever language the interface is in.
+    const timeoutError = failure("worktree-timeout")
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: () => void = () => {}
     const cancelled = new Promise<never>((_, reject) => {
-      onAbort = () => { controller.abort(); reject(new Error('Worktree request cancelled.')) }
+      onAbort = () => { controller.abort(); reject(failure("worktree-cancelled")) }
       timer = setTimeout(() => { controller.abort(); reject(timeoutError) }, 15000)
       signal?.addEventListener('abort', onAbort, { once: true })
       if (signal?.aborted) onAbort()
@@ -52,7 +89,8 @@ export function createWorktreeApi(connection: ConnectionService) {
   }
 
   return {
-    scan: (paths: string[], signal?: AbortSignal) => read<WorktreeList[]>("worktree.scan", { paths }, signal),
+    scan: (paths: string[], signal?: AbortSignal, depth?: number) =>
+      read<ScanAnswer>("worktree.scan", depth === undefined ? { paths } : { paths, depth }, signal),
     /**
      * What the Host remembers of the last scan of these Workspaces.
      *
@@ -70,6 +108,18 @@ export function createWorktreeApi(connection: ConnectionService) {
 
     /** Whether a workspace can hold a task, and which repositories it would span. */
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),
+    /**
+     * Several source roots, classified as one request.
+     *
+     * The same walk the singular form performs, taken now for every path -
+     * nothing here is cached or reused across calls, because a user who has
+     * since made a repository must not be told it is not one. What it saves is
+     * the round trip and the wait between walks, not the reading.
+     * @param sourceRoots - the paths to classify.
+     * @param signal - an abort signal, when the caller has one.
+     * @returns one classification per path, in the order asked.
+     */
+    classifyRoots: (sourceRoots: string[], signal?: AbortSignal) => read<SourceRootClassification[]>("task.classify-roots", { paths: sourceRoots }, signal),
     /** The recommended container location for a source root, before creating anything. */
     suggestRoot: (sourceRoot: string, tasksRoot?: string, signal?: AbortSignal) => read<TaskRootSuggestion>("task.suggest-root", { sourceRoot, tasksRoot }, signal),
     /**
@@ -82,6 +132,16 @@ export function createWorktreeApi(connection: ConnectionService) {
     preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
+    /**
+     * Add repositories to a task that already exists.
+     *
+     * `repositories` are absolute paths rather than names under a source root: a
+     * repository added to a running task need not sit beside the ones it started
+     * with, so there is no directory to resolve a name against. They may be on
+     * another volume — the merge at the end reads each worktree's own source
+     * repository, so where it is makes no difference to that.
+     */
+    addRepositories: (payload: { task: string; project: string; tasksRoot: string; repositories: string[]; baseRef?: string }) => call<AddRepositoriesResult>("task.add-repositories", payload),
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
     /**
@@ -93,6 +153,6 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string }) => call<FinishTaskResult>("task.done", payload),
   }
 }

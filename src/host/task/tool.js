@@ -7,7 +7,8 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { projectNameFor } from './naming.js'
-import { createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
+import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
+import { coded } from './codes.js'
 
 /**
  * Model-facing description: what this is for, the order to drive it in, and the
@@ -20,7 +21,9 @@ const DESCRIPTION = [
   '',
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the Worktree Space container root before creating anything.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
-  'Pass merge only when the user asked to merge, deleteBranch only after a merge or - with force - when the user asked to abandon the task, and force only when the user has decided to discard uncommitted work.',
+  'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
+  'Pass merge only when the user asked to merge, and deleteBranch only after a merge: a branch that landed on its target is safe to remove, and that is the tidying-up this tool does on its own.',
+  'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
@@ -125,7 +128,7 @@ function envelope(action) {
  */
 function required(value, name) {
   const text = typeof value === 'string' ? value.trim() : ''
-  if (text === '') throw new Error(`${name} is required for this action`)
+  if (text === '') throw coded('E7006', `${name} is required for this action`)
   return text
 }
 
@@ -133,9 +136,10 @@ function required(value, name) {
  * Resolve the container root a list or done action should read: an explicit root,
  * else whatever the configuration names, else the recommendation for the source root.
  *
- * The middle answer is here for the same reason it is in `create`: a list or a
- * done that names only a source root has to read the container the creates have
- * been landing in, or it would report on a directory nobody uses.
+ * The middle answer is here for the same reason it is in `create`: a list, an add
+ * or a done that names only a source root has to read the container the creates
+ * have been landing in, or it would report on, or write to, a directory nobody
+ * uses.
  * @param subprocess - the profile's subprocess service.
  * @param tasksRoot - the explicit container root, if any.
  * @param sourceRoot - the source root, if any.
@@ -147,7 +151,7 @@ async function containerFor(subprocess, tasksRoot, sourceRoot, configuredRoot = 
   const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
-  if (source === '') throw new Error('tasksRoot is required (or sourceRoot, to use its recommended task space)')
+  if (source === '') throw coded('E7006', 'tasksRoot is required (or sourceRoot, to use its recommended task space)')
   return (await suggestTaskRoot(subprocess, source, { configuredRoot })).suggested
 }
 
@@ -168,8 +172,42 @@ function projectFor(project, sourceRoot) {
   const explicit = typeof project === 'string' ? project.trim() : ''
   if (explicit !== '') return explicit
   const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
-  if (source === '') throw new Error('project is required (or sourceRoot, whose directory name it is)')
+  if (source === '') throw coded('E7006', 'project is required (or sourceRoot, whose directory name it is)')
   return projectNameFor(source)
+}
+
+/**
+ * Refuse the one request a call cannot answer for itself.
+ *
+ * `force` is the whole of the irreversible surface here, and it is irreversible
+ * twice over: it discards uncommitted work, and it swaps `git branch -d` for
+ * `branch -D` (`archive.js`), which deletes a branch whose commits landed
+ * nowhere. A model can be talked into either by anything it reads, so it is not
+ * gated on a flag the model also holds - it is not expressible here at all, and
+ * the way out is the management page, where the user ticks it.
+ *
+ * Everything else this tool can do to finish a task is recoverable or is git's
+ * own decision. Merging lands the work; `deleteBranch` after a merge is
+ * `git branch -d`, which refuses an unmerged branch on its own. `cleanStray`
+ * reaches only the entries sitting directly in a task space that carries this
+ * plugin's record and at least one linked worktree, and the user's own
+ * documents are never among them: filing them away is `documentsDirectory` and
+ * throwing them out is `discardDocuments`, and this tool passes neither.
+ * Abandoning a task needs `deleteBranch` without a merge, which `archive.js`
+ * already refuses without `force` - so refusing `force` closes that door too.
+ * @param args - the tool's arguments.
+ * @throws Error carrying E7007 when the call asks for `force`.
+ */
+function refuseIrreversible(args) {
+  if (args.force !== true) return
+  throw coded(
+    'E7007',
+    'force cannot be done from a tool call: discarding uncommitted work, and force-deleting a branch '
+    + 'whose commits landed nowhere, are irreversible and have to be the user\'s own decision. '
+    + 'Abandoning a task (deleteBranch without merge) needs force too, so it is not available here either. '
+    + 'Ask them to open the Worktree Space management page and finish this task space there. '
+    + 'Merging, and removing a branch once it has landed, are both still available here.',
+  )
 }
 
 /**
@@ -186,6 +224,10 @@ function summarize(action, value) {
   if (action === 'create') {
     const names = value.repositories.map((row) => row.name).join(', ')
     return `Task '${value.task}' is ready at ${value.container} on branch '${value.branch}', with worktrees of: ${names}.${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
+  }
+  if (action === 'add') {
+    const names = value.repositories.map((row) => row.name).join(', ')
+    return `Added to task '${value.task}' at ${value.container} on branch '${value.branch}': ${names}.${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
   }
   if (action === 'list') {
     if (value.repositories.length === 0 && value.container === '') return `No task space at ${value.tasksRoot}.`
@@ -283,22 +325,22 @@ export function registerTaskTool(ctx, options = {}) {
       action: {
         type: 'string',
         required: true,
-        enum: ['suggest-root', 'create', 'list', 'done'],
-        description: 'suggest-root, create, list, or done.',
+        enum: ['suggest-root', 'create', 'add', 'list', 'done'],
+        description: 'suggest-root, create, add, list, or done.',
       },
-      task: { type: 'string', description: 'Name (create, done): the task space directory and branch suffix, with no separators or spaces.' },
-      project: { type: 'string', description: 'Project layer (list, done): the source root\'s own directory name. Omit when sourceRoot is given, since it is derived from it.' },
+      task: { type: 'string', description: 'Name (create, add, done): the task space directory and branch suffix, with no separators or spaces.' },
+      project: { type: 'string', description: 'Project layer (add, list, done): the source root\'s own directory name. Omit when sourceRoot is given, since it is derived from it.' },
       sourceRoot: { type: 'string', description: 'Directory of the repositories. Required for suggest-root and create.' },
       tasksRoot: { type: 'string', description: 'Container for task spaces: beside the repositories\' directory, never inside it or a parent of it. Omit for the recommendation.' },
-      repos: { type: 'array', items: { type: 'string' }, description: 'Repository names (create). Omit for all discovered.' },
-      baseRef: { type: 'string', description: 'Start point (create). Omit for each repository HEAD.' },
+      repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths, as reported by suggest-root (create, add). Omit for every discovered (create). A bare name is read as relative to sourceRoot, which only names a repository sitting directly in it.' },
+      baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
       target: { type: 'string', description: 'Branch to merge into (done), for every repository. Omit for the branch each source repository has checked out.' },
-      deleteBranch: { type: 'boolean', description: 'Delete each branch (done). Needs merge, or force to delete a branch that was never merged and abandon its commits.' },
-      cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Off by default.' },
+      deleteBranch: { type: 'boolean', description: 'Delete each branch (done), after a merge. Needs merge; deleting a branch that never landed is refused here.' },
+      cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Never reaches the user\'s own documents here.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },
-      force: { type: 'boolean', description: 'Discard uncommitted changes, force-delete branches (done). Only on the user decision.' },
+      force: { type: 'boolean', description: 'Discard uncommitted changes (done). Refused here, always - the user decides that themselves, on the management page.' },
     },
     output: {
       schema: OUTPUT_SCHEMA,
@@ -349,7 +391,6 @@ export function registerTaskTool(ctx, options = {}) {
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           configuredRoot: configuredRoot(),
-          push: false,
         })
         const value = envelope(action)
         value.task = result.task
@@ -357,7 +398,34 @@ export function registerTaskTool(ctx, options = {}) {
         value.branch = result.branch
         value.container = result.path
         value.tasksRoot = result.tasksRoot
-        value.warnings = result.warnings
+        // `warnings` is left as the envelope's empty array: a create has none to
+        // report now that it no longer pushes, and the field is shared by all
+        // four actions' schemas rather than being this action's own.
+        value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
+        value.summary = summarize(action, value)
+        return value
+      }
+
+      if (action === 'add') {
+        const task = required(args.task, 'task')
+        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
+        const project = projectFor(args.project, args.sourceRoot)
+        const result = await addTaskRepositories(ctx.subprocess, {
+          task,
+          project,
+          tasksRoot,
+          // Absolute paths, not names: a repository added to an existing task need
+          // not sit under the source root that task began from, so there is no
+          // directory to resolve a name against.
+          repositories: Array.isArray(args.repos) ? args.repos : [],
+          baseRef: typeof args.baseRef === 'string' && args.baseRef.trim() !== '' ? args.baseRef.trim() : undefined,
+        })
+        const value = envelope(action)
+        value.task = result.task
+        value.project = result.project
+        value.branch = result.branch
+        value.container = result.path
+        value.tasksRoot = result.tasksRoot
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
         value.summary = summarize(action, value)
         return value
@@ -391,6 +459,7 @@ export function registerTaskTool(ctx, options = {}) {
 
       if (action === 'done') {
         const task = required(args.task, 'task')
+        refuseIrreversible(args)
         const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
         const project = projectFor(args.project, args.sourceRoot)
         const result = await finishTask(ctx.subprocess, {
@@ -428,7 +497,7 @@ export function registerTaskTool(ctx, options = {}) {
         return value
       }
 
-      throw new Error(`unknown action: ${action}`)
+      throw coded('E7005', `unknown action: ${action}`)
     },
     // Both presenters are pure: the same arguments and the same result give the
     // same view on the live path and on a session-log replay. Neither reads a

@@ -67,7 +67,7 @@
         "node": "v24.18.0",
         "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
         "compose": { "result": "passed", "exit": 0, "lines": 1262, "worktreeSpaceMentions": 3, "nameMentions": 1 },
-        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35367, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "3c02e8695ba5", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35367, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 233359, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "86aaab027255", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
         "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
         "rollback": { "result": "passed", "exit": 0, "lines": 1259, "worktreeSpaceMentions": 0 }
       },
@@ -76,7 +76,7 @@
         "node": "v24.18.0",
         "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
         "compose": { "result": "passed", "exit": 0, "lines": 1262, "worktreeSpaceMentions": 3, "nameMentions": 1 },
-        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35333, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "b4c4e30ed039", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 35333, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 233359, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "4c7530a47842", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
         "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
         "rollback": { "result": "passed", "exit": 0, "lines": 1259, "worktreeSpaceMentions": 0 }
       },
@@ -85,7 +85,7 @@
         "node": "v24.18.0",
         "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
         "compose": { "result": "passed", "exit": 0, "lines": 1249, "worktreeSpaceMentions": 3, "nameMentions": 1 },
-        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 34825, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "a891e0ed576d", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 34825, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 233359, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "bebf947663e5", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
         "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
         "rollback": { "result": "passed", "exit": 0, "lines": 1246, "worktreeSpaceMentions": 0 }
       },
@@ -94,7 +94,7 @@
         "node": "v24.18.0",
         "install": { "result": "passed", "exit": 0, "incompatibleWarning": false, "installedVersion": "1.1.0" },
         "compose": { "result": "passed", "exit": 0, "lines": 1237, "worktreeSpaceMentions": 3, "nameMentions": 1 },
-        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 33544, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 213710, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "37a15226d7a9", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
+        "visible": { "result": "passed", "pageStatus": 200, "pageBytes": 33544, "pageMentions": 5, "bundleStatus": 200, "bundleBytes": 233359, "bundleType": "text/javascript; charset=utf-8", "bundleRev": "acd5af9bb3b8", "rpcOk": "HTTP 200 {\"ok\":true}", "rpcInventedEndpoint": "HTTP 404" },
         "uninstall": { "result": "passed", "exit": 0, "nodeModulesGone": true, "patchMentions": 0 },
         "rollback": { "result": "passed", "exit": 0, "lines": 1234, "worktreeSpaceMentions": 0 }
       }

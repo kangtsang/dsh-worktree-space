@@ -17,11 +17,19 @@ import { basename, resolve } from 'node:path'
 /** Branch prefix a task uses in every repository by default. */
 export const DEFAULT_BRANCH_PREFIX = 'task/'
 
-/** Raised when a task name or a branch prefix cannot become a directory and a branch. */
+/**
+ * Raised when a task name or a branch prefix cannot become a directory and a branch.
+ *
+ * One code for the class: every case here is the same thing from a caller's point
+ * of view - a name that cannot be used, fix the name - and the message says which
+ * character is at fault. Splitting it further would make codes for distinctions no
+ * caller acts on.
+ */
 export class TaskNameError extends Error {
   constructor(message) {
     super(message)
     this.name = 'TaskNameError'
+    this.code = 'E4009'
   }
 }
 
@@ -51,6 +59,12 @@ const ILLEGAL_BRANCH_CHARACTERS = /[\s~^:?*\[\]\\\u0000-\u001f\u007f]/
 export function validateTaskName(task) {
   const name = String(task ?? '')
   if (name === '') throw new TaskNameError('a task name is required')
+  // The two relative names, which {@link validateProjectName} already refuses and
+  // which FORBIDDEN cannot catch because they carry neither a separator nor a
+  // space. `taskSpacePath` joins this straight into `<root>/<project>/<task>`, so
+  // a task named `..` resolves back to the container root and one named `.` to the
+  // project layer - and finishing a task deletes what it finds under that path.
+  if (name === '.' || name === '..') throw new TaskNameError(`task name must not be '.' or '..': ${name}`)
   if (FORBIDDEN.test(name)) {
     throw new TaskNameError(`task name must not contain /, \\ or whitespace: ${name}`)
   }

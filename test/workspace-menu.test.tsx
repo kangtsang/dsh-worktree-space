@@ -3,7 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMenuEntries } from "../src/client/components/WorkspaceMenuEntries"
 import { t } from "../src/client/lib/i18n"
-import { OWN_MENU_ITEM, workspaceIdFromRowKey } from "../src/client/lib/workspaceMenu"
+import { OWN_MENU_ITEM, workspaceIdFromRowKey } from "../src/client/lib/workspace-menu"
 
 const repositoryPath = "E:\\workspace\\public\\kratos-admin"
 const taskPath = "E:\\worktree-space\\antest"
@@ -51,6 +51,13 @@ function rowMenu() {
 function openMenu(workspaceId = "w1") {
   const { trigger } = workspaceRow(workspaceId)
   trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }))
+  return rowMenu()
+}
+
+/** Opens a row's own menu from the keyboard, which is what a button does for Enter. */
+function openMenuWithKeyboard(workspaceId: string, key = "Enter") {
+  const { trigger } = workspaceRow(workspaceId)
+  trigger.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
   return rowMenu()
 }
 
@@ -170,6 +177,26 @@ describe("this plugin's entries in the workspace menu", () => {
     rowMenu()
     await until(() => false, { attempts: 20 })
     expect(ownItems()).toHaveLength(0)
+  })
+
+  it("puts its entries in the row the keyboard opened, not the one the mouse last used", async () => {
+    // Which row a menu belongs to was recorded on `pointerdown` alone, so a keyboard
+    // user activating a row's trigger never recorded anything and inherited whichever
+    // row the mouse had been used on - as long as it was within the window. Choosing
+    // "start a task space" then offered one for a Workspace the user never pointed at.
+    const second = { workspaceId: "w2", path: "E:\\workspace\\other", title: "other" }
+    const next = setup({ items: [workspace, second] })
+    // The mouse was last used on the first row...
+    workspaceRow("w1").trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }))
+    // ...and the menu about to appear belongs to the second one.
+    const menu = openMenuWithKeyboard("w2", " ")
+
+    await until(() => ownItem(t("workspaceCreate")) !== null)
+    // The entry acts on the Workspace whose row opened the menu, which is the only
+    // thing here that says which row that was.
+    ownItem(t("workspaceCreate"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    expect(next.onCreate).toHaveBeenCalledExactlyOnceWith({ path: second.path, title: second.title })
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
   })
 
   it("takes its entries back when the plugin goes away", async () => {

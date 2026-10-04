@@ -6,7 +6,7 @@ function worktree(path: string, branch: string | undefined, extra: Partial<Workt
   return { path, branch, isMain: false, detached: false, locked: false, prunable: false, ...extra }
 }
 function repository(repoPath: string, rows: Worktree[]): WorktreeList {
-  return { repoPath, commonDir: `${repoPath}/.git`, worktrees: [worktree(repoPath, "main", { isMain: true }), ...rows] }
+  return { repoPath, worktrees: [worktree(repoPath, "main", { isMain: true }), ...rows] }
 }
 const root = "E:\\worktree-space"
 // A task space is `<container root>/<project>/<task>`, and the project is the

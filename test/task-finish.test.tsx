@@ -3,9 +3,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
-import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finishScene"
+import { clearFinishScenes, readFinishScene, saveFinishScene, type FinishSceneSession } from "../src/client/lib/finish-scene"
 import { format, t } from "../src/client/lib/i18n"
 import type { FinishTaskResult, Worktree, WorktreeList } from "../src/client/lib/types"
+import { scanAnswer } from "./scan-answer.helper"
 
 const root = "E:\\worktree-space"
 // A task space is `<container root>/<project>/<task>`, the project being the source
@@ -21,7 +22,6 @@ function repository(name: string, rows: Worktree[]): WorktreeList {
   const repoPath = `E:\\workspace\\public\\kratos-admin\\${name}`
   return {
     repoPath,
-    commonDir: `${repoPath}\\.git`,
     currentBranch: "main",
     worktrees: [{ ...worktree(repoPath, "main"), isMain: true }, ...rows],
   }
@@ -56,8 +56,11 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
 function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
-    scan: vi.fn().mockResolvedValue(repos),
+    scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
     cachedScan: vi.fn().mockResolvedValue(null),
+    // These cases are about finishing, not about what each Workspace holds, so the
+    // page's classification is left unanswered rather than given a guess.
+    classifyRoots: vi.fn(() => new Promise(() => {})),
     // What the Host has configured: the archive reads the shipped strategy unless a test
     // asks for another one, its directory is empty unless a test sets one, and the agent
     // entries are offered unless a test hides them, which is what a case about the
@@ -739,7 +742,6 @@ describe("finishing a task", () => {
         ...scanned(),
         {
           repoPath: repo,
-          commonDir: `${repo}\\.git`,
           currentBranch: "main",
           worktrees: [{ ...worktree(repo, "main"), isMain: true }, worktree(site, "task/demo")],
         },
@@ -871,6 +873,41 @@ describe("finishing a task", () => {
     expect(screen.getByText(t("taskDirectoryLabel")).parentElement?.textContent).toContain(container.replace(/\\/g, "/"))
     expect([...document.querySelectorAll(".dws-plan-target")].map((select) => (select as HTMLSelectElement).value)).toEqual(["main", "develop"])
     expect(document.querySelector(".dws-remove-target")).toBeNull()
+  })
+
+  it("leaves a count out rather than printing one the Host never counted", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    // The Host omits `commits` for a repository git would not answer about, rather
+    // than reporting a zero it did not count: the two are different facts, and only
+    // the first is a zero. Read unguarded, the row printed "undefined commits" right
+    // beside the error line that explains why the number is missing.
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task,
+      tasksRoot,
+      path: `${tasksRoot}\\${task}`,
+      changedFiles: 1,
+      // The total is still a number, which is why the headline keeps its own.
+      commits: 1,
+      strays: [],
+      repositories: [
+        { name: "alpha", path: `${tasksRoot}\\${task}\\alpha`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 1 },
+        { name: "beta", path: `${tasksRoot}\\${task}\\beta`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], changedFiles: 0, error: "fatal: unable to read object" },
+      ],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    const rows = () => [...document.querySelectorAll(".dws-finish-repos li")].map((row) => row.textContent ?? "")
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    // The row that could be counted says so; the row that could not says why, and
+    // nothing else — no `String(undefined)` anywhere on the dialog.
+    expect(rows()[0]).toContain(format(t("planCommits"), { count: "1" }))
+    expect(rows()[1]).not.toContain(t("planCommits"))
+    expect(rows()[1]).toContain("fatal: unable to read object")
+    expect(document.body.textContent).not.toContain("undefined")
+    // The headline keeps its own total, which the Host always reports.
+    expect(document.querySelector(".dws-dialog-status")?.textContent).toContain(format(t("planCommits"), { count: "1" }))
   })
 
   it("points one repository at another branch, previews it, and merges there", async () => {
@@ -1111,6 +1148,35 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).not.toHaveBeenCalled()
   })
 
+  it("names the source repository under each worktree, and nothing when it cannot say", async () => {
+    const user = userEvent.setup()
+    const next = setup()
+    next.api.planTask.mockImplementation(async ({ task, tasksRoot }: { task: string; tasksRoot: string }) => ({
+      task, tasksRoot, path: `${tasksRoot}\\${task}`, changedFiles: 0, commits: 2, strays: [],
+      repositories: [
+        // Two repositories added at different moments: one from the source root the
+        // task began from, one from somewhere with no directory in common with it.
+        // Both say which repository the merge runs in; that is the whole point.
+        { name: "alpha", path: `${tasksRoot}\\${task}\\alpha`, mainRepo: "E:\\wt-demo\\repos\\alpha", branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 0 },
+        { name: "gamma", path: `${tasksRoot}\\${task}\\gamma`, mainRepo: "E:\\wt-demo\\repos\\gamma", branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 0 },
+        // The Host could not resolve this one. An empty line would read as "there is
+        // no source repository", which is not what that means.
+        { name: "delta", path: `${tasksRoot}\\${task}\\delta`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 0, changedFiles: 0 },
+      ],
+    }))
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await waitFor(() => expect(document.querySelector(".dws-finish-repos.dws-plan")).toBeTruthy())
+
+    const rows = document.querySelectorAll(".dws-finish-repos.dws-plan li")
+    expect(rows).toHaveLength(3)
+    expect(rows[0].querySelector(".dws-plan-source code")?.textContent).toBe("E:/wt-demo/repos/alpha")
+    expect(rows[1].querySelector(".dws-plan-source code")?.textContent).toBe("E:/wt-demo/repos/gamma")
+    expect(rows[0].querySelector(".dws-plan-source")?.textContent).toContain(t("planSourceRepository"))
+    expect(rows[2].querySelector(".dws-plan-source")).toBeNull()
+    expect(document.querySelectorAll(".dws-plan-source code")).toHaveLength(2)
+  })
+
   it("turns red when abandoning a branch that still has commits", async () => {
     const user = userEvent.setup()
     const next = setup()
@@ -1205,6 +1271,33 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledWith("ws-antest"))
     expect(screen.getByText(t("archiveWorkspaceRemoved"))).toBeTruthy()
+  })
+
+  it("finds the registration when the two sides spell the path differently", async () => {
+    // The Host answers with the platform's separators; a workspace list can carry
+    // the other style. Comparing the raw strings missed the registration, so nothing
+    // was unregistered and the finished task space stayed registered at a directory
+    // that no longer existed - which every later scan then reported as ENOENT.
+    const spellings = [
+      ["forward slashes", container.replace(/\\/g, "/")],
+      ["a trailing separator", `${container}\\`],
+      ["a different drive-letter case", container.replace(/^([a-z]):/, (m) => m.toUpperCase())],
+    ] as const
+    for (const [label, registeredPath] of spellings) {
+      const user = userEvent.setup()
+      const next = setup({
+        items: [{ workspaceId: "ws-antest", path: registeredPath, title: "worktree-space/antest" }],
+        result: finishResult({ containerRemoved: true }),
+      })
+      await ready()
+      await user.click(screen.getByRole("button", { name: t("finishTask") }))
+      await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
+
+      await waitFor(() => {
+        expect(next.workspaces.delete, `not unregistered for ${label}`).toHaveBeenCalledWith("ws-antest")
+      })
+      cleanup()
+    }
   })
 
   it("surfaces a failed finish without closing the dialog or losing the choice", async () => {

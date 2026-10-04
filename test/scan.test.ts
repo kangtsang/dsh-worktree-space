@@ -5,7 +5,6 @@ import type { WorktreeList } from "../src/client/lib/types"
 function repository(path: string, linked = false): WorktreeList {
   return {
     repoPath: path,
-    commonDir: `${path}/.git`,
     worktrees: [
       { path, branch: "main", isMain: true, detached: false, locked: false, prunable: false },
       ...(linked ? [{ path: `${path}.worktrees/task`, branch: "task", isMain: false, detached: false, locked: false, prunable: false }] : []),

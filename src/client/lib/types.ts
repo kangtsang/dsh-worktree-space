@@ -35,26 +35,78 @@ export interface WorktreeStatus {
   output: string
 }
 
+/**
+ * One repository's worktrees, as the Host read them.
+ *
+ * `currentBranch` is filled in on the client from the main worktree's row rather
+ * than asked for over git: the scan used to send `defaultBranch` and `defaultRef`,
+ * read by nothing anywhere, and `commonDir` before them, also read by nothing. All
+ * three cost a `git` process per repository, which on Windows is ~95% process
+ * creation - the scan of a ninety-four repository Workspace went from about 3.9s
+ * to about 0.9s by dropping them. If a future feature needs one, it belongs on the
+ * endpoint that needs it, not back on the path every refresh walks.
+ */
 export interface WorktreeList {
   repoPath: string
-  commonDir: string
-  defaultBranch?: string
-  defaultRef?: string
   currentBranch?: string
   worktrees: Worktree[]
 }
 
 /**
- * Answer of `worktree.cached`: what the Host still remembers of a scan.
+ * Answer of `worktree.scan`: what was found, and whether that is all of it.
+ *
+ * A scan that found some of the repositories under a Workspace returns those and
+ * `complete: false` with a `reason`. It used to throw instead, which discarded
+ * every repository it had already read and left the panel showing whatever was
+ * remembered - so one repository refusing to answer turned ninety good rows into
+ * an error page.
+ */
+export interface ScanAnswer {
+  lists: WorktreeList[]
+  /** Whether `lists` is everything the scan was going to look at. */
+  complete: boolean
+  /** Why not, in one sentence. Empty when `complete`. */
+  reason: string
+  /**
+   * The bounds this scan really used, as the Host resolved them.
+   *
+   * Reported rather than guessed at on the client: the panel names the depth while
+   * the scan runs, and the Host is the only side that knows it - the config may
+   * have moved on, `resolveScanDepth` may have clamped what the caller sent, and a
+   * payload may have carried a depth of its own. A name assembled from the client's
+   * own copy of the setting is one that can disagree with the walk it is
+   * describing, which is the one thing a scanning message must not do.
+   */
+  bounds: { depth: number; directories: number }
+}
+
+/**
+ * Answer of `worktree.cached`: what the Host still remembers of a scan, and what
+ * a scan would run at right now.
  *
  * It is the previous scan's own answer, held in the Host's memory since that scan
  * and dropped when the DSH instance exits — never written down, and never the last
  * word, because the panel scans again as soon as it has painted this.
+ *
+ * Answered whether or not anything is remembered. A Host that remembers nothing
+ * about these paths has empty `repositories`, which is a different statement from
+ * "this Host cannot tell you the current bounds" — and the panel needs the bounds
+ * before its very first scan resolves, so a miss must not take them away.
  */
 export interface RememberedScan {
   repositories: WorktreeList[]
   /** The statuses the Host happens to hold, by worktree path; others are missing. */
   statuses: Record<string, WorktreeStatus>
+  /**
+   * The bounds a scan started *now* would use, read from the Host's configuration.
+   *
+   * Not the remembered scan's own bounds, and not derived from them: a panel that
+   * named a depth from a previous run would be showing the scan that just
+   * happened, not the one on screen. Read on the Host so the client cannot be the
+   * one deciding, and carried here so the panel learns it from a call it already
+   * makes rather than from a new round trip.
+   */
+  current: { depth: number; directories: number }
 }
 
 /** One repository a task would span. */
@@ -74,6 +126,13 @@ export interface SourceRepository {
  */
 export interface SourceRootClassification {
   path: string
+  /**
+   * Whether the path is a directory that exists.
+   *
+   * `isSourceRoot` cannot be used for this: a directory holding no repositories
+   * and a path that is not there both answer false.
+   */
+  isDirectory: boolean
   /** Whether the path itself is a repository (a linked worktree is not). */
   isRepository: boolean
   /** Whether a task can be started here. */
@@ -103,7 +162,31 @@ export interface CreateTaskResult {
   tasksRoot: string
   baseRef?: string
   repositories: Array<{ name: string; path: string }>
-  warnings: string[]
+}
+
+/**
+ * Answer of `task.add-repositories`: the repositories one call added to a task
+ * that already existed.
+ *
+ * The repositories the task already had are not listed — nothing was taken away,
+ * and the caller can re-read the task for those — so this is only ever the new
+ * worktrees and where their source repositories live.
+ */
+export interface AddRepositoriesResult {
+  task: string
+  project: string
+  branch: string
+  path: string
+  tasksRoot: string
+  /** The commit the new worktrees started from; absent when each used its own HEAD. */
+  baseRef?: string
+  repositories: Array<{
+    name: string
+    /** The worktree inside the task space. */
+    path: string
+    /** The source repository it was cut from, wherever that is. */
+    sourcePath: string
+  }>
 }
 
 /** Per-repository outcome of `task.done`. */
@@ -148,6 +231,13 @@ export interface TaskInspection {
   tasksRoot: string
   branch?: string
   sourceRoot?: string
+  /**
+   * The commit every repository of this task started from, when the task named
+   * one rather than starting each repository at its own HEAD. Absent is a fact
+   * about the task, not an omission: it is how the caller tells "each at its own
+   * HEAD" from "a base this Host cannot name".
+   */
+  baseRef?: string
   repositories: string[]
 }
 
@@ -174,8 +264,15 @@ export interface TaskPlanRepository {
    * mean moving a checkout someone else is using.
    */
   branches: string[]
-  /** Commits that merge would bring. */
-  commits: number
+  /**
+   * Commits that merge would bring, or nothing when git would not say.
+   *
+   * The Host omits the field rather than reporting a zero it did not count: a caller
+   * has to be able to tell "there is nothing to merge" from "this could not be
+   * counted", and only the first is a zero. The row's own `error` is what says which
+   * happened, so a missing count is shown by leaving it out.
+   */
+  commits?: number
   changedFiles: number
   error?: string
 }
@@ -241,6 +338,14 @@ export interface TaskPreference {
   archiveDocumentsDirectory: string
   /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
   handoffEntry: string
+  /**
+   * `on` when the audit log is being written, `off` when it is not.
+   *
+   * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}:
+   * a Host that predates the setting answers without it, and absent reads as `on`,
+   * which is what such a Host does.
+   */
+  auditLog?: string
 }
 
 /** The sessions service face (`ctx.sessions`). */

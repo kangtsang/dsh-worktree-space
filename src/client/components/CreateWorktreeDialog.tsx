@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, GitPullRequest, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { nameOf, slashPath, slugOf, taskDirectory } from "../lib/paths"
+import { errorText } from "../lib/error-text"
+import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
@@ -122,9 +123,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       // not a guess.
       setBranchPrefix(configuredPrefixRef.current || next.branchPrefix || FALLBACK_BRANCH_PREFIX)
       // Every discovered repository is in the task until the user narrows it.
-      setSelected(next.repositories.map((repository) => repository.name))
+      setSelected(next.repositories.map((repository) => repository.path))
     }).catch((reason) => {
-      if (alive) setError(String(reason?.message ?? reason))
+      if (alive) setError(errorText(t, reason))
     }).finally(() => {
       if (alive) setLoading(false)
     })
@@ -140,20 +141,29 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const prefixProblem = branchPrefixProblem(typedPrefix)
   // The checkbox promises a new default for the *next* task space, so it is offered
   // only for a prefix that could actually become one: an unset one has nothing to
-  // save, and an unusable one would be refused by the Host. The field is prefilled
-  // with the current default, so the box starts clear rather than already ticked.
-  const canSaveDefault = typedPrefix !== "" && prefixProblem === "" && typedPrefix !== configuredPrefix
+  // save, an unusable one would be refused by the Host, and there is nothing to save
+  // it into when the shell serves no configuration form at all — which the entry that
+  // mounts this dialog promises. The field is prefilled with the current default, so
+  // the box starts clear rather than already ticked.
+  const hasForm = config !== undefined
+  const canSaveDefault = hasForm && typedPrefix !== "" && prefixProblem === "" && typedPrefix !== configuredPrefix
   // The suggestion carries the container root the configuration names, when it names
   // one, so this is one comparison rather than a second read of the settings: a field
-  // left where the dialog put it is already the default, and one that was moved is a
-  // location the user may want next time too.
+  // left where the dialog put it is already the default, one that was moved is a
+  // location the user may want next time too, and neither is anything without a form
+  // to write it through.
   const typedRoot = tasksRoot.trim()
   const defaultRoot = suggestion === null ? "" : slashPath(suggestion.suggested)
-  const canSaveDefaultRoot = typedRoot !== "" && defaultRoot !== "" && typedRoot !== defaultRoot
+  const canSaveDefaultRoot = hasForm && typedRoot !== "" && defaultRoot !== "" && typedRoot !== defaultRoot
   // The host refuses separators and whitespace; this form additionally keeps the
   // name a valid Git ref, so the branch cannot fail later.
-  const normalizedName = taskName.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "")
-  const taskSlug = normalizedName ? slugOf(taskName) : ""
+  //
+  // One rule decides both what is submitted and whether there is anything to submit:
+  // the same normalization `slugOf` uses, without its placeholder. Spelling it a
+  // second time is how a name comes to be shown as valid here and sent as another
+  // one there — the emptiness check was reading a copy that could drift away from
+  // the validation.
+  const taskSlug = normalizedSlugOf(taskName)
   const validSlug = /^[a-z0-9_][a-z0-9._-]*$/.test(taskSlug)
     && !taskSlug.includes("..") && !taskSlug.endsWith(".") && !taskSlug.endsWith(".lock")
   const taskBranch = validSlug && prefixProblem === "" ? `${effectivePrefix}${taskSlug}` : ""
@@ -180,6 +190,48 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const endBusy = () => { busyRef.current = false; setBusy(false) }
   const dismiss = () => { if (!busyRef.current) onClose() }
 
+  /**
+   * Undo a create that got as far as making the task space.
+   *
+   * Registration is the last step that can fail, and by then the worktrees and the
+   * branch exist. They go back the way they came: the Workspace row first, because
+   * it points at the directory, then the directory and the branch together, so the
+   * next attempt at this name meets neither.
+   *
+   * `force` is what makes the branch deletable. It was cut seconds ago and carries
+   * no commits of its own, and this is the Host's own request to abandon it - not a
+   * user discarding work. A branch that refuses to go leaves the error to report
+   * rather than being forced past a check that exists for finished tasks.
+   */
+  const rollbackCreated = async (
+    made: { path: string; task: string; project: string },
+    workspace: Workspace | undefined,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const problems: string[] = []
+    if (workspace?.workspaceId) {
+      try { await workspaces.delete(workspace.workspaceId) }
+      catch (reason: any) { problems.push(errorText(t, reason)) }
+    }
+    try {
+      await api.doneTask({
+        task: made.task,
+        project: made.project,
+        tasksRoot: tasksRoot.trim(),
+        deleteBranch: true,
+        force: true,
+        // Without this the Host records a task space and a branch being deleted
+        // and can say nothing about why. It is the one thing that distinguishes
+        // this removal from a user finishing a task, and the audit log is where
+        // the next person looks when a create has left the disk in a state they
+        // did not expect.
+        cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+      })
+    } catch (reason: any) {
+      problems.push(errorText(t, reason))
+    }
+    return problems.length === 0 ? { ok: true } : { ok: false, error: problems.join("; ") }
+  }
+
   const registerAndOpen = async (createdPath: string, slug: string) => {
     const workspace = await workspaces.create({ path: createdPath })
     try {
@@ -198,22 +250,29 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     if (!recovery || busyRef.current) return
     startBusy()
     try { await registerAndOpen(recovery.path, recovery.task); setRecovery(null) }
-    catch (reason: any) { setError(`${t("registerFailed")} ${String(reason?.message ?? reason)}`) }
+    catch (reason: any) { setError(`${t("registerFailed")} ${errorText(t, reason)}`) }
     finally { endBusy() }
   }
 
-  const cleanupCreated = async () => {
-    if (!recovery || busyRef.current) return
-    startBusy()
-    try {
-      // The task is freshly created, so finishing it removes its worktrees and
-      // the container while keeping the branches.
-      await api.doneTask({ task: recovery.task, project: recovery.project, tasksRoot: recovery.tasksRoot })
-      setRecovery(null)
-      onClose()
-    } catch (reason: any) {
-      setError(format(t("cleanupFailed"), { error: String(reason?.message ?? reason), path: recovery.path }))
-    } finally { endBusy() }
+  /**
+   * Write one preference, answering a refusal and a failure the same way.
+   *
+   * The configuration form reports the Host's verdict two ways: `false` when the
+   * Host turned the write down, and a rejection when there was never a verdict at
+   * all - a connection dropped mid round trip rejects every write still queued on it.
+   * Only the first is a refusal, but neither is a reason to undo the task space that
+   * has just been created, and the second is the one that used to: it escaped into
+   * the catch around the whole create, which cannot tell a preference write that
+   * failed from a registration that did and would take the worktrees and the branch
+   * down with it. So it is caught here, where the only thing left to do is report the
+   * setting as unsaved - which is exactly what the refusal does.
+   * @param field - the configuration field to write.
+   * @param value - the value to put in it.
+   * @returns whether the Host now has it.
+   */
+  const writePreference = async (field: string, value: string) => {
+    try { return (await config?.set(field, value)) === true }
+    catch { return false }
   }
 
   const create = async () => {
@@ -250,9 +309,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       created = { path: result.path, task: result.task, project: result.project }
       // Ticking the box is a promise about the *next* task space, so the new default
       // is written only once this one exists - and a form that refuses it cannot
-      // undo the task that was just created.
+      // undo the task that was just created. Nor can one that fails to answer: both
+      // arrive here as `false`, having stopped at `writePreference`.
       if (saveAsDefault && canSaveDefault) {
-        const accepted = await config?.set("defaultBranchPrefix", typedPrefix)
+        const accepted = await writePreference("defaultBranchPrefix", typedPrefix)
         setSaveAsDefault(false)
         if (!accepted) setError(t("branchPrefixNotSaved"))
       }
@@ -262,12 +322,12 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       // with a strategy that would read it, and a directory it accepted while the
       // strategy write failed stays inert under the default.
       if (saveRootAsDefault && canSaveDefaultRoot) {
-        const savedDirectory = await config?.set("tasksRootDirectory", typedRoot)
-        const savedStrategy = savedDirectory === true
-          ? await config?.set("tasksRootStrategy", "custom")
+        const savedDirectory = await writePreference("tasksRootDirectory", typedRoot)
+        const savedStrategy = savedDirectory
+          ? await writePreference("tasksRootStrategy", "custom")
           : false
         setSaveRootAsDefault(false)
-        if (savedStrategy !== true) setError(t("tasksRootNotSaved"))
+        if (!savedStrategy) setError(t("tasksRootNotSaved"))
       }
       phase = "register"
       workspace = await workspaces.create({ path: result.path })
@@ -278,42 +338,65 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       onCreated(result.path)
       onClose()
     } catch (reason: any) {
-      const detail = String(reason?.message ?? reason)
+      const detail = errorText(t, reason)
       if (phase === "open") {
         // The task and its registration are fine; only showing the Session failed.
         if (created) onCreated(created.path)
         setError(`${t("openFailed")}${detail}`)
         return
       }
-      if (workspace?.workspaceId) {
-        try {
-          await workspaces.delete(workspace.workspaceId)
-        } catch (cleanupError: any) {
-          if (created) setRecovery({ ...created, tasksRoot: tasksRoot.trim(), branch: taskBranch })
-          setError(format(t("cleanupFailed"), { error: String(cleanupError?.message ?? cleanupError), path: created?.path ?? "" }))
-          return
-        }
+      // The container on disk is this task's own, left by an earlier version that
+      // could not register its Workspace. It is not a name clash the user should
+      // have to clear by hand, so it is reported with a way to clear it here.
+      if (reason?.code === "task-space-unregistered" && !created) {
+        setRecovery({
+          // taskPath is the preview path, built the way task.create builds it.
+          path: taskPath,
+          task: taskSlug,
+          project,
+          tasksRoot: tasksRoot.trim(),
+          branch: taskBranch,
+        })
+        setError(format(t("resumeUnregistered"), { path: taskPath }))
+        return
       }
+      // A create is one thing: the task space, its worktrees and its branch, or
+      // none of them. Once the containers exist but the registration failed, they
+      // are undone here rather than handed back, because a task space that was
+      // never registered is not half a task - and the branch outliving its
+      // directory is what would make the next attempt at this name fail.
       if (created) {
-        setRecovery({ ...created, tasksRoot: tasksRoot.trim(), branch: taskBranch })
-        setError(`${t("registerFailed")} ${detail}`)
-      } else {
-        setError(`${t("operationError")}${detail}`)
+        const undone = await rollbackCreated(created, workspace)
+        if (undone.ok) {
+          setError(format(t("createRolledBack"), { error: detail }))
+        } else {
+          setError(format(t("rollbackIncomplete"), {
+            error: detail,
+            undo: undone.error,
+            path: created.path,
+            branch: taskBranch || created.task,
+          }))
+        }
+        return
       }
+      setError(`${t("operationError")}${detail}`)
     } finally {
       endBusy()
     }
   }
 
-  const toggleRepository = (name: string, include: boolean) => {
+  // Selected entries are paths, not names. Discovery walks to maxDepth, so a
+  // repository is not always a direct child of the source root, and a bare name
+  // cannot say which of them it meant - the Host would rebuild the wrong path.
+  const toggleRepository = (path: string, include: boolean) => {
     setSelected((current) => (include
-      ? [...new Set([...current, name])]
-      : current.filter((entry) => entry !== name)))
+      ? [...new Set([...current, path])]
+      : current.filter((entry) => entry !== path)))
   }
   // Every card acts on one list, so the pair of actions below them is a property of the
   // field rather than of any one card: it says what the next click does to all of them.
   const setAllRepositories = (include: boolean) => {
-    setSelected(include ? repositories.map((repository) => repository.name) : [])
+    setSelected(include ? repositories.map((repository) => repository.path) : [])
   }
 
   // The picker leads the form — it is the decision this dialog exists for, and the only
@@ -326,14 +409,17 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     <legend className="dws-field-legend"><span id={`${id}-repositories`} className="dws-field-label">{t("repositoriesLabel")}</span></legend>
     <div className="dws-repo-picker">
       <div className="dws-repo-choices">
-        {repositories.map((repository) => <label key={repository.name} className="dws-check-option" htmlFor={`${id}-repo-${repository.name}`}>
-          <input id={`${id}-repo-${repository.name}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.name)} onChange={(event) => toggleRepository(repository.name, event.target.checked)} />
+        {/* Keyed and identified by position, not by name: with repositories coming from
+            more than one level, two of them can share a basename, and a path is not
+            something to put in an element id. The label still reads the name. */}
+        {repositories.map((repository, index) => <label key={repository.path} className="dws-check-option" htmlFor={`${id}-repo-${index}`}>
+          <input id={`${id}-repo-${index}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.path)} onChange={(event) => toggleRepository(repository.path, event.target.checked)} />
           {/* The same name-then-branch line the repository view renders, so a
               repository reads the same wherever this plugin lists it. */}
           <span className="dws-check-copy">
             <span className="dws-check-name">
               <span className="dws-check-label">{repository.name}</span>
-              {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("branch")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
+              {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
             </span>
             <span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span>
           </span>
@@ -447,7 +533,6 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
 
         <form className="dws-create-form" onSubmit={(event) => { event.preventDefault(); void create() }} aria-busy={busy}>
           <div className="dws-dialog-body">
-            {error ? <div className="dws-error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
             {!loading && sourceReady ? picker : null}
             {loading ? <div className="dws-dialog-loading" role="status">
               <div><Loader2 size={16} className="dws-spin" aria-hidden="true" /> {t("loadingSourceRoot")}</div>
@@ -462,9 +547,15 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             </div>}
           </div>
 
+          {/* Outside the scrolling body, so it cannot scroll away from the button
+              that acts on it. The body is the only part of this dialog that
+              scrolls, and with two repositories selected the form is taller than
+              the dialog - an error inside it was reachable only by scrolling up,
+              and the sticky heading covers the first line when you do. */}
+          {error ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
+
           <footer className="dws-dialog-footer">
             {recovery ? <>
-              <Button type="button" className="dws-button-danger" disabled={busy} onClick={() => void cleanupCreated()}>{t("cleanupTask")}</Button>
               <Button type="button" className="dws-button-primary" disabled={busy} onClick={() => void retryRegister()}>{busy ? <Loader2 size={16} className="dws-spin" aria-hidden="true" /> : null}{t("retryRegister")}</Button>
             </> : <>
               <Button type="button" className="dws-button-ghost" disabled={busy} onClick={dismiss}>{t("cancel")}</Button>

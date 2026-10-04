@@ -2,7 +2,7 @@
 
 本文件供 DSH STORE 自动审查与人工复核使用，如实描述插件在运行时做什么、不做什么，以及失败边界。
 
-声明基线：`dsh-worktree-space@1.1.0`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
+声明基线：`dsh-worktree-space@1.2.0`，对应本仓库默认分支上的固定提交。插件版本、`engines` 与 `dsh` 字段见 `package.json`。
 
 ## 运行时行为
 
@@ -48,6 +48,7 @@
     试合并干净则 `reset --hard` 回到试合并前记录的提交，再由上面那一步在目标分支上记录合并提交。
   - git 自己的登记：`git worktree add/remove` 会写 `<源仓库>/.git/worktrees/<名字>/` 下 git 自己的登记与索引
     （`.git` 标记、`HEAD`、`index` 等）。这是 git 的行为，插件不去编辑源仓库检出里的文件。
+  - 操作日志：向**容器根下的 `worktree-space-log.jsonl`** 追加一行 JSON（`fs.appendFile`），逐条说明见下。
   - 配置项（入口开关、扫描深度、默认分支前缀、Worktree Space 容器根目录、归档位置）由 DSH 自己的插件配置服务
     （Plugins 页面的实时表单）保存，**插件不写任何配置文件**；`task.preference` 端点只读。
 
@@ -60,13 +61,29 @@
   **另开一个会话**、由**宿主里的 agent** 在那个会话中执行 `git add` / `git commit`——那些命令不是本插件
   发出的，也不属于本插件的权限信号。
 
-- **网络**：插件自身**不发任何 HTTP 请求**。唯一的网络行为是用户在创建对话框中显式勾选「推送」时的
-  `git push -u origin <分支>`（默认不勾选、不执行；`task.create` 只在 `push === true` 时才带上它）。
-  其余 `git` 子命令都是本地操作。Git 自己的凭据助手与代理设置不由本插件控制。
+- **网络**：插件自身**不发任何 HTTP 请求**，也**不执行任何 `git push`**。它发出的全部 `git` 子命令都是本地
+  操作（见下方命令表），不写任何远端 ref。Git 自己的凭据助手与代理设置不由本插件控制。
 
 - **凭据/密钥**：插件**不读取、不存储、不转发**任何凭据。不读 `process.env`，不读 `~/.git-credentials`、
-  `~/.ssh`、`.netrc` 或 OS 钥匙串，也不把任何凭据写进日志或响应。`git push` 是否用得上凭据、用哪一个，
-  完全取决于用户自己 Git 的配置。
+  `~/.ssh`、`.netrc` 或 OS 钥匙串，也不把任何凭据写进日志或响应。
+
+- **操作日志**：**容器根下的 `worktree-space-log.jsonl`**，一个只追加、不改写、不删除的 JSONL 文件。
+  插件每发出一条会改动仓库状态的 `git` 命令、每有一条 `git` 命令失败、每遇到一个错误或警告，就追加一行：
+  `ts`（ISO 时间）、`kind`（`git` / `error` / `warning`）、`op`（端点名）、`task`、`project`，以及各自的
+  字段——命令记 `argv`、`cwd`、`exit`、`stderr`（超过 2 KB 截断），错误记 `message`、`stack`、`code` 和
+  它落在哪个仓库、哪个阶段。
+  - **只记路径、命令和 git 自己的报错文字，不记任何文件内容**，也不把文件内容读出来。
+  - `argv` 与报错文字里 URL 的凭据在写入前替换成 `***`（`https://user:token@host/x` 记成
+    `https://***@host/x`）；路径里的 `@` 不受影响。
+  - 成功的**只读** `git` 命令不记（`status`、`rev-parse`、`for-each-ref` 之类）；改变状态的命令和**任何失败**
+    都记，哪怕调用方会吞掉这个失败——比如探测分支是否已存在的那种查询。
+  - **只在容器根已经存在时写，且从不创建目录**：容器根不存在时那次写入失败并被忽略，因此 `worktree.scan`、
+    `worktree.status` 这类不属于任何任务空间的调用什么都不记。
+  - 写日志的任何失败（文件被删、目录只读、磁盘满）都被吞掉，**不影响任何操作的成败**。写入是 `await` 的：
+    调用返回时记录已经落盘，顺序与命令结束的顺序一致。
+  - 超过 10 MB 时先把当前文件改名为 `worktree-space-log.<YYYYMMDD-HHMMSS>.jsonl` 再重开，**旧文件保留**。
+  - **没有读日志的端点，日志不离开这台机器**：不外发、不上传、不进任何响应。
+  - 容器根被删除，日志跟着一起没；它不是备份，也不是审计凭证。
 
 - **外部服务**：无。不需要账号、不需要服务端、不上报遥测。
 
@@ -80,7 +97,6 @@
 | 查询（只读） | `rev-parse --show-toplevel`、`rev-parse --git-common-dir`、`rev-parse --abbrev-ref HEAD`、`rev-parse HEAD`、`rev-parse --verify --quiet <ref>^{commit}`、`rev-parse --verify --quiet MERGE_HEAD`、`symbolic-ref --quiet --short refs/remotes/origin/HEAD`、`for-each-ref --format=%(refname:short) <refs>`、`show-ref --verify --quiet`、`status --short`、`status --porcelain`、`status --short --branch`、`worktree list --porcelain`、`rev-list --count`、`merge-base --is-ancestor`、`diff --name-only HEAD`、`diff --name-only --diff-filter=U` |
 | 工作树 | `worktree add`、`worktree remove [--force]`、`worktree prune` |
 | 分支与合并 | `branch -d`、`branch -D`、`merge --no-ff --no-edit <ref>`、`merge --abort`、`reset --hard <sha>` |
-| 网络（需显式勾选） | `push -u origin <分支>` |
 
 ## 依赖
 
@@ -134,7 +150,9 @@
 - **权限信号**：本插件的功能就是**文件读写**与**命令执行**（调用 `git`），因此**无法**满足 DSH STORE
   「文件 / 网络 / 命令 / 凭据信号均为空」的自动批准条件。本文件的作用是把这些信号如实、完整地声明出来，
   供人工复核与上架详情展示 —— 高权限项目的正确状态是「已声明的高权限」，而不是「看起来没有权限」。
-- **固定提交**：待定 —— 打上 `v1.1.0` 标签后，把该标签指向的提交哈希填在这里（GitHub 上可核对）。
+- **固定提交**：`57bf17b`（`build: bundles for 1.2.0`）—— 这是兼容性矩阵**实测安装**的那个提交，
+  `store-evidence.md` 第 5 节里所有行都出自这一轮。标签 `v1.2.0` **尚未推送**，所以在 GitHub 上
+  还核不到这个哈希；`v1.2.0` 一旦推上去，应当指向同一提交，否则证据指向的就不是发布的那份产物了。
 - **生命周期**：一次性 Profile 的安装、启动与卸载验证步骤及当前证据见 `docs/store-evidence.md`。
 
 ## 对应语言版本

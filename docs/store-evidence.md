@@ -4,7 +4,7 @@
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
 [`PERMISSIONS.md`](../PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
 
-声明基线：`dsh-worktree-space@1.1.0`，对应本仓库默认分支上的固定提交。下面的清单现状、验收方法、
+声明基线：`dsh-worktree-space@1.2.0`，对应本仓库默认分支上的固定提交。下面的清单现状、验收方法、
 验收结果与边界情形都以它为准，不引用其它版本。
 
 ---
@@ -116,7 +116,7 @@ dsh --profile evidence --dump-config
 
 | 字段 | 值 |
 | --- | --- |
-| `version` | `1.1.0` |
+| `version` | `1.2.0` |
 | `engines.node` | `>=22.19.0` |
 | `engines.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
 | `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.1.7-rc.1 <0.3.0-0` |
@@ -152,9 +152,20 @@ dsh --profile evidence --dump-config
 
 ## 5. 生命周期实测矩阵
 
-四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口（`0.1.7-rc.1` → 34800、
-`0.1.7-rc.2` → 34801、`0.2.0-rc.1` → 34802、`0.2.0-rc.2` → 34803，避开宿主默认的 3080）。
-被测产物是 `dsh-worktree-space-1.1.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件。
+四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口。端口按**从新到旧**分配
+（`run-all.ps1` 依版本顺序取号）：`0.2.0-rc.2` → 34800、`0.2.0-rc.1` → 34801、`0.1.7-rc.2` → 34802、
+`0.1.7-rc.1` → 34803，避开宿主默认的 3080。
+被测产物是 `dsh-worktree-space-1.2.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件，
+sha256 `02A8A8F8444C3A34E4C49A55E54BD000E622E19E47EAEEC75BB06BCBBE73B2F6`（431136 字节）。
+本轮测的就是提交 `31281ac`，运行时间 2026-10-04 17:00:47 +08:00，
+判定 `PASS`（4 通过 0 失败），总耗时 26 秒，退出码 0。矩阵报告写在
+`<RunRoot>\logs\matrix-report.md` 与同名 `.json`，报告里带着 `Commit: 31281ac`——
+**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
+
+> **提交 sha 会随历史重整消失，产物哈希不会。**
+> 本节记过的 `5476d81`、`9d491a4` 都因为重整提交历史而不复存在，那不影响它们当时跑出的结论：
+> tarball 是不可变文件，上面那个 `02A8A8F8…` 才是能长期复核的东西，提交 sha 只是当时的指针。
+> **复核某一轮以产物哈希为准，别拿 sha 去 `git show`。**
 
 | DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -164,21 +175,90 @@ dsh --profile evidence --dump-config
 | `0.1.7-rc.1` | `v24.18.0` | 通过 | 通过（1237 行 / 3 处命中） | 通过 | 通过 | 通过（1234 行 / 0 处命中） |
 
 四个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
-`version` 均为 `1.1.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
+`version` 均为 `1.2.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
 
-`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。
+回滚是**逐字节**回到安装前，不是"看起来干净"：每个版本的 `06-dump-after-remove.txt` 与
+`01-create.txt` 行数完全相同（1259/1259、1259/1259、1246/1246、1234/1234），
+`cordis.patch.yml` 提及数为 0，`node_modules` 已删除。
+
+### 宿主在 bundle 末尾追加 76 字节——自动化比对必须先剥掉它
+
+服务端下发的 `client/client.js` **永远不等于**仓库里那份，直接比 sha256 会在完全正常的构建上报「陈旧」。
+差的是宿主自己追加的一行：
+
+```
+;//# sourceMappingURL=…/dsh-worktree-space/client.js.map&rev=<token>
+```
+
+这不是推测，是逐字节量出来的：仓库文件是 HTTP 响应的**完整前缀**——公共前缀等于文件全长，
+**公共后缀 = 0**——多出来的只有结尾那 76 字节，其中 `rev` 逐宿主不同（内容寻址的缓存键），
+这也是四份原始哈希互不相同的原因。只对前缀算哈希，得到的就是仓库 `client\client.js` 的哈希。
+
+本轮仓库那份是 259523 字节 / `611260CD…C8A9`，所以服务端应为 259599。
+**这条已在三个不同产物上各验一次**（仓库那份分别是 259620 / 259843 / 259523 字节）：
+一次吻合是猜测，两次吻合是巧合，三次才是规律。仓库重构、改文案、换排版都会让产物变，
+但那 76 字节的差一直没变——这才是把它写成规则的理由。
+
+**两路数据互证，但来源不同，要分清：**
+
+| 来源 | 数据 | 性质 |
+| --- | --- | --- |
+| 矩阵运行 | 四个 `summary.txt` 各记 `bundle_status: 200`、`bundle_bytes: 259599` | 来自矩阵，但**只有字节数、没有哈希** |
+| 事后补采 | 公共前缀 / 公共后缀 / 前缀哈希逐项实测 | **不是**矩阵运行的数据 |
+
+字节级那几项是矩阵跑完之后**另起同一批宿主、同一份 tarball** 单独起实例抓的，原因是抓取脚本
+用了 `Get-ChildItem -Path '…\log-*' -Filter '04-boot.txt'` 这种写法，在当前 provider 上返回 0 条
+（改成字面路径 `'…\log-*\04-boot.txt'` 才返回 4 条），于是没发现启动 URL；等发现时窗口已经关了——
+`run-one.ps1` 在第 4 步的 `finally` 里杀宿主，第 5 步又卸掉了插件。
+
+**结论成立，但别把补采当矩阵数据引用。** 好在矩阵自己记的 `bundle_bytes: 259599`
+= 259523 + 76，与补采的差值一致，两路独立数据指向同一件事。
+
+上一轮 `wts-1.2.0-4` 换了个包、换个 run root 独立抓了一次，结论相同（公共前缀 = 259620，
+公共后缀 = 0）。两次不同产物各自复现，这条才算数。
+
+**所以自动化检查要先把末尾那行剥掉再比。** 矩阵本身只记 `bundle_bytes`、从不记哈希，
+而第 5 步会卸载插件，跑完之后装进去的副本就没了——想验只能在宿主还活着的时候抓。
+
+阴性对照也要留着，否则这条比对可能恒真：翻一个字节，sha256 变、**长度不变**（证明长度比对什么都证不了）；
+拿 `lib\index.js` 去和 `client\client.js` 比，哈希不同（证明能区分不同文件）。
+
+### 这份证据是循环的，如实记下
+
+`package.json` 的 `files` 白名单**包含本文档**，所以改本文档就改了被测产物的 sha256。
+上面那个哈希描述的是**装着旧版本文档的包**。这不是疏漏，是打包范围决定的：
+证据文档和被它描述的产物住在同一个 tarball 里，谁先谁后都有代价。
+
+因此补一句可复核的话：**本文档的任何一次修改，都会让上面那个 sha256 失效**，需要重跑矩阵。
+判断包对不对，看 `lib\index.js` 和 `client\client.js` 的哈希，不看 tarball 的——
+那两个是构建产物，改文档不会动它们。
+
+`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。**1.2.0 的桌面端尚无实测记录**，
+上面这一行说的是 1.1.0。
+
+### 汇总列曾经恒为假
+
+`run-all.ps1` 早期用 `$out = & run-one.ps1` 的返回值判定完成度，但 `run-one.ps1` 的每一条结论都由
+`Emit` 经 `Write-Host` 输出——这个宿主不把 `Write-Host` 放进输出流，于是 `$out` 恒为空，
+汇总那一列对**任何**版本都显示 `False`，无论实际发生了什么。方向恰好是唯一没人会去核对的
+那一种：全绿时它报失败，真有失败时它也报失败，只是没人分得清。
+
+现在改为读每个版本的 `logs\log-<版本>\summary.txt`——那是 `Emit` 同一批调用写进磁盘的副本，
+而日志目录每轮开头会被清空，不会读到上一轮的残留。修复后本轮四个版本均输出 `True`。
+逐版本的权威记录始终是 `summary.txt`，不是控制台汇总。
 
 ### 逐条对照
 
 | 判据（第 2 节） | 实测 | 说明 |
 | --- | --- | --- |
 | 2.1 安装以 0 退出、无 `incompatible` | 四个版本均满足 | pnpm 12.6.0，`Packages: +1` |
-| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.1.0` | |
+| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.2.0` | |
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
-| 2.3 进程正常启动 | 四次均 `boot_alive: True` | |
-| 2.3 页面可达 | 四次均 HTTP 200（33544 / 34825 / 35333 / 35367 字节），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**213710 字节**，内容含 `id: "dsh-worktree-space"` | |
-| 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show"}}` | 编造的 endpoint → **404** |
+| 2.3 进程正常启动 | 四次均 `boot_alive: True`，stderr 文件均 0 字节，`boot_stopped: True` | |
+| 2.3 页面可达 | 四次均 HTTP 200（35367 / 35333 / 34825 / 33544 字节，按 0.2.0-rc.2 到 0.1.7-rc.1），页面中出现插件 5 次 | |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`，内容含 `id: "dsh-worktree-space"` | 服务端比仓库的 `client\client.js`（259523）多 **76**；剥掉 sourceMappingURL 后与仓库逐字节相同，见上节 |
+| 2.3 bundle 的 rev 逐版本不同 | `f8065f63666c` / `40e4544f02ae` / `faffaadd369a` / `be80bd8852d2` | 内容寻址，四份不同的宿主缓存各自一份 |
+| 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
 | 2.4 再次 `--dump-config` 无 `worktree-space` | 四次均 0 处命中，且行数回到安装前 | |
@@ -190,7 +270,8 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
 `RPC method does not match endpoint.`。
 
 **bundle 地址是页面相对的**：`plugins/??dsh-worktree-space/client.js&rev=<rev>`，`rev` 每个版本各不相同
-（`37a15226d7a9` / `a891e0ed576d` / `b4c4e30ed039` / `3c02e8695ba5`），字节数四个版本一致。
+（`86aaab027255` / `4c7530a47842` / `bebf947663e5` / `acd5af9bb3b8`，按 0.2.0-rc.2 到 0.1.7-rc.1），
+字节数四个版本一致。
 
 ## 6. 必须逐条回应的边界情形
 
