@@ -68,13 +68,28 @@ function subprocessMock(handlers = {}) {
       const key = args.join(" ")
       calls.push({ cwd, args, key })
       const handler = replyFor(key)
-      const reply = typeof handler === "function" ? handler({ cwd, args }) : handler
-      const object = typeof reply === "object" && reply !== null
+      // A reply that puts something on disk is only meaningful once it is there.
+      // The code under test reads the filesystem the moment a git call reports
+      // back, so an async handler's side effects belong inside the reply.
+      //
+      // A promise is an object, so `typeof reply === "object"` was true for one and
+      // the branch below read `.exitCode` off the promise itself - undefined, so it
+      // answered 0 at once and left the side effects running unwatched. It passed
+      // because the filesystem calls inside a handler happened to finish first, and
+      // that is a scheduling race rather than a guarantee.
+      const text = { stdout: '', stderr: '' }
+      const done = Promise.resolve(typeof handler === "function" ? handler({ cwd, args }) : handler)
+        .then((reply) => {
+          const object = typeof reply === "object" && reply !== null
+          text.stdout = object ? reply.stdout ?? "" : reply ?? ""
+          text.stderr = object ? reply.stderr ?? "" : ""
+          return { exitCode: object ? reply.exitCode ?? 0 : 0, signal: null }
+        })
       return {
-        done: Promise.resolve({ exitCode: object ? reply.exitCode ?? 0 : 0, signal: null }),
+        done,
         collected: {
-          stdout: { readFrom: () => ({ text: object ? reply.stdout ?? "" : reply ?? "" }) },
-          stderr: { readFrom: () => ({ text: object ? reply.stderr ?? "" : "" }) },
+          stdout: { readFrom: () => ({ text: text.stdout }) },
+          stderr: { readFrom: () => ({ text: text.stderr }) },
         },
       }
     },

@@ -45,13 +45,35 @@ function subprocessMock(handlers = {}) {
       const key = args.join(" ")
       calls.push({ cwd, args, key })
       const handler = replyFor(key)
-      const reply = typeof handler === "function" ? handler({ cwd, args }) : handler
-      const object = typeof reply === "object" && reply !== null
+      // A handler's side effects have to finish before this call is answered, not
+      // merely before the test that made them returns.
+      //
+      // The code under test reads the filesystem the moment a git call reports back:
+      // `worktree add` returns, and the very next thing it does is write the task
+      // metadata. A reply that puts a checkout on disk is only meaningful if that
+      // checkout is there when the metadata is written, so the reply cannot resolve
+      // while its own side effect is still running.
+      //
+      // A promise is an object, so `typeof reply === "object"` was true for an async
+      // handler and the branch below read `.exitCode` off the promise itself - which
+      // is undefined, so it answered `exitCode: 0` at once and let the side effects
+      // run unwatched in the background. The test still passed on Windows, where the
+      // three awaited filesystem calls inside a handler happened to finish first,
+      // and failed on the CI runner, where they did not. A test whose outcome is a
+      // scheduling race is not a test.
+      const text = { stdout: '', stderr: '' }
+      const done = Promise.resolve(typeof handler === "function" ? handler({ cwd, args }) : handler)
+        .then((reply) => {
+          const object = typeof reply === "object" && reply !== null
+          text.stdout = object ? reply.stdout ?? "" : reply ?? ""
+          text.stderr = object ? reply.stderr ?? "" : ""
+          return { exitCode: object ? reply.exitCode ?? 0 : 0, signal: null }
+        })
       return {
-        done: Promise.resolve({ exitCode: object ? reply.exitCode ?? 0 : 0, signal: null }),
+        done,
         collected: {
-          stdout: { readFrom: () => ({ text: object ? reply.stdout ?? "" : reply ?? "" }) },
-          stderr: { readFrom: () => ({ text: object ? reply.stderr ?? "" : "" }) },
+          stdout: { readFrom: () => ({ text: text.stdout }) },
+          stderr: { readFrom: () => ({ text: text.stderr }) },
         },
       }
     },
