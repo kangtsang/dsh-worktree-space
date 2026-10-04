@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'stop-tree.ps1')
 
 # ASCII-only on purpose: Windows PowerShell 5.1 reads a BOM-less .ps1 as the system
 # ANSI code page, which mangles non-ASCII and can eat a closing quote.
@@ -57,9 +58,40 @@ foreach ($v in $versions) {
             -ArgumentList @('install', '--prefix', $prefix, '--no-save', '--loglevel=error', "@deepseek-ai/dsh@$v") `
             -RedirectStandardOutput $o -RedirectStandardError $e
   $null = $p.Handle
-  $null = $p.WaitForExit(900000)
-  $code = $p.ExitCode
+
+  # WaitForExit(timeout) returns FALSE on timeout and does NOT throw, so the
+  # result used to be discarded and $p.ExitCode read afterwards came back empty:
+  # the report said "FAILED exit=" with no code at all, and the npm install tree
+  # kept running in the background. When that leaked tree finally finished it
+  # dropped .bin\dsh.cmd into place, and the NEXT run of this script found the
+  # file and reported "already present" - a half-installed or bad version reading
+  # as a good one, which is the outcome this whole script exists to prevent.
+  # Handled the way invoke-bounded.ps1 handles it: kill the tree, then re-check.
+  $waited = $p.WaitForExit(900000)
   $sw.Stop()
+
+  if (-not $waited) {
+    $kill = Stop-ProcessTree -ProcessId $p.Id -Process $p -Label ('npm install ' + $v) -WaitMs 15000
+    $failed += $v
+    Write-Host ('    FAILED timeout=900s; process tree ' + $(if ($kill.stopped) { 'killed' } else { 'STILL RUNNING, pid ' + $p.Id }))
+    if (Test-Path -LiteralPath $exe) {
+      # Said out loud, because this is the trap: a partial install can leave a
+      # usable-looking .bin\dsh.cmd behind and the next run would call it present.
+      # This script has no Remove-Item, by design, so the prefix has to go by hand.
+      Write-Host ('    WARNING: ' + $exe + ' exists after a killed install.')
+      Write-Host ('             Remove ' + $prefix + ' by hand and re-run, or the next')
+      Write-Host ('             run will report this version as already present.')
+    }
+    if ($kill.output) { Write-Host ('      ' + $kill.output) }
+    foreach ($f in @($e, $o)) {
+      if (Test-Path -LiteralPath $f) {
+        @(Get-Content -LiteralPath $f -TotalCount 6) | ForEach-Object { Write-Host ('      ' + $_) }
+      }
+    }
+    continue
+  }
+
+  $code = $p.ExitCode
 
   if ($code -ne 0) {
     $failed += $v

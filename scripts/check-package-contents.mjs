@@ -7,12 +7,34 @@ import { promisify } from "node:util"
 
 const execFileAsync = promisify(execFile)
 // Windows resolves the npm CLI to a .cmd shim. Naming it explicitly is not
-// enough: since the CVE-2024-27980 fix Node refuses to spawn a batch file
-// without a shell (EINVAL), and passing arguments through a shell is
-// deprecated (DEP0190). Running npm's own JS entry point with the current Node
-// executable avoids both, and behaves the same on every platform.
+// enough: since the CVE-2024-27980 fix Node refuses to start a batch file
+// without a shell (EINVAL), and passing arguments through a shell is deprecated
+// (DEP0190). Running npm's own JS entry point with the current Node executable
+// avoids both, and behaves the same on every platform.
+//
+// There is deliberately no fallback to the npm on PATH. That fallback cannot
+// work: on Windows it is the same batch shim, so it is not a slower route to the
+// same answer but a guaranteed failure on the one platform that has the problem.
+// Measured on this machine, Node 24: the bare name resolves to nothing at all
+// (ENOENT) and naming the shim is rejected outright (EINVAL) - the CVE fix doing
+// exactly its job. So an unusual Node layout is reported rather than guessed at.
+// This check is the last gate before publishing, and a gate that cannot run must
+// not open.
 const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
-const [npmCommand, npmArgs] = existsSync(npmCli) ? [process.execPath, [npmCli]] : ["npm", []]
+if (!existsSync(npmCli)) {
+  console.error(
+    `npm's CLI entry point is not where a Node installation puts it.\n\n` +
+      `  looked for: ${npmCli}\n\n` +
+      `That file is npm's own JS, installed beside the node executable. Without it this ` +
+      `machine's npm can only be reached through a .cmd shim, and a shim is exactly what ` +
+      `Node stopped running without a shell after CVE-2024-27980 - so this check stops ` +
+      `here instead of pretending to have looked.\n\n` +
+      `Install a Node that ships npm, or run this with one that does, and try again.`,
+  )
+  process.exit(1)
+}
+const npmCommand = process.execPath
+const npmArgs = [npmCli]
 const npmCache = join(process.cwd(), ".npm-cache")
 await mkdir(npmCache, { recursive: true })
 const { stdout } = await execFileAsync(npmCommand, [...npmArgs, "pack", "--dry-run", "--json"], {

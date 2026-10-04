@@ -78,6 +78,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $global:LASTEXITCODE = 0
 
+# Every taskkill in this script goes through Stop-ProcessTree. Under
+# $ErrorActionPreference = 'Stop' a native command whose stderr is redirected with
+# 2>&1 raises a TERMINATING error the moment it writes a line, and taskkill writes
+# "not found" to stderr every single time the process is already gone - which on a
+# failure path it usually is.
+. (Join-Path $PSScriptRoot 'stop-tree.ps1')
+
 # ---------------------------------------------------------------------------
 # Delete guard.
 #
@@ -122,6 +129,73 @@ function Assert-SafeDelete {
   return $full
 }
 
+function ConvertTo-NativeArgString {
+  <#
+    Joins a native argument array into one Windows command line, quoting the
+    elements that need it.
+
+    Start-Process -ArgumentList joins the array with SPACES and never quotes an
+    element that contains one, so `git -C "C:\some dir\repo"` arrives as the two
+    arguments `C:\some dir` and `repo` and git answers
+    `fatal: cannot change to 'C:\some dir'`. Measured here on both
+    powershell.exe 5.1 and pwsh 7, with git and with node: the same array that
+    works on a space-free path loses everything from the first space onward.
+
+    Only elements holding whitespace or a quote are wrapped. Everything else is
+    passed through byte for byte, so every argument that already works reaches
+    the program exactly as it did before and only the broken ones change. That
+    restraint is deliberate: npm.cmd is a batch shim, cmd.exe does not parse
+    quotes the way CommandLineToArgvW does, and quoting everything would buy no
+    correctness in exchange for a new way to break the pack.
+
+    The wrapping is the encoding CommandLineToArgvW parses back, which is what
+    node.exe, git.exe and the shim's own %* expansion all end up in:
+      * wrap in double quotes
+      * a backslash run before a quote is doubled and the quote becomes \",
+        2n+1 backslashes in all - n would escape the quote and end the argument
+      * a trailing backslash run is doubled, or it escapes the closing quote and
+        the argument runs on into the next one
+
+    Paths are still better moved into -WorkingDir where a caller can do that
+    (every git call here is); this exists for the ones that cannot be, because
+    they are arguments by nature: npm's --pack-destination, node's script
+    argument, the tarball being installed.
+
+    The parameter is $ArgList and not $Args. $args is an automatic variable and
+    PowerShell variable names ignore case, so `param([string[]]$Args)` is a plain
+    [string[]] parameter that binds NOTHING: no error, no warning, BoundParameters
+    stays empty and the body sees zero elements. Measured on both editions, and
+    it bit this function on its first attempt - the quoting came out as an empty
+    string and every command would have run with no arguments at all, which is a
+    worse failure than the bug being fixed. Adding [Parameter(Mandatory)] does
+    make it bind, but relying on that is not worth it: Invoke-Checked and
+    Wait-ForUrl already spell theirs $CmdArgs and $DshArgs, and this file avoids
+    automatic-variable names for a reason run-one.ps1 states outright.
+  #>
+  param([string[]]$ArgList)
+
+  $out = foreach ($arg in $ArgList) {
+    if ($arg.Length -eq 0 -or $arg -notmatch '[\s"]') { $arg; continue }
+    $sb = [System.Text.StringBuilder]::new()
+    $null = $sb.Append('"')
+    $slashes = 0
+    foreach ($ch in $arg.ToCharArray()) {
+      if ($ch -eq '\') { $slashes++; continue }
+      if ($ch -eq '"') {
+        $null = $sb.Append('\' * ($slashes * 2 + 1)).Append('"')
+      } else {
+        if ($slashes) { $null = $sb.Append('\' * $slashes) }
+        $null = $sb.Append($ch)
+      }
+      $slashes = 0
+    }
+    if ($slashes) { $null = $sb.Append('\' * ($slashes * 2)) }
+    $null = $sb.Append('"')
+    $sb.ToString()
+  }
+  return ($out -join ' ')
+}
+
 function Invoke-Checked {
   <#
     Runs a native command, fails loudly, and never truncates its output.
@@ -140,9 +214,13 @@ function Invoke-Checked {
   # Passing '' is not the same as passing nothing - it resolves against the
   # process CWD and can fail - so the argument is only supplied when there is
   # somewhere to run it in.
+  #
+  # The argument list is quoted by ConvertTo-NativeArgString first, because
+  # -ArgumentList joins with spaces and does not quote an element that holds
+  # one, which silently truncates every path in it at the first space.
   $start = @{
     FilePath = $Exe
-    ArgumentList = $CmdArgs
+    ArgumentList = (ConvertTo-NativeArgString -ArgList $CmdArgs)
     NoNewWindow = $true
     PassThru = $true
     Wait = $true
@@ -236,7 +314,9 @@ function Wait-ForUrl {
   #>
   param([string[]]$DshArgs, [string]$OutFile, [string]$ErrFile, [int]$TimeoutSec, [string]$What)
 
-  $proc = Start-Process -FilePath 'node' -ArgumentList $DshArgs -NoNewWindow -PassThru `
+  # Quoted for the same reason as in Invoke-Checked: $DshArgs starts with $binJs,
+  # a path, and -ArgumentList would cut it at the first space in the hosts root.
+  $proc = Start-Process -FilePath 'node' -ArgumentList (ConvertTo-NativeArgString -ArgList $DshArgs) -NoNewWindow -PassThru `
             -RedirectStandardOutput $OutFile -RedirectStandardError $ErrFile
   # Holding the handle keeps the process object alive so HasExited stays useful.
   $null = $proc.Handle
@@ -260,7 +340,11 @@ function Wait-ForUrl {
     if (Test-Path -LiteralPath $OutFile) { $raw = Get-Content -LiteralPath $OutFile -Raw }
     $err = ''
     if (Test-Path -LiteralPath $ErrFile) { $err = Get-Content -LiteralPath $ErrFile -Raw }
-    $null = & taskkill /PID $proc.Id /T /F 2>&1
+    # Killed BEFORE the diagnostics below are printed, and through the helper: the
+    # old `& taskkill ... 2>&1` raised a terminating error against an already dead
+    # pid, so on the single most common failure - dsh not booting - the throw came
+    # first and the output that explains WHY it did not boot was never printed.
+    $null = Stop-ProcessTree -ProcessId $proc.Id -Process $proc -Label ($What + ' (failed boot)')
     if (-not [string]::IsNullOrEmpty($raw)) {
       Write-Host ("{0} output: " -f $What)
       Write-Host ("  " + (($raw -replace '\s+', ' ').Trim()))
@@ -341,11 +425,25 @@ if ($SkipPack -and (Test-Path -LiteralPath $tarball)) {
 #
 # The one delete. A home left over from an aborted run holds a booted server's
 # own files open and cannot be removed, so its stray node processes are killed
-# first - by PID, scoped to this case root, never by image name.
+# first - by PID, scoped to this DSH build, never by image name.
+#
+# The filter matches $binJs, the entry point every dsh process here is started
+# with, so it genuinely appears in the server's command line. It used to match
+# $caseRoot, which reaches the server only through DSH_HOME in the ENVIRONMENT -
+# never on the command line - so the sweep found nothing at all and the home wipe
+# below went straight at files an aborted server still had open.
+#
+# Scope note: $binJs is per DSH version, not per case root, so this also stops a
+# server from a DIFFERENT case root running the same version. That is the same
+# breadth run-one.ps1 accepts for its hosts sweep, and the alternative - matching
+# a port - would miss whatever port the previous run used.
 
 $stray = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-         Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + $caseRoot + '*') }
-foreach ($s in $stray) { $null = & taskkill /PID $s.ProcessId /T /F 2>&1 }
+         Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + $binJs + '*') }
+foreach ($s in $stray) {
+  Write-Host ('  clearing stray dsh process PID ' + $s.ProcessId)
+  $null = Stop-ProcessTree -ProcessId ([int]$s.ProcessId) -Label 'stray dsh process'
+}
 if ($stray) { Start-Sleep -Seconds 2 }
 
 $safeHome = Assert-SafeDelete -Path $dshHome -MustBeUnder $caseRoot -ExpectLeaf 'home' -Label 'dshHome'
@@ -387,8 +485,10 @@ if (Test-Path -LiteralPath (Join-Path $profDir 'package.json')) {
     -OutFile (Join-Path $logDir '01-profile.txt') `
     -ErrFile (Join-Path $logDir '01-profile.stderr.txt') `
     -TimeoutSec 180 -What 'profile boot'
-  $null = & taskkill /PID $mk.Process.Id /T /F 2>&1
-  $null = $mk.Process.WaitForExit(15000)
+  $mkKill = Stop-ProcessTree -ProcessId $mk.Process.Id -Process $mk.Process -Label 'profile verification boot'
+  if (-not $mkKill.stopped) {
+    Write-Host ('  the profile verification boot is still running: pid ' + $mk.Process.Id)
+  }
 }
 
 # --- install ---------------------------------------------------------------
@@ -430,15 +530,34 @@ for ($i = 1; $i -le $FixtureRepos; $i++) {
   $r = Join-Path $fixtureRoot ('repo-' + $i)
   if (-not (Test-Path -LiteralPath (Join-Path $r '.git'))) {
     New-Item -ItemType Directory -Path $r -Force | Out-Null
-    $g = @('-C', $r, '-c', 'user.email=accept@example.invalid', '-c', 'user.name=Accept',
+    # NO -C <path> in the argument list. Start-Process -ArgumentList joins the
+    # array with spaces and does NOT quote an element containing one, so a case
+    # root with a space in it arrives at git as two arguments and git fails with
+    # "cannot change to 'C:\...\dir'". The working directory travels as its own
+    # Start-Process property instead, which the OS handles correctly. That is
+    # why these calls pass -WorkingDir rather than relying on the quoting in
+    # ConvertTo-NativeArgString: relocation is exact, quoting is a fallback for
+    # the arguments that cannot be relocated (npm's --pack-destination, node's
+    # script argument, the tarball).
+    $g = @('-c', 'user.email=accept@example.invalid', '-c', 'user.name=Accept',
            '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false')
-    $null = & git @g init --quiet 2>&1
+    # NOT `& git @g ... 2>&1`. Under $ErrorActionPreference = 'Stop' one line of
+    # git's stderr - a hint, a deprecation warning - raises a TERMINATING error
+    # and aborts the run, and $null = threw the exit code away anyway, so a
+    # fixture that failed to commit looked identical to one that did.
+    # Invoke-Checked redirects to files and checks the exit code, the same
+    # treatment npm pack and plugin add already get above.
+    $null = Invoke-Checked -Exe 'git' -CmdArgs ([string[]]@($g + @('init', '--quiet'))) `
+              -What ('fixture-init-' + $i) -WorkingDir $r
     Set-Content -LiteralPath (Join-Path $r 'README.md') -Value ('fixture repository ' + $i) -Encoding ASCII
-    $null = & git @g add README.md 2>&1
-    $null = & git @g commit --quiet -m 'fixture' 2>&1
+    $null = Invoke-Checked -Exe 'git' -CmdArgs ([string[]]@($g + @('add', 'README.md'))) `
+              -What ('fixture-add-' + $i) -WorkingDir $r
+    $null = Invoke-Checked -Exe 'git' -CmdArgs ([string[]]@($g + @('commit', '--quiet', '-m', 'fixture'))) `
+              -What ('fixture-commit-' + $i) -WorkingDir $r
     # A second branch, so a task's own branch is visibly distinct from the
     # source's and picking a base that is not HEAD is possible.
-    $null = & git @g branch feature-x 2>&1
+    $null = Invoke-Checked -Exe 'git' -CmdArgs ([string[]]@($g + @('branch', 'feature-x'))) `
+              -What ('fixture-branch-' + $i) -WorkingDir $r
   }
   $repos += $r
 }
@@ -475,7 +594,22 @@ $firstBelow = $firstBelow.Split('\')[0]
 $containerRoot = if ($firstBelow) { Join-Path ($volumeRoot + $firstBelow) 'worktree-space' } else { Join-Path $pluginRoot 'worktree-space' }
 $containerOutside = -not ([System.IO.Path]::GetFullPath($containerRoot)).StartsWith($caseRoot.TrimEnd('\') + '\')
 
-Set-Content -LiteralPath (Join-Path $caseRoot 'case.env') -Encoding ASCII -Value @(
+# case.env is the maintainer's ONLY record of this run's URL, so it is written
+# through .NET rather than with Set-Content -Encoding ...:
+#   * ASCII replaces every non-ASCII character with '?'. Measured on this
+#     machine: a path holding one accented letter and four CJK characters came
+#     back as "?-????", i.e. a case.env pointing at a path that does not exist.
+#   * utf8 on Windows PowerShell 5.1 writes a BOM (first bytes EF BB BF,
+#     measured). That glues an invisible U+FEFF onto the FIRST key's name, so
+#     anything reading a KEY=value file with a plain split-and-match loses
+#     DSH_HOME - the first line - while every later line reads fine. That is the
+#     worst kind of file to debug, and it only happens on 5.1.
+# [Text.UTF8Encoding]::new($false) is the one spelling that means "UTF-8, no BOM"
+# on BOTH 5.1 and 7. The PowerShell 7 name utf8NoBOM would need
+# #Requires -Version 7.0, which would lock everyone still on 5.1 out of this
+# script for no gain at all.
+$caseEnv = Join-Path $caseRoot 'case.env'
+$caseEnvLines = @(
   "DSH_HOME=$safeHome"
   "FIXTURE=$fixtureRoot"
   "REPOS=$($repos -join ';')"
@@ -486,6 +620,7 @@ Set-Content -LiteralPath (Join-Path $caseRoot 'case.env') -Encoding ASCII -Value
   "PID=$($boot.Process.Id)"
   "LOGS=$logDir"
 )
+[IO.File]::WriteAllText($caseEnv, (($caseEnvLines -join [Environment]::NewLine) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
 
 Write-Host ''
 Write-Host ('  URL      : ' + $boot.Url)
@@ -517,10 +652,11 @@ try {
   }
 }
 finally {
-  if (-not $boot.Process.HasExited) {
-    $null = & taskkill /PID $boot.Process.Id /T /F 2>&1
-    $null = $boot.Process.WaitForExit(15000)
-  }
-  Write-Host ('server stopped: ' + $boot.Process.HasExited)
+  # One kill, for every way this hold loop can end: Ctrl-C, the server exiting on
+  # its own, or the timer. Through the helper, so a server that already exited -
+  # the case this loop handles at its top - does not turn the cleanup into a
+  # terminating error.
+  $stop = Stop-ProcessTree -ProcessId $boot.Process.Id -Process $boot.Process -Label 'dsh server'
+  Write-Host ('server stopped: ' + $stop.stopped)
   Write-Host ('logs kept at ' + $logDir)
 }

@@ -8,14 +8,27 @@ import { defineConfig } from "vitest/config"
  * because they are slow in a way that has nothing to do with what is being tested.
  * `task-merge-worktree.test.mjs` builds a repository, four commits and two
  * worktrees per test with `execFileSync`, and on Windows each `git.exe` launch is
- * almost entirely process creation. Nineteen seconds for nine tests, serial, and
- * not reducible without rewriting the fixture to be asynchronous.
+ * almost entirely process creation. Serial, and not reducible without rewriting the
+ * fixture to be asynchronous.
  *
- * Separating them means the other forty-one files - every one of them under a
- * second - can be run on their own in about eight seconds, which is the loop a
- * change actually gets checked in, while `pnpm test:unit` still runs all of it.
+ * Separating them means the files that do not need a process can be run on their own
+ * in seconds, which is the loop a change actually gets checked in, while
+ * `pnpm test:unit` still runs all of it.
+ *
+ * Nothing here counts files, tests or seconds. Those numbers go stale on the next
+ * addition, and the next person to check them finds a mismatch, spends time working
+ * out whether the number is old or something broke, and only then looks at the thing
+ * that actually matters. The invariants worth writing down are elsewhere: the two
+ * layers do not overlap and their union is the full enumeration.
  */
-const REAL_GIT = ["test/task-merge-worktree.test.mjs", "test/encoding.test.ts"]
+const REAL_GIT = [
+  "test/task-merge-worktree.test.mjs",
+  "test/encoding.test.ts",
+  // Not git, but it earns the same place: it forks a real node worker that hangs and
+  // a real copy of the runner, so what it checks is process-tree behaviour. Same
+  // reason for the layer - the assertion only means something against real processes.
+  "test/suite-runner-budget.test.mjs",
+]
 
 /**
  * Worker count, and this is the whole reason the suite used to take sixteen

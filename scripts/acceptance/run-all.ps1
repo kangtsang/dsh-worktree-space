@@ -44,19 +44,55 @@ if (-not $versions.Count) { throw 'manifest declares no dshReleases' }
 # "0.2.0"; Sort-Object keeps ties in their original order, so rc.2 never rises
 # above rc.1 and the run is not actually newest-first. Rank on the prerelease
 # number too, and treat a final release as outranking its own prereleases.
+#
+# Each field goes into its own FIXED-WIDTH, zero-padded slot, and the whole key is
+# one string. Fixed width is what makes the ordering total: a numeric scheme has
+# to guess a bound for the widest field and is wrong the moment a version exceeds
+# it, and that is not a hypothetical - an earlier attempt here put a final release
+# at core+100000 while rc.N outranked it as soon as N reached five digits, because
+# family*1e4 + 99999 = 119999. With padded strings there is nothing to overflow and
+# nothing to spill into the next slot.
+#
+# Two ways ranking a prerelease on its number alone was wrong, both currently
+# harmless because the manifest only declares rc.N - and both are landmines the
+# day it does not:
+#   * rc.1 and beta.1 got the SAME rank, so which sorted first was decided by the
+#     order the manifest happened to list its keys in. Family first, then number:
+#     alpha < beta < rc < final.
+#   * a final release was core + 9999, which 0.2.0-rc.99999 outranks - a final
+#     sorting below its own release candidate.
 function Get-VersionRank {
   param([string]$Spec)
   $m = [regex]::Match($Spec, '^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$')
   if (-not $m.Success) { throw ("declared DSH release is not a version number: " + $Spec) }
-  $core = [double]$m.Groups[1].Value * 1e12 + [double]$m.Groups[2].Value * 1e8 + [double]$m.Groups[3].Value * 1e4
+
+  # 10 digits each for major/minor/patch; [long] normalises a leading zero.
+  $core = '{0:D10}{1:D10}{2:D10}' -f [long]$m.Groups[1].Value, [long]$m.Groups[2].Value, [long]$m.Groups[3].Value
   $pre  = $m.Groups[4].Value
-  if (-not $pre) { return $core + 9999 }
-  $pm = [regex]::Match($pre, '^[A-Za-z][A-Za-z.-]*?(\d+)$')
+
+  # Final slot is 3, above every prerelease family, so 0.2.0 outranks 0.2.0-rc.N
+  # for any N, however many digits N has.
+  if (-not $pre) { return ($core + '3' + ('{0:D18}' -f [long]0)) }
+
+  $pm = [regex]::Match($pre, '^([A-Za-z][A-Za-z.-]*?)\.?([0-9]+)$')
   if (-not $pm.Success) {
-    Write-Host ("  note: " + $Spec + " has an unrecognised prerelease tag '" + $pre + "'; ranking it as 0")
-    return $core
+    Write-Host ("  note: " + $Spec + " has an unrecognised prerelease tag '" + $pre + "'; ranking it with alpha.0")
+    return ($core + '0' + ('{0:D18}' -f [long]0))
   }
-  return $core + [double]$pm.Groups[1].Value
+  $family = $pm.Groups[1].Value.ToLowerInvariant()
+
+  # Family first, then number. An unrecognised family is ranked WITH alpha and
+  # announced, rather than silently sharing a slot with one of the known three.
+  $familySlot = '0'
+  switch ($family) {
+    'alpha' { $familySlot = '0' }
+    'beta'  { $familySlot = '1' }
+    'rc'    { $familySlot = '2' }
+    default {
+      Write-Host ("  note: " + $Spec + " has an unknown prerelease family '" + $family + "'; ranking it with alpha")
+    }
+  }
+  return ($core + $familySlot + ('{0:D18}' -f [long]$pm.Groups[2].Value))
 }
 
 $ordered = @($versions | Sort-Object { Get-VersionRank -Spec $_ } -Descending)

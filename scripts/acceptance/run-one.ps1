@@ -50,6 +50,10 @@ $evidenceRoot   = Split-Path $runRoot -Parent
 $disposableRoot = Join-Path $runRoot 'homes'
 $logRoot        = Join-Path $runRoot 'logs'
 $invoker        = Join-Path $PSScriptRoot 'invoke-bounded.ps1'
+# Every taskkill in this script goes through Stop-ProcessTree. See stop-tree.ps1
+# for why a native command writing to stderr under ErrorActionPreference = 'Stop'
+# turns the cleanup into the thing that fails.
+. (Join-Path $PSScriptRoot 'stop-tree.ps1')
 
 if (-not $Tarball) {
   $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\package.json') -Raw | ConvertFrom-Json
@@ -171,6 +175,22 @@ function Run-Dsh {
 #
 # Same shape of rule as the two deletes below it, same guard: a direct child of
 # $logRoot named log-<v>, never a wildcard and never a path computed here.
+#
+# The stray-process sweep comes FIRST, before this directory is touched at all.
+# It used to sit below, in the isolation section, while the comment there said it
+# had to happen "before touching the directory" - so a previous aborted dsh still
+# holding 04-boot.stderr.txt open made the Remove-Item below throw first, which is
+# precisely the situation the sweep exists to clear. Scoped to $hostsRoot, which
+# genuinely does appear in the server's command line (it is the parent of the bin
+# path node is started with), so nothing outside the evidence workspace is touched.
+
+$stray = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+         Where-Object { $_.CommandLine -and $_.CommandLine -like ("*" + [IO.Path]::GetFullPath($hostsRoot) + "*") }
+foreach ($s in $stray) {
+  Write-Host ("clearing stray host process PID " + $s.ProcessId)
+  $null = Stop-ProcessTree -ProcessId ([int]$s.ProcessId) -Label 'stray host process'
+}
+if ($stray) { Start-Sleep -Seconds 2 }
 
 if (-not (Test-Path -LiteralPath $logRoot)) { New-Item -ItemType Directory -Path $logRoot -Force | Out-Null }
 $safeLog = Assert-LogDir -Path $logDir -Label 'logDir'
@@ -196,18 +216,6 @@ $env:DSH_HOME = $safeHome
 if ([System.IO.Path]::GetFullPath($env:DSH_HOME) -eq [Environment]::GetFolderPath('UserProfile')) {
   throw "REFUSED: DSH_HOME resolved to the user profile"
 }
-
-# A previous aborted run can leave a booted dsh holding this version's
-# 04-boot.stderr.txt open, which makes the log directory undeletable. Clear any
-# process still pointing at our own host build before touching the directory.
-# Scoped to $hostsRoot so nothing outside the evidence workspace is touched.
-$stray = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-         Where-Object { $_.CommandLine -and $_.CommandLine -like ("*" + [IO.Path]::GetFullPath($hostsRoot) + "*") }
-foreach ($s in $stray) {
-  Write-Host ("clearing stray host process PID " + $s.ProcessId)
-  $null = & taskkill /PID $s.ProcessId /T /F 2>&1
-}
-if ($stray) { Start-Sleep -Seconds 2 }
 
 Emit "version"     $v
 Emit "node"        (node -v)
@@ -327,72 +335,108 @@ Emit "boot_alive" (-not $proc.HasExited)
 #     "//plugins/..." silently falls through to the SPA fallback and answers 200
 #     text/html with the page's own byte count.
 
-if ($url) {
-  $base = (($url -split '\?')[0]).TrimEnd('/')
-  try {
-    $page = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30 -SessionVariable sess
-    Emit "page_status"   $page.StatusCode
-    Emit "page_bytes"    $page.RawContentLength
-    Emit "page_mentions" ([regex]::Matches($page.Content, 'dsh-worktree-space')).Count
-    Emit "session_cookies" (@($sess.Cookies.GetCookies($base)).Count)
-  } catch {
-    Emit "page_error" $_.Exception.Message
-  }
+# $page and $sess are read by the probes below the fetch, so they are initialised
+# HERE rather than assigned only inside the try. Under Set-StrictMode a variable
+# that never got assigned throws on first read, and the read that threw was
+# $page.Content one line below the catch - which meant a failed index fetch (a
+# timeout, a failed cookie exchange: both ordinary) turned into a terminating
+# error with no outer catch, the server cleanup below never ran, the booted dsh
+# leaked on its port, and stages 5 and 6 recorded nothing at all.
+$page = $null
+$sess = $null
 
-  # (b) the advertised client bundle
-  $m = [regex]::Match($page.Content, '"dsh-worktree-space","url":"([^"]+)"')
-  if ($m.Success) {
-    Emit "bundle_url" $m.Groups[1].Value
+try {
+  if ($url) {
+    $base = (($url -split '\?')[0]).TrimEnd('/')
     try {
-      $b = Invoke-WebRequest -Uri ($base + '/' + $m.Groups[1].Value) -UseBasicParsing `
-               -TimeoutSec 30 -WebSession $sess
-      # .Content for a text/javascript response is a Byte[] on Windows
-      # PowerShell, and casting that to [string] yields the literal text
-      # "System.Byte[]" - which matches nothing and reads like a plugin fault.
-      # Read the raw stream instead.
-      $ms = New-Object IO.MemoryStream
-      $b.RawContentStream.CopyTo($ms)
-      $bt = [Text.Encoding]::UTF8.GetString($ms.ToArray())
-      Emit "bundle_status"  $b.StatusCode
-      Emit "bundle_bytes"   $b.RawContentLength
-      Emit "bundle_type"    $b.Headers['Content-Type']
-      Emit "bundle_registers" ([regex]::Matches($bt,'id: "dsh-worktree-space"')).Count
-      Emit "bundle_endpoints" ([regex]::Matches($bt,'dsh-worktree-space/[a-z]+\.[a-z-]+')).Count
+      $page = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 30 -SessionVariable sess
+      Emit "page_status"   $page.StatusCode
+      Emit "page_bytes"    $page.RawContentLength
+      Emit "page_mentions" ([regex]::Matches($page.Content, 'dsh-worktree-space')).Count
+      Emit "session_cookies" (@($sess.Cookies.GetCookies($base)).Count)
     } catch {
-      $c = $null; try { $c = [int]$_.Exception.Response.StatusCode } catch { }
-      Emit "bundle_status" $(if ($c) { $c } else { 'ERR' })
+      $page = $null
+      Emit "page_error" $_.Exception.Message
     }
-  } else {
-    Emit "bundle_url" "NOT ADVERTISED"
-  }
 
-  # (c) the host RPC route
-  $rpcId = [guid]::NewGuid().ToString('N')
-  foreach ($ep in @('task.preference', 'definitely.not.an.endpoint')) {
-    $fullEp = 'dsh-worktree-space/' + $ep
-    $envl = @{ type='client-request'; rpcId=$rpcId; method=$fullEp; payload=@{} } | ConvertTo-Json -Compress
-    try {
-      $r = Invoke-WebRequest -Uri ($base + '/api/' + $fullEp) -Method POST -Body $envl `
-                 -ContentType 'application/json' -UseBasicParsing -TimeoutSec 20 -WebSession $sess
-      Emit ("rpc_" + $ep) ("HTTP " + $r.StatusCode + "  " + (($r.Content -replace '\s+',' ').Trim()))
-    } catch {
-      $code = $null; $raw = ''
-      try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+    # (b) the advertised client bundle. Read through a local, so a page that was
+    # never fetched reads as "we do not know" instead of as a plugin that failed
+    # to advertise itself - those are very different findings.
+    $html = ''
+    if ($page) { $html = $page.Content }
+    $m = [regex]::Match($html, '"dsh-worktree-space","url":"([^"]+)"')
+    if ($m.Success) {
+      Emit "bundle_url" $m.Groups[1].Value
       try {
-        $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
-        $raw = $sr.ReadToEnd(); $sr.Close()
-      } catch { }
-      Emit ("rpc_" + $ep) $(if ($code) { "HTTP $code  " + (($raw -replace '\s+',' ').Trim()) } else { "error: " + $_.Exception.Message })
+        $b = Invoke-WebRequest -Uri ($base + '/' + $m.Groups[1].Value) -UseBasicParsing `
+                 -TimeoutSec 30 -WebSession $sess
+        # .Content for a text/javascript response is a Byte[] on Windows
+        # PowerShell, and casting that to [string] yields the literal text
+        # "System.Byte[]" - which matches nothing and reads like a plugin fault.
+        # Read the raw stream instead.
+        $ms = New-Object IO.MemoryStream
+        $b.RawContentStream.CopyTo($ms)
+        $bt = [Text.Encoding]::UTF8.GetString($ms.ToArray())
+        Emit "bundle_status"  $b.StatusCode
+        Emit "bundle_bytes"   $b.RawContentLength
+        Emit "bundle_type"    $b.Headers['Content-Type']
+        Emit "bundle_registers" ([regex]::Matches($bt,'id: "dsh-worktree-space"')).Count
+        Emit "bundle_endpoints" ([regex]::Matches($bt,'dsh-worktree-space/[a-z]+\.[a-z-]+')).Count
+      } catch {
+        $c = $null; try { $c = [int]$_.Exception.Response.StatusCode } catch { }
+        Emit "bundle_status" $(if ($c) { $c } else { 'ERR' })
+      }
+    } elseif ($page) {
+      Emit "bundle_url" "NOT ADVERTISED"
+    } else {
+      Emit "bundle_url" "UNKNOWN: the index page was never fetched"
+      Emit "bundle_status" "SKIPPED"
+    }
+
+    # (c) the host RPC route. Skipped, with the reason on the record, when the
+    # index fetch failed: without the session cookie EVERY /api route answers 405
+    # or 404, including host routes that are certainly present, so probing anyway
+    # would file a plugin fault that never happened.
+    if ($sess) {
+      $rpcId = [guid]::NewGuid().ToString('N')
+      foreach ($ep in @('task.preference', 'definitely.not.an.endpoint')) {
+        $fullEp = 'dsh-worktree-space/' + $ep
+        $envl = @{ type='client-request'; rpcId=$rpcId; method=$fullEp; payload=@{} } | ConvertTo-Json -Compress
+        try {
+          $r = Invoke-WebRequest -Uri ($base + '/api/' + $fullEp) -Method POST -Body $envl `
+                     -ContentType 'application/json' -UseBasicParsing -TimeoutSec 20 -WebSession $sess
+          Emit ("rpc_" + $ep) ("HTTP " + $r.StatusCode + "  " + (($r.Content -replace '\s+',' ').Trim()))
+        } catch {
+          $code = $null; $raw = ''
+          try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+          try {
+            $sr = New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())
+            $raw = $sr.ReadToEnd(); $sr.Close()
+          } catch { }
+          Emit ("rpc_" + $ep) $(if ($code) { "HTTP $code  " + (($raw -replace '\s+',' ').Trim()) } else { "error: " + $_.Exception.Message })
+        }
+      }
+    } else {
+      foreach ($ep in @('task.preference', 'definitely.not.an.endpoint')) {
+        Emit ("rpc_" + $ep) "SKIPPED: no session cookie, the index fetch failed"
+      }
     }
   }
 }
-
-# taskkill /T /F, not $proc.Kill($true): that overload does not exist on .NET
-# Framework, and swallowing the error leaves the server holding its port.
-$tree = & taskkill /PID $proc.Id /T /F 2>&1
-$null = $proc.WaitForExit(15000)
-Emit "boot_stopped" $proc.HasExited
-if (-not $proc.HasExited) { Emit "boot_kill_FAILED" ($tree -join ' ') }
+finally {
+  # The server cleanup is in a finally so it runs on EVERY way out of the probe
+  # block, including any throw that escapes it. That is the whole point: the probe
+  # is the part that fails, and a throw from here used to skip the kill entirely.
+  #
+  # taskkill /T /F, not $proc.Kill($true): that overload does not exist on .NET
+  # Framework, and swallowing the error leaves the server holding its port. The
+  # kill goes through Stop-ProcessTree so a taskkill stderr line - which it writes
+  # every single time the pid is already dead - cannot become a terminating error
+  # and take stages 5 and 6 down with it.
+  $kill = Stop-ProcessTree -ProcessId $proc.Id -Process $proc -Label 'dsh server'
+  Emit "boot_stopped" $kill.stopped
+  if (-not $kill.stopped) { Emit "boot_kill_FAILED" $kill.output }
+}
 
 # --- 5. uninstall ------------------------------------------------------------
 

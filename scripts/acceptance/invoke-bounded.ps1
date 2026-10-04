@@ -27,6 +27,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'stop-tree.ps1')
 
 $root = [System.IO.Path]::GetFullPath($AllowedRoot)
 $out  = [System.IO.Path]::GetFullPath($OutFile)
@@ -68,11 +69,17 @@ if (-not $p.WaitForExit($TimeoutSec * 1000)) {
   #
   # taskkill /T /F kills the tree on Windows. The kill is then VERIFIED, because
   # an unverified kill is the same silent failure as a swallowed error.
-  $tree = & taskkill /PID $p.Id /T /F 2>&1
-  $null = $p.WaitForExit(15000)
-  if (-not $p.HasExited) {
+  #
+  # The kill itself goes through Stop-ProcessTree. This line used to be
+  # `$tree = & taskkill /PID $p.Id /T /F 2>&1`, which is the very trap the header
+  # comment warns about, reached through taskkill: under $ErrorActionPreference =
+  # 'Stop' the "not found" taskkill writes to stderr became a terminating error,
+  # so the timeout branch - the one that exists precisely because the process
+  # misbehaved - could abort the whole run instead of returning -1.
+  $kill = Stop-ProcessTree -ProcessId $p.Id -Process $p -Label ($Exe + ' (timeout)') -WaitMs 15000
+  if (-not $kill.stopped) {
     Write-Host ("KILL-FAILED after {0}s timeout; pid {1} is still alive" -f $TimeoutSec, $p.Id)
-    Write-Host ($tree -join [Environment]::NewLine)
+    Write-Host $kill.output
     return @{ code = -2; timedOut = $true; killFailed = $true; out = $out; err = $err }
   }
   Write-Host ("TIMEOUT after {0}s; process tree killed" -f $TimeoutSec)

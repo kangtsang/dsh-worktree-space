@@ -85,6 +85,12 @@
 四步打包、安装、建 profile、启动 web 实例都做完了，脚本停在页面上，**由你决定功能对不对**。Ctrl-C 或
 `-HoldSeconds` 到期后关闭，`case.env` 里留下 URL、路径和日志位置。
 
+> **`stop-tree.ps1` 是共享的，不是入口。** 它只定义一个函数 `Stop-ProcessTree`，被 `run-one.ps1`、
+> `start-acceptance.ps1`、`invoke-bounded.ps1`、`install-hosts.ps1` 以 dot-source 引入，自己什么都不执行。
+> 四个脚本都要杀进程树，所以定义一份比各写一份更诚实——本目录的守卫是靠 AST 从入口脚本里抽出来测的，
+> 重复四份就等于有四份可以各自漂移的守卫。它本身**一个 `Remove-Item` 都没有**（注释里那两处是在解释
+> 它为什么故意不留删除面），也没有非 ASCII 字节。
+
 | | |
 | --- | --- |
 | **做** | 检查 bundle 新鲜度 → `npm pack` → 建 profile → `dsh plugin add` 装 tarball → 建 fixture 仓库 → 启 web 实例 → 停在那儿 |
