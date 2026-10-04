@@ -103,14 +103,35 @@ export function slashPath(value: unknown) {
 }
 
 /**
+ * Whether two paths are Windows-shaped, and case therefore cannot tell two spellings
+ * of one directory apart from two different directories.
+ *
+ * This is decided from the paths, never from `process.platform`. The client bundle
+ * runs in a browser and has no idea what the Host it is talking to runs on - that
+ * value would describe the browser. A drive letter is the thing that carries the
+ * answer across the wire: `C:\Repo` only reaches us from a Windows Host, and on one,
+ * `Repo` and `repo` are one directory spelled two ways.
+ *
+ * The cost of getting it backwards is not symmetric. Folding case where the
+ * filesystem does not treats `/Work` and `/work` as one directory, which can drop a
+ * repository the session was about to touch, or hand a commit a write boundary that
+ * spans two unrelated trees. Failing to fold on Windows is a duplicate listing. So
+ * every comparison in this module goes through here rather than calling toLowerCase
+ * on its own — two of the three did, and the two disagreed with the third.
+ * @param left - one path, already separator-normalised.
+ * @param right - the other.
+ * @returns whether both carry a drive letter.
+ */
+function bothWindowsPaths(left: string, right: string): boolean {
+  return /^[a-zA-Z]:/.test(left) && /^[a-zA-Z]:/.test(right)
+}
+
+/**
  * Whether two paths name the same location.
  *
  * Compared after the separator style and trailing separators are settled, because
  * the same directory reaches this code spelled more than one way: the Host answers
  * with the platform's own, git reports forward slashes, and a user types either.
- * Case is folded only when both names carry a drive letter — that is what says they
- * are Windows paths, where one directory has one spelling, against a POSIX
- * filesystem where `Repo` and `repo` really are two directories.
  * @param left - one path.
  * @param right - the other.
  * @returns whether both name one location.
@@ -119,8 +140,7 @@ export function sameLocation(left: unknown, right: unknown) {
   const first = slashPath(cleanPath(left))
   const second = slashPath(cleanPath(right))
   if (first === second) return true
-  const windows = /^[a-zA-Z]:/.test(first) && /^[a-zA-Z]:/.test(second)
-  return windows && first.toLowerCase() === second.toLowerCase()
+  return bothWindowsPaths(first, second) && first.toLowerCase() === second.toLowerCase()
 }
 
 /**
@@ -128,7 +148,10 @@ export function sameLocation(left: unknown, right: unknown) {
  *
  * The layout rules ask this of two directories that must stay outside one another,
  * and the answer has to be about location rather than about spelling for the same
- * reason {@link sameLocation} folds what it folds.
+ * reason {@link sameLocation} folds what it folds: `isInsideDirectory` answered from
+ * spelling alone, so on a case-sensitive filesystem `/WORKSPACE/public` came back as
+ * sitting inside `/workspace` and the layout rule that uses this would have rejected
+ * a container for no reason.
  * @param parent - the containing directory.
  * @param child - the candidate descendant.
  * @returns whether `child` sits below `parent`, and is not `parent`.
@@ -138,7 +161,12 @@ export function isInsideDirectory(parent: unknown, child: unknown) {
   const inner = slashPath(cleanPath(child)).replace(/\/+$/, "")
   if (sameLocation(outer, inner)) return false
   const prefix = outer.endsWith("/") ? outer : `${outer}/`
-  return inner.toLowerCase().startsWith(prefix.toLowerCase())
+  // Two branches, not one. Folding is a decision about spelling, and answering
+  // "these are not Windows paths" as though it were the answer to "is the child below
+  // the parent" makes every POSIX directory look like a root: `/workspace/public`
+  // came back as not inside `/workspace`.
+  if (bothWindowsPaths(inner, prefix)) return inner.toLowerCase().startsWith(prefix.toLowerCase())
+  return inner.startsWith(prefix)
 }
 
 /**
@@ -155,13 +183,22 @@ export function isInsideDirectory(parent: unknown, child: unknown) {
  * approval it avoids.
  */
 export function commonAncestor(left: unknown, right: unknown) {
-  const first = slashPath(cleanPath(left)).split("/")
-  const second = slashPath(cleanPath(right)).split("/")
+  const leftPath = slashPath(cleanPath(left))
+  const rightPath = slashPath(cleanPath(right))
+  const first = leftPath.split("/")
+  const second = rightPath.split("/")
+  // Case folds only on Windows-shaped paths, for the reason `bothWindowsPaths` gives.
+  // Unconditionally, this function handed the caller a directory shared by two trees
+  // that have nothing to do with each other: `/Work/task/alpha` and `/work/repos/alpha`
+  // came back as `/Work`, and that answer is used as a write boundary when a session
+  // commits - so on a case-sensitive Host it would have widened the boundary to a
+  // directory neither repository is under, or to nothing at all and then fallen back
+  // to asking for approval.
+  const fold = bothWindowsPaths(leftPath, rightPath)
+  const key = (segment: string) => (fold ? segment.toLowerCase() : segment)
   const shared: string[] = []
   for (let index = 0; index < Math.min(first.length, second.length); index += 1) {
-    // Compared without case: Windows is case-insensitive, and the two paths reach
-    // here from different sources - the Host's answer and the git command output.
-    if (first[index].toLowerCase() !== second[index].toLowerCase()) break
+    if (key(first[index]) !== key(second[index])) break
     shared.push(first[index])
   }
   return shared.length < 2 ? undefined : shared.join("/")

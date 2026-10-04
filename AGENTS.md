@@ -189,6 +189,29 @@
 
 **`git` 层只有三个文件**：`test/task-merge-worktree.test.mjs`、`test/encoding.test.ts` 和 `test/suite-runner-budget.test.mjs`。前两个用 `execFileSync` 驱动真实 git，在 Windows 上单次 `git.exe` 启动几乎全是进程创建开销，所以慢得没法靠调参解决；第三个 fork 真实的 node 进程树，理由相同——它验的就是进程树行为，对真实进程之外的东西断言不算数。新增真正跑进程 / 碰磁盘的测试时放进这一层，`vitest.config.ts` 顶部的 `REAL_GIT` 一行加文件名。**这一行的文件名数量要跟着变**：它写错不会让任何测试失败，只会让下一个照着它放文件的人以为规则是"只有两个"。
 
+### 测试里的路径不能无条件按 Windows 语义断言——CI 跑在 Linux 上
+
+`.github/workflows/ci.yml` 是 `runs-on: ubuntu-latest`，跑的是完整的 `pnpm test`。
+**本地在 Windows 上全绿，只说明 Windows 上绿。**
+
+本仓库的路径处理**按文件系统大小写敏感性分叉**：宿主的 `canonicalPath` 只在
+`process.platform === 'win32'` 时折叠大小写（`src/host/task/paths.js`），
+因为 Linux 上 `/Repo` 和 `/repo` 就是两个目录，把看着像的其中一个剪掉，等于静默丢掉一个真实工作区。
+
+**所以断言大小写差异的行为时必须按平台分支，不能只写 Windows 的答案。** 栽过一次：
+`test/host.test.mjs` 里一条 `prunes a nested Workspace whose path differs only in case`
+写死了 `E:\WORKSPACE\public` 被 `e:\workspace` 包含，在 Linux 上必然失败——而它一直「绿」，
+因为本机是 Windows，从来没人跑过 Linux。**一个从来没在 CI 上跑过的测试，和没写是同一个状态。**
+
+**别把这条反过来修成「干脆不分大小写」。** 同时补一条对照用例：共享前缀拼写一致时
+（`E:\workspace\PUBLIC` vs `E:\workspace`）在**所有**平台都剪。两条合起来才把
+「按平台分叉」和「完全不看大小写」区分开——只改前一条，反向的修法也能让它变绿。
+
+**客户端那份另有一条约定，和宿主不同，别混。** 浏览器端不知道宿主是什么系统，
+所以 `src/client/lib/paths.ts` 是**按路径形状**判断：两边都带盘符（`^[a-zA-Z]:`）才当
+Windows 路径折叠大小写（`sameLocation`）。写客户端路径工具时照这个来，别去读 `process.platform`
+——浏览器里那个值是浏览器的，不是宿主的。
+
 ### `maxWorkers` 必须写在根级，不能写在 project 里
 
 这是本仓库最容易踩的坑，而且**踩了不报错**。

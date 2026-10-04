@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanPath, commonAncestor, nameOf, normalizedSlugOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
+import { cleanPath, commonAncestor, isInsideDirectory, nameOf, normalizedSlugOf, parentOf, slugOf, taskDirectory } from "../src/client/lib/paths"
 
 describe("worktree path helpers", () => {
   it("normalizes trailing separators without changing root paths", () => {
@@ -63,8 +63,31 @@ describe("the directory a worktree and its repository share", () => {
   it("keeps the left path's own spelling of the shared part", () => {
     // The two paths reach here from different sources - the Host's answer and a git
     // command's output - so the comparison ignores case while the answer keeps the
-    // spelling the caller already had on screen.
+    // spelling the caller already had on screen. Both carry a drive letter, which is
+    // what says they are Windows paths where one directory has one spelling.
     expect(commonAncestor("E:\\Work\\task\\alpha", "e:\\work\\repos\\alpha")).toBe("E:/Work")
+  })
+
+  it("finds no shared directory between two POSIX paths that differ only in case", () => {
+    // `/Work` and `/work` are two directories, so there is no directory above both of
+    // them but `/` - and `/` is exactly the boundary `commonAncestor` refuses to hand
+    // back, because a write boundary that wide would make the whole disk writable.
+    //
+    // These two cases run on every platform, including a Windows one: the client does
+    // not read `process.platform` - it is a browser bundle and that value would
+    // describe the browser - it decides from the path shape. So a POSIX path is treated
+    // as case-sensitive whether or not the machine running the test is.
+    expect(commonAncestor("/Work/task/alpha", "/work/repos/alpha")).toBeUndefined()
+    expect(commonAncestor("/Work/task/alpha", "/Work/repos/alpha")).toBe("/Work")
+  })
+
+  it("does not place a POSIX path inside another that differs only in case", () => {
+    // The layout rules ask this of two directories that have to stay outside one
+    // another. Answering from spelling alone rejected a container for no reason.
+    expect(isInsideDirectory("/workspace", "/WORKSPACE/public")).toBe(false)
+    expect(isInsideDirectory("/workspace", "/workspace/public")).toBe(true)
+    // A drive letter is the other end of the same rule, in the other direction.
+    expect(isInsideDirectory("e:\\workspace", "E:\\WORKSPACE\\public")).toBe(true)
   })
 
   it("answers with nothing when only a volume root is shared", () => {

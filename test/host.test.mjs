@@ -809,8 +809,29 @@ describe("a Workspace registered inside another Workspace", () => {
 
   it("prunes a nested Workspace whose path differs only in case", () => {
     // Windows has one directory named once; `WORKSPACE` and `workspace` are one
-    // spelling of it, not two.
-    expect(topLevelRequestedPaths(["E:\\WORKSPACE\\public", "e:\\workspace"])).toEqual(["e:\\workspace"])
+    // spelling of it, not two, so the nested one goes.
+    //
+    // Linux has two directories, and it has to keep them: a Workspace registered at
+    // `/Workspace/public` is a different Workspace from `/workspace`, and dropping it
+    // because the two merely look alike would lose real work with nothing to notice
+    // it was lost. That is the whole reason `canonicalPath` lowercases on win32 and
+    // nowhere else, and this case is what pins that down. Asserting the Windows answer
+    // on every platform would have been describing a bug on half of them.
+    const nested = "E:\\WORKSPACE\\public"
+    const parent = "e:\\workspace"
+    expect(topLevelRequestedPaths([nested, parent]))
+      .toEqual(process.platform === "win32" ? [parent] : [nested, parent])
+  })
+
+  it("prunes a nested Workspace whose ancestor is spelled the same either way", () => {
+    // The case above must not have been "fixed" by dropping case handling outright.
+    // With the shared prefix spelled identically this is a plain descendant on every
+    // platform, so it goes on every platform - which is what separates the two
+    // answers above from a function that never looks at case at all.
+    const nested = "E:\\workspace\\PUBLIC"
+    const parent = "E:\\workspace"
+    expect(topLevelRequestedPaths([nested, parent])).toEqual([parent])
+    expect(topLevelRequestedPaths([parent, nested])).toEqual([parent])
   })
 
   it("does not prune a sibling that only shares a name prefix, in either separator", () => {
