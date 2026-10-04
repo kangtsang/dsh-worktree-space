@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 /**
@@ -73,6 +73,52 @@ describe("scripts/check-package-contents.mjs", () => {
       // And it stops before doing anything, rather than leaving a cache
       // directory behind on the way to failing.
       expect(existsSync(join(workdir, ".npm-cache"))).toBe(false)
+    } finally {
+      await rm(workdir, { recursive: true, force: true })
+    }
+  }, 20_000)
+
+  it("finds npm under lib/, which is where the Linux and macOS archives install it", async () => {
+    // The check above is satisfied by a machine shaped like Windows, where npm sits
+    // beside the node executable. Nothing here said what happens on the other layout,
+    // so the path was assumed rather than looked for, and the assumption held until
+    // the first run on a Linux runner - where the whole gate refused to open on a
+    // path that does not exist, and printed "install a Node that ships npm" about a
+    // Node that shipped npm one directory over.
+    //
+    // A Node installation does not agree with itself about where npm lives: the
+    // Windows installer puts it at <prefix>/node_modules/npm, and the official Linux
+    // and macOS archives put it at <prefix>/lib/node_modules/npm. The candidate list
+    // is what covers both, so this builds the second shape and asks for the same
+    // answer the Windows-shaped test above already gets.
+    const workdir = await mkdtemp(join(tmpdir(), "dsh-npm-cli-posix-"))
+    try {
+      const binDir = join(workdir, "node", "22.23.3", "x64", "bin")
+      const libDir = join(workdir, "node", "22.23.3", "x64", "lib")
+      await mkdir(binDir, { recursive: true })
+      // Only one thing is installed here, and it is npm, in the POSIX spot. The
+      // Windows spot is deliberately left empty so this cannot pass by accident on
+      // the candidate that Windows already covers.
+      const npmCli = join(libDir, "node_modules", "npm", "bin", "npm-cli.js")
+      await mkdir(dirname(npmCli), { recursive: true })
+      await writeFile(join(binDir, "node"), "")
+      await writeFile(npmCli, "console.log('pretend npm')\n")
+
+      const { code, stderr } = await runModule(
+        [
+          `process.execPath = ${JSON.stringify(join(binDir, "node"))}`,
+          `await import(${JSON.stringify(SCRIPT)})`,
+        ].join("\n"),
+        workdir,
+      )
+
+      // It got past locating npm - so it did not print the "not where a Node
+      // installation puts it" report. It fails later, on the dry-run pack of a
+      // directory that is not a package, and that is the point: the gate opened.
+      expect(stderr).not.toContain("CVE-2024-27980")
+      expect(stderr).not.toContain("is not where this Node installation puts it")
+      expect(existsSync(join(workdir, ".npm-cache"))).toBe(true)
+      expect(code).not.toBe(0)
     } finally {
       await rm(workdir, { recursive: true, force: true })
     }

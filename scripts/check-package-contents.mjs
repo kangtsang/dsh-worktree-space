@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { execFile } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, join, normalize } from "node:path"
 import { promisify } from "node:util"
 
 const execFileAsync = promisify(execFile)
@@ -15,20 +15,58 @@ const execFileAsync = promisify(execFile)
 // There is deliberately no fallback to the npm on PATH. That fallback cannot
 // work: on Windows it is the same batch shim, so it is not a slower route to the
 // same answer but a guaranteed failure on the one platform that has the problem.
-// Measured on this machine, Node 24: the bare name resolves to nothing at all
+// Measured on Windows with Node 24: the bare name resolves to nothing at all
 // (ENOENT) and naming the shim is rejected outright (EINVAL) - the CVE fix doing
 // exactly its job. So an unusual Node layout is reported rather than guessed at.
 // This check is the last gate before publishing, and a gate that cannot run must
 // not open.
-const npmCli = join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js")
-if (!existsSync(npmCli)) {
+//
+// The entry point is looked for rather than assumed, because a Node installation
+// does not agree with itself about where npm lives. The Windows installer puts it
+// beside the executable - `<prefix>\node_modules\npm\bin\npm-cli.js` - while the
+// official Linux and macOS archives put it under `lib` -
+// `<prefix>\lib\node_modules\npm\bin\npm-cli.js`. Assuming the first was fine on the
+// machine the assumption was made on and fatal on the CI runner, where the path
+// looked for does not exist at all and the gate refused to open. It refused for the
+// right reason and for the wrong one at the same time: the message said "install a
+// Node that ships npm", and the runner's Node shipped npm perfectly well, one
+// directory over.
+//
+// `process.execPath` is resolved through any symlink first. On a runner the `node`
+// on PATH is a link into the tool cache, and the archive layout lives behind the
+// link rather than next to it - reading the link's own directory would look for npm
+// somewhere it was never installed.
+function npmCliCandidates() {
+  // A symlink is followed when there is one to follow. `process.execPath` is a real
+  // path on any normal installation and a fabricated one under test, and
+  // realpathSync throws ENOENT on a path that does not exist - which would replace
+  // this check's own report with a stack trace about something else entirely. That
+  // is worse than the layout it was written to diagnose, and the one situation this
+  // branch exists for is precisely the situation where it cannot resolve anything.
+  let execPath = process.execPath
+  try {
+    execPath = realpathSync(execPath)
+  } catch {
+    // Keep the path as given and let the candidates below decide.
+  }
+  const prefix = dirname(execPath)
+  return [
+    join(prefix, "node_modules", "npm", "bin", "npm-cli.js"),
+    normalize(join(prefix, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")),
+  ]
+}
+
+const candidates = npmCliCandidates()
+const npmCli = candidates.find((path) => existsSync(path))
+if (!npmCli) {
   console.error(
-    `npm's CLI entry point is not where a Node installation puts it.\n\n` +
-      `  looked for: ${npmCli}\n\n` +
-      `That file is npm's own JS, installed beside the node executable. Without it this ` +
-      `machine's npm can only be reached through a .cmd shim, and a shim is exactly what ` +
-      `Node stopped running without a shell after CVE-2024-27980 - so this check stops ` +
-      `here instead of pretending to have looked.\n\n` +
+    `npm's CLI entry point is not where this Node installation puts it.\n\n` +
+      candidates.map((path) => `  looked for: ${path}\n`).join("") +
+      `\nThat file is npm's own JS. Windows installs it beside the node executable and the ` +
+      `Linux and macOS archives install it under lib/, and both are listed above.\n\n` +
+      `Without it this machine's npm can only be reached through a .cmd shim, and a shim is ` +
+      `exactly what Node stopped running without a shell after CVE-2024-27980 - so this ` +
+      `check stops here instead of pretending to have looked.\n\n` +
       `Install a Node that ships npm, or run this with one that does, and try again.`,
   )
   process.exit(1)
