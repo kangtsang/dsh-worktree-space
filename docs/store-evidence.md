@@ -156,11 +156,16 @@ dsh --profile evidence --dump-config
 （`run-all.ps1` 依版本顺序取号）：`0.2.0-rc.2` → 34800、`0.2.0-rc.1` → 34801、`0.1.7-rc.2` → 34802、
 `0.1.7-rc.1` → 34803，避开宿主默认的 3080。
 被测产物是 `dsh-worktree-space-1.2.0.tgz`，由本仓库 `pnpm pack` 产出，含 21 个文件，
-sha256 `C82F4F24F135230FFC9462A89677A503725044A020BAB97BFF46E9113DBFA432`（422635 字节）。
-本轮测的就是提交 `57bf17b`（`build: bundles for 1.2.0`），运行时间 2026-10-04 14:58:57 +08:00，
-判定 `PASS`（4 通过 0 失败），总耗时 29 秒，退出码 0。矩阵报告写在
-`<RunRoot>\logs\matrix-report.md` 与同名 `.json`，报告里带着 `Commit: 57bf17b`——
+sha256 `4EACB47A29C712E0D80EFE2405A7802ED8AFFE26E228DA74A484C74777B69923`（430357 字节）。
+本轮测的就是提交 `5476d81`，运行时间 2026-10-04 16:18:01 +08:00，
+判定 `PASS`（4 通过 0 失败），总耗时 25 秒，退出码 0。矩阵报告写在
+`<RunRoot>\logs\matrix-report.md` 与同名 `.json`，报告里带着 `Commit: 5476d81`——
 **一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
+
+> **`5476d81` 这个 sha 后来不存在了，这不代表报告是假的。**
+> 它在重整提交历史时被并进了本节所在的提交。tarball 是不可变文件，上面那个
+> `4EACB47A…` 才是能长期复核的东西；提交 sha 只是当时的指针，改一次历史就换一个。
+> 真要按当时那个提交复核，得先把仓库退回去——所以复核时以产物哈希为准，别拿 sha 去 `git show`。
 
 | DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -173,8 +178,31 @@ sha256 `C82F4F24F135230FFC9462A89677A503725044A020BAB97BFF46E9113DBFA432`（4226
 `version` 均为 `1.2.0`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
 
 回滚是**逐字节**回到安装前，不是"看起来干净"：每个版本的 `06-dump-after-remove.txt` 与
-`01-create.txt` 行数完全相同（45660/45660、45065/45065、44712/44712），
+`01-create.txt` 行数完全相同（1259/1259、1259/1259、1246/1246、1234/1234），
 `cordis.patch.yml` 提及数为 0，`node_modules` 已删除。
+
+### 宿主在 bundle 末尾追加 76 字节——自动化比对必须先剥掉它
+
+服务端下发的 `client/client.js` **永远不等于**仓库里那份，直接比 sha256 会在完全正常的构建上报「陈旧」。
+差的是宿主自己追加的一行：
+
+```
+;//# sourceMappingURL=…/dsh-worktree-space/client.js.map&rev=<token>
+```
+
+这不是推测。本轮拿 `0.2.0-rc.2` 现场起的宿主抓下四个版本的响应，逐字节定位：
+**公共前缀 = 259843 字节，正好是仓库文件全长；公共后缀 = 0 字节**。仓库文件是响应的一个完整前缀，
+多出来的只有结尾那 76 字节，其中 `rev` 逐版本不同（内容寻址的缓存键），这也是四份原始哈希互不相同的原因。
+只对前 259843 字节算哈希，得到 `279CF672…4F86`，与仓库 `client\client.js` 完全一致——4/4 如此。
+
+上一轮 `wts-1.2.0-4` 换了个包、换个 run root 独立抓了一次，结论相同（公共前缀 = 259620，
+公共后缀 = 0）。两次不同产物各自复现，这条才算数。
+
+**所以自动化检查要先把末尾那行剥掉再比。** 矩阵本身只记 `bundle_bytes`、从不记哈希，
+而第 5 步会卸载插件，跑完之后装进去的副本就没了——想验只能在宿主还活着的时候抓。
+
+阴性对照也要留着，否则这条比对可能恒真：翻一个字节，sha256 变、**长度不变**（证明长度比对什么都证不了）；
+拿 `lib\index.js` 去和 `client\client.js` 比，哈希不同（证明能区分不同文件）。
 
 ### 这份证据是循环的，如实记下
 
@@ -209,8 +237,8 @@ sha256 `C82F4F24F135230FFC9462A89677A503725044A020BAB97BFF46E9113DBFA432`（4226
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
 | 2.3 进程正常启动 | 四次均 `boot_alive: True`，stderr 文件均 0 字节，`boot_stopped: True` | |
 | 2.3 页面可达 | 四次均 HTTP 200（35367 / 35333 / 34825 / 33544 字节，按 0.2.0-rc.2 到 0.1.7-rc.1），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**258782 字节**，内容含 `id: "dsh-worktree-space"` | 服务端字节比仓库的 `client\client.js`（258706）多 **76**，两轮都是 76，是宿主加的固定外壳，不是产物变了 |
-| 2.3 bundle 的 rev 逐版本不同 | `b2693514cba9` / `333d4d84068e` / `9a8ecfa438ec` / `c36b96f125b4` | 内容寻址，四份不同的宿主缓存各自一份 |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript`、**259919 字节**，内容含 `id: "dsh-worktree-space"` | 服务端字节比仓库的 `client\client.js`（259843）多 **76**，是宿主在末尾追加的 sourceMappingURL 行；剥掉后 4/4 与仓库逐字节相同，见上一节 |
+| 2.3 bundle 的 rev 逐版本不同 | `9c047b848fe9` / `6861d3275746` / `c36838489fc1` / `63d844917001` | 内容寻址，四份不同的宿主缓存各自一份 |
 | 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
