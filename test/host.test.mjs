@@ -75,11 +75,36 @@ describe("worktree porcelain parser", () => {
       await mkdir(join(root, "projects", "one", ".git"), { recursive: true })
       await mkdir(join(root, "node_modules", "ignored", ".git"), { recursive: true })
       await mkdir(join(root, "projects", "two"), { recursive: true })
+      // A linked worktree, not a repository: `projects/two` carries `.git` as a file
+      // and is a checkout of `projects/one`. See the test below for why that is not a
+      // root of its own.
       await writeFile(join(root, "projects", "two", ".git"), "gitdir: ../one/.git\n")
       expect((await discoverGitRoots(root)).sort()).toEqual([
         join(root, "projects", "one"),
-        join(root, "projects", "two"),
       ].sort())
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("does not list a linked worktree as a repository of its own", async () => {
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-worktree-"))
+    try {
+      // The shape a task space makes: a container of linked worktrees, one per
+      // repository. Registering a container root as a Workspace used to answer with
+      // every one of them, and each row named the repository they are checkouts of -
+      // the same repository, once per task space, under a path that is not its own.
+      await mkdir(join(root, "alpha"), { recursive: true })
+      await writeFile(join(root, "alpha", ".git"), "gitdir: ../../elsewhere/.git/worktrees/alpha\n")
+      // A real repository beside them, so a walk that finds nothing at all is not
+      // what this is looking at.
+      await mkdir(join(root, "repo", ".git"), { recursive: true })
+
+      expect(await discoverGitRoots(root)).toEqual([join(root, "repo")])
+      // Pointed straight at one, the answer is the same: this is the directory a
+      // create refuses as a source root, and a scan must not offer what a create
+      // would then refuse.
+      expect(await discoverGitRoots(join(root, "alpha"))).toEqual([])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

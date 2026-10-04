@@ -4,6 +4,7 @@ import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { addTaskRepositories } from "../src/host/task/add.js"
+import { readAudit } from "../src/host/task/audit-log.js"
 
 /**
  * Adding a repository to a task that already exists.
@@ -405,6 +406,99 @@ describe("addTaskRepositories", () => {
       // And the record still says what it said: the worktrees are written to it
       // only once every one of them exists.
       expect(await fixture.readMetadata()).toEqual(before)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("takes back the record it wrote when the container had none, so the repository can be added again", async () => {
+    const fixture = await taskFixture()
+    // A space made before the JSON existed carries no record of its own, only the
+    // note - so whatever this call writes is the only record there will be.
+    await rm(fixture.metadataPath)
+    const halfWritten = subprocessMock({
+      "show-ref --verify --quiet refs/heads/task/login": { exitCode: 1 },
+      "rev-parse --abbrev-ref HEAD": ({ cwd }) => (cwd.startsWith(fixture.taskPath) ? BRANCH : "main"),
+      "rev-parse HEAD": "deadbeef",
+      "status --porcelain": "",
+      // The worktree goes in, and so does a directory where the note belongs: the
+      // record is written first and the note second, so this is the half-written
+      // state - a record on disk naming a repository whose worktree is about to go.
+      "worktree add": async ({ args }) => {
+        await mkdir(args[2], { recursive: true })
+        await rm(join(fixture.taskPath, "worktree-space.md"), { force: true })
+        await mkdir(join(fixture.taskPath, "worktree-space.md"))
+        return ""
+      },
+      "worktree remove": async ({ args }) => {
+        await rm(args[args.length - 1], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      await expect(addTaskRepositories(halfWritten.subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+      })).rejects.toThrow()
+
+      // Left behind, that record is the only thing naming 'gamma', so the next
+      // request to add it is refused as a name this task already holds.
+      expect(existsSync(join(fixture.taskPath, "worktree-space.json"))).toBe(false)
+      const retry = subprocessMock({
+        "show-ref --verify --quiet refs/heads/task/login": { exitCode: 1 },
+        "rev-parse --abbrev-ref HEAD": ({ cwd }) => (cwd.startsWith(fixture.taskPath) ? BRANCH : "main"),
+        "rev-parse HEAD": "deadbeef",
+        "status --porcelain": "",
+        "worktree add": { exitCode: 128, stderr: "fatal: could not add worktree" },
+      })
+      await expect(addTaskRepositories(retry.subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+      })).rejects.toThrow(/could not add worktree/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("gives the caller the code git put on the failure, and records the same one", async () => {
+    const fixture = await taskFixture(["gamma", "beta"])
+    const base = addSucceeds(fixture.taskPath)
+    const subprocess = {
+      spawn(request) {
+        const key = request.argv.slice(3).join(" ")
+        // The first repository goes in; the second fails on something git names,
+        // which is the code the caller has to be told rather than a catch-all.
+        if (key.startsWith("worktree add") && key.includes("beta")) {
+          return {
+            done: Promise.resolve({ exitCode: 128, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "" }) },
+              stderr: { readFrom: () => ({ text: "fatal: not a git repository\n" }) },
+            },
+          }
+        }
+        return base.subprocess.spawn(request)
+      },
+    }
+    try {
+      const failure = await addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+      }).then(() => undefined, (error) => error)
+
+      // The error is rebuilt, to carry the rollback's outcome in its message, and
+      // `recover` reads the code off it with no classifier to fall back on.
+      expect(failure.code).toBe("E3004")
+      // And the record says the same thing: a code read off either end has to be
+      // the one to grep for.
+      const written = (await readAudit(fixture.container)).filter((record) => record.kind === "error")
+      expect(written.map((record) => record.code)).toEqual(["E3004"])
     } finally {
       await fixture.cleanup()
     }

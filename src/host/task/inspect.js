@@ -165,20 +165,6 @@ async function currentBranchOf(subprocess, repoPath) {
 }
 
 
-export function parseBreadcrumb(text) {
-  const source = String(text ?? '')
-  const task = /^# Task:\s*(.+)$/m.exec(source)?.[1]?.trim()
-  if (task === undefined || task === '') return undefined
-  const branch = /^-\s*Branch:\s*`([^`]+)`/m.exec(source)?.[1]?.trim()
-  const sourceRoot = /^-\s*Source root:\s*`([^`]+)`/m.exec(source)?.[1]?.trim()
-  return {
-    task,
-    ...(branch === undefined || branch === '' ? {} : { branch }),
-    ...(sourceRoot === undefined || sourceRoot === '' ? {} : { sourceRoot }),
-  }
-}
-
-
 export async function inspectTask(taskPath) {
   const path = String(taskPath ?? '').trim()
   const name = basename(path)

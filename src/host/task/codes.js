@@ -40,8 +40,8 @@ export const ERROR_CODES = {
   E2002: 'create.js - the task space is this task own, left before its Workspace was registered',
   E2003: 'archive.js, add.js - no task space at that path',
   E2004: 'archive.js, add.js - the task space holds no git worktrees',
-  E2005: 'create.js, add.js - creating or extending failed and everything was rolled back',
-  E2006: 'create.js, add.js - creating or extending failed and the rollback left something behind',
+  E2005: 'create.js, add.js - creating or extending failed with no code of its own, and everything was rolled back',
+  E2006: 'create.js, add.js - creating or extending failed with no code of its own, and the rollback left something behind',
 
   // --- E3xxx git and branches ---------------------------------------------
   E3001: 'create.js, add.js - the branch to cut the worktree from is already in use',
@@ -78,6 +78,7 @@ export const ERROR_CODES = {
   E7004: 'skill.js - a bundled skill file declares a name that is not the one served',
   E7005: 'tool.js - an unknown action was asked for',
   E7006: 'tool.js - a required argument for an action is missing',
+  E7007: 'tool.js - an irreversible action was asked for through a tool call, where it is not the user\'s own decision',
 }
 
 /** The code reported when a failure has no code of its own. */

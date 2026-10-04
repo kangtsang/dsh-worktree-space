@@ -181,4 +181,33 @@ describe("the code table and the public filter are one list", () => {
       }
     }
   })
+
+  it("registers every code the host actually raises", async () => {
+    // The other direction. A code thrown somewhere but missing from the table is
+    // silently flattened to E9001 by publicCode, so the caller is told "something
+    // failed" about a refusal that was written down carefully - E7007 was raised in
+    // tool.js with no entry, and nothing caught it.
+    const { ERROR_CODES, UNKNOWN } = await import("../src/host/task/codes.js")
+    const { readdir, readFile } = await import("node:fs/promises")
+    const { fileURLToPath } = await import("node:url")
+
+    const dir = fileURLToPath(new URL("../src/host/", import.meta.url))
+    const raised = new Map()
+    for (const rel of await readdir(dir, { recursive: true })) {
+      if (!rel.endsWith(".js")) continue
+      const source = await readFile(`${dir}${rel}`, "utf8")
+      for (const match of source.matchAll(/\bE\d{4}\b/g)) {
+        const code = match[0]
+        if (code === UNKNOWN) continue          // the catch-all, deliberately outside the table
+        if (!raised.has(code)) raised.set(code, rel)
+      }
+    }
+
+    // Without this the whole check passes by finding nothing, which is the failure
+    // mode a broken directory walk produces.
+    expect(raised.size, `the walk found only ${raised.size} codes - it is looking in the wrong place`).toBeGreaterThan(30)
+
+    const unregistered = [...raised.keys()].filter((code) => !Object.hasOwn(ERROR_CODES, code)).sort()
+    expect(unregistered, `raised but not in ERROR_CODES: ${unregistered.join(", ")}`).toEqual([])
+  })
 })

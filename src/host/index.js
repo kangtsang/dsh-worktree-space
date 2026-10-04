@@ -58,7 +58,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009',
   'E5001', 'E5002', 'E5003', 'E5004',
   'E6001', 'E6002',
-  'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006',
+  'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
   'E9001',
   'cancelled',
 ])
@@ -414,7 +414,9 @@ export function resolveScanDepth(value) {
 // read, or could not finish looking through. It never throws: one unreadable
 // directory must not cost the caller every other repository, so the walk reports
 // the problem and keeps what it found.
-// @returns the repositories it reached, sorted.
+// @returns the repositories it reached, sorted. A directory is one of them when its
+// `.git` is a directory; a `.git` *file* is a linked worktree, which is a checkout of
+// a repository rather than one, and is left out.
 export async function discoverGitRoots(rootPath, { signal, maxDepth = DEFAULT_SCAN_DEPTH, maxDirectories = MAX_SCAN_DIRECTORIES, ignored = DEFAULT_IGNORED_SCAN_DIRECTORY_SET, onIssue } = {}) {
   const roots = []
   const start = cleanPath(rootPath)
@@ -457,8 +459,21 @@ export async function discoverGitRoots(rootPath, { signal, maxDepth = DEFAULT_SC
         noteUnreadable(path, error)
         return
       }
-      if (entries.some((entry) => entry.name === '.git')) {
-        roots.push(path)
+      // Only a real `.git` *directory* marks a repository root. A linked worktree
+      // carries `.git` as a *file*, and it is a checkout of a repository rather than
+      // one: listing it would put the same repository in the panel a second time,
+      // under the path of the checkout rather than its own, and registering a task
+      // container root as a Workspace would do it for every task space under it.
+      // `discoverSourceRepos` draws the same line, for the same reason - it is what
+      // keeps a task container from being offered as a source root - so what a
+      // Workspace shows and what a create offers cannot come to disagree.
+      //
+      // Either way the walk stops here rather than descending: what is under a
+      // checkout is that repository's own tree, and under a repository there is
+      // nothing this plugin makes a repository out of.
+      const gitEntry = entries.find((entry) => entry.name === '.git')
+      if (gitEntry !== undefined) {
+        if (gitEntry.isDirectory()) roots.push(path)
         return
       }
       if (depth >= maxDepth) return
@@ -873,7 +888,13 @@ export function apply(ctx, config = {}) {
       // `log: false` because a scan is a read of every repository under the
       // Workspace, and `worktree` is not in the read-only filter. Five hundred
       // processes and a hundred records per refresh is not a log anybody can read.
-      // Failures are still recorded - see runGit.
+      //
+      // What a failing call leaves behind is not the log either: `runGit` records a
+      // failure, and `auditRecord` then drops every record made before an operation
+      // has named a container root - which a scan belongs to none of. So a scan that
+      // could not answer says so in its own reply, and is not written down anywhere:
+      // the log is a record of task spaces, and a scan is not one. That drop is
+      // deliberate; see audit-log.js.
       const porcelain = await runGit(ctx.subprocess, path, ['worktree', 'list', '--porcelain'], { log: false })
       const worktrees = parseWorktrees(porcelain)
       // No fallback to a `rev-parse`: an empty porcelain is git saying this

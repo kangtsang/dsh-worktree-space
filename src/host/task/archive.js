@@ -4,7 +4,7 @@
  * Finishing a task: what merging would do, which files are the user's own, and the merge, removal, and filing that follow.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readdir, readFile, rmdir, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, open, readdir, rmdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
@@ -41,13 +41,48 @@ async function conflictedFiles(subprocess, site) {
 }
 
 /**
+ * How many bytes of a changed file are read looking for conflict markers.
+ *
+ * Markers sit in the lines somebody edited by hand, and a file past this is a
+ * payload - a bundle, a lock file, a dump - rather than a resolution in progress.
+ * The window bounds what is held in memory, not which files are asked: what it
+ * decides is which of two sentences describes the merge, and both of them stop the
+ * finish the same way, so a file too large to look at whole costs the reader no more
+ * than one it was readable to find markers in.
+ */
+const MARKER_SCAN_MAX_BYTES = 1024 * 1024
+
+/**
+ * Read the head of a file, refusing to let its size decide how much is held.
+ *
+ * `readFile` sizes its buffer from the file and there is no way to bound that, so
+ * the read is opened and asked for a fixed window instead - the pattern
+ * `readBounded` in skill.js already uses, for the same reason. A file that does not
+ * fill the window is read whole; one that overflows it is read as far as the window
+ * goes, because a half-read file here still answers "no markers in this part", and
+ * refusing it outright would answer that for a file nothing looked at.
+ * @param path - the file to read.
+ * @returns the first {@link MARKER_SCAN_MAX_BYTES} bytes of the file.
+ */
+async function readHead(path) {
+  const handle = await open(path, 'r')
+  try {
+    const buffer = Buffer.alloc(MARKER_SCAN_MAX_BYTES)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    return buffer.subarray(0, bytesRead).toString('utf8')
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
  * The paths an unfinished merge still has conflict markers in.
  *
  * Resolving a conflict means editing files under the worktree, and this is what says
  * whether that is done: every path the merge has changed is read back - staged or not,
  * since a resolution may have been staged already - and a line beginning `<<<<<<<`,
  * `=======` or `>>>>>>>` marks the merge as unfinished. Nothing else about the file's
- * contents is judged here.
+ * contents is judged here, and each read stops at {@link MARKER_SCAN_MAX_BYTES}.
  * @param subprocess - the profile's subprocess service.
  * @param site - the checkout the merge is standing in.
  * @returns the paths that still carry markers, relative to that checkout.
@@ -61,7 +96,7 @@ async function conflictMarkers(subprocess, site) {
   for (const file of listed) {
     let text = ''
     try {
-      text = await readFile(join(site, file), 'utf8')
+      text = await readHead(join(site, file))
     } catch {
       // A path git lists that cannot be read - a submodule, a directory - carries no
       // markers this could find, and is not a reason to refuse the finish.
@@ -84,38 +119,60 @@ async function uncommittedCount(subprocess, worktreePath) {
 }
 
 /**
+ * One record of a `status --porcelain=v1 -z` stream: the two status columns, then
+ * the path. Porcelain v1 always writes both columns and a blank between them and the
+ * path, so anything that does not have that shape is a record `runGit` trimmed.
+ */
+const STATUS_RECORD = /^([ MADRCU?!]{2}) ([\s\S]+)$/
+
+/**
  * The tracked paths a checkout has changed but not committed.
  *
- * `git status --short` is read and its untracked lines are dropped, because those
- * are the one kind of dirt a merge does not mind: git writes a tree of tracked
+ * `git status --porcelain=v1 -z` is read and its untracked lines are dropped, because
+ * those are the one kind of dirt a merge does not mind: git writes a tree of tracked
  * files and leaves `??` alone. A build output that was never going to be in the way
  * is not one of the paths a refusal should name.
  *
  * Staged and unstaged both count, and both are reported: `A` against the first
  * column is staged, `M` against the second is not, and a merge refuses over either.
  *
- * The columns are not read at a fixed offset, because `runGit` trims what it
- * returns and the first status line of a dirty checkout begins with the blank in
- * ` M path` - that leading blank is the unstaged column, and slicing three
- * characters off a trimmed line turns `shared.txt` into `hared.txt`. What is
- * needed from a line is only whether it is untracked and where the path starts, so
- * both are asked of the pattern rather than of a position.
+ * `-z` is what makes the paths usable at all. The line-oriented report is not a list
+ * of paths: a rename reads `R  old -> new`, which is neither of the paths - the file
+ * is at `new`, and `old -> new` matches nothing a merge writes - and a non-ASCII
+ * path is C-quoted, so `文.txt` arrives as `"\346\226\207.txt"` and is compared
+ * against itself for as long as the pre-check runs. With `-z` git writes each path
+ * verbatim and separates records with NUL, so a rename names its two paths as two
+ * records and nothing in a path can end the record early.
+ *
+ * The columns are not read at a fixed offset, because `runGit` trims what it returns
+ * and the first status record of a dirty checkout begins with the blank in ` M path`
+ * - that leading blank is the unstaged column, and trimming the stream eats it. It is
+ * put back on whichever record does not have two columns, and that can only ever be
+ * the first one: trimming reaches no further than the front of the stream.
  * @param subprocess - the profile's subprocess service.
  * @param site - the checkout to read.
  * @returns the paths, which is empty for a clean checkout.
  */
 async function dirtyPaths(subprocess, site) {
-  const status = await tryRunGit(subprocess, site, ['status', '--short'])
-  return status
-    .split(/\r?\n/)
-    // `??` is the only two-column marker that means "not tracked", and it always
-    // sits at the front of the line whether or not a column was trimmed away.
-    .filter((line) => !line.startsWith('??'))
-    // The path begins after the status columns and the blank that follows them, so
-    // it is whatever remains once those are gone - matched rather than sliced, to
-    // survive the leading blank having been trimmed off the first line.
-    .map((line) => line.replace(/^\s*[MADRCU?!]{1,2}\s+/, '').trim())
-    .filter((path) => path !== '')
+  const status = await tryRunGit(subprocess, site, ['status', '--porcelain=v1', '-z'])
+  if (status === '') return []
+  const records = status.split('\0')
+  const dirty = []
+  for (let index = 0; index < records.length; index += 1) {
+    const parsed = STATUS_RECORD.exec(records[index]) ?? STATUS_RECORD.exec(` ${records[index]}`)
+    if (parsed === null) continue
+    const [, columns, path] = parsed
+    // `??` is the only two-column marker that means "not tracked", and it is asked of
+    // the two columns rather than of a prefix of the raw record, so the answer does
+    // not depend on which of them the trim took.
+    if (columns === '??') continue
+    // A rename or a copy is two records: the path the working tree has, which is the
+    // one a merge can be in the way of, and the one it came from, which it does not
+    // have any more. Both are read off; only the first is a path on disk.
+    if (columns.includes('R') || columns.includes('C')) index += 1
+    dirty.push(path)
+  }
+  return dirty
 }
 
 /**
@@ -355,6 +412,10 @@ async function auditOutcome(repositories, warnings, phase) {
  * chooses. `targets` names a branch per repository, which is how the dialog
  * previews a choice the user just made: the target and the commit count it gets
  * back are the ones {@link finishTask} would act on.
+ *
+ * A repository git would not answer about carries no `commits` at all rather than a
+ * zero: its `error` says why, and a caller reading that number can tell it was not
+ * counted from one that was counted as empty.
  * @param subprocess - the profile's subprocess service.
  * @param options - `task`, `project`, `tasksRoot`, and the optional per-repository `targets`.
  * @returns the per-repository plan and its totals.
@@ -403,7 +464,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
     const status = await tryRunGit(subprocess, worktreePath, ['status', '--short', '--branch'])
     const lines = status === '' ? [] : status.split(/\r?\n/)
     const changed = lines.filter((line) => line !== '' && !line.startsWith('## ')).length
-    const plan = { name, path: worktreePath, mainRepo: '', branch, changedFiles: changed, commits: 0, branches: [] }
+    const plan = { name, path: worktreePath, mainRepo: '', branch, changedFiles: changed, branches: [] }
 
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     const listed = parseWorktrees(porcelain)
@@ -418,8 +479,13 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       plan.branches = await mergeCandidates(subprocess, mainRepo, listed, branch, plan.checkedOut)
       try {
         plan.target = await resolveMergeTarget(subprocess, mainRepo, targets?.[name], branch)
+        // Left out rather than claimed as zero when git will not answer the count:
+        // "no commits" is a fact about the branch, and a repository that could not be
+        // asked is not one holding none. This is the rule the status endpoint follows
+        // for the same number, and the two answers sit side by side on one page.
         const ahead = await tryRunGit(subprocess, worktreePath, ['rev-list', '--count', `${plan.target}..HEAD`])
-        plan.commits = Number.parseInt(ahead, 10) || 0
+        const counted = Number.parseInt(ahead, 10)
+        if (Number.isFinite(counted)) plan.commits = counted
         mergeTarget = mergeTarget ?? plan.target
       } catch (error) {
         plan.error = error.message
@@ -427,7 +493,10 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
     }
 
     changedFiles += plan.changedFiles
-    commits += plan.commits
+    // A total is a sum, so a repository that could not be counted is left out of it
+    // rather than counted as nothing - and the top level keeps its number, because
+    // the dialog prints it as the headline of what this would bring.
+    commits += plan.commits ?? 0
     repositories.push(plan)
   }
 
@@ -515,6 +584,12 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
  * work: it is reported in the state it is in, never aborted, and no side is ever picked.
  * Merging the resolved branch into the source repository is the step this side owns, and
  * it runs outside any session, where git's own directory is in reach.
+ *
+ * A worktree that is on no branch stops the merge before any of that, because a merge
+ * needs a name and git answers a detached checkout's name - the literal `HEAD` - by
+ * resolving it against the checkout doing the merging. Nothing is merged, nothing is
+ * removed and no branch is deleted: the answer carries `merged: false`, `removed:
+ * false` and the reason, so no caller can read it as a finish that went through.
  * @param subprocess - the profile's subprocess service.
  * @param options - the task, its project, its root, and what to do with branches, documents and worktrees.
  *   `cause` is a sentence saying why the dialog is finishing a task the user never
@@ -657,6 +732,28 @@ export async function finishTask(subprocess, options) {
       continue
     }
 
+    // A worktree on no branch has nothing to merge from. `git merge` needs a name to
+    // merge, and the name a detached checkout reports is the literal `HEAD` - which
+    // git resolves against the checkout running the merge, so the merge target is
+    // merged into itself: "Already up to date", exit 0. The finish would report a
+    // merge that never happened, remove a worktree that is clean because it was never
+    // merged into, and leave the task's commits behind as objects nothing points at.
+    // The deletion path below refuses these two answers too - `branch !== taskBranch`
+    // is true of both - for the same reason: a name that is not a branch cannot be
+    // what the caller meant.
+    //
+    // Refused the way uncommitted work is, because it is the same shape of answer:
+    // nothing was merged, nothing was removed, no branch was deleted, the worktree is
+    // still there, and `conflict` stays unset - there is no merge standing to settle.
+    if (merge && (branch === '' || branch === 'HEAD')) {
+      outcome.error = branch === ''
+        ? `'${name}' reports no branch, so there is nothing in it to merge; check that ${worktreePath} is still the worktree this task made`
+        : `'${name}' is on a detached HEAD, so its commits belong to no branch and there is nothing to merge them from. Check a branch out in ${worktreePath}, or move the work onto one, before the task can be finished.`
+      repositories.push(outcome)
+      failed = true
+      continue
+    }
+
     if (merge) {
       try {
         // A branch named for this repository wins; `target` names one for all of
@@ -710,7 +807,17 @@ export async function finishTask(subprocess, options) {
         // started - the thing standing in the way is uncommitted work in the
         // repository they work in. `mergeIntoBranch` refuses it by name; this
         // recognises it even where that guard did not run.
-        const dirtyCheckout = error?.code === 'E5004' || /local changes .* would be overwritten/i.test(String(error?.message ?? ''))
+        //
+        // Both of git's wordings for that end in the same three words, and both mean
+        // it here. "Your local changes to the following files would be overwritten by
+        // merge" is the one the guard above usually pre-empts; "The following
+        // untracked working tree files would be overwritten by merge" is the one it
+        // cannot, because an untracked file is not a dirty path unless the merge
+        // happens to write it - which is git's to notice, not this side's. Matching
+        // the first wording alone answered that one as a conflict: nothing was
+        // reconciled and there is no merge to conclude, yet the page said to go and
+        // reconcile it.
+        const dirtyCheckout = error?.code === 'E5004' || /would be overwritten by merge/i.test(String(error?.message ?? ''))
         outcome.conflict = !dirtyCheckout
         await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
         outcome.error = error.message

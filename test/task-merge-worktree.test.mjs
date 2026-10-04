@@ -421,6 +421,121 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     }
   }, GIT_TIMEOUT)
 
+  it("refuses to merge a worktree left on a detached HEAD", async () => {
+    // The one that loses commits rather than reporting an error. `git merge HEAD`
+    // inside the target's checkout resolves `HEAD` against that checkout, so the
+    // merge target is merged into itself: "Already up to date", exit 0. The finish
+    // then reported `merged: true`, removed a worktree that was clean only because
+    // nothing had been merged into it, and left the task's commits behind as objects
+    // nothing points at - which a gc collects.
+    //
+    // A mid-flight rebase and a `git checkout <sha>` both leave a worktree here, so
+    // this is a state a user reaches rather than one that has to be built.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      const before = git(source, ["rev-parse", "develop"])
+      // The worktree's own commits are only reachable through this SHA once it is off
+      // the branch, which is exactly why they must not be thrown away.
+      const work = git(fixtureUnderTest.taskRepo, ["rev-parse", "feat/sample"])
+      git(fixtureUnderTest.taskRepo, ["checkout", "-q", work])
+
+      expect(git(fixtureUnderTest.taskRepo, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("HEAD")
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(true)
+      expect(result.repositories[0]).toMatchObject({ merged: false, removed: false, branchDeleted: false })
+      // Not a conflict: nothing was reconciled and there is no merge to conclude.
+      expect(result.repositories[0].conflict).toBeFalsy()
+      expect(result.repositories[0].error).toMatch(/detached HEAD/)
+      // The branch did not move, and the worktree is still on disk with the record
+      // beside it, so the task can be finished again once a branch is checked out.
+      expect(git(source, ["rev-parse", "develop"])).toBe(before)
+      expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+      expect(existsSync(join(fixtureUnderTest.taskPath, "worktree-space.json"))).toBe(true)
+      // And the commits are still there, reachable from the worktree.
+      expect(git(fixtureUnderTest.taskRepo, ["rev-parse", "HEAD"])).toBe(work)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("names an untracked file the merge would overwrite, instead of calling it a conflict", async () => {
+    // An untracked file is the one kind of dirt a merge writes straight past - unless
+    // the merge happens to write it, which git then refuses. That refusal arrives in
+    // the branch's own words, and git words it differently for the tracked case:
+    // "Your local changes to the following files would be overwritten by merge"
+    // against "The following untracked working tree files would be overwritten by
+    // merge". Only the first was recognised, so the second was reported as a
+    // conflict: a merge to settle and markers to go and read, in a checkout where
+    // nothing was ever reconciled.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      // The task branch writes a path the source checkout holds untracked.
+      await writeFile(join(fixtureUnderTest.taskRepo, "collided.txt"), "written by the task\n")
+      git(fixtureUnderTest.taskRepo, ["add", "-A"])
+      git(fixtureUnderTest.taskRepo, ["commit", "-qm", "task adds collided.txt"])
+      await writeFile(join(source, "collided.txt"), "the user's own untracked file\n")
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(true)
+      // Nothing was reconciled, so it is not a conflict and no merge is standing.
+      expect(result.repositories[0].conflict).toBeFalsy()
+      expect(result.repositories[0].mergeInProgress).toBeFalsy()
+      expect(result.repositories[0].merged).toBe(false)
+      // Git's own message, which names the file - and the file is still there, which
+      // is the whole point of refusing.
+      expect(result.repositories[0].error).toMatch(/would be overwritten by merge/)
+      expect(result.repositories[0].error).toContain("collided.txt")
+      expect(readFileSync(join(source, "collided.txt"), "utf8")).toBe("the user's own untracked file\n")
+      expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("names a renamed file by the path the merge would write", async () => {
+    // `git status --short` writes a rename as `R  shared.txt -> renamed.txt`, which
+    // is not a path: the file is at `renamed.txt`, and the string matches nothing a
+    // merge writes. A non-ASCII path arrives C-quoted for the same reason. Both made
+    // the pre-check miss work it should have named, and left git to refuse the merge
+    // instead - which it does, but only after the finish has let the merge start.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      // The task branch moves the file...
+      git(fixtureUnderTest.taskRepo, ["mv", "shared.txt", "renamed.txt"])
+      git(fixtureUnderTest.taskRepo, ["commit", "-qam", "rename the file"])
+      // ...and the source checkout has the same rename half-made, with work on top of
+      // it, so the path the merge writes is dirty there.
+      git(source, ["mv", "shared.txt", "renamed.txt"])
+      await writeFile(join(source, "renamed.txt"), "work in progress under the new name\n")
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(true)
+      expect(result.repositories[0]).toMatchObject({ merged: false, removed: false })
+      expect(result.repositories[0].conflict).toBeFalsy()
+      // Named by the path the filesystem has, not as `shared.txt -> renamed.txt`.
+      expect(result.repositories[0].error).toContain("renamed.txt")
+      expect(result.repositories[0].error).not.toContain("->")
+      // The refusal is this side's own, which is the difference: the merge was never
+      // attempted against a checkout git would have stopped anyway.
+      expect(result.repositories[0].error).toMatch(/Commit or stash it/)
+      // The work is still there.
+      expect(readFileSync(join(source, "renamed.txt"), "utf8")).toBe("work in progress under the new name\n")
+      expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
   it("clears the record when every repository finished and the space is empty", async () => {
     // The other half of the same rule: with no worktree left there is nothing left to
     // describe, and the record would be a claim about a directory this plugin no

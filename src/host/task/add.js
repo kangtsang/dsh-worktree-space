@@ -18,17 +18,17 @@
  * the task began.
  */
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
-import { coded } from './codes.js'
+import { ERROR_CODES, coded } from './codes.js'
 import { sourceFacts } from './create.js'
 import { isSourceRepository } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { isInside, refuseDelete, samePathLocation } from './paths.js'
 
-import { TASK_METADATA, TASK_README, listTaskWorktrees, readTaskMetadata, renderTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { TASK_METADATA, TASK_README, listTaskWorktrees, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /**
  * The branch every repository of a task shares, read from the container itself.
@@ -150,22 +150,37 @@ async function rollbackAdded(subprocess, tasksRoot, created) {
  * Put the container's record back the way it was.
  *
  * The record is written after the worktrees, so a failure there can leave it
- * describing repositories whose worktrees are about to be taken back. Writing the
- * previous text back is what keeps the two in step; it is best effort, because a
+ * describing repositories whose worktrees are about to be taken back, and the two
+ * files that make up that record are written one after the other - which is what
+ * makes "there was no record before this call" its own case rather than an easy
+ * one. The record this call wrote would then be the only one there is, naming a
+ * repository the task no longer has, and the next request to add that repository
+ * is refused as a name already taken against a task space that never took it.
+ *
+ * So each file is put back on its own account: one this call found is rewritten
+ * byte for byte, one this call made is taken away again. Best effort, because a
  * container that cannot be written to is a container the write already failed in.
  * @param taskPath - the task space directory.
  * @param previousJson - the JSON file's contents before this call, or undefined.
- * @param previousMetadata - the record those contents parsed to.
+ * @param previousReadme - the note's contents before this call, or undefined.
  */
-async function restoreMetadata(taskPath, previousJson, previousMetadata) {
-  if (previousJson === undefined) return
-  try {
-    await writeFile(join(taskPath, TASK_METADATA), previousJson, 'utf8')
-    await writeFile(join(taskPath, TASK_README), renderTaskMetadata(previousMetadata), 'utf8')
-  } catch {
-    // Reported by the caller's own outcome, not here: the worktrees are already
-    // gone either way, and a record that could not be rewritten is the next
-    // person's problem to see rather than this one's to mask.
+async function restoreMetadata(taskPath, previousJson, previousReadme) {
+  for (const [name, before] of [[TASK_METADATA, previousJson], [TASK_README, previousReadme]]) {
+    try {
+      if (before === undefined) {
+        // `force`, not `recursive`: what came out of here is a file this plugin
+        // wrote, and a directory sitting where it belongs is that path's own
+        // problem to have, not this rollback's to clear by force.
+        await rm(join(taskPath, name), { force: true })
+      } else {
+        await writeFile(join(taskPath, name), before, 'utf8')
+      }
+    } catch {
+      // Reported by the caller's own outcome, not here: the worktrees are already
+      // gone either way, and a record that could not be rewritten is the next
+      // person's problem to see rather than this one's to mask. Each file is done
+      // on its own so that one that cannot be written does not strand the other.
+    }
   }
 }
 
@@ -254,8 +269,11 @@ export async function addTaskRepositories(subprocess, options) {
   }
 
   // Read before the first worktree exists, so a rollback has the record as it was
-  // rather than as it would have been written.
+  // rather than as it would have been written. The note is read beside it because
+  // the two are written one after the other, so a container that held only one of
+  // them is a real state and each has to be put back on its own account.
   const previousJson = await readFile(join(taskPath, TASK_METADATA), 'utf8').catch(() => undefined)
+  const previousReadme = await readFile(join(taskPath, TASK_README), 'utf8').catch(() => undefined)
 
   const created = []
   try {
@@ -290,21 +308,34 @@ export async function addTaskRepositories(subprocess, options) {
     })
   } catch (error) {
     const stranded = await rollbackAdded(subprocess, tasksRoot, created)
-    await restoreMetadata(taskPath, previousJson, metadata)
+    await restoreMetadata(taskPath, previousJson, previousReadme)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
+    // One code, decided here, for the record below and the error the caller
+    // reads: `recover` takes the code off the error and no caller hands it a
+    // classifier, so an error rebuilt without one reaches the caller as E9001
+    // while the log says E2005 - the same failure under two names, which is
+    // what these codes exist to prevent. A failure that carries one of ours keeps
+    // it, and one from outside the table does not: a Node filesystem error brings
+    // a `code` of its own (`EISDIR`), and `recover` would flatten it anyway.
+    const own = typeof error?.code === 'string' && Object.hasOwn(ERROR_CODES, error.code) ? error.code : ''
+    const code = own !== '' ? own : (stranded.length === 0 ? 'E2005' : 'E2006')
     // The two outcomes again, because "rolled back" and "left something behind"
     // call for different amounts of attention and neither is in the message: the
     // task's own worktrees are untouched either way, and only this call's are named.
     await recordError(error, {
       phase: 'add',
-      code: stranded.length === 0 ? 'E2005' : 'E2006',
+      code,
       msg: stranded.length === 0
         ? `Adding repositories to '${task}' failed. The worktrees this call made were taken back, so the task is exactly as it was and the same repositories can be added again.`
         : `Adding repositories to '${task}' failed and the worktrees this call made could not all be removed. The ones named in \`stranded\` are still on disk; the task's own repositories were not touched.`,
       ...(created.length === 0 ? {} : { created: created.map((entry) => entry.name) }),
       ...(stranded.length === 0 ? {} : { stranded }),
     })
-    throw new Error(`${error.message}${suffix}`)
+    // Rebuilt rather than rethrown, because what the rollback managed is part of
+    // what the caller has to be told; the code rides over for the reason above.
+    const rolled = new Error(`${error.message}${suffix}`)
+    rolled.code = code
+    throw rolled
   }
 
   await recordEvent(

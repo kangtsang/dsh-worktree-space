@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
-import { coded } from './codes.js'
+import { ERROR_CODES, coded } from './codes.js'
 import { prepareContainerRoot } from './container.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
@@ -15,29 +15,6 @@ import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPre
 import { assertIsolated, refuseDelete } from './paths.js'
 
 import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
-
-export function breadcrumb(details) {
-  const { task, branch, baseRef, sourceRoot, repositories } = details
-  return [
-    `# Task: ${task}`,
-    '',
-    `- Branch: \`${branch}\` (one branch per repository below)`,
-    `- Base: ${baseRef === undefined ? "each repository's current HEAD" : `\`${baseRef}\``}`,
-    `- Created: ${new Date().toISOString()}`,
-    `- Source root: \`${sourceRoot}\``,
-    '- This folder is the agent session working directory.',
-    '',
-    '## Repositories',
-    ...repositories.map((name) => `- \`${name}\``),
-    '',
-    '## Conventions',
-    '- Commit in each repository separately (the same branch name everywhere).',
-    '- Source repositories are read-only: never edit or commit there.',
-    '- Merging back to the main branch is the user\'s action, not the agent\'s.',
-    '',
-  ].join('\n')
-}
-
 
 /**
  * The facts only the source repository can answer, read before a worktree is
@@ -73,7 +50,7 @@ function holdsOnlyOurs(leftovers, created) {
   return leftovers.every((name) => TASK_OWNED_FILES.includes(name) || created.some((entry) => basename(entry.path) === name))
 }
 
-async function rollbackTask(subprocess, tasksRoot, taskPath, created) {
+async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
   const stranded = []
   for (const entry of created) {
     // The worktree was created by this call and never handed to a caller, so a
@@ -84,16 +61,47 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, created) {
     if (refused !== '') { stranded.push(entry.name); continue }
     if (!(await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path]))) {
       stranded.push(entry.name)
+      continue
+    }
+    // Removing the worktree is half of what has to go back: the branch was made
+    // by `worktree add -b`, and git does not delete it with the checkout that
+    // held it. Left behind it takes the name, and the same task cannot be
+    // created again - which is the opposite of what the record below then says.
+    //
+    // Deleting it is safe because it cannot be anybody else's: this create
+    // refused every repository that already had this branch before it made
+    // anything, and the worktree that was holding it is gone. `-D` because it
+    // has no commits and can have none now, and `--` for the reason archive.js
+    // gives - this is the one call here that leaves the container.
+    if (!(await gitSucceeded(subprocess, entry.repoPath, ['branch', '-D', '--', branch]))) {
+      stranded.push(`${entry.name}'s branch ${branch}`)
     }
   }
   if (stranded.length > 0) return stranded
 
+  // The container is the last thing standing, and "no task space was left behind"
+  // is a claim about it, so the claim is made only when it is demonstrably gone.
+  // Four ways that fails, and only the first is a clean no-op: a readdir failing
+  // because the directory is already absent PROVES it is gone, while one failing
+  // for any other reason proves nothing and has to be reported; a container holding
+  // something this call did not put there is left alone on purpose, which still
+  // takes the name; and a removal that throws leaves it.
+  const container = `the task space ${basename(taskPath)}`
+  let leftovers
   try {
-    const leftovers = await readdir(taskPath)
-    if (holdsOnlyOurs(leftovers, created)) await rm(taskPath, { recursive: true, force: true })
+    leftovers = await readdir(taskPath)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') stranded.push(container)
+    return stranded
+  }
+  if (!holdsOnlyOurs(leftovers, created)) {
+    stranded.push(container)
+    return stranded
+  }
+  try {
+    await rm(taskPath, { recursive: true, force: true })
   } catch {
-    // A container that cannot be removed is reported by the caller's outcome,
-    // not here.
+    stranded.push(container)
   }
   return stranded
 }
@@ -233,8 +241,23 @@ export async function createTask(subprocess, options) {
       })),
     }))
   } catch (error) {
-    const stranded = await rollbackTask(subprocess, tasksRoot, taskPath, created)
+    const stranded = await rollbackTask(subprocess, tasksRoot, taskPath, branch, created)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
+    // The code is decided once, here, and goes into the two places that must not
+    // disagree: the record below and the error the caller reads. `recover` takes
+    // the code off the error and no caller hands it a classifier, so an error
+    // rebuilt without one reaches the caller as E9001 - which names nothing the
+    // log does not, but names it a different way from the record written here.
+    //
+    // A failure that carries one of ours keeps it: which git call failed, and why,
+    // is more use to a caller than the fact that a rollback ran, and the client
+    // already tells E3004 from E3005. A code from outside the table is not kept -
+    // a Node filesystem error brings a `code` of its own (`EISDIR`), and passing
+    // that on would put a second vocabulary in the log and on the wire, which
+    // `recover` would flatten to E9001 anyway. So those answer for what the
+    // rollback managed, which is the only distinction left to make there.
+    const own = typeof error?.code === 'string' && Object.hasOwn(ERROR_CODES, error.code) ? error.code : ''
+    const code = own !== '' ? own : (stranded.length === 0 ? 'E2005' : 'E2006')
     // What the rollback could not undo is the part a create that failed leaves
     // behind, and it is not in the message the caller reads - so it is here.
     // The sentence says which of the two outcomes this is, because "rolled back"
@@ -242,17 +265,19 @@ export async function createTask(subprocess, options) {
     // neither is visible in `exit` or `code` on their own.
     await recordError(error, {
       phase: 'create',
-      // Which of the two outcomes this is, as a code: "rolled back" and "left
-      // something behind" call for different amounts of attention, and neither is
-      // visible in the message or the stack on its own.
-      code: stranded.length === 0 ? 'E2005' : 'E2006',
+      code,
       msg: stranded.length === 0
-        ? 'Creating the task space failed. It was rolled back: no worktree, no branch and no task space were left behind, so the same name can be used again.'
+        ? 'Creating the task space failed. The rollback removed the worktrees, the branch and the task space this call had made, so the same name can be used again.'
         : 'Creating the task space failed and the rollback could not remove everything. The leftovers named in `stranded` are still on disk and have to be dealt with by hand.',
       ...(created.length === 0 ? {} : { created: created.map((entry) => entry.name) }),
       ...(stranded.length === 0 ? {} : { stranded }),
     })
-    throw new Error(`${error.message}${suffix}`)
+    // Rebuilt rather than rethrown, because the rollback's outcome is part of what
+    // the caller has to be told. The code is carried over for the reason above:
+    // an error rebuilt without one is one the caller learns nothing from.
+    const rolled = new Error(`${error.message}${suffix}`)
+    rolled.code = code
+    throw rolled
   }
 
   await recordEvent(
