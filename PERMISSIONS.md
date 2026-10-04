@@ -12,8 +12,8 @@
   工作区，并开一个以它为工作目录的会话。
 
 - **读取**：
-  - 工作区目录树（只读）：按广度优先 `readdir` 扫描，最多 `scanDepth` 层（1–5，默认 2）、
-    最多 `maxScanDirectories` 个目录（默认 1000），每层最多并发 8 个。跳过 `node_modules`、`Library`、
+  - 工作区目录树（只读）：按广度优先 `readdir` 扫描，最多 `scanDepth` 层（1–5，默认 3）、
+    最多 `maxScanDirectories` 个目录（默认 2000），每层最多并发 8 个。跳过 `node_modules`、`Library`、
     `dist`、`build`、`vendor` 以及隐藏目录（`.worktrees` 除外）。扫描只为发现「哪个目录是 Git 仓库」，
     **不读取文件内容**。
   - 任务空间里的两个插件元数据文件 `worktree-space.json`、`worktree-space.md`；以及每个仓库 worktree 的

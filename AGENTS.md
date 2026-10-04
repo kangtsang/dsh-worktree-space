@@ -212,6 +212,63 @@
 Windows 路径折叠大小写（`sameLocation`）。写客户端路径工具时照这个来，别去读 `process.platform`
 ——浏览器里那个值是浏览器的，不是宿主的。
 
+### 同一个道理不止适用于路径——「在一台机器上成立」都别当成「通用」
+
+Linux CI 连续三轮拦下三类东西，**根子是同一个**：某件事只在一台机器上成立过，
+于是被当成了通用事实。
+
+| 轮次 | 被拦下的 | 「只在一台机器上成立」的是什么 |
+| --- | --- | --- |
+| 1 | 测试写死 Windows 的大小写语义 | 只有本机是 Windows |
+| 2 | `check:package` 只找 Windows 那个位置的 npm | **只在一台机器上量过一次布局** |
+| 3 | subprocess mock 的 Promise 竞态 | 只有本机的**调度速度**刚好合适 |
+
+第 2 条的注释当时写着 `Measured on this machine`——**这句话本身就是缺陷**：
+量了一台机器的布局，然后当成布局。npm 装在 node.exe 旁边是 Windows 的事，
+Linux/macOS 装在 `lib/` 下面。同一个检查在本机绿了很久，在 runner 上**最后一道发布门直接拒绝打开**，
+还打印了一句完全误导的话：「安装一个自带 npm 的 Node」——那个 Node 带着 npm，就在隔壁目录。
+
+第 3 条更隐蔽：`typeof reply === "object"` 对 Promise 也成立，于是 mock 去读 promise 上的
+`.exitCode`（不存在），`?? 0` 变成成功，**立刻答复，副作用在后台裸跑**。
+Windows 上恰好赶上了，Linux 上没赶上。把 handler 延迟 150ms 就能在本机复现——而且是**两条**挂，
+不是一条。
+
+**所以下面这几条都按「我这台机器」重新过一遍：**
+
+- **本机量过的路径或布局**（node、npm、python、各种 CLI 装在哪）→ 改成**找**，别写死一个
+- **本机跑绿的测试** → 在 Linux 上是什么结果？写死平台语义的断言按平台分支；
+  靠时序成立的断言（mock、副作用、竞态）改成**确定性的等待**，别指望调度
+- **本机绿的整体流程**（CI、本地全量）→ 本地绿只说明本机绿
+
+`test/documented-defaults.test.mjs` 是这条的另一个实例：**改了默认值却忘了同步说明文档**。
+这类事靠人记不住，所以把文档里写的数字**抠出来和代码常量比**。查了才发现不止一处漏：
+`scanDepth` 从 2 改到 3 之后四个文档有三个没跟；内置跳过目录少了一项，README 还在数 24（实际 23）。
+代码是对的、文档是错的，两边各自都自洽——**没有任何办法靠读代码发现它**。
+现在改默认值之后 `pnpm test` 会直接点名是哪几个文件。
+
+### 打 tag 之前在 Linux 上跑一遍 `pnpm test`，别等 CI 告诉你
+
+上面那三轮都是**推了 tag → CI 报错 → 查根因 → 修 → 再推**。每次都要删远端 tag、推 main、再推 tag，
+而 `pnpm test` 在本机只要一分多钟。**本机能跑的验证，没有理由放到 CI 上才发现。**
+
+WSL 里常驻着一份 Linux 用的检出：`\\wsl$\Ubuntu\home\zega\dsh-wts-linux`，
+Node 是 `~/opt/node`（软链，升级只需解压 + 重指软链，PATH 不用动）。同步文件后：
+
+```
+wsl.exe -e bash -lc 'cd ~/dsh-wts-linux && pnpm test'
+```
+
+**`-l` 必须带。** `wsl.exe -e bash -c` 是不登录非交互的调用，**不读任何配置文件**，
+所以里面没有 node，会报 command not found——这是配置方式的正常边界，不是环境坏了。
+
+**判据看 exit code，别只看测试数。** 这套验证第一次跑通时还顺带证明了一件别处验不了的事：
+Linux 构建出的 `client/client.js` 和 `lib/index.js` 与 Windows 构建的**逐字节相同**，
+也就是 `check:tracked-bundle` 在两个平台都成立。**构建是可复现的**——
+以前没人在 Linux 上跑过这道检查，所以没人知道。
+
+这条不替代 CI：CI 仍然跑，它多验的是 `pnpm install --frozen-lockfile` 那一层，
+本地那份的依赖是早就装好的。**发版前的顺序是：Linux 本地验 → 提交 → 推 tag。**
+
 ### `maxWorkers` 必须写在根级，不能写在 project 里
 
 这是本仓库最容易踩的坑，而且**踩了不报错**。

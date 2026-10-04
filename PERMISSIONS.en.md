@@ -16,7 +16,7 @@ Declared baseline: `dsh-worktree-space@1.2.0`, at the fixed commit on this repos
 
 - **Reads**:
   - The Workspace directory tree, read-only: a breadth-first `readdir` walk, at most `scanDepth` levels
-    (1–5, default 2) and at most `maxScanDirectories` directories (default 1000), reading up to eight
+    (1–5, default 3) and at most `maxScanDirectories` directories (default 2000), reading up to eight
     directories at a time per level. `node_modules`, `Library`, `dist`, `build`, `vendor` and hidden
     directories are skipped (except `.worktrees`). The scan only decides *which directory is a Git
     repository* — it **does not read file contents**.
