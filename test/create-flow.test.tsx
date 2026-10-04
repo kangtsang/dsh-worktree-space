@@ -138,7 +138,7 @@ describe("native task create flow", () => {
     expect(offered().every((box) => box.checked)).toBe(true)
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
-    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["alpha", "beta"] })))
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["/repo/alpha", "/repo/beta"] })))
   })
 
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
@@ -160,7 +160,11 @@ describe("native task create flow", () => {
     expect(document.querySelector(".dws-preview")?.getAttribute("aria-live")).toBe("polite")
     await user.keyboard("{Enter}")
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledExactlyOnceWith("ws-task"))
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["alpha", "beta"], baseRef: undefined, branchPrefix: "task/" })
+    // Paths, not names: the picker selected two repositories that sit directly in
+    // the source root, and what identifies them is where they are. The Host cannot
+    // rebuild a repository from a directory name when discovery reached it through
+    // a level in between.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)
@@ -238,6 +242,29 @@ describe("native task create flow", () => {
     detached.mount()
     await ready()
     expect(document.querySelectorAll(".dws-check-option .dws-branch-label")).toHaveLength(0)
+  })
+
+  it("submits the paths of repositories that sit below the source root", async () => {
+    // The shape that broke: discovery walks to maxDepth, so a Workspace registered
+    // one level above its repositories reports `repos/alpha`. The dialog used to send
+    // back the leaf name, and the Host could only rebuild it as `sourceRoot/alpha` -
+    // so every repository it had just listed was refused on create.
+    const nested = setup()
+    nested.api.suggestRoot.mockResolvedValue({
+      ...suggestion,
+      repositories: [
+        { name: "alpha", path: "/workspace/repos/alpha", branch: "main" },
+        { name: "beta", path: "/workspace/repos/beta", branch: "main" },
+      ],
+    })
+    nested.mount()
+    const user = userEvent.setup()
+    await ready()
+    fireEvent.change(nameField(), { target: { value: "fix-login" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(nested.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      repos: ["/workspace/repos/alpha", "/workspace/repos/beta"],
+    })))
   })
 
   // Each invalid input, and the one rule it breaks.

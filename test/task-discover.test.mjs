@@ -139,3 +139,88 @@ describe("resolveSourceRepos", () => {
     }
   })
 })
+
+// A repository is not always a direct child of the source root. Discovery walks
+// to maxDepth and reports full paths, but resolution used to rebuild a repository
+// from its directory name alone, so a Workspace registered one level above its
+// repositories listed them and then refused every one of them: the dialog showed
+// `repos/alpha`, sent back `alpha`, and the Host asked `E:/root/alpha` about it.
+describe("resolveSourceRepos with repositories below the root", () => {
+  async function nested() {
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-nested-"))
+    const inner = join(root, "repos")
+    await mkdir(inner, { recursive: true })
+    const repository = async (name) => {
+      const directory = join(inner, name)
+      await mkdir(join(directory, ".git"), { recursive: true })
+      return directory
+    }
+    const alpha = await repository("alpha")
+    const beta = await repository("beta")
+    return { root, inner, alpha, beta, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  it("finds the repositories discovery reported for the same root", async () => {
+    const { root, alpha, beta, cleanup } = await nested()
+    try {
+      // What discovery hands the dialog, and what the dialog must therefore hand back.
+      const discovered = await discoverSourceRepos(root, { maxDepth: 2 })
+      expect(discovered.sort()).toEqual([alpha, beta].sort())
+      expect(await resolveSourceRepos(root, discovered)).toEqual(discovered)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("resolves a repository named by a relative path", async () => {
+    const { root, alpha, cleanup } = await nested()
+    try {
+      expect(await resolveSourceRepos(root, ["repos/alpha"])).toEqual([alpha])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("resolves a repository named by an absolute path", async () => {
+    const { root, alpha, cleanup } = await nested()
+    try {
+      expect(await resolveSourceRepos(root, [alpha])).toEqual([alpha])
+      expect(await resolveSourceRepos(root, [`${alpha}/`])).toEqual([alpha])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("refuses a repository outside the source root", async () => {
+    const { root, cleanup } = await nested()
+    try {
+      // Discovery is bounded by the source root, so this did not come from this
+      // dialog - and a path is an input, not something to look up.
+      await expect(resolveSourceRepos(root, [tmpdir()])).rejects.toThrow(/not inside the source root/)
+      await expect(resolveSourceRepos(root, [join(root, "..", "elsewhere")])).rejects.toThrow(/not inside the source root/)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("refuses an empty entry", async () => {
+    const { root, cleanup } = await nested()
+    try {
+      await expect(resolveSourceRepos(root, ["  "])).rejects.toThrow(/a repository path is required/)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("cannot reach a nested repository from its name alone", async () => {
+    const { root, cleanup } = await nested()
+    try {
+      // This is the shape that used to be sent, and it is genuinely ambiguous:
+      // two levels down, "alpha" says nothing about where. It fails loudly
+      // instead of quietly picking a directory.
+      await expect(resolveSourceRepos(root, ["alpha"])).rejects.toThrow(/not a source repository/)
+    } finally {
+      await cleanup()
+    }
+  })
+})

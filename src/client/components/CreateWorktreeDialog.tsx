@@ -122,7 +122,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       // not a guess.
       setBranchPrefix(configuredPrefixRef.current || next.branchPrefix || FALLBACK_BRANCH_PREFIX)
       // Every discovered repository is in the task until the user narrows it.
-      setSelected(next.repositories.map((repository) => repository.name))
+      setSelected(next.repositories.map((repository) => repository.path))
     }).catch((reason) => {
       if (alive) setError(String(reason?.message ?? reason))
     }).finally(() => {
@@ -353,15 +353,18 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     }
   }
 
-  const toggleRepository = (name: string, include: boolean) => {
+  // Selected entries are paths, not names. Discovery walks to maxDepth, so a
+  // repository is not always a direct child of the source root, and a bare name
+  // cannot say which of them it meant - the Host would rebuild the wrong path.
+  const toggleRepository = (path: string, include: boolean) => {
     setSelected((current) => (include
-      ? [...new Set([...current, name])]
-      : current.filter((entry) => entry !== name)))
+      ? [...new Set([...current, path])]
+      : current.filter((entry) => entry !== path)))
   }
   // Every card acts on one list, so the pair of actions below them is a property of the
   // field rather than of any one card: it says what the next click does to all of them.
   const setAllRepositories = (include: boolean) => {
-    setSelected(include ? repositories.map((repository) => repository.name) : [])
+    setSelected(include ? repositories.map((repository) => repository.path) : [])
   }
 
   // The picker leads the form — it is the decision this dialog exists for, and the only
@@ -374,8 +377,11 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     <legend className="dws-field-legend"><span id={`${id}-repositories`} className="dws-field-label">{t("repositoriesLabel")}</span></legend>
     <div className="dws-repo-picker">
       <div className="dws-repo-choices">
-        {repositories.map((repository) => <label key={repository.name} className="dws-check-option" htmlFor={`${id}-repo-${repository.name}`}>
-          <input id={`${id}-repo-${repository.name}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.name)} onChange={(event) => toggleRepository(repository.name, event.target.checked)} />
+        {/* Keyed and identified by position, not by name: with repositories coming from
+            more than one level, two of them can share a basename, and a path is not
+            something to put in an element id. The label still reads the name. */}
+        {repositories.map((repository, index) => <label key={repository.path} className="dws-check-option" htmlFor={`${id}-repo-${index}`}>
+          <input id={`${id}-repo-${index}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.path)} onChange={(event) => toggleRepository(repository.path, event.target.checked)} />
           {/* The same name-then-branch line the repository view renders, so a
               repository reads the same wherever this plugin lists it. */}
           <span className="dws-check-copy">

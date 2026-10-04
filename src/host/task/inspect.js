@@ -12,7 +12,7 @@ import { mapWithLimit } from './concurrency.js'
 import { discoverSourceRepos, isSourceRepository } from './discover.js'
 import { tryRunGit } from './git.js'
 import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
-import { assertIsolated } from './paths.js'
+import { assertIsolated, isInside } from './paths.js'
 
 import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot } from './shared.js'
 
@@ -89,7 +89,13 @@ export async function classifySourceRoots(paths, { signal, concurrency = 6, ...b
   }
   const classified = await mapWithLimit(asked, concurrency, async (path) => {
     try {
-      return await classifySourceRoot(path, { signal, ...bounds })
+      // Every path asked about is classified, including one that sits inside
+      // another - that Workspace needs its own answer, because `isSourceRoot` is
+      // what decides whether a task space can be started from it. What it does not
+      // need is its repositories discovered a second time inside the parent's
+      // walk, so the parent's walk steps over it.
+      const nested = asked.filter((other) => other !== path && isInside(path, other))
+      return await classifySourceRoot(path, { signal, ...bounds, exclude: nested })
     } catch {
       // The same reasoning the scan follows: a directory that cannot be read is
       // not a reason to abandon the other twenty.

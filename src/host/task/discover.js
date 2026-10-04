@@ -8,7 +8,8 @@
  * source root.
  */
 import { readdir, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
+import { isInside, samePathLocation } from './paths.js'
 import { coded } from './codes.js'
 
 /**
@@ -58,6 +59,7 @@ export async function discoverSourceRepos(sourceRoot, {
   maxDepth = 1,
   maxDirectories = Number.POSITIVE_INFINITY,
   ignored = new Set(),
+  exclude = [],
 } = {}) {
   const repositories = []
   const queue = [{ path: sourceRoot, depth: 0 }]
@@ -69,6 +71,15 @@ export async function discoverSourceRepos(sourceRoot, {
     inspected += batch.length
     if (inspected > maxDirectories) break
     await Promise.all(batch.map(async ({ path, depth }) => {
+      // Another caller asked about a directory inside this one and will walk it
+      // itself. Stopping here is what keeps one repository from being discovered -
+      // and paid for - twice, and it is not the same thing as not walking this
+      // path: the caller still gets its own answer for the nested directory, from
+      // its own walk. `topLevelRequestedPaths` is not usable for this, because it
+      // deletes the nested path from the request rather than the nested subtree
+      // from this walk - which costs the nested Workspace its own classification,
+      // and with it the ability to start a task space from it.
+      if (exclude.some((nested) => isInside(nested, path))) return
       // A repository is a leaf of this walk: nothing under it is a source root of
       // its own, and a linked worktree is not one at all - `.git` is a file there,
       // not the directory this checks for.
@@ -100,22 +111,54 @@ export async function discoverSourceRepos(sourceRoot, {
 }
 
 /**
- * Resolve explicitly named repositories under a source root.
+ * Resolve the repositories a request named, under a source root.
  *
- * A source root that is itself a repository lists that repository by its own
- * name, because that is the name discoverSourceRepos reports for it: the root,
- * not a child of the root.
+ * A repository is named by its path, not by its directory name. Discovery walks
+ * to `maxDepth`, so the repositories it reports are not always direct children of
+ * the source root - a Workspace registered one level above its repositories gets
+ * `repos/alpha` from discovery - and a name carries none of that. The dialog then
+ * sent back `alpha`, and the only way to rebuild it was to join it onto the source
+ * root, which asks the wrong question: it finds `E:/wt-demo/alpha` for a workspace
+ * rooted at `E:/wt-demo` and answers "not a source repository" about a repository
+ * the same dialog had just listed. Listing it and taking it were two functions
+ * reading two different trees.
+ *
+ * A bare name still works, because `resolve` treats it as relative to the source
+ * root - the shape the agent tool sends, and the shape that was correct while every
+ * repository really was a direct child. A path is taken as written.
+ *
+ * Whatever the caller sends is checked to sit inside the source root. Discovery is
+ * bounded by that root, so anything outside it did not come from this dialog, and a
+ * path is an input rather than something to look up.
  * @param sourceRoot - the directory holding the source repositories.
- * @param names - repository directory names.
+ * @param requested - repository paths, or names relative to the source root.
  * @returns the resolved repository paths, in the given order.
- * @throws Error when a name does not name a source repository.
+ * @throws Error when one does not name a repository inside the source root.
  */
-export async function resolveSourceRepos(sourceRoot, names) {
-  const selfName = (await isSourceRepository(sourceRoot)) ? basename(sourceRoot) : undefined
+export async function resolveSourceRepos(sourceRoot, requested) {
   const repositories = []
-  for (const name of names) {
-    const candidate = name === selfName ? sourceRoot : join(sourceRoot, name)
-    if (!(await isSourceRepository(candidate))) throw coded('E6001', `not a source repository: ${name}`)
+  // A source root that is itself a repository is listed by its own name, because
+  // that is the name discovery reports for it. Reading a bare name as relative to
+  // the root would ask for a child called after the root, so the root answers for
+  // itself. Resolved once, and only if some bare name actually turns up.
+  let rootIsRepo
+  const rootAnswersForItself = async (entry) => {
+    if (rootIsRepo === undefined) rootIsRepo = await isSourceRepository(sourceRoot)
+    return rootIsRepo && !/[\\/]/.test(entry) && basename(sourceRoot) === basename(entry)
+  }
+
+  for (const raw of requested) {
+    const entry = typeof raw === 'string' ? raw.trim() : ''
+    if (entry === '') throw coded('E4005', 'a repository path is required')
+    // Absolute wins, bare name lands under the source root - which also covers a
+    // relative path such as "repos/alpha", the one discovery actually produces.
+    const candidate = (await rootAnswersForItself(entry))
+      ? resolve(sourceRoot)
+      : resolve(sourceRoot, entry)
+    if (!samePathLocation(candidate, sourceRoot) && !isInside(sourceRoot, candidate)) {
+      throw coded('E4006', `not inside the source root ${sourceRoot}: ${entry}`)
+    }
+    if (!(await isSourceRepository(candidate))) throw coded('E6001', `not a source repository: ${basename(candidate)}`)
     repositories.push(candidate)
   }
   return repositories

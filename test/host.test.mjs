@@ -93,15 +93,20 @@ describe("worktree porcelain parser", () => {
     const depthFive = join(root, "a", "b", "c", "d", "five")
     try {
       for (const path of [depthTwo, depthThree, depthFour, depthFive]) await mkdir(join(path, ".git"), { recursive: true })
-      // The default reaches the second level and stops there: the third is one level
-      // too far, which is the whole of what a default is - far enough for the
-      // layouts people have, shallow enough that a home directory does not turn
-      // into a crawl. Two levels, not three: measured against a real Workspace,
-      // every repository the extra level found was two of ninety-six, and it costs
-      // a full extra breadth-first pass to find them. The order is the sorted one
-      // the walk settles on.
-      expect(await discoverGitRoots(root)).toEqual([depthTwo])
-      expect(await discoverGitRoots(root, { maxDepth: 3 }).then((found) => found.sort())).toEqual([depthThree, depthTwo].sort())
+      // The default reaches the third level and stops there. It was two, on a
+      // measurement - against a real Workspace the extra level found two repositories
+      // out of ninety-six - which is a cost worth naming but not a cost worth
+      // refusing reachability for. A repository is a leaf of this walk, so depth only
+      // buys the directories that hold none between the source root and the
+      // repositories: on a source root whose repositories all sit within two levels
+      // the third level found nothing and walked nothing extra, because there was
+      // nothing at level two left to descend into. What bounds a walk is the
+      // directory budget, not the depth. The order is the sorted one the walk
+      // settles on.
+      expect((await discoverGitRoots(root)).sort()).toEqual([depthTwo, depthThree].sort())
+      // Still one level short of the deepest, so three is a default and not a
+      // ceiling: a deeper layout is a setting, not a rewrite.
+      expect(await discoverGitRoots(root, { maxDepth: 2 })).toEqual([depthTwo])
       expect((await discoverGitRoots(root, { maxDepth: 5 })).sort()).toEqual([depthTwo, depthThree, depthFour, depthFive].sort())
       expect(await discoverGitRoots(root, { maxDepth: 1 })).toEqual([])
     } finally {
@@ -110,7 +115,7 @@ describe("worktree porcelain parser", () => {
   })
 
   it("clamps a requested scan depth into the supported range", () => {
-    expect(DEFAULT_SCAN_DEPTH).toBe(2)
+    expect(DEFAULT_SCAN_DEPTH).toBe(3)
     expect(MIN_SCAN_DEPTH).toBe(1)
     expect(MAX_SCAN_DEPTH).toBe(5)
     expect(MAX_SCAN_DIRECTORIES).toBe(2000)
@@ -764,6 +769,29 @@ describe("a Workspace registered inside another Workspace", () => {
     expect(topLevelRequestedPaths([parent, `${inner}/`])).toEqual([parent])
   })
 
+  // Every case above is written with forward slashes, which is also what the Host
+  // answers with when a scan reports a path. The Workspace registration it has to
+  // prune arrives in the platform's own spelling, and on Windows that is
+  // backslashes - so the pruning ran against paths whose separator no `startsWith`
+  // could match, and dropped nothing at all. Every other case in this block passed
+  // while the one shape a Windows user actually registers did not.
+  it("prunes a nested Workspace registered in the platform's own separator", () => {
+    const winParent = "E:\\workspace"
+    const winInner = "E:\\workspace\\public"
+    expect(topLevelRequestedPaths([winParent, winInner])).toEqual([winParent])
+    expect(topLevelRequestedPaths([winInner, winParent])).toEqual([winParent])
+  })
+
+  it("prunes a nested Workspace whose path differs only in case", () => {
+    // Windows has one directory named once; `WORKSPACE` and `workspace` are one
+    // spelling of it, not two.
+    expect(topLevelRequestedPaths(["E:\\WORKSPACE\\public", "e:\\workspace"])).toEqual(["e:\\workspace"])
+  })
+
+  it("does not prune a sibling that only shares a name prefix, in either separator", () => {
+    expect(topLevelRequestedPaths(["E:\\work", "E:\\workspaces"])).toEqual(["E:\\work", "E:\\workspaces"])
+  })
+
   it("still classifies a nested Workspace on its own account", async () => {
     const fixture = await mkdtemp(join(tmpdir(), "dsh-ws-nested-"))
     try {
@@ -778,12 +806,16 @@ describe("a Workspace registered inside another Workspace", () => {
       // twice, and it is still walked as itself - pruning removes the duplicate, not
       // the Workspace.
       expect(byPath[nested].repositoryCount).toBe(1)
-      // The parent's own walk still descends into the nested directory, so its count
-      // includes what is under it. That is why the panel stopped reading a count
-      // from here: a Workspace reading "0" beside a list of twelve came from two
-      // walks measuring two different things, and the badge now counts the list the
-      // row actually shows.
-      expect(byPath[join(fixture, "work")].repositoryCount).toBe(2)
+      // The nested Workspace is a Workspace like any other, and `isSourceRoot` is
+      // what decides whether a task space can be started from it. Dropping it from
+      // the request - which is what pruning the request does - took that away.
+      expect(byPath[nested].isSourceRoot).toBe(true)
+      // The parent's walk steps over the nested Workspace, so its count is the
+      // repositories the parent itself holds. That is also what its row shows: the
+      // panel gives each repository to the most specific Workspace holding it, so
+      // inner-repo belongs to the nested row and never appeared under this one.
+      // Counting it here would put a number beside a list that does not contain it.
+      expect(byPath[join(fixture, "work")].repositoryCount).toBe(1)
     } finally {
       await rm(fixture, { recursive: true, force: true })
     }

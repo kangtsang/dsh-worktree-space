@@ -5,6 +5,7 @@ import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabled
 import { coded, UNKNOWN } from './task/codes.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { mapWithLimit } from './task/concurrency.js'
+import { isInside } from './task/paths.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
@@ -185,7 +186,18 @@ export function ignoredScanDirectorySet(added, removed) {
 /** Scan bounds. The Web UI offers these depths, and the Host enforces them. */
 export const MIN_SCAN_DEPTH = 1
 export const MAX_SCAN_DEPTH = 5
-export const DEFAULT_SCAN_DEPTH = 2
+/**
+ * Three, not two.
+ *
+ * A repository is a leaf of the walk, so depth only costs what sits between the
+ * source root and the repositories - the directories that hold none. Two levels
+ * finds `E:\work\repos\alpha` and nothing below it, so a Workspace registered one
+ * level above a further layout reported none of its repositories and read as an
+ * empty directory rather than one holding repositories it could not reach. Three
+ * is still bounded by the same ceiling: the cost is the directories walked, and
+ * the ceiling is on those, not on the depth.
+ */
+export const DEFAULT_SCAN_DEPTH = 3
 /** Directories one scan may inspect before it refuses to guess any further. */
 export const MAX_SCAN_DIRECTORIES = 2000
 
@@ -529,11 +541,7 @@ export function requestedPaths(payload) {
  * @returns true when `inner` is a descendant of `outer`.
  */
 function isInsideDirectory(outer, inner) {
-  const left = cleanPath(outer)
-  const right = cleanPath(inner)
-  if (left === '' || right === '' || left === right) return false
-  const prefix = left.endsWith('/') ? left : `${left}/`
-  return right.startsWith(prefix)
+  return isInside(outer, inner)
 }
 
 /**
@@ -1020,11 +1028,15 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.classify-roots') return recover(async () => {
       const paths = requestedPaths(payload)
       if (paths.length === 0) throw coded('E4004', 'A source root is required.')
-      // Pruned exactly as `worktree.scan` prunes: the badge on a Workspace and the
-      // repositories its row lists come from two walks over one path list, so one
-      // dropping a nested Workspace and the other keeping it would put a count
-      // beside a list the count no longer describes.
-      return classifySourceRoots(topLevelRequestedPaths(paths), { signal, concurrency: SCAN_CONCURRENCY, ...taskScanBounds() })
+      // Not pruned the way `worktree.scan` prunes, and deliberately so. Pruning
+      // deletes the nested path from the request; this endpoint's answer is not a
+      // repository list but `isSourceRoot` per path, and that is what decides
+      // whether a task space can be started from the Workspace. A Workspace
+      // registered inside another one is a Workspace like any other, and dropping
+      // it here took that ability away from it. `classifySourceRoots` stops the
+      // duplicate walk from the other end instead: each path is classified on its
+      // own account, while every other one skips its nested subtrees.
+      return classifySourceRoots(paths, { signal, concurrency: SCAN_CONCURRENCY, ...taskScanBounds() })
     })
 
     if (endpoint === 'task.suggest-root') return recover(async () => {

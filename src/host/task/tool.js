@@ -332,7 +332,7 @@ export function registerTaskTool(ctx, options = {}) {
       project: { type: 'string', description: 'Project layer (add, list, done): the source root\'s own directory name. Omit when sourceRoot is given, since it is derived from it.' },
       sourceRoot: { type: 'string', description: 'Directory of the repositories. Required for suggest-root and create.' },
       tasksRoot: { type: 'string', description: 'Container for task spaces: beside the repositories\' directory, never inside it or a parent of it. Omit for the recommendation.' },
-      repos: { type: 'array', items: { type: 'string' }, description: 'Repository names (create), or absolute paths (add). Omit for every discovered (create).' },
+      repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths, as reported by suggest-root (create, add). Omit for every discovered (create). A bare name is read as relative to sourceRoot, which only names a repository sitting directly in it.' },
       baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
