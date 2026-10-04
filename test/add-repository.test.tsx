@@ -213,20 +213,45 @@ describe("the repository view adds a repository by registering it as a Workspace
     expect(next.api.scan.mock.calls[1][0]).toContain("/work/gamma")
   })
 
-  it("says plainly that a repository already in the list needs nothing done to it", async () => {
+  it("notices that the scan already lists it, and registers nothing", async () => {
     const next = setup()
-    next.api.scan.mockResolvedValue(scanAnswer([]))
+    // The scan has found `/spaces/alpha`, so the panel is already showing it.
+    next.api.scan.mockResolvedValue(scanAnswer([repository("/spaces/alpha")]))
     next.api.classifyRoot.mockResolvedValue({ isRepository: true })
     next.mount()
     showRepositories()
 
-    // `/spaces` is already a Workspace, so it is already in the list the field
-    // exists to add to.
-    fireEvent.change(await openField(next), { target: { value: "/spaces" } })
+    fireEvent.change(await openField(next), { target: { value: "/spaces/alpha" } })
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: t("addRepositoryAdd") })) })
 
     expect(next.workspaces.create).not.toHaveBeenCalled()
-    expect(screen.getByRole("alert").textContent).toContain(t("addRepositoryAlready"))
+    // Not a failure: the repository is in the list they were adding to, so it is a
+    // status in the warn colour rather than an alert, and it is not an error to
+    // have asked.
+    const notice = screen.getByRole("status")
+    expect(notice.textContent).toContain(t("addRepositoryAlready"))
+    expect(screen.queryByRole("alert")).toBeNull()
+    // And the field stays open, so a mistyped path can be corrected in place.
+    expect(screen.queryByRole("textbox", { name: t("addRepositorySource") })).not.toBeNull()
+  })
+
+  it("registers a repository the scan did not list, even under a registered Workspace", async () => {
+    const next = setup()
+    // `/spaces` is a registered Workspace and `/spaces/beta` is a repository under
+    // it, but this scan returned only `/spaces/alpha`. The list is what decides, so
+    // `/spaces/beta` is still registered: whether some ancestor is a Workspace is a
+    // different question, and answering it would register a second Workspace over a
+    // directory that already has one for no gain.
+    next.api.scan.mockResolvedValue(scanAnswer([repository("/spaces/alpha")]))
+    next.api.classifyRoot.mockResolvedValue({ isRepository: true })
+    next.mount()
+    showRepositories()
+
+    fireEvent.change(await openField(next), { target: { value: "/spaces/beta" } })
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: t("addRepositoryAdd") })) })
+
+    expect(next.workspaces.create).toHaveBeenCalledExactlyOnceWith({ path: "/spaces/beta" })
+    expect(screen.queryByRole("status")).toBeNull()
   })
 
   it("refuses a directory that is not a repository, and registers nothing", async () => {

@@ -172,6 +172,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const [addingSource, setAddingSource] = useState(false)
   const [sourcePath, setSourcePath] = useState("")
   const [sourceError, setSourceError] = useState("")
+  // Kept apart from `sourceError` because it is not one: the repository the user
+  // named is in the list already, which is what they asked for, so it is drawn in
+  // the warn colour and announced as a status rather than interrupting them as a
+  // failure. A field that stays open under a red error tells the reader the last
+  // thing they did was wrong; it was not.
+  const [sourceNotice, setSourceNotice] = useState("")
   const [sourceBusy, setSourceBusy] = useState(false)
   const [addingSpace, setAddingSpace] = useState(false)
   const [spacePath, setSpacePath] = useState("")
@@ -475,10 +481,16 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
    *
    * Nothing here is a list of ours: the repository view is a scan of the
    * Workspaces, so the entry goes where every other entry comes from and is
-   * removed the way every other entry is. Registering one that is already
-   * registered is not a failure — the user asked for it to be in the list and it
-   * is — so it says so and moves on rather than sending them looking for
-   * something to fix.
+   * removed the way every other entry is.
+   *
+   * Whether it is worth registering is answered by that scan, so the scan's own
+   * repository paths are what decides. A repository the last scan already listed
+   * is on the page in front of the user: registering it again would put a second
+   * Workspace over a directory that already has one, which they would then have to
+   * delete by hand. That is a notice and not a failure — nothing is broken, the
+   * repository is where they asked for it to be — so it is said once, in the warn
+   * colour, with the field left open so a mistyped path can be corrected without
+   * starting again.
    */
   const addSource = async () => {
     const path = sourcePath.trim()
@@ -486,11 +498,15 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
     setSourceBusy(true)
     setSourceError("")
     try {
-      const outcome = await addRepositorySource(api, workspaces, path)
+      const outcome = await addRepositorySource(api, workspaces, path, repos.map((repo) => repo.repoPath))
+      if (!outcome.added) {
+        setSourceNotice(t("addRepositoryAlready"))
+        return
+      }
+      setSourceNotice("")
       setSourcePath("")
       setAddingSource(false)
-      if (!outcome.added) setError(t("addRepositoryAlready"))
-      else await refresh([path])
+      await refresh([path])
     } catch (reason: any) {
       setSourceError(String(reason?.message ?? reason))
     } finally {
@@ -567,11 +583,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         {/* Offered only in the repository view: it is this view's list being added
             to, and in the other two the same button would answer a question the
             user is not asking. */}
-        {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSourceError(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
+        {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy || !!action} onClick={() => { setSourceError(""); setSourceNotice(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
         {view === "repos" && addingSource ? <div className="dws-add-source-row">
           <Input aria-label={t("addRepositorySource")} placeholder={t("addRepositoryManualPlaceholder")} value={sourcePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSourcePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSource() } }} />
           <Button className="dws-button-primary" disabled={sourceBusy || sourcePath.trim() === ""} onClick={() => void addSource()}>{sourceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{sourceBusy ? t("addingRepository") : t("addRepositoryAdd")}</Button>
-          <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSource(false); setSourcePath(""); setSourceError("") }}><X size={14} /></Button>
+          <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSource(false); setSourcePath(""); setSourceError(""); setSourceNotice("") }}><X size={14} /></Button>
         </div> : null}
         {/* The same offer one level up: a Workspace is a directory the user has
             named, and naming one is DSH's own job, done here because this is where
@@ -586,6 +602,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
         </div> : null}
       </div>
       {sourceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{sourceError}</span></div> : null}
+        {sourceNotice ? <p className="dws-notice" role="status"><AlertCircle size={15} aria-hidden="true" /><span>{sourceNotice}</span></p> : null}
       {spaceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{spaceError}</span></div> : null}
       <div className="dws-list-controls">
         {/* The dialog form offers the three views here, as it always has, set off from
