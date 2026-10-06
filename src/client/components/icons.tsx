@@ -14,6 +14,7 @@ import Loading03Icon from "@hugeicons/core-free-icons/Loading03Icon"
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon"
 import RefreshCwIcon from "@hugeicons/core-free-icons/RefreshCwIcon"
 import Search01Icon from "@hugeicons/core-free-icons/Search01Icon"
+import Settings02Icon from "@hugeicons/core-free-icons/Settings02Icon"
 import type { ComponentProps } from "react"
 
 /**
@@ -27,7 +28,7 @@ import type { ComponentProps } from "react"
  * Hugeicons' stroke-rounded set is the family DSH's own chrome is drawn from, so the
  * plugin's glyphs share a weight and a corner radius with the shell's instead of merely
  * sitting beside them. Each glyph is imported from its own file: the package ships 6,000
- * of them, and only the fourteen below are in the bundle.
+ * of them, and only the fifteen below are in the bundle.
  */
 type IconProps = Omit<ComponentProps<typeof HugeiconsIcon>, "icon"> & { className?: string }
 
@@ -88,6 +89,8 @@ export const ChevronDown = iconOf(ArrowDown01Icon)
 export const Plus = iconOf(PlusSignIcon)
 export const RefreshCw = iconOf(RefreshCwIcon)
 export const Search = iconOf(Search01Icon)
+/** The gear: the one glyph that means "this leads to the plugin's settings page". */
+export const Settings = iconOf(Settings02Icon)
 
 /**
  * The plugin's own mark: the one glyph not drawn by Hugeicons.

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "Worktree Space：一任务一空间，Agent 并行不悖。把一个或多个 Git 仓库的工作任务放进独立任务空间：每个参与的仓库在同一个任务分支上各开一个 worktree，任务空间自动注册为工作区，agent 会话就在其中独立工作。多个任务并行推进、互不干扰；结束后合并回各仓库目标分支，worktree 分支和任务空间按需清理。遇到问题请在 https://github.com/kangtsang/dsh-worktree-space/issues 反馈。"
+    "description": "Worktree Space：一任务一空间，工作多路并行。把一个或多个 Git 仓库的工作任务放进独立任务空间：每个参与的仓库在同一个任务分支上各开一个 worktree，任务空间自动注册为工作区，agent 会话就在其中独立工作。多个任务并行推进、互不干扰；结束后合并回各仓库目标分支，worktree 分支和任务空间按需清理。遇到问题请在 https://github.com/kangtsang/dsh-worktree-space/issues 反馈。"
   }
 }

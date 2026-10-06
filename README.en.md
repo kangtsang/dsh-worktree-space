@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
-Worktree Space: One task, one space — agents in parallel, never in conflict. A task that involves one or more Git repositories goes into its own task space directory, where each
+Worktree Space: One task, one space — work on parallel tracks. A task that involves one or more Git repositories goes into its own task space directory, where each
 participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH
 workspace, agent sessions start working inside it, and each task gets its own space, so several tasks can run in
 parallel without interfering with one another. When a task is finished you can merge the task branch back into the
@@ -242,9 +242,9 @@ data directory, which needs a DSH restart.
 | Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
 | Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
-| Scan depth | 1–5 levels | 2 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
+| Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, a smaller Workspace is requested |
-| Directories the scan skips | any list of directory names | the plugin's 24 | A scan never descends into directories with these names. The plugin ships 24 dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — and you can add your own or take one of those away. **Removing a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Up to 200 of your own. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
+| Directories the scan skips | any list of directory names | the plugin's 23 | A scan never descends into directories with these names. The plugin ships 23 dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — and you can add your own or take one of those away. **Removing a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Up to 200 of your own. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
 | Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source Workspace by the rule below and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits, and their tasks cannot crowd each other. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
 | Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
@@ -295,9 +295,11 @@ Open the **management page** — two ways in:
 
 - **The Worktree Space shortcut at the sidebar foot** (shown by default) — opens it as a **dialog**;
 - **The Worktree Space row under New session** (hidden by default, turn it on in the
-  **configuration**) — opens it **full width** in the main column, where the page brings its own
-  left-hand navigation: **Back to conversation** first, since the panel takes the column the
-  conversation was in, then the three views. The dialog form keeps the switcher in its toolbar.
+  **configuration**) — opens it **full width** in the main column.
+
+Both forms share one left-hand navigation: the full-width page leads with **Back to conversation**,
+since the panel takes the column the conversation was in, then the three views; at the foot of the
+column, **⚙ Plugin Settings** jumps to this plugin's configuration on the Host's Plugins page.
 
 The three
 views differ as described under Features: Workspaces shows where a task space can start, Git

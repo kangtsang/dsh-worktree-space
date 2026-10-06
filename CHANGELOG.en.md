@@ -4,6 +4,30 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.2.1 — 2026-10-06
+
+### Added
+
+- **A "⚙ Plugin Settings" row at the foot of the management page's navigation column.**
+  The dialog and the full-width panel share it; a click goes straight to this plugin's
+  detail page on the Host's Plugins panel (through the `pluginNavigation.openBundle`
+  the panel publishes, without touching the current Session), and the dialog closes
+  before jumping. Where the Host serves no such navigation the row does nothing and
+  the management page keeps working.
+- **The full-width panel's heading carries the "Feedback" link.** Until now only the
+  dialog had one, and the panel is the way most readers reach the page — the place
+  most likely to want a bug report was the one place that offered no way to file it.
+- **A second line under the heading: the usage flow** — pick a workspace -> create a
+  task space -> the agent works -> finish the task (merge back to the target branch,
+  archive the leftover documents, destroy the task space) — and the feedback link now
+  rides at the end of that line.
+
+### Fixed
+
+- **The README's description of the management page disagreed with the page**: it said
+  the dialog form kept the view switcher in its toolbar, while both forms had long
+  since shared one navigation column.
+
 ## 1.2.0 — 2026-10-04
 
 Everything in this release is about things that could be seen but not done: a path you

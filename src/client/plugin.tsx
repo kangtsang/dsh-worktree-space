@@ -57,6 +57,18 @@ const SIDEBAR_FOOTER_ORDER = 5
 const PANEL_ID = "dsh-worktree-space"
 
 /**
+ * Where the gear row takes the reader: this bundle's own detail page on the
+ * shell's Plugins panel.
+ *
+ * The Plugins panel provides a `pluginNavigation` service whose `openBundle`
+ * selects the panel and moves straight to one package's detail — the contract
+ * the voice bundle uses for its own settings button. The package name is the
+ * one the inventory lists this bundle under, which is `package.json`'s name,
+ * the same string the loader registers this plugin's own card by.
+ */
+const BUNDLE_NAME = "dsh-worktree-space"
+
+/**
  * This plugin's configuration form, once the shell has served one.
  *
  * Held at module scope because the form arrives inside an inject callback while the
@@ -127,6 +139,21 @@ export const WorktreePlugin = {
     const requestCreate = (target: Pick<Workspace, "path" | "title">) => openCreate(target)
     const requestArchive = (path: string) => openArchive(path)
     const requestManage = () => openManage()
+    // The gear row's destination: this plugin's own configuration, which lives on
+    // the shell's Plugins panel under this bundle's detail page. `pluginNavigation`
+    // is the panel's published way in — it selects the panel and opens the bundle
+    // in one step, without touching the current Session. Where the service is not
+    // served (a shell without the Plugins panel), the row does nothing rather than
+    // taking the management page down with a throw.
+    const requestSettings = () => {
+      try {
+        const navigation = ctx.get("pluginNavigation") as { openBundle?: (name: string) => void } | undefined
+        navigation?.openBundle?.(BUNDLE_NAME)
+      } catch {
+        // Nothing to open; the configuration stays reachable through the shell's own
+        // navigation.
+      }
+    }
 
     const refreshClassification = async () => {
       if (!active) return
@@ -226,6 +253,13 @@ export const WorktreePlugin = {
             uiWorkspace={uiWorkspace}
             sessions={sessions}
             onCreate={(target) => setRequest({ kind: "create", target })}
+            onOpenSettings={() => {
+              // Close first: the dialog covers the main column, and the page it is
+              // jumping to lives in that column — leaving it open would put the
+              // Plugins page behind a window over it.
+              setRequest(null)
+              requestSettings()
+            }}
             onClose={() => setRequest(null)}
           />
         ) : null}
@@ -261,7 +295,7 @@ export const WorktreePlugin = {
     // id means, and a hidden row is a preference, not an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={requestCreate} onBack={() => ctx.layout.selectPanel(null)} />,
+      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
     ))
 
     // The plugin's two ways in, each shown or hidden by this plugin's own
