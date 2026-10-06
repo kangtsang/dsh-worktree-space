@@ -52,6 +52,10 @@
   .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
   .dws-nav svg { flex: none; }
   .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
+  /* The gear row sits at the foot of the column, the way the shell pins its own
+     settings control to the foot of its sidebar: the views belong at the top, and
+     the way out to the plugin's configuration belongs apart from them. */
+  .dws-nav-settings { margin-top: auto; }
   /* The panel's first band, and the whole reason the page is two bands: the back row and
      the heading share it, and it grows to the taller of the two, so whatever the
      description wraps to, the band below begins after it. The row's inset is 24px rather
@@ -83,6 +87,10 @@
   .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+  /* The flow line sits under the description as its own line inside the same
+     paragraph: a block span, not a nested paragraph, because the host already
+     wraps this in a <p>. */
+  .dws-usage-flow { display: block; }
   /* The section is a column that fills the frame it is given: everything above the rows
      is pinned in one block, and the list below it is the only thing that scrolls, so the
      search box and the filters stay where the eye left them however long the list grows. */

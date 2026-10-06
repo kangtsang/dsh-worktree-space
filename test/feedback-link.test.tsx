@@ -50,6 +50,9 @@ describe("the plugin description carries a feedback link", () => {
     const description = document.body.querySelector(".dws-manage-dialog .dws-form-note")
     expect(description, "the manage dialog header is the description").not.toBeNull()
     expect(description!.textContent, "this is the sentence the plugin describes itself with").toContain("一个包含多个 Git 仓库的工作任务")
+    // The flow line is the second line of the block: its own element under the
+    // description, not a newline inside it - the host wraps both in one <p>.
+    expect(description!.querySelector(".dws-usage-flow")?.textContent).toContain("使用流程")
 
     const link = description!.querySelector<HTMLAnchorElement>("a.dws-feedback-link")
     expect(link, "the feedback link follows that description").not.toBeNull()
@@ -58,11 +61,12 @@ describe("the plugin description carries a feedback link", () => {
     expect(link!.getAttribute("target")).toBe("_blank")
     expect(link!.getAttribute("rel")).toContain("noreferrer")
 
-    // Nothing stands between the sentence and the link. A middot read as punctuation
-    // belonging to the sentence it was attached to, and the two should abut.
+    // Nothing but one space stands between the sentence and the link. A middot read
+    // as punctuation belonging to the sentence it was attached to, and the copy now
+    // ends on a bracket, so the link needs its own air.
     expect(description!.querySelector(".dws-feedback-sep"), "no separator is rendered").toBeNull()
     expect(description!.textContent, "the link follows the sentence directly")
-      .toMatch(/按需清理。?使用反馈$/)
+      .toMatch(/销毁任务空间）\s+使用反馈$/)
   })
 
   it("is not on the tab description, which names the current view", async () => {
@@ -74,14 +78,20 @@ describe("the plugin description carries a feedback link", () => {
     expect(viewDescription!.querySelector("a"), "the tab description is not where the link goes").toBeNull()
   })
 
-  it("is not on the sidebar panel, which says the same sentence and stays bare", async () => {
+  it("is on the sidebar panel too, which says the same sentence and now links it", async () => {
     const s = stubs()
     render(<WorktreesPage api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} variant="panel" />)
     await settle()
     const sidebar = document.body.querySelector(".dws-panel-lead")
     expect(sidebar, "the sidebar panel renders its own heading").not.toBeNull()
     expect(sidebar!.textContent, "the sidebar still says what the plugin does").toContain("一个包含多个 Git 仓库的工作任务")
-    expect(sidebar!.querySelector("a"), "the sidebar panel has no feedback link").toBeNull()
+    // The link was once left off this host on purpose. That was wrong: the panel is
+    // the way most readers reach the page, and the one place they want to report a
+    // problem from is the place that offered no way to do it.
+    const link = sidebar!.querySelector<HTMLAnchorElement>("a.dws-feedback-link")
+    expect(link, "the panel's heading carries the same feedback link the dialog does").not.toBeNull()
+    expect(link!.getAttribute("href")).toBe(ISSUES_URL)
+    expect(link!.textContent).toBe("使用反馈")
   })
 
   // WorktreesSettings renders its own <h2> + description header when `heading` is set,

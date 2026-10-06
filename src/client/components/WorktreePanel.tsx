@@ -3,7 +3,8 @@ import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { worktreeNavItems, WorktreesSettings } from "./WorktreesSettings"
 import type { WorktreeView } from "./WorktreesSettings"
-import { BrandGlyph, ChevronLeft } from "./icons"
+import { BrandGlyph, ChevronLeft, Settings } from "./icons"
+import { PluginDescription } from "./PluginDescription"
 import type { createWorktreeApi } from "../lib/api"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 
@@ -15,6 +16,12 @@ export interface WorktreesPageProps {
   sessions: ISessions
   /** Opens the create form; the host decides whether it covers the page or steps aside. */
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
+  /**
+   * Shows this plugin's own configuration on the Host's Plugins panel. Left
+   * out, the navigation column keeps only the three views: a host that cannot
+   * reach that page must not offer a row that goes nowhere.
+   */
+  onOpenSettings?: () => void
   /**
    * The host's own way out of the page, for following a session out of the finish
    * dialog. The panel leaves it out — its way back to the conversation says the same
@@ -33,8 +40,18 @@ export interface WorktreesPageProps {
  * the panel's way back to the conversation is the panel's own chrome, and it leads the
  * heading instead — see `WorktreeNavBack` — so that this column begins on the toolbar's
  * own line in both hosts.
+ *
+ * The gear row is the one thing under the views, pinned to the foot of the column the
+ * way the shell pins its own settings control to the foot of its sidebar: this is where
+ * a reader who wants to change how the plugin behaves looks, and both hosts get it from
+ * here rather than growing a second copy. It is offered only when the host can actually
+ * reach the Plugins page — a row that goes nowhere is worse than no row.
  */
-export function WorktreesNav({ view, onView }: { view: WorktreeView; onView: (view: WorktreeView) => void }) {
+export function WorktreesNav({ view, onView, onOpenSettings }: {
+  view: WorktreeView
+  onView: (view: WorktreeView) => void
+  onOpenSettings?: () => void
+}) {
   const t = useT()
   return <nav className="dws-nav" aria-label={t("worktreesTitle")}>
     {worktreeNavItems().map(({ value, label }) => <button
@@ -44,6 +61,11 @@ export function WorktreesNav({ view, onView }: { view: WorktreeView; onView: (vi
       aria-current={view === value ? "true" : undefined}
       onClick={() => onView(value)}
     ><span>{t(label)}</span></button>)}
+    {onOpenSettings ? <button
+      type="button"
+      className="dws-nav-item dws-nav-settings"
+      onClick={onOpenSettings}
+    ><Settings size={16} aria-hidden="true" /><span>{t("pluginSettings")}</span></button> : null}
   </nav>
 }
 
@@ -76,7 +98,7 @@ function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
  * keeps its heading and its way back above the two columns, the dialog puts the title in
  * the window's own header, and either way only the rows the view lists scroll.
  */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, variant, onBack, onLeave }: WorktreesPageProps & {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave }: WorktreesPageProps & {
   variant: "panel" | "dialog"
   /** Panel only: the way back to the conversation. */
   onBack?: () => void
@@ -96,7 +118,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     onLeave={onLeave ?? onBack}
   />
   if (variant === "dialog") return <section className="dws-manage-page" aria-label={t("worktreesTitle")}>
-    <WorktreesNav view={view} onView={setView} />
+    <WorktreesNav view={view} onView={setView} onOpenSettings={onOpenSettings} />
     <div className="dws-manage-page-content">{settings}</div>
   </section>
   // The two bands of the panel's own chrome. The way back to the conversation and the
@@ -109,11 +131,11 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
       <WorktreeNavBack onBack={onBack} />
       <header className="dws-panel-heading">
         <h1>{t("worktreesTitle")}</h1>
-        <p>{t("panelDescription")}</p>
+        <p><PluginDescription /></p>
       </header>
     </div>
     <div className="dws-panel-body">
-      <WorktreesNav view={view} onView={setView} />
+      <WorktreesNav view={view} onView={setView} onOpenSettings={onOpenSettings} />
       <div className="dws-panel-scroll">
         <div className="dws-panel-content">{settings}</div>
       </div>

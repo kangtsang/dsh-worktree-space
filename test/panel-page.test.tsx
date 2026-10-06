@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act } from "react"
-import { WorktreePanelPage } from "../src/client/components/WorktreePanel"
+import { WorktreePanelPage, WorktreesPage } from "../src/client/components/WorktreePanel"
 import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { t } from "../src/client/lib/i18n"
@@ -126,6 +126,45 @@ describe("the management page as a main panel", () => {
     await waitFor(() => expect(screen.getByText(t("workspaceEmpty"))).toBeTruthy())
     // The dialog did not close on the way: switching views is not leaving the page.
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  // The gear row is the page's way to the Host's Plugins page, where this plugin's
+  // configuration is edited. It is offered by the host, not assumed: a build whose
+  // shell has no such panel must not draw a row that goes nowhere.
+  it("offers the plugin-settings row only when the host can take it there", async () => {
+    const api: any = { scan: vi.fn().mockResolvedValue(scanAnswer([])), cachedScan: vi.fn().mockResolvedValue(null), status: vi.fn() }
+    const workspaces: any = { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} }, create: vi.fn(), rename: vi.fn(), delete: vi.fn() }
+    const shared = {
+      api,
+      workspaces,
+      uiWorkspace: { openWorkspace: vi.fn() } as any,
+      sessions: { list: { getSnapshot: () => ({ byId: {} }) } } as any,
+      onCreate: vi.fn(),
+    }
+
+    mount(vi.fn())
+    await settle()
+    // Without the handler, the column holds the three views and nothing else.
+    const nav = screen.getByRole("navigation", { name: t("worktreesTitle") })
+    expect(within(nav).queryByRole("button", { name: t("pluginSettings") })).toBeNull()
+    cleanup()
+
+    // With it, the panel and the dialog both draw the row, and a click lands on the
+    // host's handler — the panel's because it is a page in the main column, the
+    // dialog's because the host closes it on the way out (see plugin.tsx).
+    render(<WorktreesPage {...shared} variant="panel" onBack={vi.fn()} onOpenSettings={vi.fn()} />)
+    await settle()
+    const panelRow = screen.getByRole("button", { name: t("pluginSettings") })
+    expect(document.querySelector(".dws-nav")?.contains(panelRow)).toBe(true)
+    cleanup()
+
+    const onOpenSettings = vi.fn()
+    render(<WorktreeManagePanel {...shared} onOpenSettings={onOpenSettings} onClose={vi.fn()} />)
+    await settle()
+    const dialogRow = screen.getByRole("button", { name: t("pluginSettings") })
+    expect(document.querySelector(".dws-nav")?.contains(dialogRow)).toBe(true)
+    fireEvent.click(dialogRow)
+    expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
   it("leaves the dialog's own layout alone: without a navigation, the toolbar keeps the switcher", async () => {
