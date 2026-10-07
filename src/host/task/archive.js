@@ -9,6 +9,8 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
 import { coded } from './codes.js'
+import { assertDeliveryGate, destroyDeployment } from './deploy.js'
+import { deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, refuseDelete } from './paths.js'
@@ -613,6 +615,7 @@ export async function finishTask(subprocess, options) {
     documentsDirectory,
     discardDocuments = false,
     cause,
+    acknowledgeDelivery = false,
   } = options
 
   // Deleting a branch that was merged is routine; deleting one that was not throws
@@ -667,6 +670,14 @@ export async function finishTask(subprocess, options) {
   if (taskBranch === '') {
     warnings.push(`no task branch is recorded in ${taskPath}; no branch was deleted in any repository`)
   }
+
+  // The delivery gate is the one check here that reads the task's policy rather
+  // than the caller's request. Its default is the hard refusal, which is what a
+  // model-facing tool call meets; the panel can carry the user's own overrule
+  // (`acknowledgeDelivery`), because the user's instruction outranks the policy -
+  // and a bypassed gate is recorded as a warning, never silently.
+  const gateWarning = await assertDeliveryGate(recorded, taskPath, { merge, bypass: acknowledgeDelivery === true })
+  if (gateWarning !== undefined) warnings.push(gateWarning)
 
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
@@ -1011,6 +1022,25 @@ export async function finishTask(subprocess, options) {
         ...(containerRemoved ? { containerRemoved: true } : {}),
       },
     )
+    // The deployment, if the task ever had one, is a compose project named by the
+    // environment id in the record. It is torn down here rather than left to the
+    // deploy script or the user's memory, because nothing runs after the task
+    // space is gone: a cleanup someone has to remember is a cleanup that leaks.
+    // Best effort by contract — a missing docker, an unreachable engine or a
+    // refused removal becomes a warning this finish still carries, never a
+    // failure, and it is skipped outright when the policy deployed nothing.
+    if (cause === undefined) {
+      const policy = deliveryPolicyOf(recorded)
+      const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
+      if (policy.deploy.target !== 'none' && envId !== '') {
+        try {
+          const outcome = await destroyDeployment(subprocess, taskPath, envId)
+          if (outcome.warning !== undefined) warnings.push(outcome.warning)
+        } catch (error) {
+          warnings.push(`deployment cleanup failed for ${envId}: ${error.message}`)
+        }
+      }
+    }
   } else {
     const stuck = repositories.filter((entry) => entry?.removed !== true).map((entry) => entry.name)
     await recordEvent(

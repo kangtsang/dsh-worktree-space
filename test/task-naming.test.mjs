@@ -3,6 +3,7 @@ import { basename, join } from "node:path"
 import {
   branchNameFor,
   DEFAULT_BRANCH_PREFIX,
+  deploymentEnvIdFor,
   projectNameFor,
   TaskNameError,
   validateBranchPrefix,
@@ -99,6 +100,29 @@ describe("branchNameFor", () => {
 
   it("honours a configured prefix", () => {
     expect(branchNameFor("fix-login", "feat/")).toBe("feat/fix-login")
+  })
+})
+
+describe("deploymentEnvIdFor", () => {
+  it("derives one id from the two names the task already has", () => {
+    expect(deploymentEnvIdFor("kratos-admin", "fix-login")).toBe("dsh-kratos-admin-fix-login")
+  })
+
+  it("keeps dashes and digits that are already legal", () => {
+    // The real shape: a project whose own name carries a dash, nesting a task of it.
+    expect(deploymentEnvIdFor("dsh-worktree-space", "docker")).toBe("dsh-dsh-worktree-space-docker")
+  })
+
+  it("folds what compose would refuse into a dash", () => {
+    // A project name may carry spaces and capitals - the directory the user
+    // already has - while a compose project name may not.
+    expect(deploymentEnvIdFor("My Project", "fix-login")).toBe("dsh-my-project-fix-login")
+  })
+
+  it("falls back per layer when a name folds away entirely", () => {
+    // A name made only of characters outside the alphabet would otherwise fold
+    // to nothing and leave a dangling dash behind.
+    expect(deploymentEnvIdFor("我的项目", "登录")).toBe("dsh-project-task")
   })
 })
 

@@ -9,6 +9,7 @@ import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
 import { ERROR_CODES, coded } from './codes.js'
 import { prepareContainerRoot } from './container.js'
+import { resolveDeliveryPolicy } from './delivery.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
@@ -121,6 +122,10 @@ export async function createTask(subprocess, options) {
     // the list in the create dialog, and what this actually takes are one number
     // rather than three that happen to disagree.
     scanBounds = {},
+    // The delivery policy as this request stated it, and the per-project defaults
+    // the configuration holds. Resolved below, once, before anything is made.
+    delivery,
+    deliveryDefaults = {},
   } = options
 
   const name = validateTaskName(task)
@@ -134,6 +139,9 @@ export async function createTask(subprocess, options) {
   // than asked for: the dialog never has to name it, and the layout cannot drift
   // from the directory the user sees on disk.
   const project = projectNameFor(sourceRoot)
+  // The delivery policy is resolved once, before anything is created: an invalid
+  // one must fail the request, not surface halfway through a rollback.
+  const policy = resolveDeliveryPolicy(project, delivery, deliveryDefaults)
 
   // An absent list means "every discovered repository"; an explicitly empty one
   // is a caller that selected nothing, which must not silently become all.
@@ -232,6 +240,7 @@ export async function createTask(subprocess, options) {
       sourceRoot,
       branch,
       baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
+      delivery: policy,
       repositories: created.map((entry) => ({
         name: entry.name,
         sourcePath: entry.repoPath,

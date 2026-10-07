@@ -60,12 +60,17 @@ export const ERROR_CODES = {
   E4007: 'archive.js - deleting an unmerged branch was not forced',
   E4008: 'archive.js - the merge target is unusable',
   E4009: 'naming.js - the task name or branch prefix is not usable',
+  E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
   E5002: 'archive.js - finishing did not complete for every repository',
   E5003: 'archive.js - one repository could not be finished and needs another attempt',
   E5004: 'archive.js - the source checkout has uncommitted work the merge would overwrite',
+  E5005: 'deploy.js - the delivery policy requires a deployment before a merge, and none was recorded',
+  E5006: 'deploy.js - the last deployment smoke did not pass, so the merge is refused',
+  E5007: 'deploy.js - the delivery policy waits for a human acceptance ack, so the merge is refused',
+  E5008: 'deploy.js - the deploy script is missing, or it failed while rebuilding the environment',
 
   // --- E6xxx scanning and discovery ---------------------------------------
   E6001: 'discover.js, add.js - a candidate directory is not a source repository',

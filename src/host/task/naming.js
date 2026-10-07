@@ -142,3 +142,36 @@ export function validateBranchPrefix(prefix) {
 export function branchNameFor(task, prefix = DEFAULT_BRANCH_PREFIX) {
   return `${prefix}${task}`
 }
+
+/**
+ * Docker environment id a task's deployments carry.
+ *
+ * A deployed task is one compose project — one network, one teardown — so it needs
+ * an id unique to the task that every side spells the same way: the note prints it
+ * for the session, the deploy script takes it as `DSH_ENV_ID`, and a cleanup that
+ * runs after the fact matches containers by the `dsh.env-id` label carrying it.
+ * Deriving it here, from the two names the task already has, is what keeps those
+ * sides agreeing without a fourth name to ask for or to mistype.
+ *
+ * A compose project name is held to a narrower alphabet than a directory name is —
+ * lowercase letters, digits, dash and underscore — while a project name may carry
+ * spaces or any other character the user's filesystem really has. Everything
+ * outside the alphabet folds to a dash, and a segment that folds away entirely
+ * falls back to its layer's name, so the id stays legal for every project the user
+ * has. The fold is many-to-one: two names differing only outside the alphabet
+ * collapse to one id, which for cleanup is the safe direction — an over-broad match
+ * tears down at worst a task that spells the same.
+ * @param project - the project layer's name.
+ * @param task - the task name.
+ * @returns the environment id, e.g. `dsh-my-project-fix-login`.
+ */
+export function deploymentEnvIdFor(project, task) {
+  const slug = (value, fallback) => {
+    const folded = String(value ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    return folded === '' ? fallback : folded
+  }
+  return ['dsh', slug(project, 'project'), slug(task, 'task')].join('-')
+}

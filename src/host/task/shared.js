@@ -7,7 +7,8 @@
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tryRunGit } from './git.js'
-import { validateProjectName, validateTaskName } from './naming.js'
+import { coerceDeliveryPolicy } from './delivery.js'
+import { deploymentEnvIdFor, validateProjectName, validateTaskName } from './naming.js'
 import { assertTaskSpaceShape } from './paths.js'
 import { recommendTasksRoot } from './paths.js'
 
@@ -165,10 +166,16 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * @param details - `task`, `tasksRoot`, `sourceRoot`, the shared `branch`, the
  * optional `baseRef`, and the created repositories with their source paths,
  * source branches and starting commits.
- * @returns the document to write as JSON.
+ * @returns the document to write as JSON. Alongside the captured facts it
+ * carries the `deploymentEnvId` derived from the project and task names — a
+ * deployment is not a fact this plugin captures, but the id every deploy
+ * command and cleanup later must spell identically, so it is written down
+ * rather than recomputed at each end — and the `delivery` policy the task was
+ * created under, completed to the defaults where the caller said less, so the
+ * note, the gate and the panel read one record instead of three opinions.
  */
 export function taskMetadata(details) {
-  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [] } = details
+  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [], delivery } = details
   return {
     version: 1,
     task,
@@ -177,6 +184,8 @@ export function taskMetadata(details) {
     sourceRoot,
     branch,
     baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? null : `${baseRef}`,
+    deploymentEnvId: deploymentEnvIdFor(project, task),
+    delivery: coerceDeliveryPolicy(delivery),
     createdAt: new Date().toISOString(),
     repositories: repositories.map((entry) => ({
       name: entry.name,
@@ -236,11 +245,17 @@ async function parseLegacyBreadcrumb(taskPath) {
 
 /**
  * Render the metadata as the note a session reads.
+ *
+ * The Deployment section is here, and not only in the bundled skill, because it
+ * is the one line a session must copy exactly — the environment id — and a note
+ * generated from the same record the cleanup later reads is what keeps the two
+ * from drifting. A container old enough to predate the field renders without the
+ * section: guidance that names no id would invite a session to guess one.
  * @param metadata - the document {@link taskMetadata} built.
  * @returns the Markdown contents.
  */
 export function renderTaskMetadata(metadata) {
-  const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [] } = metadata
+  const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [], deploymentEnvId, delivery } = metadata
   const lines = [
     `# Task: ${task}`,
     '',
@@ -260,6 +275,23 @@ export function renderTaskMetadata(metadata) {
     '- Source repositories are read-only: never edit or commit there.',
     '- Merging back to the main branch is the user\'s action, not the agent\'s.',
     '',
+    ...(typeof deploymentEnvId === 'string' && deploymentEnvId !== '' ? [
+      '## Deployment',
+      '- If this space holds deployable services — a repository with its own `deploy/deploy.sh`, or a `deploy/` orchestration root beside the worktrees — deploy them to an isolated Docker environment rather than starting them on the host.',
+      `- Environment id for this task: \`DSH_ENV_ID=${deploymentEnvId}\`. Pass it to every deploy command: it is what keeps this task's containers, images and acceptance URL apart from every other task's.`,
+      '- `./deploy.sh up` builds and starts the environment and prints the acceptance URL; run `./deploy.sh smoke` and let it pass before handing the URL to the user.',
+      '- `./deploy.sh status --json` is the machine-readable view; `./deploy.sh destroy` tears the environment down when acceptance is over.',
+      '',
+    ] : []),
+    ...(delivery === undefined ? [] : [
+      '## Delivery policy',
+      `- Deploy: target \`${delivery.deploy.target}\` (${delivery.deploy.mode}).`,
+      `- Verification: \`${delivery.verification}\`.`,
+      `- Merge: \`${delivery.merge.mode}\` into ${delivery.merge.target === null ? 'the branch each source repository has checked out' : `\`${delivery.merge.target}\``}, then ${delivery.merge.deleteBranch ? 'delete' : 'keep'} the task branch.`,
+      `- Conflicts: \`${delivery.conflicts}\`. Strays: \`${delivery.strays}\`.`,
+      '- `done` enforces this policy: a merge is refused while the deployment state has no passing smoke and, under agent-then-human, while the human acceptance ack is missing.',
+      '',
+    ]),
   ]
   return lines.join('\n')
 }

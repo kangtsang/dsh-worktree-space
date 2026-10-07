@@ -27,6 +27,7 @@ const DESCRIPTION = [
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
+  'The task\'s delivery policy - whether a merge waits for a passing deployment smoke, and for a human acceptance ack - is decided by the user and recorded in the task metadata at create time. It is not a tool argument, and done enforces it: a refused merge names what is missing, and the way past it is to deploy, smoke, and be accepted - not to retry.',
 ].join('\n')
 
 /**
@@ -317,6 +318,10 @@ export function registerTaskTool(ctx, options = {}) {
   // Read per call rather than captured once: the setting can change while a
   // session is running, and the next create should follow it.
   const configuredRoot = () => typeof options.configuredRoot === 'function' ? options.configuredRoot() : ''
+  // The same rule for the per-project delivery defaults: the policy a create
+  // records is the user's standing answer for that project, and a create the
+  // model makes has to land on the same answer a dialog-made create would.
+  const configuredDeliveryDefaults = () => typeof options.configuredDeliveryDefaults === 'function' ? options.configuredDeliveryDefaults() : {}
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -391,6 +396,10 @@ export function registerTaskTool(ctx, options = {}) {
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           configuredRoot: configuredRoot(),
+          // The policy is not a tool argument: the model never picks how a task is
+          // delivered. It reads the same project defaults a dialog-made create
+          // would, so a task started from a session lands on the same answers.
+          deliveryDefaults: configuredDeliveryDefaults(),
         })
         const value = envelope(action)
         value.task = result.task

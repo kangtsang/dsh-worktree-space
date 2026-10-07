@@ -3,6 +3,8 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabledReader } from './task/audit-log.js'
 import { coded, UNKNOWN } from './task/codes.js'
+import { ackAcceptance, deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
+import { resolveDeliveryPolicy } from './task/delivery.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { mapWithLimit } from './task/concurrency.js'
 import { isInside } from './task/paths.js'
@@ -18,7 +20,7 @@ export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.preference']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-accept', 'task.deploy-up', 'task.deploy-smoke', 'task.preference']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -55,8 +57,8 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009',
-  'E5001', 'E5002', 'E5003', 'E5004',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010',
+  'E5001', 'E5002', 'E5003', 'E5004', 'E5005', 'E5006', 'E5007', 'E5008',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
   'E9001',
@@ -390,6 +392,28 @@ export function configuredTasksRoot() {
   if (tasksRootStrategyReference?.get() !== 'custom') return ''
   const value = tasksRootDirectoryReference?.get()
   return typeof value === 'string' ? value.trim() : ''
+}
+
+let deliveryDefaultsReference
+
+/**
+ * The delivery policies projects default to, as the object the JSON text holds.
+ *
+ * Read per call, like the container root: the Plugins page can rewrite it while a
+ * session runs, and the next create should follow the newer answer. Anything the
+ * text does not deliver - empty, unreadable, not an object - is an empty map, which
+ * leaves every project on the built-in default rather than on an error.
+ * @returns the map of project name to policy, possibly empty.
+ */
+export function configuredDeliveryDefaults() {
+  const raw = settingValue(deliveryDefaultsReference)
+  if (typeof raw !== 'string' || raw.trim() === '') return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
 }
 
 /**
@@ -772,6 +796,22 @@ export const Config = z.object({
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
     .description('Where archived documents go under the custom strategy. Empty files them under the container root instead.'),
+  /**
+   * The delivery policies projects default to, as JSON text: one object keyed by
+   * project name, each value a policy the schema in `task/delivery.js` validates.
+   *
+   * A JSON string rather than a structured form field because the Plugins page has
+   * no map editor yet; a user who wants a project's tasks to deploy and gate their
+   * merges writes the object here once, and every create under that project reads
+   * it. Invalid JSON, or a value that is not an object, is answered with an empty
+   * map rather than raised: a broken default must not become a plugin that cannot
+   * create anything.
+   *
+   * Volatile like the rest of this schema: a write lands on the running entry and
+   * the next create follows it.
+   */
+  deliveryDefaultsJson: z.string().default('').volatile()
+    .description('Per-project default delivery policies as JSON, e.g. {"my-project":{"deploy":{"target":"docker","mode":"auto"}}}. Invalid JSON is ignored.'),
 })
 
 /**
@@ -818,6 +858,9 @@ export function apply(ctx, config = {}) {
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
   tasksRootDirectoryReference = config.tasksRootDirectory
+  // And for how a task is delivered: the settings card holds the JSON text, and
+  // every create resolves the policy a project defaults to through this.
+  deliveryDefaultsReference = config.deliveryDefaultsJson
   // The audit log, unlike the others, is not read at use time: it is pushed into
   // the module that writes, because the writers are the many call sites and a
   // read there would mean asking every one of them for the setting.
@@ -841,9 +884,9 @@ export function apply(ctx, config = {}) {
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot }))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults }))
   } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot })
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults })
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -1118,6 +1161,11 @@ export function apply(ctx, config = {}) {
         // A request that names no container root takes the configured one, which is
         // the same answer `task.suggest-root` just gave the dialog.
         configuredRoot: configuredTasksRoot(),
+        // The delivery policy: an explicit one in the request wins, then the
+        // project's stored default, then the built-in one. Resolved inside the
+        // create, so an invalid policy refuses it before anything is made.
+        delivery: payload.delivery,
+        deliveryDefaults: configuredDeliveryDefaults(),
         // And the same walk that dialog previewed and the Workspace card counted,
         // with the same bounds: `scanDepth` decides what "the repositories under
         // this root" means, and one meaning has to hold across all three.
@@ -1190,6 +1238,10 @@ export function apply(ctx, config = {}) {
         keep: Array.isArray(payload.keep) ? payload.keep.filter((name) => typeof name === 'string') : [],
         documentsDirectory: typeof payload.documentsDirectory === 'string' ? payload.documentsDirectory : undefined,
         discardDocuments: payload.discardDocuments === true,
+        // The user's own overrule of the delivery gate, from the panel's
+        // "finish anyway?" confirmation. The tool never sends it: the model's way
+        // past the gate is deploying, smoking and being accepted, never a flag.
+        acknowledgeDelivery: payload.acknowledgeDelivery === true,
         // Why the dialog is finishing a task it never told the user existed. The
         // rollback after a create whose Workspace would not register goes through
         // this endpoint like any other, so without this the log would show the
@@ -1197,6 +1249,53 @@ export function apply(ctx, config = {}) {
         // was a create that had already half succeeded.
         cause: typeof payload.cause === 'string' && payload.cause.trim() !== '' ? payload.cause.trim() : undefined,
       })
+    })
+
+    // What the task's deployment looks like right now, read live: a dynamic port
+    // changes with every deploy, so the panel asks rather than remembers.
+    if (endpoint === 'task.deploy-status') return recover(async () => {
+      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      if (!path) throw coded('E4005', 'A task path is required.')
+      return deploymentStatus(ctx.subprocess, path)
+    })
+
+    // Tear the task's environment down, best effort by label. The endpoint answers
+    // for itself even while the task is still open - the user may want the machine
+    // back before the task is finished - and reports what it could not remove
+    // rather than raising, because a partial teardown is a fact about docker, not
+    // a reason the panel should show nothing.
+    if (endpoint === 'task.deploy-destroy') return recover(async () => {
+      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      if (!path) throw coded('E4005', 'A task path is required.')
+      return destroyDeployment(ctx.subprocess, path)
+    })
+
+    // The human acceptance the agent-then-human policy waits for. Writing it is
+    // deliberately the user's own act through a real endpoint, not a field the
+    // caller may fill: the ack is the one thing that turns a green smoke into a
+    // deliverable task, and it means a person looked.
+    if (endpoint === 'task.deploy-accept') return recover(async () => {
+      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      if (!path) throw coded('E4005', 'A task path is required.')
+      return ackAcceptance(path)
+    })
+
+    // The one-click rebuild behind a destroyed (or never-deployed) card: the
+    // task space's own deploy script, run with the environment id the record
+    // already carries, so the rebuilt environment lands under the same name.
+    if (endpoint === 'task.deploy-up') return recover(async () => {
+      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      if (!path) throw coded('E4005', 'A task path is required.')
+      return deployEnvironment(ctx.subprocess, path)
+    })
+
+    // Re-run the smoke through the task's own script. A failed smoke is a
+    // result, not an error: the script records it and the card shows the red
+    // badge - the panel needs the answer, whatever it is.
+    if (endpoint === 'task.deploy-smoke') return recover(async () => {
+      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      if (!path) throw coded('E4005', 'A task path is required.')
+      return smokeEnvironment(ctx.subprocess, path)
     })
 
     return fail(UNKNOWN, `Unknown endpoint: ${endpoint}`)
