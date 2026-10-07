@@ -4,6 +4,8 @@
 范围：`dsh-worktree-space` 插件的任务交付生命周期，以及它与部署验收能力（4 服务 demo 已验证
 的 deploy.sh / compose / 冒烟约定）的衔接。已实现部分标注了提交号，未实现部分是计划。
 
+相关文档：使用者指南见 [delivery-guide.md](delivery-guide.md)（面板用法、策略配置、清单编写、错误码）；agent 指引见捆绑 skill。
+
 相关基线：
 - L0 已实现：task/docker 分支 `ed4b121`（naming.js / shared.js / SKILL.md / 测试）
 - 部署参考实现：`E:\workspace\public\docker`（4 个独立服务仓库 + `deploy/` 编排根）
@@ -111,7 +113,7 @@ created ──► developing ──► deploying ──► verifying ──┬�
 |---|---|---|---|---|
 | `docker` | 自成体系的服务组（如 4 服务 demo） | compose 环境，动态端口 | 容器级隔离 | ✅ 已跑通（L0） |
 | `host` | 脚本、CLI、单进程小工具 | 用户本机直接运行 | **无隔离**，占用真实端口/环境 | 待定义契约 |
-| `dsh-acceptance` | DSH 插件 / skill 本身（如本插件） | `scripts/acceptance/` 的受控沙箱（安装→配置→可见→卸载回滚，多 DSH 版本） | 沙箱级隔离 | 基础设施已有，契约待对齐 |
+| ~~dsh-acceptance~~ | ~~DSH 插件~~ | 已移除（2026-10-07）：插件验收也是 docker 承载的网页实例，见 §3.2 修订 | — | — |
 
 ### 3.1 部署清单（manifest）——定稿形态（决策 D12）
 
@@ -148,8 +150,13 @@ targets:
 - `docker`：隔离最好，可 `auto`。
 - `host`：无隔离——占用真实端口、写真实数据目录。**默认禁止 auto**，但 deploy.yaml
   对该目标显式标 `autoAllowed: true` 可豁免（决策 D8）——想开的人显式担责。
-- `dsh-acceptance`：沙箱内安装/回滚，隔离好；**只对最新 DSH 版本验收**——矩阵验收
-  （run-all）是发版动作，不进任务交付流水线（决策 D7，与现有的人工验收习惯一致）。
+
+**`dsh-acceptance` 已从目标类型移除**（2026-10-07 修订）：调研确认 DSH 验收实例
+本身是纯 Node 进程（`dsh web --port`）提供网页验收，插件经 `dsh plugin add` 装入，
+无平台约束——它完全可以由 docker 承载。所谓 DSH 插件验收，是 `docker` 目标的
+一个**配方**：清单的 up 指向一个装好指定版本 DSH 与插件 tarball 的镜像启动命令，
+DSH 版本是配方的参数（原 D7 的单最新版语义由此保留）。`scripts/acceptance/`
+保持原有角色：宿主侧的手工验收与发版矩阵基础设施，不进流水线类型系统。
 
 ### 3.3 状态文件契约（已实现部分）
 
@@ -291,12 +298,12 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 - **D1** 验收默认 `agent-then-human`——自动验证接线正确，产品判断留给人。（已确认 2026-10-05）
 - **D2** 冲突默认 `ask`；`agent-auto` 作为策略项后置。（已确认）
 - **D3** 自动合并需策略显式开启，闸门全绿才执行；永不 push；abandon 路径永远人审。（已确认）
-- **D4** 部署目标可插拔：docker / host / dsh-acceptance / none，清单声明支持范围，
+- **D4**（修订 2026-10-07：目标收敛为 docker / host / none）部署目标可插拔：清单声明支持范围，
   目标不支持就报错，绝不静默换目标。（用户新增需求）
 - **D5** 环境身份 = `dsh-<slug(project)>-<slug(task)>`，三处（note / 脚本 / label）共用
   一条折叠规则。（L0 已实现）
 - **D6** 先串通全流程，实测后再优化各环节。（用户指示）
-- **D7** `dsh-acceptance` 目标只对**最新 DSH 版本**验收；全矩阵（run-all）是发版动作，
+- **D7**（修订 2026-10-07：原独立的 dsh-acceptance 目标类型移除，语义并入 docker 配方——DSH 版本是配方参数，仍只对**最新 DSH 版本**验收）全矩阵（run-all）是发版动作，
   不进任务交付流水线——与现有人工验收习惯一致。（Q1，2026-10-05 拍板）
 - **D8** `host` 目标默认禁止 auto；deploy.yaml 对该目标显式 `autoAllowed: true` 才豁免。（Q2，拍板）
 - **D9** 项目级默认策略存**插件配置**（项目名做 key，创建对话框"记住为该项目默认"），

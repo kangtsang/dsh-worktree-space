@@ -18,7 +18,10 @@
 import { coded } from './codes.js'
 
 /** What carries the acceptance: an isolated compose environment, the user's own machine, a DSH sandbox - or nothing. */
-export const DEPLOY_TARGETS = ['docker', 'host', 'dsh-acceptance', 'none']
+// 'dsh-acceptance' was removed as a target type: a DSH plugin is accepted on a
+// web instance too, and that instance is a node process in a container like any
+// other - it belongs to docker, as a documented recipe, not as a category.
+export const DEPLOY_TARGETS = ['docker', 'host', 'none']
 /** Whether deploying is part of the flow by itself (auto) or waits to be asked for. */
 export const DEPLOY_MODES = ['auto', 'on-request']
 /** Who says the work is right: the agent alone, the agent and then the user, or the user alone. */
