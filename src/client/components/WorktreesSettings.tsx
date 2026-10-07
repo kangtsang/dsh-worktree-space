@@ -12,6 +12,7 @@ import type { RememberedScan, SourceRootClassification, Workspace, Worktree, Wor
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { AddRepositoryDialog } from "./AddRepositoryDialog"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
+import { DeployCard } from "./DeployCard"
 import { finishScenes } from "../lib/finish-scene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
@@ -164,6 +165,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   }, [view, api, workspaces, reclassifyToken])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
+  /** The task whose finish press met an unsatisfied delivery gate, waiting on the user's yes/no. */
+  const [gateConfirm, setGateConfirm] = useState<string | null>(null)
+  /** Whether the finish now opening carries the user's own overrule of the gate. */
+  const [gateAcknowledged, setGateAcknowledged] = useState(false)
   /** Path of the task whose add-repository dialog is open, if any. */
   const [extending, setExtending] = useState<string | null>(null)
   // Adding a repository to the repository view. The field is here rather than in a
@@ -203,6 +208,24 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
    * the page until the next refresh — the path is known exactly, so it is scanned
    * rather than waited for.
    */
+  /**
+   * The finish press. The delivery gate asks here rather than inside the finish
+   * dialog: the user's instruction outranks the policy, so an unsatisfied gate is
+   * a question - "finish anyway?" - answered once, and the dialog then opens with
+   * that answer carried. A status that cannot be read at all (no docker, no
+   * deployment) never stands between the user and the finish panel.
+   */
+  const finishClick = useCallback(async (task: TaskGroup) => {
+    try {
+      const status = await api.deployStatus(task.path)
+      const unmet = status.target !== "none" && status.stateFound
+        && (status.lastSmoke?.result !== "pass" || (status.verification !== "agent" && !status.humanAck))
+      if (unmet) { setGateConfirm(task.path); return }
+    } catch { /* unreadable is not blocking */ }
+    setGateAcknowledged(false)
+    setArchiving(task.path)
+  }, [api])
+
   const refresh = useCallback(async (extra: string[] = []) => {
     refreshController.current?.abort()
     const controller = new AbortController()
@@ -691,8 +714,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
           <Button className="dws-button-ghost dws-add-repository" disabled={busy} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
-          <Button className="dws-button-ghost dws-finish-task" disabled={busy} onClick={() => setArchiving(task.path)}><Check size={15} /><span>{t("finishTask")}</span></Button>
+          <Button className="dws-button-ghost dws-finish-task" disabled={busy} onClick={() => finishClick(task)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
+        <DeployCard api={api} path={task.path} />
         {listed.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
           {listed.map(repository => {
             const state = taskRepoStatus(repository)
@@ -808,9 +832,23 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       workspaces={workspaces}
       sessions={sessions}
       uiWorkspace={uiWorkspace}
+      acknowledgeDelivery={gateAcknowledged}
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
       onLeave={onLeave}
     /> : null}
+    {gateConfirm ? <Dialog open onOpenChange={(open) => { if (!open) setGateConfirm(null) }}>
+      <DialogContent className="dws-confirm-dialog dws-confirm-narrow" showClose={false}>
+        {/* No heading, like every one-sentence confirm in this panel: the question
+            is the whole content, and a title above it would be two things to read. */}
+        <div className="dws-dialog-body">
+          <DialogDescription className="dws-confirm-body">{t("deliveryGateConfirm")}</DialogDescription>
+        </div>
+        <footer className="dws-dialog-footer">
+          <Button onClick={() => setGateConfirm(null)}>{t("cancel")}</Button>
+          <Button className="dws-button-primary" onClick={() => { setGateAcknowledged(true); setArchiving(gateConfirm); setGateConfirm(null) }}>{t("deliveryGateContinue")}</Button>
+        </footer>
+      </DialogContent>
+    </Dialog> : null}
   </section>
 }

@@ -369,3 +369,54 @@ export interface ConnectionService {
 
 /** The workspace service face (`ctx.workspaces`). */
 export type WorkspacesService = IWorkspaces
+
+/** One running container of a task's deployment, as the live docker query answered. */
+export interface DeploymentContainer {
+  name: string
+  state: string
+}
+
+/**
+ * A task's deployment, as the panel renders it: what the deploy recorded in its
+ * state file, and what docker says is running right now, by the `dsh.env-id` label.
+ */
+export interface DeploymentStatus {
+  envId: string
+  target: string
+  /** The policy's verification mode, so the finish press knows whether an ack is owed. */
+  verification: string
+  url: string | null
+  lastSmoke: { at: string; result: string } | null
+  humanAck: { at: string; by?: string } | null
+  destroyedAt: string | null
+  stateFound: boolean
+  statePath: string | null
+  containers: DeploymentContainer[]
+}
+
+/** What tearing a deployment down answered. */
+export interface DeployDestroyResult {
+  removed: boolean
+  containers: number
+  warning?: string
+}
+
+/** What re-running the smoke through the deploy script answered. A failed smoke is a result, not an error. */
+export interface DeploySmokeResult {
+  output: string
+  exitCode: number | null
+  status: DeploymentStatus
+}
+
+/** What rebuilding the environment through the deploy script answered. */
+export interface DeployUpResult {
+  /** The tail of the deploy script's output, for a failure to name itself. */
+  output: string
+  status: DeploymentStatus
+}
+
+/** What recording a human acceptance answered. */
+export interface DeployAcceptResult {
+  statePath: string
+  humanAck: { at: string; by?: string }
+}

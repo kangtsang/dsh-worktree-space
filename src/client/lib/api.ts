@@ -3,6 +3,11 @@ import type {
   AddRepositoriesResult,
   ConnectionService,
   CreateTaskResult,
+  DeployAcceptResult,
+  DeployDestroyResult,
+  DeploySmokeResult,
+  DeployUpResult,
+  DeploymentStatus,
   FinishTaskResult,
   RememberedScan,
   SourceRootClassification,
@@ -153,6 +158,35 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string; acknowledgeDelivery?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    /**
+     * A task's deployment, read live: docker by the `dsh.env-id` label for what runs
+     * right now, the deploy's state file for the URL, the smoke and the human ack.
+     * A dynamic port changes with every deploy, so this is asked, never remembered.
+     */
+    deployStatus: (path: string, signal?: AbortSignal) => read<DeploymentStatus>("task.deploy-status", { path }, signal),
+    /**
+     * Tear the task's environment down, best effort by the same label: compose first
+     * (the containers carry the file and directory to use), then whatever is still
+     * standing. Answers what it could not remove rather than raising.
+     */
+    destroyDeployment: (path: string) => call<DeployDestroyResult>("task.deploy-destroy", { path }),
+    /**
+     * Rebuild the environment through the task space's own deploy script — the
+     * one-click 「部署验收」 behind a destroyed card. The acceptance facts the
+     * previous environment earned (its smoke, its ack) stay on the task; only a
+     * new smoke, when the task's flow runs one, renews them.
+     */
+    deployUp: (path: string) => call<DeployUpResult>("task.deploy-up", { path }),
+    /**
+     * Re-run the smoke through the task's own script. A failed smoke comes back
+     * as a result (the red badge), not as a thrown error.
+     */
+    deploySmoke: (path: string) => call<DeploySmokeResult>("task.deploy-smoke", { path }),
+    /**
+     * Record the user's acceptance on the deployment state — the one act that turns
+     * a green smoke into a deliverable task under the agent-then-human policy.
+     */
+    acceptDeployment: (path: string) => call<DeployAcceptResult>("task.deploy-accept", { path }),
   }
 }

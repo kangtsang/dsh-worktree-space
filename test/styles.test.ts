@@ -170,7 +170,7 @@ describe("floating panel surface", () => {
     expect(rule(".dws-chevron-placeholder")).toContain("width: var(--dws-chevron-size)")
     expect(rule(".dws-repo-header")).toContain("gap: var(--dws-row-gap)")
     const list = rule(".dws-worktree-list")
-    expect(list).toContain("padding: 4px 12px 5px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap))")
+    expect(list).toContain("padding: 1px 12px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap))")
   })
 
   it("draws nothing between a parent row and the rows it holds", () => {

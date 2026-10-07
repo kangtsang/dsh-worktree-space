@@ -43,6 +43,7 @@ describe('task metadata', () => {
   it('records the identity and the creation-time facts, and nothing live', () => {
     const metadata = taskMetadata({
       task: 'filter-demo',
+      project: 'public',
       tasksRoot: 'E:\\worktree-space',
       sourceRoot: 'E:\\workspace\\public',
       branch: 'task/filter-demo',
@@ -55,6 +56,7 @@ describe('task metadata', () => {
     expect(metadata.task).toBe('filter-demo')
     expect(metadata.baseRef).toBe(null)
     expect(typeof metadata.createdAt).toBe('string')
+    expect(metadata.deploymentEnvId).toBe('dsh-public-filter-demo')
     expect(metadata.repositories).toEqual([
       {
         name: 'mybatis-3',
@@ -74,6 +76,7 @@ describe('task metadata', () => {
     try {
       const metadata = taskMetadata({
         task: 'login',
+        project: 'public',
         tasksRoot: 'E:\\worktree-space',
         sourceRoot: 'E:\\workspace\\public',
         branch: 'task/login',
@@ -94,11 +97,36 @@ describe('task metadata', () => {
       expect(note).toContain(metadata.createdAt)
       expect(note).toContain('worktree-space.json')
       expect(note).toContain('- `alpha`')
+      // The deployment section states this task's own id, copied verbatim into
+      // every deploy command; nothing else is what keeps environments apart. The
+      // delivery policy renders beside it, so a session reads both from one note.
+      expect(note).toContain('## Deployment')
+      expect(note).toContain('DSH_ENV_ID=dsh-public-login')
+      expect(note).toContain('## Delivery policy')
+      expect(note).toContain('- Deploy: target `none` (on-request).')
 
       expect(await readTaskMetadata(root)).toEqual(metadata)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
+  })
+
+  it('renders without the deployment sections when the record predates them', () => {
+    // A container old enough to hold neither field renders no guidance that names
+    // an id or a policy: a session asked to guess either would guess worse than
+    // no section at all.
+    const { deploymentEnvId, delivery, ...legacy } = taskMetadata({
+      task: 'login',
+      project: 'public',
+      tasksRoot: 'E:\\worktree-space',
+      sourceRoot: 'E:\\workspace\\public',
+      branch: 'task/login',
+      repositories: [{ name: 'alpha', sourcePath: 'E:\\workspace\\public\\alpha' }],
+    })
+    expect(deploymentEnvId).toBeDefined()
+    expect(delivery).toBeDefined()
+    expect(renderTaskMetadata(legacy)).not.toContain('## Deployment')
+    expect(renderTaskMetadata(legacy)).not.toContain('## Delivery policy')
   })
 
   it('keeps reading a container that only has the legacy note', async () => {

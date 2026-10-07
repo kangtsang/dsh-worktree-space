@@ -1,6 +1,6 @@
 ---
 name: task-worktree-space
-description: Use when the user starts a task or feature spanning one or more repositories and wants the work isolated in its own git worktree workspace rather than the source checkouts - multi-repo, parallel sessions, an isolated branch - or asks to list, merge or clean up a finished task. Chinese phrasings that mean the same include 多仓库并行开发、独立工作目录、工作区隔离、任务空间、Worktree Space、收尾合并清理.
+description: Use when the user starts a task or feature spanning one or more repositories and wants the work isolated in its own git worktree workspace rather than the source checkouts - multi-repo, parallel sessions, an isolated branch - or asks to list, merge or clean up a finished task, or to deploy a task's services to a Docker environment for acceptance - 部署验收, 隔离环境, 验收地址. Chinese phrasings that mean the same include 多仓库并行开发、独立工作目录、工作区隔离、任务空间、Worktree Space、收尾合并清理、部署验收.
 ---
 
 # Task Worktree Space
@@ -153,6 +153,35 @@ worktrees of different repositories:
   than guessing (the same facts as data live in `worktree-space.json`); if another
   session created the workspace, follow that file.
 
+## Deploying for acceptance
+
+When the user wants to try the work, or a change only shows itself at runtime,
+deploy the task space's services to an isolated Docker environment instead of
+starting them on the host: ports cannot collide with anything the user already
+runs, the services reach each other over their own network, and tearing the
+whole environment down afterwards is one command.
+
+A task space is deployable when one of its repositories carries a
+`deploy/deploy.sh` of its own, or when the space holds a `deploy/` orchestration
+root beside the worktrees — a `docker-compose.yml` whose build contexts name the
+sibling worktrees. When neither exists and the user asks to deploy, scaffolding
+that root from the repositories' own run commands is ordinary session work; what
+must not happen is starting the services on the host instead.
+
+- Take the environment id from `worktree-space.md` (`DSH_ENV_ID=...`) and pass it
+  to **every** deploy command. It is what keeps this task's containers, images and
+  acceptance URL apart from every other task's — never guess one, and never reuse
+  another task's.
+- `./deploy.sh up` builds and starts the environment and prints the acceptance
+  URL. Run `./deploy.sh smoke` and let it pass **before** reporting the URL: an
+  address that answers 500 is not a deliverable. When it fails, the reason is
+  usually in `./deploy.sh logs <service>`.
+- Report the URL together with what to click to see the change, and say that the
+  environment keeps running until it is destroyed.
+- Leave the environment to the user. `./deploy.sh destroy` tears it down when they
+  are done with it; every deployed container carries a `dsh.env-id` label, so an
+  environment can also be found and cleaned up after the fact.
+
 ## Finishing a task
 
 Run `action: "done"`. By default it **removes the worktrees, keeps every branch,
@@ -231,6 +260,14 @@ Confirm each destructive step with the user before passing it:
    `done` is the user's move, with the panel's **Continue finishing** button: what it does is merge
    the branch into their own checkout, so it waits for them. Resolving a conflict yourself does not
    end the task, and only that second `done` finishes it.
+   **One exception, by the task's own policy:** when the task's `worktree-space.md`
+   records `Conflicts: agent-auto`, the user has already delegated the whole loop -
+   do not wait for the panel button or report and stop. Resolve the conflicted files
+   in the checkout, commit the merge there, and call `done` again with the same
+   request, in this session. Committing a merge may need elevated permission in the
+   session; ask for it openly rather than retrying around it, and if the user is not
+   there to grant it, stop and report - the delegation covers the decision, never a
+   silent permission.
 4. **Delete the branch?** After a merge, and only when the user asks: pass
    `deleteBranch: true` together with `merge: true`. When the user wants the task
    space gone without merging anything, that is the abandon path: pass

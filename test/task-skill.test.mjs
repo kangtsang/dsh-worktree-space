@@ -66,6 +66,7 @@ describe("registerTaskSkill", () => {
     // The workflow rules the model must apply live in the body.
     expect(loaded.content).toContain("Never create a workspace with a guessed location")
     expect(loaded.content).toContain("Never merge by hand")
+    expect(loaded.content).toContain("DSH_ENV_ID")
   })
 
   it("reads the file on every load, so an edited asset is served", async () => {
