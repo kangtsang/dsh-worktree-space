@@ -129,7 +129,7 @@ targets:
     up: make run                # 仓库自己声明怎么在本机起
     verify: make check          # 本机形态的验收命令
     destroy: make stop
-    autoOk: false               # 决策 D8：host 默认禁 auto，显式 true 才豁免
+    autoAllowed: false               # 决策 D8：host 默认禁 auto，显式 true 才豁免
   dsh-acceptance:
     up: ../scripts/acceptance/ 单最新版验收入口   # 决策 D7：只对最新 DSH 版本
     verify: store-evidence 清单
@@ -147,7 +147,7 @@ targets:
 
 - `docker`：隔离最好，可 `auto`。
 - `host`：无隔离——占用真实端口、写真实数据目录。**默认禁止 auto**，但 deploy.yaml
-  对该目标显式标 `autoOk: true` 可豁免（决策 D8）——想开的人显式担责。
+  对该目标显式标 `autoAllowed: true` 可豁免（决策 D8）——想开的人显式担责。
 - `dsh-acceptance`：沙箱内安装/回滚，隔离好；**只对最新 DSH 版本验收**——矩阵验收
   （run-all）是发版动作，不进任务交付流水线（决策 D7，与现有的人工验收习惯一致）。
 
@@ -259,9 +259,9 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 | L1.1 | `delivery` 策略块：schema、解析（显式 > 项目默认 > 内置）、note 渲染 `## Delivery policy`、配置字段 `deliveryDefaultsJson` | delivery.js（新）、shared.js、create.js、index.js、tool.js | ✅ `8d35484` |
 | L1.2 | 交付闸门：`finishTask` 内所有路径强制，读策略 + `.state.json`（E5005 无记录 / E5006 冒烟未过 / E5007 等人工 ack） | deploy.js（新）、archive.js、codes.js | ✅ `8d35484` |
 | L1.3 | 清理钩子（done 成功后按 label 销毁，compose down 优先 rm -f 兜底，永不致命）+ 三个端点 + 控制台部署卡片（URL/冒烟徽章/确认验收/销毁，中英文案） | deploy.js、archive.js、index.js、DeployCard.tsx、api.ts、i18n.ts | ✅ `8d35484` |
-| L1.4 | 部署清单 `deploy.yaml` + host / dsh-acceptance 目标契约对齐（契约定稿见 §3：单最新版 + autoOk 豁免） | deploy 约定、scripts/acceptance | 待做（§3） |
-| L2.1 | strays `archive` 形态 | archive.js | 待做（§7） |
-| L2.2 | 冲突自动会话（`conflicts: agent-auto`） | operations.js | 最后做（§6） |
+| L1.4 | 部署清单 `deploy.yaml` + host / dsh-acceptance 目标契约对齐（契约定稿见 §3：单最新版 + autoAllowed 豁免） | deploy 约定、scripts/acceptance | 待做（用户定序：L2 之后） |
+| L2.1 | strays 策略接线：archive 自动归档（applyStraysPolicy 纯函数 + deliveryArchive 参数）/ discard 仅 force / keep 现状 | delivery.js、archive.js、index.js、tool.js | ✅ 本次 |
+| L2.2 | 冲突 agent-auto：策略经 note/tool description 暴露给调用方，agent-auto 时 agent 自动解决冲突、提交合并并重试 done（提权需公开请求）；无新机制 | SKILL.md、tool.js | ✅ 本次 |
 
 ### L1 实现时按推荐取的默认决策（待维护者核对）
 
@@ -298,7 +298,7 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 - **D6** 先串通全流程，实测后再优化各环节。（用户指示）
 - **D7** `dsh-acceptance` 目标只对**最新 DSH 版本**验收；全矩阵（run-all）是发版动作，
   不进任务交付流水线——与现有人工验收习惯一致。（Q1，2026-10-05 拍板）
-- **D8** `host` 目标默认禁止 auto；deploy.yaml 对该目标显式 `autoOk: true` 才豁免。（Q2，拍板）
+- **D8** `host` 目标默认禁止 auto；deploy.yaml 对该目标显式 `autoAllowed: true` 才豁免。（Q2，拍板）
 - **D9** 项目级默认策略存**插件配置**（项目名做 key，创建对话框"记住为该项目默认"），
   与容器根同一机制。（Q4，拍板）
 - **D10** auto 合并遇目标分支被检出在用户工作副本：**照样就地合并**；预演合并仍先行，

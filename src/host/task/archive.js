@@ -10,7 +10,7 @@ import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
 import { coded } from './codes.js'
 import { assertDeliveryGate, destroyDeployment } from './deploy.js'
-import { deliveryPolicyOf } from './delivery.js'
+import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, refuseDelete } from './paths.js'
@@ -616,6 +616,7 @@ export async function finishTask(subprocess, options) {
     discardDocuments = false,
     cause,
     acknowledgeDelivery = false,
+    deliveryArchive,
   } = options
 
   // Deleting a branch that was merged is routine; deleting one that was not throws
@@ -628,12 +629,6 @@ export async function finishTask(subprocess, options) {
 
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
-
-  // Checked before anything is touched: when the documents are archived the
-  // originals leave the container, which is then removed — so a destination
-  // inside the container would be deleted moments after the copy.
-  const destination = typeof documentsDirectory === 'string' ? documentsDirectory.trim() : ''
-  if (destination !== '') assertIsolated(taskPath, destination)
 
   if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
   auditEnter({ task, project: projectName, tasksRoot })
@@ -670,6 +665,23 @@ export async function finishTask(subprocess, options) {
   if (taskBranch === '') {
     warnings.push(`no task branch is recorded in ${taskPath}; no branch was deleted in any repository`)
   }
+
+  // The strays policy fills the gaps a caller left: a finish that named no
+  // cleanStray, no directory and no discard takes its handling from the task's
+  // own delivery policy. A caller that decided anything is honoured verbatim,
+  // and `discard` without force stays dead - see applyStraysPolicy. Everything
+  // it decides still passes the isolation check a caller-named directory would.
+  const strayed = applyStraysPolicy(deliveryPolicyOf(recorded), {
+    cleanStray,
+    discardDocuments,
+    documentsDirectory,
+    keep,
+    force,
+  }, deliveryArchive, taskPath)
+  const strayCleanStray = strayed.cleanStray
+  const strayDiscardDocuments = strayed.discardDocuments
+  const strayDestination = strayed.documentsDirectory
+  if (strayDestination !== '') assertIsolated(taskPath, strayDestination)
 
   // The delivery gate is the one check here that reads the task's policy rather
   // than the caller's request. Its default is the hard refusal, which is what a
@@ -960,26 +972,26 @@ export async function finishTask(subprocess, options) {
   const keptByFailure = []
   for (const name of content) {
     if (keep.includes(name)) continue
-    if (destination === '') {
-      if (!discardDocuments) continue
+    if (strayDestination === '') {
+      if (!strayDiscardDocuments) continue
     } else {
       try {
-        await mkdir(destination, { recursive: true })
-        await cp(join(taskPath, name), join(destination, name), { recursive: true, force: false, errorOnExist: true })
+        await mkdir(strayDestination, { recursive: true })
+        await cp(join(taskPath, name), join(strayDestination, name), { recursive: true, force: false, errorOnExist: true })
       } catch (error) {
         // Kept, not cleaned: a copy that failed must not cost the original, so
         // this is excluded from the clean-up below and reported as still there.
-        warnings.push(`could not archive '${name}' to '${destination}': ${error.message}`)
+        warnings.push(`could not archive '${name}' to '${strayDestination}': ${error.message}`)
         keptByFailure.push(name)
         continue
       }
       archivedStrays.push(name)
     }
     await rm(join(taskPath, name), { recursive: true, force: true })
-    if (destination === '') removedStrays.push(name)
+    if (strayDestination === '') removedStrays.push(name)
   }
 
-  if (cleanStray) {
+  if (strayCleanStray) {
     for (const name of strays) {
       if (keep.includes(name) || keptByFailure.includes(name)) continue
       if (archivedStrays.includes(name) || removedStrays.includes(name)) continue

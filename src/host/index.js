@@ -884,9 +884,9 @@ export function apply(ctx, config = {}) {
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults }))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) }))
   } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults })
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) })
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -1242,6 +1242,9 @@ export function apply(ctx, config = {}) {
         // "finish anyway?" confirmation. The tool never sends it: the model's way
         // past the gate is deploying, smoking and being accepted, never a flag.
         acknowledgeDelivery: payload.acknowledgeDelivery === true,
+        // The strays policy may file content away; the archive preference is
+        // the configuration's standing answer for where.
+        deliveryArchive: { strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() },
         // Why the dialog is finishing a task it never told the user existed. The
         // rollback after a create whose Workspace would not register goes through
         // this endpoint like any other, so without this the log would show the

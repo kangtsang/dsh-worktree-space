@@ -260,6 +260,14 @@ Confirm each destructive step with the user before passing it:
    `done` is the user's move, with the panel's **Continue finishing** button: what it does is merge
    the branch into their own checkout, so it waits for them. Resolving a conflict yourself does not
    end the task, and only that second `done` finishes it.
+   **One exception, by the task's own policy:** when the task's `worktree-space.md`
+   records `Conflicts: agent-auto`, the user has already delegated the whole loop -
+   do not wait for the panel button or report and stop. Resolve the conflicted files
+   in the checkout, commit the merge there, and call `done` again with the same
+   request, in this session. Committing a merge may need elevated permission in the
+   session; ask for it openly rather than retrying around it, and if the user is not
+   there to grant it, stop and report - the delegation covers the decision, never a
+   silent permission.
 4. **Delete the branch?** After a merge, and only when the user asks: pass
    `deleteBranch: true` together with `merge: true`. When the user wants the task
    space gone without merging anything, that is the abandon path: pass

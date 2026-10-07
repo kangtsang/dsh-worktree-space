@@ -169,3 +169,72 @@ export function resolveDeliveryPolicy(project, explicit, defaults = {}) {
     ? coerceDeliveryPolicy(undefined)
     : normalizeDeliveryPolicy(chosen)
 }
+
+/**
+ * Apply the strays policy to a finish request, in one place and testably.
+ *
+ * Three policies, mapped onto what {@link `archive.js`} already knows how to do:
+ * `archive` files the user's content into the archive directory and clears the
+ * build output (no per-item waiting); `keep` is the shipped behaviour, where the
+ * caller decides per finish; `discard` throws everything away and is honoured
+ * only on the abandon path, where `force` is already the caller saying so.
+ *
+ * A caller that decided anything itself - a cleanStray, an archive directory, a
+ * discard, a keep list - is honoured verbatim: the policy fills gaps, it does not
+ * overrule.
+ * @param policy - the task's delivery policy.
+ * @param request - what the caller asked for: the cleanStray / discardDocuments
+ *   flags, the documents directory, the keep list, and `force`.
+ * @param archive - the archive preference, used to root the per-task folder when
+ *   the policy files things away and the caller named no directory.
+ * @param taskPath - the task space directory, for the folder name under the root.
+ * @returns the flags `finishTask` should run with.
+ */
+export function applyStraysPolicy(policy, request, archive, taskPath) {
+  const cleanStray = request.cleanStray === true
+  const discardDocuments = request.discardDocuments === true
+  const documentsDirectory = typeof request.documentsDirectory === 'string' ? request.documentsDirectory.trim() : ''
+  const keep = Array.isArray(request.keep) ? request.keep : []
+  const callerDecided = cleanStray || discardDocuments || documentsDirectory !== '' || keep.length > 0
+
+  // Discard throws everything away, and only the abandon path says so - force is
+  // already the caller admitting the work is not wanted. Off it, or on a finish
+  // without force, the flag is not honoured: a policy must not become a second,
+  // quieter way to lose work.
+  if (policy.strays === 'discard' && request.force === true) {
+    return { cleanStray: true, discardDocuments: true, documentsDirectory: '' }
+  }
+
+  if (callerDecided || policy.strays !== 'archive') {
+    // The two flags are independent, as finishTask has always treated them:
+    // cleanStray clears the build output, discardDocuments throws the user's
+    // content away - one without the other is a decision the caller may make.
+    return { cleanStray, discardDocuments, documentsDirectory }
+  }
+  // Archive: the caller said nothing, so the policy speaks - file the content
+  // away and clear the output, without the per-item wait. The folder layout
+  // mirrors what the panel's dialog would have built: <root>/archived-docs/
+  // <project>/<task>-<stamp>, the stamp keeping two finishes apart.
+  const strategy = archive && archive.strategy === 'custom' && String(archive.directory ?? '').trim() !== ''
+    ? String(archive.directory).trim()
+    : containerRootOf(taskPath)
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const parts = String(taskPath).split(/[\\/]+/).filter((part) => part !== '')
+  const task = parts[parts.length - 1] ?? 'task'
+  const project = parts[parts.length - 2] ?? 'project'
+  const root = String(strategy).replace(/[\\/]+$/, '')
+  return {
+    cleanStray: true,
+    discardDocuments: false,
+    documentsDirectory: `${root}\\archived-docs\\${project}\\${task}-${stamp}`,
+  }
+}
+
+/** The container root a task space lives under: two levels up, as the layout lays it out. */
+function containerRootOf(taskPath) {
+  const parts = String(taskPath ?? '').split(/[\\/]+/).filter((part) => part !== '')
+  const up = parts.slice(0, -2).join('\\')
+  return up === '' ? '.' : up
+}

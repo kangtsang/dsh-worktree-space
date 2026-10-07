@@ -28,6 +28,7 @@ const DESCRIPTION = [
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
   'The task\'s delivery policy - whether a merge waits for a passing deployment smoke, and for a human acceptance ack - is decided by the user and recorded in the task metadata at create time. It is not a tool argument, and done enforces it: a refused merge names what is missing, and the way past it is to deploy, smoke, and be accepted - not to retry.',
+  'The task\'s note names the conflict mode too: a task whose policy is conflicts=agent-auto expects the caller to resolve a returned conflict itself - ask no one, fix the files listed in conflictedFiles in that checkout, commit the merge there, and call done again. Under any other mode a returned conflict is reported and waits for the user.',
 ].join('\n')
 
 /**
@@ -322,6 +323,9 @@ export function registerTaskTool(ctx, options = {}) {
   // records is the user's standing answer for that project, and a create the
   // model makes has to land on the same answer a dialog-made create would.
   const configuredDeliveryDefaults = () => typeof options.configuredDeliveryDefaults === 'function' ? options.configuredDeliveryDefaults() : {}
+  // Where the strays policy files content away, when a done leaves the handling
+  // to the policy: the same archive preference the finish dialog reads.
+  const configuredArchive = () => typeof options.configuredArchive === 'function' ? options.configuredArchive() : undefined
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -481,6 +485,7 @@ export function registerTaskTool(ctx, options = {}) {
           force: args.force === true,
           cleanStray: args.cleanStray === true,
           keep: Array.isArray(args.keep) ? args.keep : [],
+          deliveryArchive: configuredArchive(),
         })
         const value = envelope(action)
         value.task = task

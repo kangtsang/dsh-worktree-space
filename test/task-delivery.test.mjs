@@ -13,6 +13,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  applyStraysPolicy,
   DEFAULT_DELIVERY_POLICY,
   coerceDeliveryPolicy,
   deliveryPolicyOf,
@@ -286,5 +287,52 @@ describe('task metadata carries the policy', () => {
     expect(metadata.deploymentEnvId).toBe('dsh-public-login')
     expect(metadata.delivery.deploy).toEqual({ target: 'docker', mode: 'auto' })
     expect(metadata.delivery.verification).toBe(DEFAULT_DELIVERY_POLICY.verification)
+  })
+})
+
+describe('applyStraysPolicy', () => {
+  const ARCHIVE = { strategy: 'container', directory: '' }
+  // Forward slashes: the splitter accepts either, and the escape-free form keeps
+  // the value readable - the production paths arrive with backslashes, same shape.
+  const TASK = 'D:/space/worktree-space/proj/login'
+
+  it('archive files content away and clears output when the caller said nothing', () => {
+    const r = applyStraysPolicy({ strays: 'archive' }, {}, ARCHIVE, TASK)
+    expect(r.cleanStray).toBe(true)
+    expect(r.discardDocuments).toBe(false)
+    expect(r.documentsDirectory).toContain('archived-docs')
+    expect(r.documentsDirectory).toContain('proj')
+    expect(r.documentsDirectory).toContain('login-')
+    // The stamp is the audit-log clock with a dash between date and time.
+    expect(r.documentsDirectory).toMatch(/login-\d{8}-\d{6}$/)
+  })
+
+  it('honours a caller that decided anything itself, verbatim', () => {
+    const r = applyStraysPolicy({ strays: 'archive' }, { cleanStray: true }, ARCHIVE, TASK)
+    expect(r.cleanStray).toBe(true)
+    expect(r.documentsDirectory).toBe('')
+    // keep-list counts as a decision too
+    const kept = applyStraysPolicy({ strays: 'archive' }, { keep: ['notes.md'] }, ARCHIVE, TASK)
+    expect(kept.cleanStray).toBe(false)
+  })
+
+  it('keeps the shipped behaviour under keep, and never discards without force', () => {
+    const r = applyStraysPolicy({ strays: 'keep' }, {}, ARCHIVE, TASK)
+    expect(r.cleanStray).toBe(false)
+    const d = applyStraysPolicy({ strays: 'discard' }, { force: false }, ARCHIVE, TASK)
+    expect(d.cleanStray).toBe(false)
+    expect(d.discardDocuments).toBe(false)
+  })
+
+  it('discard only honours the abandon path, where force already said so', () => {
+    const r = applyStraysPolicy({ strays: 'discard' }, { force: true }, ARCHIVE, TASK)
+    expect(r.cleanStray).toBe(true)
+    expect(r.discardDocuments).toBe(true)
+    expect(r.documentsDirectory).toBe('')
+  })
+
+  it('roots the archive under a custom directory when the configuration names one', () => {
+    const r = applyStraysPolicy({ strays: 'archive' }, {}, { strategy: 'custom', directory: 'D:\docs' }, TASK)
+    expect(r.documentsDirectory.startsWith('D:\docs')).toBe(true)
   })
 })
