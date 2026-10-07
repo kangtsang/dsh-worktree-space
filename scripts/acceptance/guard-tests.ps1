@@ -1,5 +1,10 @@
 param(
-  [string]$RunRoot = (Join-Path $env:TEMP 'dsh-acceptance\run')
+  # Only the matrix root is an input here; every other scope is taken from
+  # run-one.ps1 below. Kept on the same derivation as the runner so the paths
+  # this test exercises are the paths the runner really uses.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$MatrixRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'matrix')
 )
 
 Set-StrictMode -Version Latest
@@ -20,8 +25,8 @@ $ErrorActionPreference = 'Stop'
 $runnerPath = Join-Path $PSScriptRoot 'run-one.ps1'
 if (-not (Test-Path -LiteralPath $runnerPath)) { throw ("runner not found at " + $runnerPath) }
 
-$runRoot  = [System.IO.Path]::GetFullPath($RunRoot)
-$v        = '0.1.7-rc.2'
+$matrixRoot = [System.IO.Path]::GetFullPath($MatrixRoot)
+$v          = '0.1.7-rc.2'
 
 # The scope variables the guards read are TAKEN FROM THE RUNNER, not restated
 # here. Copying them would be a second answer to the same question: widen
@@ -30,16 +35,20 @@ $v        = '0.1.7-rc.2'
 # while the runner deleted whatever the new values named. Only the two script
 # *inputs* are supplied above; everything else follows the runner.
 #
-# Order is the list's, and it is the runner's: $runRoot feeds the two roots and
-# $evidenceRoot, and $v feeds $leaf.
-$scopeNames = @('runRoot', 'evidenceRoot', 'disposableRoot', 'logRoot', 'leaf')
+# Order is the list's, and it is the runner's: $matrixRoot feeds the two roots
+# and $evidenceRoot, and $v feeds $leaf.
+#
+# These names must match run-one.ps1 EXACTLY. Rename a variable there and not
+# here and the test throws "run-one.ps1 no longer assigns: ..." rather than
+# passing vacuously - which is the point of extracting them.
+$scopeNames = @('matrixRoot', 'evidenceRoot', 'disposableRoot', 'logRoot', 'leaf')
 
 $errors = $null
 $ast    = [System.Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$null, [ref]$errors)
 if ($errors -and $errors.Count) { throw ("runner does not parse: " + $errors[0].Message) }
 
 # Bind the extracted guards to the runner's own scope before anything calls them.
-# Evaluated in $scopeNames order, which is the runner's: $runRoot feeds the two
+# Evaluated in $scopeNames order, which is the runner's: $matrixRoot feeds the two
 # roots and $evidenceRoot, and $v feeds $leaf.
 $assigned = @{}
 foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $false)) {
@@ -77,7 +86,12 @@ Write-Host ''
 $sep  = [IO.Path]::DirectorySeparatorChar
 $u    = '..'
 $user = [Environment]::GetFolderPath('UserProfile')
-$hostsRoot = (Join-Path $evidenceRoot 'hosts')
+# The hosts root sits under the acceptance root, a SIBLING of this project's
+# directory - not under it. Deriving it from $evidenceRoot (this project's dir)
+# would name a path that does not exist and would stop testing the real thing:
+# the case that matters is "the shared DSH builds are refused", and that path is
+# <AcceptanceRoot>\hosts.
+$hostsRoot = Join-Path $AcceptanceRoot 'hosts'
 
 $cases = @(
   @{ ok = $true;  n = 'normal: this version home';        p = $disposableRoot + $sep + $leaf },
@@ -86,11 +100,11 @@ $cases = @(
   @{ ok = $false; n = 'all DSH builds';                   p = $hostsRoot },
   @{ ok = $false; n = 'one DSH build';                    p = $hostsRoot + $sep + '0.2.0-rc.2' },
   @{ ok = $false; n = 'the evidence root itself';         p = $evidenceRoot },
-  @{ ok = $false; n = 'the run root itself';              p = $runRoot },
+  @{ ok = $false; n = 'the matrix root itself';           p = $matrixRoot },
   @{ ok = $false; n = 'the disposable root itself';       p = $disposableRoot },
-  @{ ok = $false; n = 'drive root of the run area';       p = ([System.IO.Path]::GetPathRoot($runRoot)) },
+  @{ ok = $false; n = 'drive root of the matrix area';    p = ([System.IO.Path]::GetPathRoot($matrixRoot)) },
   @{ ok = $false; n = 'drive root C:\';                   p = 'C:\' },
-  @{ ok = $false; n = 'traversal up to the hosts';        p = $runRoot + $sep + $u + $sep + 'hosts' },
+  @{ ok = $false; n = 'traversal up to the hosts';        p = $matrixRoot + $sep + $u + $sep + 'hosts' },
   @{ ok = $false; n = 'traversal out to the user';        p = $disposableRoot + $sep + $leaf + $sep + $u + $sep + $u + $sep + $u + $sep + $u + $sep + 'Users' + $sep + 'someone' },
   @{ ok = $false; n = 'right name but nested deeper';     p = $disposableRoot + $sep + 'sub' + $sep + $leaf },
   @{ ok = $false; n = 'right level but wrong name';       p = $disposableRoot + $sep + 'home-0.9.9' },

@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
 
-Worktree Space: One task, one space — agents in parallel, never in conflict. A task that involves one or more Git repositories goes into its own task space directory, where each
+Worktree Space: One task, one space — work on parallel tracks. A task that involves one or more Git repositories goes into its own task space directory, where each
 participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH
 workspace, agent sessions start working inside it, and each task gets its own space, so several tasks can run in
 parallel without interfering with one another. When a task is finished you can merge the task branch back into the
@@ -295,9 +295,11 @@ Open the **management page** — two ways in:
 
 - **The Worktree Space shortcut at the sidebar foot** (shown by default) — opens it as a **dialog**;
 - **The Worktree Space row under New session** (hidden by default, turn it on in the
-  **configuration**) — opens it **full width** in the main column, where the page brings its own
-  left-hand navigation: **Back to conversation** first, since the panel takes the column the
-  conversation was in, then the three views. The dialog form keeps the switcher in its toolbar.
+  **configuration**) — opens it **full width** in the main column.
+
+Both forms share one left-hand navigation: the full-width page leads with **Back to conversation**,
+since the panel takes the column the conversation was in, then the three views; at the foot of the
+column, **⚙ Plugin Settings** jumps to this plugin's configuration on the Host's Plugins page.
 
 The three
 views differ as described under Features: Workspaces shows where a task space can start, Git

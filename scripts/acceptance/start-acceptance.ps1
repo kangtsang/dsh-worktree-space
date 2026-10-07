@@ -19,10 +19,25 @@
   a running process. Merging them would make the matrix script carry a
   hold-open-until-timeout loop it has no use for.
 
-.PARAMETER CaseRoot
-  The acceptance root. Everything this script creates lives under it: the DSH
-  home, the logs, the fixture repositories and the task container. Wiped and
-  rebuilt on every run, so a run never inherits the previous run's state.
+.PARAMETER AcceptanceRoot
+  The one acceptance root on this machine, D:\dsh-acceptance by default. The DSH
+  builds live under <AcceptanceRoot>\hosts and are shared by every plugin
+  repository and by the matrix; each repository gets <AcceptanceRoot>\<repo
+  name> for its own state.
+
+.PARAMETER ProjectName
+  This repository directory's own name, derived rather than configured. It names
+  both this project's directory under the acceptance root and the project layer
+  the plugin puts inside the shared task container (the plugin derives that from
+  basename of the fixture source root, which is named after this).
+
+.PARAMETER ManualRoot
+  This project's hand-driven area, <AcceptanceRoot>\<ProjectName>\manual by
+  default. Everything this script creates lives under it: the DSH home, the logs,
+  the fixture repositories and the task container. Wiped and rebuilt on every run,
+  so a run never inherits the previous run's state. Named "manual" because what
+  happens here is driven by a person at a browser, as opposed to the unattended
+  matrix under "matrix\".
 
 .PARAMETER Port
   Port to serve on. Must be free; the script refuses rather than picking another,
@@ -35,7 +50,7 @@
   scripts/acceptance/install-hosts.ps1.
 
 .PARAMETER SkipPack
-  Reuse the tarball already in the case root instead of building a new one. For
+  Reuse the tarball already in the manual root instead of building a new one. For
   driving the page when only the profile config changed.
 
 .PARAMETER FixtureRepos
@@ -63,9 +78,23 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$CaseRoot = 'D:\dsh-acceptance\case',
+  # One acceptance root for every plugin repository on this machine. The hosts
+  # are SHARED by every project and by both entry points (the matrix and this
+  # hand-driven instance); the per-project state is not.
+  #
+  # $ProjectName is this repository directory's own name, and it is doing double
+  # duty on purpose: it names this project's directory under the acceptance root
+  # AND it names the project layer the plugin puts inside the task container
+  # (projectNameFor() in src/host/task/naming.js is basename(sourceRoot), and the
+  # fixture source root is named after the repository below). Two plugins sharing
+  # one container root stay apart because this layer differs, which is why the
+  # fixture directory must NOT be called "source" any more - that made every
+  # plugin's tasks land in the same <container>\source\ bucket.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$ManualRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'manual'),
   [string]$DshVersion = '0.2.0-rc.2',
-  [string]$HostsRoot = 'D:\dsh-acceptance\hosts',
+  [string]$HostsRoot = (Join-Path $AcceptanceRoot 'hosts'),
   [int]$Port = 34822,
   [int]$HoldSeconds = 3600,
   [switch]$SkipPack,
@@ -89,7 +118,7 @@ $global:LASTEXITCODE = 0
 # Delete guard.
 #
 # There is exactly one recursive delete in this script: the previous run's DSH
-# home, under the case root. Everything else is created, never removed. The
+# home, under the manual root. Everything else is created, never removed. The
 # checks below are the reason it is safe - the repository once lost a user
 # directory to an unguarded Remove-Item, and $home being a read-only automatic
 # variable meant the path was never what it looked like.
@@ -361,13 +390,30 @@ function Wait-ForUrl {
 
 # ---------------------------------------------------------------------------
 
-$caseRoot = [System.IO.Path]::GetFullPath($CaseRoot)
-$dshHome = Join-Path $caseRoot 'home'
-$logDir = Join-Path $caseRoot 'log'
-$pluginRoot = Join-Path $caseRoot 'fixture'
+$manualRoot = [System.IO.Path]::GetFullPath($ManualRoot)
+$dshHome = Join-Path $manualRoot 'home'
+$logDir = Join-Path $manualRoot 'log'
+# The fixture workspace: a git source root to point the plugin at, one level deep.
+#
+# It used to be <manual>\fixture\<repo name> - three levels for "a git workspace
+# to test against". The extra "fixture" directory carried no meaning and no rule
+# needed it, so it is gone.
+#
+# What it is called matters, and not for tidiness: the plugin derives the project
+# layer inside the task container from basename(sourceRoot) (projectNameFor in
+# src/host/task/naming.js), so this directory name IS the <project> in
+# <container root>\<project>\<task>. It is named after the TEST CASE rather than
+# the plugin because that is what this directory is - a case fixture - and the
+# container is shared with other plugins' acceptance runs, where a per-case name
+# reads better than a repeat of the plugin name. Verified by running the plugin's
+# own recommendTasksRoot/projectNameFor:
+#   source <manual>\workspace-test  -> project "workspace-test"
+#   source <manual>                 -> project "manual"
+# This directory belongs to this project alone; no other plugin writes here.
+$fixtureRoot = Join-Path $manualRoot 'workspace-test'
 $binJs = Join-Path $HostsRoot ($DshVersion + '\node_modules\@deepseek-ai\dsh\lib\bin.js')
 $repo = [System.IO.Path]::GetFullPath($PluginRepo)
-$tarball = Join-Path $caseRoot 'dsh-worktree-space-under-test.tgz'
+$tarball = Join-Path $manualRoot 'dsh-worktree-space-under-test.tgz'
 $profileName = 'accept'
 
 if ($Port -eq 3080) { throw 'REFUSED: 3080 is the desktop instance default; pick another port' }
@@ -394,7 +440,7 @@ if ($busy) {
   throw ("REFUSED: port {0} is in use by PID {1}. Nothing was changed - stop that process (it is usually the previous run's server) and start again." -f $Port, $holders)
 }
 
-foreach ($d in @($caseRoot, $logDir, $pluginRoot)) {
+foreach ($d in @($manualRoot, $logDir, $fixtureRoot)) {
   if (-not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
@@ -410,11 +456,11 @@ if ($SkipPack -and (Test-Path -LiteralPath $tarball)) {
   # `npm pack`, not `pnpm pack`: pnpm exits 0 with no tarball when its own store
   # is in a state it does not want to write to, and the failure surfaces later
   # as a confusing install error rather than as a pack error.
-  $null = Invoke-Checked -Exe 'npm.cmd' -CmdArgs @('pack', '--pack-destination', $caseRoot) `
+  $null = Invoke-Checked -Exe 'npm.cmd' -CmdArgs @('pack', '--pack-destination', $manualRoot) `
             -What 'npm-pack' -CaptureTo (Join-Path $logDir 'pack.txt') -WorkingDir $repo
-  $packed = Get-ChildItem -LiteralPath $caseRoot -Filter '*.tgz' |
+  $packed = Get-ChildItem -LiteralPath $manualRoot -Filter '*.tgz' |
               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $packed) { throw "npm pack produced no tarball in $caseRoot" }
+  if (-not $packed) { throw "npm pack produced no tarball in $manualRoot" }
   if ($packed.Name -ne (Split-Path $tarball -Leaf)) {
     $tarball = $packed.FullName
   }
@@ -425,28 +471,37 @@ if ($SkipPack -and (Test-Path -LiteralPath $tarball)) {
 #
 # The one delete. A home left over from an aborted run holds a booted server's
 # own files open and cannot be removed, so its stray node processes are killed
-# first - by PID, scoped to this DSH build, never by image name.
+# first - by PID, scoped to this DSH build and to THIS profile, never by image
+# name.
 #
 # The filter matches $binJs, the entry point every dsh process here is started
 # with, so it genuinely appears in the server's command line. It used to match
-# $caseRoot, which reaches the server only through DSH_HOME in the ENVIRONMENT -
+# $manualRoot, which reaches the server only through DSH_HOME in the ENVIRONMENT -
 # never on the command line - so the sweep found nothing at all and the home wipe
 # below went straight at files an aborted server still had open.
 #
-# Scope note: $binJs is per DSH version, not per case root, so this also stops a
-# server from a DIFFERENT case root running the same version. That is the same
-# breadth run-one.ps1 accepts for its hosts sweep, and the alternative - matching
-# a port - would miss whatever port the previous run used.
+# The profile name is matched TOO, and that part is load bearing now that several
+# plugin repositories share one hosts root. $binJs alone is not project-specific:
+# every project running DSH 0.2.0-rc.2 is started with the same bin.js path, so a
+# sweep on $binJs alone reaches into a sibling project's acceptance run and kills
+# its live server. Measured: booting the dsh-mission-guard instance killed this
+# project's running instance (its server exited 1 mid-session). `--profile <name>`
+# IS on the command line and IS per project (accept here, audit there), so
+# requiring both narrows the sweep back to this project's own servers.
+#
+# Scope note: this still stops a server from a DIFFERENT manual root running the
+# same version with the same profile name. Matching a port instead would miss
+# whatever port the previous run used, so the profile is the better key.
 
 $stray = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
-         Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + $binJs + '*') }
+         Where-Object { $_.CommandLine -and $_.CommandLine -like ('*' + $binJs + '*') -and $_.CommandLine -like ('*--profile ' + $profileName + '*') }
 foreach ($s in $stray) {
   Write-Host ('  clearing stray dsh process PID ' + $s.ProcessId)
   $null = Stop-ProcessTree -ProcessId ([int]$s.ProcessId) -Label 'stray dsh process'
 }
 if ($stray) { Start-Sleep -Seconds 2 }
 
-$safeHome = Assert-SafeDelete -Path $dshHome -MustBeUnder $caseRoot -ExpectLeaf 'home' -Label 'dshHome'
+$safeHome = Assert-SafeDelete -Path $dshHome -MustBeUnder $manualRoot -ExpectLeaf 'home' -Label 'dshHome'
 if (Test-Path -LiteralPath $safeHome) { Remove-Item -LiteralPath $safeHome -Recurse -Force }
 New-Item -ItemType Directory -Path $safeHome | Out-Null
 
@@ -456,8 +511,8 @@ if ([System.IO.Path]::GetFullPath($env:DSH_HOME) -eq [Environment]::GetFolderPat
 }
 
 # The fixture repositories sit beside the home, not inside it, so the home wipe
-# cannot reach them - and the container root is derived from them.
-$fixtureRoot = Join-Path $pluginRoot 'source'
+# cannot reach them - and the container root is derived from them. The directory
+# itself is named and justified at $fixtureRoot above.
 if (-not (Test-Path -LiteralPath $fixtureRoot)) { New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null }
 
 Write-Host ('DSH_HOME : ' + $safeHome)
@@ -577,22 +632,23 @@ $boot = Wait-ForUrl `
 # parent is that directory so the container shares a real prefix with the source
 # tree without either being widened to the volume root.
 #
-# Note where this lands. For a case root of D:\dsh-acceptance\case the container
-# goes to D:\dsh-acceptance\worktree-space - ONE LEVEL ABOVE the case root, and
+# Note where this lands. For a manual root of
+# D:\dsh-acceptance\dsh-worktree-space\manual the container goes to
+# D:\dsh-acceptance\worktree-space - ONE LEVEL ABOVE the manual root, and
 # therefore outside everything the home wipe reaches. A stale container from an
 # earlier run therefore survives the reset, and the next create finds its
 # branch already taken. That is what happened once and it looks like a broken
 # plugin rather than a stale directory.
 #
 # The fixture is placed one level deeper on purpose so the container root is a
-# sibling of the case root rather than the case root itself: a container root
-# equal to the case root would put the log next to case.env, and one above it
+# sibling of the manual root rather than the manual root itself: a container root
+# equal to the manual root would put the log next to case.env, and one above it
 # would escape the disk this whole run is confined to.
 $volumeRoot = [System.IO.Path]::GetPathRoot($fixtureRoot)
 $firstBelow = (Split-Path $fixtureRoot -Parent) -replace [regex]::Escape($volumeRoot), ''
 $firstBelow = $firstBelow.Split('\')[0]
-$containerRoot = if ($firstBelow) { Join-Path ($volumeRoot + $firstBelow) 'worktree-space' } else { Join-Path $pluginRoot 'worktree-space' }
-$containerOutside = -not ([System.IO.Path]::GetFullPath($containerRoot)).StartsWith($caseRoot.TrimEnd('\') + '\')
+$containerRoot = if ($firstBelow) { Join-Path ($volumeRoot + $firstBelow) 'worktree-space' } else { Join-Path $manualRoot 'worktree-space' }
+$containerOutside = -not ([System.IO.Path]::GetFullPath($containerRoot)).StartsWith($manualRoot.TrimEnd('\') + '\')
 
 # case.env is the maintainer's ONLY record of this run's URL, so it is written
 # through .NET rather than with Set-Content -Encoding ...:
@@ -608,7 +664,7 @@ $containerOutside = -not ([System.IO.Path]::GetFullPath($containerRoot)).StartsW
 # on BOTH 5.1 and 7. The PowerShell 7 name utf8NoBOM would need
 # #Requires -Version 7.0, which would lock everyone still on 5.1 out of this
 # script for no gain at all.
-$caseEnv = Join-Path $caseRoot 'case.env'
+$caseEnv = Join-Path $manualRoot 'case.env'
 $caseEnvLines = @(
   "DSH_HOME=$safeHome"
   "FIXTURE=$fixtureRoot"
@@ -627,10 +683,10 @@ Write-Host ('  URL      : ' + $boot.Url)
 Write-Host ('  DSH_HOME : ' + $safeHome)
 Write-Host ('  fixture  : ' + $fixtureRoot)
 Write-Host ('  log file : ' + (Join-Path $containerRoot 'worktree-space-log.jsonl'))
-Write-Host ('  case.env : ' + (Join-Path $caseRoot 'case.env'))
+Write-Host ('  case.env : ' + (Join-Path $manualRoot 'case.env'))
 if ($containerOutside) {
   Write-Host ''
-  Write-Host '  NOTE: the container root is ABOVE the case root, so this run''s reset'
+  Write-Host '  NOTE: the container root is ABOVE the manual root, so this run''s reset'
   Write-Host '        does not clear it. A leftover from an earlier run keeps its'
   Write-Host '        branches, and a create on one of those names fails on the branch.'
   Write-Host '        Remove it by hand if a run before this one left one behind:'

@@ -31,13 +31,63 @@
 - 不需要 git。脚本只按 `$PSScriptRoot\..\..` 找 `package.json`，任何一份仓库副本都能跑
 - 不需要预先装 DSH。`install-hosts.ps1` 装的就是要用的那些，**手工验收也复用它**
 
-**建议**：矩阵的默认根落在 `%TEMP%`，而 `%TEMP%` 正是本项目事故里被整个删掉过的目录。守卫保证脚本自己只删
-`<RunRoot>\homes` 和 `<RunRoot>\logs`，但把一次性产物放在一个会被系统或人工定期清理的地方仍然不是好主意。
-正式跑之前显式指定一个自己的目录：
+**建议**：显式指定一个自己的目录，别依赖 `%TEMP%`——那正是本项目事故里被整个删掉过的目录。
+守卫保证脚本自己只删 `<MatrixRoot>\homes` 和 `<MatrixRoot>\logs`，但把一次性产物放在一个会被系统或人工定期清理的
+地方仍然不是好主意。**默认根现在已经是 `D:\dsh-acceptance`，不用再手写参数**：
 
 ```powershell
-.\scripts\acceptance\run-all.ps1 -RunRoot D:\dsh-acceptance\run -HostsRoot D:\dsh-acceptance\hosts
+pnpm acceptance:hosts     # 装齐各个 DSH 版本（全局共用，只装一次）
+pnpm acceptance:matrix    # 跑六阶段矩阵
 ```
+
+需要换根时两个参数一起给：
+
+```powershell
+.\scripts\acceptance\run-all.ps1 -AcceptanceRoot D:\dsh-acceptance -ProjectName dsh-worktree-space
+```
+
+### 唯一验收根：hosts 共用，项目各一层
+
+一台机器上**只维护一个验收根**，DSH 版本装在它下面共用，每个插件仓库各占一个以仓库名命名的子目录：
+
+```
+D:\dsh-acceptance\
+├── hosts\                        ← 全局共用，只装一次（4 个版本约 1.8 GB）
+├── shared\                       ← 共用 helper：invoke-bounded.ps1 / stop-tree.ps1
+├── worktree-space\               ← 容器根（插件推导，全局共用）
+│   └── workspace-test\           ← 项目层，= fixture 源根的目录名
+└── dsh-worktree-space\           ← 本项目（= 仓库目录名）
+    ├── matrix\                   ← 矩阵（无人值守）：homes\、logs\、matrix-report.md
+    ├── manual\                   ← 人工验收（人驱）：home\、log\、workspace-test\、case.env
+    └── acceptance-archive\       ← 归档：旧矩阵报告、boot 日志、历史 scratch
+```
+
+**两个子目录名说的是「谁在驱」，不是「哪个脚本」。** 原先叫 `run\` 和 `case\`——两个词都是「运行」
+的意思，看目录名分不出哪个是无人值守、哪个要人对着浏览器。现在：
+
+| 目录 | 谁在驱 | 产出 |
+| --- | --- | --- |
+| `matrix\` | 无人值守，脚本跑完就结束 | `matrix-report.md`（发布证据） |
+| `manual\` | 一个人 + 一个浏览器 | 一个活着的进程 |
+
+`<仓库名>` 是 `scripts\acceptance\..\..` 的目录名，脚本自己推导，不写死——所以同一套脚本换到
+另一个插件仓库下就是那个插件自己的目录。
+
+**为什么必须这样。** 矩阵系脚本（`run-all` / `run-one` / `install-hosts` / `install-tarball`）原先默认落在
+`%TEMP%\dsh-acceptance\*`，而 `start-acceptance.ps1` 默认落在 `D:\dsh-acceptance\*`。**一个东西两套默认值**，
+于是跑一次 `pnpm acceptance:hosts` 就会在 TEMP 里再装一整套 1.8 GB 的 DSH，而没有任何人决定要装第二套。
+默认值现已统一到 `-AcceptanceRoot`。
+
+**为什么 hosts 能共用、两套状态不能。** DSH 安装是只读的版本仓库，两个入口都只是 `node <版本>\...\bin.js`，
+不写回安装目录；而 `matrix\` 与 `manual\` 各有自己的 DSH home，矩阵每轮会删 `<MatrixRoot>\homes\home-<版本>`，
+人工实例的 profile 必须不在那个删除范围里。同一父目录、不同子树、互不可删，才是两者共存的正确形状。
+
+**残留进程清扫按 profile 隔离，不只按 DSH 版本。** 两个项目共用一套 hosts，意味着 `bin.js` 路径完全相同；
+只按它清扫会让一个项目的启动杀掉另一个项目正在跑的实例（实测发生过）。所以清扫同时要求
+`--profile` 匹配本项目自己的名字（本项目 `accept`，mission-guard 是 `audit`）。
+
+`run-all.ps1` 端口从 `-PortBase 34800` 起按版本顺序分配；`run-one.ps1` 找 DSH 入口的路径是
+`<HostsRoot>\<版本>\node_modules\@deepseek-ai\dsh\lib\bin.js`，`<HostsRoot>` 默认 `<AcceptanceRoot>\hosts`。
 
 ---
 
@@ -50,14 +100,15 @@
 .\scripts\acceptance\guard-tests.ps1        # 删除守卫的回归测试（不装任何东西）
 ```
 
-`run-all.ps1` 默认把 DSH 安装放在 `%TEMP%\dsh-acceptance\hosts`、运行目录放在
-`%TEMP%\dsh-acceptance\run`。两个都可以用 `-HostsRoot` / `-RunRoot` 改，端口从 `-PortBase 34800`
+`run-all.ps1` 默认把 DSH 安装放在 `<AcceptanceRoot>\hosts`、运行目录放在
+`<AcceptanceRoot>\<仓库名>\matrix`（`AcceptanceRoot` 默认 `D:\dsh-acceptance`）。两个都可以用
+`-HostsRoot` / `-MatrixRoot` 改，端口从 `-PortBase 34800`
 起按版本顺序分配。
 
 版本列表**从 `package.json` 的 `dsh.compatibility.dshReleases` 读**，不在脚本里另写一份，
 所以不会和清单声明走偏。
 
-跑完 `run-all.ps1` 会打印每格结果，并留下 `<RunRoot>\homes` 与 `<RunRoot>\logs` 供查验；
+跑完 `run-all.ps1` 会打印每格结果，并留下 `<MatrixRoot>\homes` 与 `<MatrixRoot>\logs` 供查验；
 **脚本不清理它们**，由你自己看完再删。
 
 ### 可见性探测的三个前提
@@ -122,35 +173,40 @@ The bundle is older than the source it was built from, so packing now would serv
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `-CaseRoot` | `D:\dsh-acceptance\case` | 验收根。DSH home、日志、fixture、容器都在它下面 |
+| `-ManualRoot` | `<AcceptanceRoot>\<仓库名>\manual` | 人工验收根。DSH home、日志、fixture 工作区、容器都在它下面 |
 | `-Port` | `34822` | 端口。**不能用 3080**——那是桌面实例的默认值，占着会让 webserver 插件激活失败 |
 | `-DshVersion` | `0.2.0-rc.2` | 用哪个已装版本 |
-| `-HostsRoot` | `D:\dsh-acceptance\hosts` | DSH 安装根 |
+| `-HostsRoot` | `<AcceptanceRoot>\hosts` | DSH 安装根（全局共用） |
 | `-HoldSeconds` | `3600` | 打印 URL 后维持多久 |
 | `-SkipPack` | 否 | 复用已有的 tarball，只改 profile 配置时用 |
 | `-SkipBuildCheck` | 否 | 跳过「bundle 比源码旧」的检查。只在**明知**这次不该带上工作区的源码改动时用 |
-| `-FixtureRepos` | `2` | fixture 里几个 git 仓库。1 个够验证流程，2 个能看出按仓库并排的 worktree |
+| `-FixtureRepos` | `2` | fixture 工作区里几个 git 仓库。1 个够验证流程，2 个能看出按仓库并排的 worktree |
 | `-PluginRepo` | 本仓库 | 要打包的仓库。不是脚本自己的目录——`npm pack` 读的是工作目录下的 `package.json`，不指定会在脚本旁边找然后 ENOENT |
 
 ### 每次重建的范围
 
-只有一处递归删除：**上一次的 DSH home**，且删除前要通过四道检查——路径必须是 `$CaseRoot` 的直接子目录、
+只有一处递归删除：**上一次的 DSH home**，且删除前要通过四道检查——路径必须是 `$ManualRoot` 的直接子目录、
 叶子名必须正好是 `home`、不能是根本身、路径上不能有 reparse point（`Remove-Item -Recurse` 在 Windows 上
 会跟随 junction）。
 
 `Remove-Item -Recurse` 跟随 junction 这一点是这里唯一真正危险的地方，所以检查是逐级向上走完的，不是只看终点。
 本项目出过整个用户目录被删的事故，根因是 `$home` 是只读自动变量、赋值静默失败——脚本里所有变量名都避开了自动变量。
 
-### 容器根在 case 根之外 ⚠️
+### 容器根在 manual 根之外，且项目层由 fixture 目录名决定 ⚠️
 
-**跑之前要知道的一件事**：容器根不是脚本能配置的，它由插件从 source root 推导——取 source root 在卷根下的
+**跑之前要知道的两件事。**
+
+**一、容器根不是脚本能配置的**，它由插件从 source root 推导——取 source root 在卷根下的
 第一个目录，拼 `worktree-space`（`src/host/task/paths.js` 的 `firstDirectoryBelowRoot`）。
 
-所以 case 根是 `D:\dsh-acceptance\case` 时，容器根是：
+所以 manual 根是 `D:\dsh-acceptance\dsh-worktree-space\manual` 时，容器根是：
 
 ```
-D:\dsh-acceptance\worktree-space      ← 在 case 根的上一级
+D:\dsh-acceptance\worktree-space      ← 在 manual 根的上一级，全局共用
 ```
+
+注意它取的是**卷根下第一层目录**（`D:\dsh-acceptance`），所以和 fixture 放多深无关——放深一层
+不会把容器根推到别处。
 
 **它在脚本的重建范围之外**，上一次跑残留的容器和分支不会被清掉。后果是：拿残留分支的名字去创建，会在
 `E3001 分支已存在` 上失败——看起来像插件坏了，其实是个陈旧目录。
@@ -158,7 +214,27 @@ D:\dsh-acceptance\worktree-space      ← 在 case 根的上一级
 脚本检测到这一情况会在输出里提示，并打印出那个路径。确认不需要了就手动删；它是唯一需要手工处理的东西，
 删之前先看一眼内容。
 
-fixture 故意放深一层（`case\fixture\source`）就是为了让容器根和 case 根平级，而不是落在 case 根里面——
+**二、容器里的项目层 = fixture 源根的目录名**，而插件用的是 `basename(sourceRoot)`
+（`src/host/task/naming.js` 的 `projectNameFor`）。所以那个目录叫什么，容器里就出现什么：
+
+```
+manual\workspace-test\                  ← 目录名 = 容器里的项目层名
+  └─ repo-1, repo-2                     ← 真正的 git 仓库
+```
+
+于是任务空间落在 `<容器根>\workspace-test\<任务>\`。
+
+> **它以前叫 `source`，那是个坑；后来又用过仓库名。** `source` 太通用；仓库名（`dsh-worktree-space`）
+> 则是把**项目名**当成了**用例名**——这个目录装的是测试用例的工作区，不是项目本身。现在用
+> `workspace-test`：一个说得出「这是什么」的用例名。**改这个名字等于改容器里的项目层，不是纯改名。**
+> 实测（跑插件的 `recommendTasksRoot` / `projectNameFor`）：
+> `manual\workspace-test` → project `workspace-test`；`manual` 本身 → project `manual`。
+
+**这一层不能去掉。** 源根若直接是 `manual\`，项目层就会变成 `manual`。这个目录只属于本项目、别的插件
+不会写进来，所以叫 `manual` 也不算冲突；但它就丢掉了「这是哪个用例的工作区」这个信息，而且和
+`home\`、`log\` 混在同一层，读起来分不清哪个是 git 工作区。保留一层是有意的。
+
+fixture 工作区放在 `manual\` 下、和 `home\` 平级，是为了让容器根和 manual 根平级而不是落在里面——
 落在里面会让日志和 `case.env` 混在一起。
 
 ### 排查
@@ -191,16 +267,19 @@ LOGS=...          全部命令输出
 
 | 路径 | 约束 |
 | --- | --- |
-| `<RunRoot>\homes\home-<版本号>` | `<RunRoot>\homes` 的**直接**子目录，名字精确匹配，整条路径上**没有 reparse point** |
-| `<RunRoot>\logs\log-<版本号>` | 同上，根换成 `<RunRoot>\logs` |
+| `<MatrixRoot>\homes\home-<版本号>` | `<MatrixRoot>\homes` 的**直接**子目录，名字精确匹配，整条路径上**没有 reparse point** |
+| `<MatrixRoot>\logs\log-<版本号>` | 同上，根换成 `<MatrixRoot>\logs` |
 
-其余一切——DSH 安装、tarball、`<RunRoot>` 本身、用户目录、盘根——在这个脚本里**结构上删不掉**：
+其余一切——DSH 安装、tarball、`<MatrixRoot>` 本身、用户目录、盘根——在这个脚本里**结构上删不掉**：
 `Assert-Under` / `Assert-DirectChild` 会在 `Remove-Item` 之前把它们逐个拒掉。
 `install-hosts.ps1` 与 `run-all.ps1` 里**一条 `Remove-Item` 都没有**（`install-tarball.ps1` 只删它自己
 刚打出的那个 tarball）。`start-acceptance.ps1` 只删上一轮的 DSH home，约束见上面那一节。
 
 `guard-tests.ps1` 用 PowerShell 的 AST 从 `run-one.ps1` 里**把守卫函数抠出来跑**，不是抄一份——
 抄的版本会和真实代码漂移，而只存在于测试里的守卫证明不了任何事。改名或删除守卫函数，这个测试会直接失败。
+**它连守卫读取的那五个作用域变量（`matrixRoot` / `evidenceRoot` / `disposableRoot` / `logRoot` / `leaf`）
+也是从 runner 里抽的**，所以 `run-one.ps1` 里改了变量名而没同步 `guard-tests.ps1` 的 `$scopeNames`，
+测试会以 `run-one.ps1 no longer assigns: ...` 直接失败，而不是悄悄放行。
 它跑完打印 `GUARD-OK` 或 `GUARD-FAIL`，**无论哪种都不删任何东西**——它只调用守卫，看它们拒不拒。
 
 ## 已知脆弱点

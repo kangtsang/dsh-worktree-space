@@ -1,5 +1,10 @@
 param(
-  [string]$RunRoot = (Join-Path $env:TEMP 'dsh-acceptance\run')
+  # Must match run-one.ps1's MatrixRoot default, because that is where the runner
+  # looks for the tarball this script produces. Same derivation, same reason:
+  # one acceptance root, per-project state under <root>\<repo name>.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$MatrixRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'matrix')
 )
 
 Set-StrictMode -Version Latest
@@ -12,14 +17,14 @@ $ErrorActionPreference = 'Stop'
 # pack is what the matrix actually installs, so it is the same artifact the release
 # workflow would publish.
 
-$runRoot = [System.IO.Path]::GetFullPath($RunRoot)
-if (-not (Test-Path -LiteralPath $runRoot)) {
-  New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
+$matrixRoot = [System.IO.Path]::GetFullPath($MatrixRoot)
+if (-not (Test-Path -LiteralPath $matrixRoot)) {
+  New-Item -ItemType Directory -Path $matrixRoot -Force | Out-Null
 }
 
 $repo = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $manifest = Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json
-$target = Join-Path $runRoot ("dsh-worktree-space-$($manifest.version).tgz")
+$target = Join-Path $matrixRoot ("dsh-worktree-space-$($manifest.version).tgz")
 
 if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
 
@@ -36,7 +41,7 @@ try {
   & pnpm build
   if ($LASTEXITCODE -ne 0) { throw "pnpm build failed with exit $LASTEXITCODE" }
 
-  & pnpm pack --pack-destination $runRoot
+  & pnpm pack --pack-destination $matrixRoot
   if ($LASTEXITCODE -ne 0) { throw "pnpm pack failed with exit $LASTEXITCODE" }
 } finally {
   Pop-Location
@@ -45,9 +50,9 @@ try {
 if (-not (Test-Path -LiteralPath $target)) {
   # pnpm names the file from the package name and version; look for it rather than
   # assume, so a rename of the package does not silently break the matrix.
-  $found = @(Get-ChildItem -LiteralPath $runRoot -Filter '*.tgz')
+  $found = @(Get-ChildItem -LiteralPath $matrixRoot -Filter '*.tgz')
   if ($found.Count -eq 1) { $target = $found[0].FullName }
-  else { throw ("tarball not produced; found " + $found.Count + " .tgz in " + $runRoot) }
+  else { throw ("tarball not produced; found " + $found.Count + " .tgz in " + $matrixRoot) }
 }
 
 $size = (Get-Item -LiteralPath $target).Length

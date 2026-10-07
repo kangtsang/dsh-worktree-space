@@ -1,9 +1,25 @@
 param(
   [Parameter(Mandatory)][string]$v,
+  # One acceptance root for every plugin repository on this machine. The DSH
+  # builds are SHARED by every project and by both entry points (this matrix and
+  # start-acceptance.ps1); the per-project state is not.
+  #
+  # $ProjectName is this repository directory's own name, which is also the name
+  # the plugin gives the project layer inside the task container. Deriving it
+  # rather than hardcoding it is what lets one script serve any plugin repo.
+  #
+  # These defaults used to point at $env:TEMP while start-acceptance.ps1 pointed
+  # at D:\dsh-acceptance. Two defaults for one thing is exactly how a second
+  # full 1.8 GB DSH install appears without anyone deciding to make one.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
   # Where the DSH builds live: <HostsRoot>\<version>\node_modules\@deepseek-ai\dsh\lib\bin.js
-  [string]$HostsRoot = (Join-Path $env:TEMP 'dsh-acceptance\hosts'),
-  # The run area. Every disposable path below is inside it and nowhere else.
-  [string]$RunRoot   = (Join-Path $env:TEMP 'dsh-acceptance\run'),
+  [string]$HostsRoot = (Join-Path $AcceptanceRoot 'hosts'),
+  # The matrix area: the unattended release-evidence run. Every disposable path
+  # below is inside it and nowhere else. Named "matrix" rather than "run" because
+  # this project also has a hand-driven instance area, and "run" versus "case"
+  # told a reader nothing about which one they were looking at.
+  [string]$MatrixRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'matrix'),
   # The tarball under test. Defaults to the file install-tarball.ps1 produced.
   [string]$Tarball,
   # A fixed port, never the host's default 3080 (which collides with a running
@@ -45,10 +61,10 @@ $ErrorActionPreference = 'Stop'
 $global:LASTEXITCODE = 0   # StrictMode would otherwise fail on the first native call
 
 $hostsRoot      = [System.IO.Path]::GetFullPath($HostsRoot)
-$runRoot        = [System.IO.Path]::GetFullPath($RunRoot)
-$evidenceRoot   = Split-Path $runRoot -Parent
-$disposableRoot = Join-Path $runRoot 'homes'
-$logRoot        = Join-Path $runRoot 'logs'
+$matrixRoot     = [System.IO.Path]::GetFullPath($MatrixRoot)
+$evidenceRoot   = Split-Path $matrixRoot -Parent
+$disposableRoot = Join-Path $matrixRoot 'homes'
+$logRoot        = Join-Path $matrixRoot 'logs'
 $invoker        = Join-Path $PSScriptRoot 'invoke-bounded.ps1'
 # Every taskkill in this script goes through Stop-ProcessTree. See stop-tree.ps1
 # for why a native command writing to stderr under ErrorActionPreference = 'Stop'
@@ -57,7 +73,7 @@ $invoker        = Join-Path $PSScriptRoot 'invoke-bounded.ps1'
 
 if (-not $Tarball) {
   $manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\..\package.json') -Raw | ConvertFrom-Json
-  $Tarball = Join-Path $runRoot ("dsh-worktree-space-$($manifest.version).tgz")
+  $Tarball = Join-Path $matrixRoot ("dsh-worktree-space-$($manifest.version).tgz")
 }
 $tarball = [System.IO.Path]::GetFullPath($Tarball)
 
@@ -106,7 +122,7 @@ function Assert-Under {
   if ($full -match '^[A-Za-z]:\\?$')             { throw ("REFUSED[{0}]: {1} is a drive root" -f $Label, $full) }
   if ($full -eq $scope)                           { throw ("REFUSED[{0}]: {1} IS the designated root itself" -f $Label, $full) }
   if ($full -eq [IO.Path]::GetFullPath($evidenceRoot)) { throw ("REFUSED[{0}]: {1} IS the evidence root" -f $Label, $full) }
-  if ($full -eq [IO.Path]::GetFullPath($runRoot))       { throw ("REFUSED[{0}]: {1} IS the run root" -f $Label, $full) }
+  if ($full -eq [IO.Path]::GetFullPath($matrixRoot))    { throw ("REFUSED[{0}]: {1} IS the matrix root" -f $Label, $full) }
   if (-not $full.StartsWith($scope + $sep, [StringComparison]::OrdinalIgnoreCase)) {
     throw ("REFUSED[{0}]: {1} is not under {2}" -f $Label, $full, $scope)
   }

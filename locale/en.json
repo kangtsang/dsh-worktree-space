@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Worktree Space",
-    "description": "Worktree Space: one task, one space — agents in parallel, never in conflict. Put a task that spans one or more Git repositories into its own task space: every repository involved gets a worktree on the same task branch, and the task space registers itself as a workspace where agent sessions work on their own. Multiple tasks move forward in parallel without interfering with one another; when the work is done, merge back into each repository's target branch and clean up the worktree branches and task spaces as needed. Report problems at https://github.com/kangtsang/dsh-worktree-space/issues"
+    "description": "Worktree Space: one task, one space — work on parallel tracks. Put a task that spans one or more Git repositories into its own task space: every repository involved gets a worktree on the same task branch, and the task space registers itself as a workspace where agent sessions work on their own. Multiple tasks move forward in parallel without interfering with one another; when the work is done, merge back into each repository's target branch and clean up the worktree branches and task spaces as needed. Report problems at https://github.com/kangtsang/dsh-worktree-space/issues"
   }
 }

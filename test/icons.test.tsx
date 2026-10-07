@@ -11,7 +11,7 @@ import * as icons from "../src/client/components/icons"
  * stroke when it is given a width, and an icon with no stroke paints nothing.
  */
 describe("the icon surface", () => {
-  const names = ["FolderGit", "FolderGit2", "FolderClosed", "GitPullRequest", "AlertCircle", "Check", "Loader2", "X", "ChevronLeft", "ChevronRight", "ChevronDown", "Plus", "RefreshCw", "Search"] as const
+  const names = ["FolderGit", "FolderGit2", "FolderClosed", "GitPullRequest", "AlertCircle", "Check", "Loader2", "X", "ChevronLeft", "ChevronRight", "ChevronDown", "Plus", "RefreshCw", "Search", "Settings"] as const
 
   it("exports every glyph the components draw", () => {
     for (const name of names) expect(typeof icons[name], name).toBe("function")

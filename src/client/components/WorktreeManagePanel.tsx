@@ -13,6 +13,8 @@ interface WorktreeManagePanelProps {
   sessions: ISessions
   /** Opens the create form; the dialog steps aside for it. */
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
+  /** Shows the Host's Plugins page, from the navigation column's gear row. */
+  onOpenSettings?: () => void
   onClose: () => void
 }
 
@@ -26,7 +28,7 @@ interface WorktreeManagePanelProps {
  * the same lists — inside the dialog's own header and footer chrome, so the two ways
  * in are one page seen twice rather than two implementations of it.
  */
-export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onClose }: WorktreeManagePanelProps) {
+export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose }: WorktreeManagePanelProps) {
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -41,6 +43,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           uiWorkspace={uiWorkspace}
           sessions={sessions}
           onCreate={onCreate}
+          onOpenSettings={onOpenSettings}
           variant="dialog"
           onLeave={onClose}
         />
