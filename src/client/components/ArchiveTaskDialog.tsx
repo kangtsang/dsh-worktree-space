@@ -19,6 +19,12 @@ interface ArchiveTaskDialogProps {
   sessions: ISessions
   /** The navigation face, which is how the user reaches a session this dialog opened. */
   uiWorkspace: WorkspaceNavigation
+  /**
+   * The user's own answer to "finish anyway?", asked at the finish press when the
+   * delivery policy is not satisfied. Carried to the done call, which records it
+   * as a warning; the model-facing tool has no way to set it.
+   */
+  acknowledgeDelivery?: boolean
   /** Called once the task is archived, so the opener can refresh what it shows. */
   onArchived?: () => void
   onClose: () => void
@@ -67,7 +73,7 @@ interface HandoffTarget {
  * back to Ungrouped with their history intact; and a session still running here
  * stops the archive instead of having its directory pulled out from under it.
  */
-export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
+export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, acknowledgeDelivery = false, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
@@ -448,6 +454,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // task that is finished leaves nothing of its own behind. What is left to
         // decide is whether the user's writing is kept, and where.
         cleanStray: true,
+        // The user's "finish anyway" from the finish press, when the delivery
+        // policy was not satisfied; the Host records the overrule as a warning.
+        ...(acknowledgeDelivery ? { acknowledgeDelivery: true } : {}),
         // The container's own content always leaves it: filed out of the way when
         // the box is ticked (its default), discarded when it is not. Sent only
         // when there is content, so the common case carries no extra arguments.
