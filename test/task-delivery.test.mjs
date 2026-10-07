@@ -20,7 +20,7 @@ import {
   normalizeDeliveryPolicy,
   resolveDeliveryPolicy,
 } from '../src/host/task/delivery.js'
-import { ackAcceptance, deployEnvironment, deploymentStatus, assertDeliveryGate, destroyDeployment } from '../src/host/task/deploy.js'
+import { ackAcceptance, deployEnvironment, deploymentStatus, destroyDeployment, parseManifestTargets, readDeployManifest, assertDeliveryGate } from '../src/host/task/deploy.js'
 import { taskMetadata } from '../src/host/task/shared.js'
 
 const STATE = {
@@ -215,7 +215,7 @@ describe('deployment state reads and writes', () => {
   })
 
   it('rebuilds the environment through the task space\'s own deploy script', async () => {
-    const { root } = await taskFixture({ state: { ...STATE, url: null, destroyedAt: '2026-10-06T00:00:00Z' } })
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url: null, destroyedAt: '2026-10-06T00:00:00Z' } })
     await mkdir(join(root, 'deploy'), { recursive: true })
     await writeFile(join(root, 'deploy', 'deploy.sh'), 'echo up "$@"\n', 'utf8')
     const calls = []
@@ -238,7 +238,7 @@ describe('deployment state reads and writes', () => {
   })
 
   it('refuses to rebuild when the space carries no deploy script', async () => {
-    const { root } = await taskFixture({})
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
     const subprocess = { spawn: vi.fn() }
     await expect(deployEnvironment(subprocess, root)).rejects.toMatchObject({ code: 'E5008' })
     expect(subprocess.spawn).not.toHaveBeenCalled()
@@ -334,5 +334,90 @@ describe('applyStraysPolicy', () => {
   it('roots the archive under a custom directory when the configuration names one', () => {
     const r = applyStraysPolicy({ strays: 'archive' }, {}, { strategy: 'custom', directory: 'D:\docs' }, TASK)
     expect(r.documentsDirectory.startsWith('D:\docs')).toBe(true)
+  })
+})
+
+describe('the deploy manifest', () => {
+  const DOC = [
+    'targets:',
+    '  docker:',
+    '    up: ./deploy.sh up',
+    '    smoke: ./deploy.sh smoke',
+    '    destroy: ./deploy.sh destroy',
+    '  host:',
+    '    up: make run',
+    '    smoke: make check',
+    '    destroy: make stop',
+    '    autoAllowed: true',
+  ].join('\n')
+
+  it('parses the documented two-level structure with scalars and booleans', () => {
+    const t = parseManifestTargets(DOC)
+    expect(t.docker.up).toBe('./deploy.sh up')
+    expect(t.docker.destroy).toBe('./deploy.sh destroy')
+    expect(t.host.autoAllowed).toBe(true)
+    expect(t.host.up).toBe('make run')
+  })
+
+  it('answers a document outside the contract as untrusted, never half-interpreted', () => {
+    expect(parseManifestTargets('version: 2\ntargets:')).toBeUndefined()
+    expect(parseManifestTargets('targets: {}')).toBeUndefined()
+    expect(parseManifestTargets('')).toBeUndefined()
+  })
+
+  it('finds the manifest by the same two shapes the state files use', async () => {
+    const { root } = await taskFixture({})
+    expect(await readDeployManifest(root)).toBeUndefined()
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), DOC, 'utf8')
+    const m = await readDeployManifest(root)
+    expect(m.broken).toBe(false)
+    expect(Object.keys(m.targets).sort()).toEqual(['docker', 'host'])
+  })
+
+  it('refuses to deploy through a target the manifest does not offer', async () => {
+    // The manifest offers docker only; a policy pointing at host must be refused,
+    // never silently swapped to the target the manifest does have.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host' } } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  docker:\n    up: x\n', 'utf8')
+    await expect(deployEnvironment({ spawn: vi.fn() }, root)).rejects.toMatchObject({ code: 'E5009' })
+  })
+
+  it('marks a broken manifest as untrusted rather than half-interpreted', async () => {
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  [broken', 'utf8')
+    await expect(deployEnvironment({ spawn: vi.fn() }, root)).rejects.toMatchObject({ code: 'E5010' })
+  })
+
+  it('runs the manifest up command with the environment id passed by variable', async () => {
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host', mode: 'auto' }, verification: 'agent' } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  host:\n    up: make run\n    smoke: make check\n    destroy: make stop\n    autoAllowed: true\n', 'utf8')
+    const calls = []
+    const subprocess = { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      const text = argv[1] === 'ps' ? 'host-proc\trunning' : (argv[0] === 'bash' && argv[1] === '-c') ? 'ran make run' : ''
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+    const out = await deployEnvironment(subprocess, root)
+    expect(calls.some((c) => c.includes("DSH_ENV_ID='dsh-public-login'") && c.includes('make run'))).toBe(true)
+    expect(out.status.targets).toEqual(['host'])
+    expect(out.status.autoAllowed).toBe(true)
+  })
+
+  it('reports the targets and the autoAllowed flag in the status', async () => {
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host', mode: 'auto' } } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  host:\n    up: make run\n    smoke: make check\n    destroy: make stop\n', 'utf8')
+    const subprocess = { spawn() { return { done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } } } } }
+    const status = await deploymentStatus(subprocess, root)
+    expect(status.targets).toEqual(['host'])
+    // No autoAllowed in the entry: host stays man-driven by default (D8).
+    expect(status.autoAllowed).toBe(false)
   })
 })

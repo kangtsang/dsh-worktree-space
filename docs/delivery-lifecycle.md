@@ -259,7 +259,7 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 | L1.1 | `delivery` 策略块：schema、解析（显式 > 项目默认 > 内置）、note 渲染 `## Delivery policy`、配置字段 `deliveryDefaultsJson` | delivery.js（新）、shared.js、create.js、index.js、tool.js | ✅ `8d35484` |
 | L1.2 | 交付闸门：`finishTask` 内所有路径强制，读策略 + `.state.json`（E5005 无记录 / E5006 冒烟未过 / E5007 等人工 ack） | deploy.js（新）、archive.js、codes.js | ✅ `8d35484` |
 | L1.3 | 清理钩子（done 成功后按 label 销毁，compose down 优先 rm -f 兜底，永不致命）+ 三个端点 + 控制台部署卡片（URL/冒烟徽章/确认验收/销毁，中英文案） | deploy.js、archive.js、index.js、DeployCard.tsx、api.ts、i18n.ts | ✅ `8d35484` |
-| L1.4 | 部署清单 `deploy.yaml` + host / dsh-acceptance 目标契约对齐（契约定稿见 §3：单最新版 + autoAllowed 豁免） | deploy 约定、scripts/acceptance | 待做（用户定序：L2 之后） |
+| L1.4 | 部署清单：deploy.yaml 受控解析（契约两层结构）、目标分派（up/smoke/destroy 命令经 DSH_ENV_ID 执行）、目标不匹配报错（E5009/E5010）、status 暴露 targets+autoAllowed、无清单兼容 L0 仅 docker。dsh-acceptance 目标=清单里写命令即可（无需硬编码）；autoAllowed 的流水线钳制落在指引层（D8） | deploy.js、codes.js | ✅ 本次（dsh-acceptance 的 PowerShell 入口对齐待实测后调） |
 | L2.1 | strays 策略接线：archive 自动归档（applyStraysPolicy 纯函数 + deliveryArchive 参数）/ discard 仅 force / keep 现状 | delivery.js、archive.js、index.js、tool.js | ✅ 本次 |
 | L2.2 | 冲突 agent-auto：策略经 note/tool description 暴露给调用方，agent-auto 时 agent 自动解决冲突、提交合并并重试 done（提权需公开请求）；无新机制 | SKILL.md、tool.js | ✅ 本次 |
 

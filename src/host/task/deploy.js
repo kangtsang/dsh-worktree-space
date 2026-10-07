@@ -164,10 +164,17 @@ export async function deploymentStatus(subprocess, taskPath) {
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const policy = deliveryPolicyOf(recorded)
   const found = await readDeliveryState(taskPath)
+  const manifest = await readDeployManifest(taskPath)
+  const targets = manifest === undefined ? ['docker'] : manifest.broken ? [] : Object.keys(manifest.targets)
   return {
     envId,
     target: policy.deploy.target,
     verification: policy.verification,
+    // The targets the manifest offers, and whether the policy's own target
+    // allows unattended deploys - the D8 exemption a host target states in its
+    // manifest entry. A space without a manifest offers docker the L0 way.
+    targets,
+    autoAllowed: manifest !== undefined && !manifest.broken && manifest.targets[policy.deploy.target]?.autoAllowed === true,
     url: found?.state?.url ?? null,
     lastSmoke: found?.state?.lastSmoke ?? null,
     humanAck: found?.state?.humanAck ?? null,
@@ -277,15 +284,28 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
  */
 export async function destroyDeployment(subprocess, taskPath, envId) {
   let id = typeof envId === 'string' ? envId.trim() : ''
+  let recordedForTarget
   if (id === '') {
     // The panel asks by path alone: the environment id lives in the task's own
     // record. The finish-time hook names it explicitly, because by then the
     // space the record lived in may already be gone.
-    const recorded = await readTaskMetadata(taskPath).catch(() => undefined)
-    if (recorded !== undefined && typeof recorded.deploymentEnvId === 'string') id = recorded.deploymentEnvId
+    recordedForTarget = await readTaskMetadata(taskPath).catch(() => undefined)
+    if (recordedForTarget !== undefined && typeof recordedForTarget.deploymentEnvId === 'string') id = recordedForTarget.deploymentEnvId
   }
   if (id === '') {
     return { removed: false, containers: 0, warning: 'no deployment environment is recorded for this task space, so there is nothing named to remove' }
+  }
+  // A non-docker target has no containers to find by label: its teardown is
+  // whatever the manifest's destroy command says, run with the same env id.
+  const target = (recordedForTarget !== undefined ? recordedForTarget : await readTaskMetadata(taskPath).catch(() => undefined))
+  const policyTarget = typeof target?.delivery === 'object' && target.delivery !== null
+    ? String(target.delivery?.deploy?.target ?? 'docker')
+    : 'docker'
+  if (policyTarget !== 'docker') {
+    const manifest = await readDeployManifest(taskPath)
+    const entry = manifestEntryFor(manifest, policyTarget, 'destroy')
+    const out = await runManifestCommand(subprocess, entry.destroy, manifest.dir, id)
+    return { removed: out.ok, containers: 0, ...(out.ok ? {} : { warning: outputTail(out.stderr, out.stdout) }) }
   }
   const ids = await containerIds(subprocess, id)
   if (ids.length === 0) {
@@ -380,6 +400,115 @@ async function findDeployScript(taskPath) {
   return undefined
 }
 
+/** The manifest file a deploy root may carry, per the D12 decision. */
+const MANIFEST_NAME = 'deploy.yaml'
+
+/**
+ * Parse the manifest's documented structure and nothing beyond it.
+ *
+ * The contract is two levels: `targets:` at the top, one target name per line
+ * under it, and per target the scalar fields the handshake knows - `up`, `smoke`,
+ * `status`, `destroy`, `autoAllowed`. Anchors, block scalars, nested maps beyond
+ * that shape are outside the contract and are answered as a broken manifest
+ * rather than half-interpreted: a command quietly dropped is a deploy that never
+ * runs, which is worse than one that refuses to start.
+ * @param text - the manifest file's contents.
+ * @returns the targets map, or undefined when the text is outside the contract.
+ */
+export function parseManifestTargets(text) {
+  if (typeof text !== 'string' || text.trim() === '') return undefined
+  const targets = Object.create(null)
+  let current = null
+  let sawTargets = false
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, '').trimEnd()
+    if (line.trim() === '') continue
+    const indent = line.length - line.trimStart().length
+    const body = line.trim()
+    const field = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s+(.*))?$/.exec(body)
+    if (field === null) return undefined
+    const [, key, inline] = field
+    if (indent === 0) {
+      if (key === 'targets' && inline === undefined) { sawTargets = true; current = null; continue }
+      return undefined
+    }
+    if (!sawTargets) return undefined
+    if (inline === undefined || inline === '') {
+      // A target name opens a fresh entry, whichever one was being filled before.
+      current = targets[key] = {}
+      continue
+    }
+    if (current === null) return undefined
+    const scalar = inline.replace(/^['"]|['"]$/g, '')
+    current[key] = scalar === 'true' ? true : scalar === 'false' ? false : scalar
+  }
+  return sawTargets && Object.keys(targets).length > 0 ? targets : undefined
+}
+
+/**
+ * The deploy manifest a task space declares, preferred root first - the same
+ * two shapes the state files are found by.
+ * @param taskPath - the task space directory.
+ * @returns the manifest with its directory and targets, undefined when none exists,
+ *   or a broken-marker when one exists but cannot be trusted.
+ */
+export async function readDeployManifest(taskPath) {
+  const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
+  const candidates = [join(taskPath, 'deploy')]
+  for (const entry of entries) {
+    if (entry.isDirectory()) candidates.push(join(taskPath, entry.name, 'deploy'))
+  }
+  for (const dir of candidates) {
+    const file = join(dir, MANIFEST_NAME)
+    if (!existsSync(file)) continue
+    const text = await readFile(file, 'utf8').catch(() => undefined)
+    if (text === undefined) return { broken: true, dir, targets: undefined }
+    const targets = parseManifestTargets(text)
+    if (targets === undefined) return { broken: true, dir, targets: undefined }
+    return { broken: false, dir, targets }
+  }
+  return undefined
+}
+
+/**
+ * Resolve the manifest entry a policy target deploys through.
+ *
+ * No manifest at all means the space predates manifests and deploys docker the
+ * L0 way - answered as `null`, which callers translate into the deploy-script
+ * path. A manifest that exists but lacks the policy's target is the refusal the
+ * policy promised: a target it does not offer is never silently swapped for
+ * another one.
+ * @param manifest - what {@link readDeployManifest} found.
+ * @param target - the delivery policy's deploy target.
+ * @param field - which command is being asked for (`up`, `smoke`, `destroy`).
+ * @returns the target's entry, `null` for the no-manifest docker default.
+ * @throws Error carrying E5009 or E5010 when the target is not offered or the
+ *   manifest cannot be trusted.
+ */
+function manifestEntryFor(manifest, target, field) {
+  if (target === 'none') {
+    throw coded('E5009', 'the delivery policy deploys nothing (target none), so there is no manifest entry to serve; this action should not have been reachable')
+  }
+  if (manifest === undefined) return target === 'docker' ? null : undefined
+  if (manifest.broken) throw coded('E5010', `the deploy manifest exists but cannot be parsed, so no target can be trusted; fix or remove ${MANIFEST_NAME}`)
+  const entry = manifest.targets[target]
+  if (entry === undefined || entry === null || typeof entry !== 'object') {
+    throw coded('E5009', `the manifest offers no '${target}' target (its targets: ${Object.keys(manifest.targets).join(', ') || 'none'}); the delivery policy cannot be served by swapping in another`)
+  }
+  if (field !== undefined && typeof entry[field] !== 'string' || field !== undefined && entry[field] === '') {
+    throw coded('E5009', `the manifest's '${target}' target names no '${field}' command`)
+  }
+  return entry
+}
+
+/** Run one manifest command, with the environment id the handshake passes by variable. */
+async function runManifestCommand(subprocess, command, dir, envId) {
+  return runProcess(subprocess, ['bash', '-c', `DSH_ENV_ID='${envId}' ${command}`], {
+    cwd: dir,
+    maxBytes: 2 * 1024 * 1024,
+  })
+}
+
 /**
  * Re-run the task's smoke through its own deploy script, after a re-deploy or
  * whenever the user wants a fresh verdict.
@@ -397,18 +526,26 @@ async function findDeployScript(taskPath) {
 export async function smokeEnvironment(subprocess, taskPath) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const found = await findDeployScript(taskPath)
-  if (found === undefined) {
-    throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to smoke: ${taskPath}`)
-  }
+  const policy = deliveryPolicyOf(recorded)
+  const manifest = await readDeployManifest(taskPath)
+  const entry = manifestEntryFor(manifest, policy.deploy.target, 'smoke')
   let out
-  try {
-    out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
-      cwd: found.dir,
-      maxBytes: 2 * 1024 * 1024,
-    })
-  } catch (error) {
-    throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
+  if (entry === null) {
+    // No manifest: docker deploys the L0 way, through the script's own subcommand.
+    const found = await findDeployScript(taskPath)
+    if (found === undefined) {
+      throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to smoke: ${taskPath}`)
+    }
+    try {
+      out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
+        cwd: found.dir,
+        maxBytes: 2 * 1024 * 1024,
+      })
+    } catch (error) {
+      throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
+    }
+  } else {
+    out = await runManifestCommand(subprocess, entry.smoke, manifest.dir, envId)
   }
   return {
     output: outputTail(out.stderr, out.stdout),
@@ -433,21 +570,32 @@ export async function smokeEnvironment(subprocess, taskPath) {
 export async function deployEnvironment(subprocess, taskPath) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const found = await findDeployScript(taskPath)
-  if (found === undefined) {
-    throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to deploy: ${taskPath}`)
-  }
+  const policy = deliveryPolicyOf(recorded)
+  const manifest = await readDeployManifest(taskPath)
+  const entry = manifestEntryFor(manifest, policy.deploy.target, 'up')
   let out
-  try {
-    out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
-      cwd: found.dir,
-      maxBytes: 2 * 1024 * 1024,
-    })
-  } catch (error) {
-    throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
-  }
-  if (!out.ok) {
-    throw coded('E5008', `the deploy script failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
+  if (entry === null) {
+    // No manifest: docker deploys the L0 way, through the script's own subcommand.
+    const found = await findDeployScript(taskPath)
+    if (found === undefined) {
+      throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to deploy: ${taskPath}`)
+    }
+    try {
+      out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
+        cwd: found.dir,
+        maxBytes: 2 * 1024 * 1024,
+      })
+    } catch (error) {
+      throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
+    }
+    if (!out.ok) {
+      throw coded('E5008', `the deploy script failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
+    }
+  } else {
+    out = await runManifestCommand(subprocess, entry.up, manifest.dir, envId)
+    if (!out.ok) {
+      throw coded('E5008', `the manifest's up command failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
+    }
   }
   return {
     output: outputTail(out.stdout),
