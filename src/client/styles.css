@@ -184,7 +184,7 @@
   /* The list's vertical rhythm. Rows are separated by their own padding, kept
      just wide enough that two rows still read as two rows: a branch line and the
      path under it belong together, so their gap is the smaller one. */
-  .dws-repo-header { display: flex; align-items: center; gap: var(--dws-row-gap); min-width: 0; padding: 7px 0; }
+  .dws-repo-header { display: flex; align-items: center; gap: var(--dws-row-gap); min-width: 0; padding: 3px 0; }
   /* Only the arrow folds the row. It used to be the whole row, which put the name,
      the branch, the count and the path inside a button - and text inside a button is
      not selectable in the browser's own stylesheet, so a path you could read was a
@@ -204,7 +204,7 @@
   .dws-chevron-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }
   .dws-chevron-placeholder { display: block; flex: none; width: var(--dws-chevron-size); }
   .dws-repo-heading { display: block; flex: 1; min-width: 0; }
-  .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }
   .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
   .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }
   .dws-branch-label > svg { flex: none; }
@@ -219,8 +219,8 @@
      parent's chevron, icon and gap, so a child's icon starts on the column the parent's
      name starts on and one folder visibly sits under another. The indent is the whole of
      the hierarchy — nothing is drawn and nothing is shaded to say so. */
-  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 9px; padding: 4px 12px 5px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap)); }
-  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 5px 0; }
+  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 5px; padding: 1px 12px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap)); }
+  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 3px 0; }
   .dws-worktree + .dws-worktree { border-top: 1px solid var(--wt-line); }
   /* A child's folder is smaller than its parent's, so it sits inside the indent as a
      member of that row rather than competing with the header it belongs to. */
@@ -734,7 +734,7 @@
     .dws-summary { font-size: 11px; }
     .dws-repo-title { gap: 4px 7px; }
     .dws-branch-label { max-width: 135px; overflow-wrap: anywhere; }
-    .dws-worktree-list { padding: 4px 10px 5px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon)); border-radius: 8px; }
+    .dws-worktree-list { padding: 1px 10px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon)); border-radius: 8px; }
     .dws-worktree { flex-wrap: wrap; gap: 6px; }
     .dws-worktree-actions { margin-left: auto; }
     /* The dialog keeps its navigation, but there is no room for the panel's 208px rail

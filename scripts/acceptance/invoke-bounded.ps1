@@ -4,8 +4,13 @@ param(
   [Parameter(Mandatory)][string]$OutFile,
   [int]$TimeoutSec = 120,
   # This helper deletes one stale output file before writing. That deletion is
-  # confined to one directory, and to .txt files inside it.
-  [string]$AllowedRoot = (Join-Path $env:TEMP 'dsh-acceptance\run\logs')
+  # confined to one directory, and to .txt files inside it. Same derivation as
+  # the runners so a direct call lands in this project's own log area. The
+  # runners always pass -AllowedRoot explicitly; this default exists for the
+  # direct calls, and keeping it on the same rule is what stops it drifting.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$AllowedRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'run\logs')
 )
 
 # ASCII-only on purpose: Windows PowerShell 5.1 reads a BOM-less .ps1 as the system

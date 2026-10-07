@@ -1,13 +1,21 @@
 param(
-  [string]$HostsRoot = (Join-Path $env:TEMP 'dsh-acceptance\hosts'),
-  [string]$RunRoot   = (Join-Path $env:TEMP 'dsh-acceptance\run'),
+  # Same shape as run-one.ps1: one acceptance root for every plugin repository,
+  # hosts shared by all of them, per-project state under <root>\<repo name>.
+  # See the comment in run-one.ps1 for why these defaults are not $env:TEMP.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$HostsRoot = (Join-Path $AcceptanceRoot 'hosts'),
+  # The matrix area: this unattended run's homes, logs and report. Distinct from
+  # this project's "manual" area, which holds the hand-driven instance.
+  [string]$MatrixRoot = (Join-Path (Join-Path $AcceptanceRoot $ProjectName) 'matrix'),
   [string]$Tarball,
   # Fixed ports are handed out from here, newest version first. Never 3080: that is
   # the host's own default and it collides with a running app.
   [int]$PortBase = 34800,
-  # Where to write the run report. Defaults under the run root, which is scratch:
-  # a report that lands in the repository on every run turns the diff into noise.
-  # Point it at docs\ when a release is being recorded, and that one gets committed.
+  # Where to write the matrix report. Defaults under the matrix root, which is
+  # scratch: a report that lands in the repository on every run turns the diff
+  # into noise. Point it at docs\ when a release is being recorded, and that one
+  # gets committed.
   [string]$ReportPath,
   # Also emit <name>.json next to the markdown. The markdown is for a human reading
   # a release note; the json is for a gate that has to decide without reading prose.
@@ -114,9 +122,9 @@ foreach ($v in $ordered) {
   Write-Host ('################  ' + $v + '  port ' + $port + '  ################')
   $sw = [Diagnostics.Stopwatch]::StartNew()
   if ($Tarball) {
-    $out = & $runner -v $v -HostsRoot $HostsRoot -RunRoot $RunRoot -Tarball $Tarball -Port $port
+    $out = & $runner -v $v -HostsRoot $HostsRoot -MatrixRoot $MatrixRoot -Tarball $Tarball -Port $port
   } else {
-    $out = & $runner -v $v -HostsRoot $HostsRoot -RunRoot $RunRoot -Port $port
+    $out = & $runner -v $v -HostsRoot $HostsRoot -MatrixRoot $MatrixRoot -Port $port
   }
   $sw.Stop()
   $out | ForEach-Object { Write-Host $_ }
@@ -130,7 +138,7 @@ foreach ($v in $ordered) {
   # absent, and one that failed part-way leaves it short of the final line.
   $ok = $false
   $stage = 'never booted'
-  $verdictFile = Join-Path (Join-Path ([System.IO.Path]::GetFullPath($RunRoot)) 'logs') ('log-' + $v + '\summary.txt')
+  $verdictFile = Join-Path (Join-Path ([System.IO.Path]::GetFullPath($MatrixRoot)) 'logs') ('log-' + $v + '\summary.txt')
   if (Test-Path -LiteralPath $verdictFile) {
     $ok = @(Select-String -LiteralPath $verdictFile -Pattern 'STAGE: all six steps done').Count -gt 0
     # "completed=false" on its own says a version failed but not where, and the six
@@ -158,8 +166,8 @@ Write-Host '################  MATRIX SUMMARY  ################'
 foreach ($s in $summary) {
   Write-Host ('  {0,-12} port {1}  {2,-10} {3,5}s  {4}' -f $s.version, $s.port, $s.completed, $s.seconds, $s.stage)
 }
-Write-Host ('logs under        ' + (Join-Path ([System.IO.Path]::GetFullPath($RunRoot)) 'logs'))
-Write-Host ('profiles left in  ' + (Join-Path ([System.IO.Path]::GetFullPath($RunRoot)) 'homes'))
+Write-Host ('logs under        ' + (Join-Path ([System.IO.Path]::GetFullPath($MatrixRoot)) 'logs'))
+Write-Host ('profiles left in  ' + (Join-Path ([System.IO.Path]::GetFullPath($MatrixRoot)) 'homes'))
 
 # ---------------------------------------------------------------------------
 # Report
@@ -190,7 +198,7 @@ try {
 $when = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
 
 if (-not $ReportPath) {
-  $ReportPath = Join-Path (Join-Path ([System.IO.Path]::GetFullPath($RunRoot)) 'logs') 'matrix-report.md'
+  $ReportPath = Join-Path (Join-Path ([System.IO.Path]::GetFullPath($MatrixRoot)) 'logs') 'matrix-report.md'
 }
 $reportDir = Split-Path -Parent ([System.IO.Path]::GetFullPath($ReportPath))
 if (-not (Test-Path -LiteralPath $reportDir)) {

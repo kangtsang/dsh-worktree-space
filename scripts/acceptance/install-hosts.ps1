@@ -1,6 +1,20 @@
 param(
-  [string]$HostsRoot = (Join-Path $env:TEMP 'dsh-acceptance\hosts'),
-  [string]$RunRoot   = (Join-Path $env:TEMP 'dsh-acceptance\run')
+  # One acceptance root for every plugin repository on this machine. The hosts
+  # live directly under it and are SHARED by every project and by both entry
+  # points (the matrix and the hand-driven instance): they are 1.8 GB of DSH
+  # builds, and installing a second copy per project is what produced two
+  # identical hosts roots on this machine.
+  #
+  # $ProjectName is the repository directory's own name, which is also the name
+  # the plugin uses for the project layer inside the task container. Deriving it
+  # rather than hardcoding it is what lets the same script serve any plugin repo.
+  #
+  # These defaults used to point at $env:TEMP, while start-acceptance.ps1 pointed
+  # at D:\dsh-acceptance. Two defaults for one thing is how a second full DSH
+  # install appears without anyone deciding to make one.
+  [string]$AcceptanceRoot = 'D:\dsh-acceptance',
+  [string]$ProjectName = (Split-Path (Join-Path $PSScriptRoot '..\..') -Leaf),
+  [string]$HostsRoot = (Join-Path $AcceptanceRoot 'hosts')
 )
 
 Set-StrictMode -Version Latest

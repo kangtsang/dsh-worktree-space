@@ -34,7 +34,7 @@
 全局规则要求任何删除路径都经过机器校验；本仓库的落地要求是：
 
 - 任何递归删除都必须先通过 `Assert-Under` → `Assert-DirectChild` → `Assert-Deletable`，另加 reparse point 检查
-- 删除目标只能是 `<RunRoot>\homes\home-<版本>` 和 `<RunRoot>\logs\log-<版本>`，且必须是直接子目录、名字精确匹配
+- 删除目标只能是 `<MatrixRoot>\homes\home-<版本>` 和 `<MatrixRoot>\logs\log-<版本>`，且必须是直接子目录、名字精确匹配
 - 全脚本禁止通配符递归删除
 - 改完守卫后必须跑 `guard-tests.ps1`，它打印 `GUARD-OK` / `GUARD-FAIL` 且自身不删除任何东西
 
@@ -66,7 +66,7 @@
 用 `scripts/acceptance/start-acceptance.ps1` 起实例之后，**必须把访问地址贴出来**，
 否则这个实例等于没起——它只是个后台进程，我看不见。
 
-地址直接读 `<CaseRoot>\case.env` 的 `URL=`，不要等后台任务的输出回传：那个回传会被打断，而 `case.env`
+地址直接读 `<ManualRoot>\case.env` 的 `URL=`，不要等后台任务的输出回传：那个回传会被打断，而 `case.env`
 是脚本自己写的、可重复读的落盘结果。贴地址时一并给出这轮要验的点，别让人自己猜。
 
 **启动验收实例一律派子 agent 做，不要在主会话里跑。**
