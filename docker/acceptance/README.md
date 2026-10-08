@@ -47,6 +47,31 @@ docker exec dsh-wts-acceptance cat /dsh/acceptance.env
 | 任务空间 | `/workspace/worktree-space/source/<任务>/`（项目层 = 源根目录名 = `source`） |
 | 工作区登记 | `/dsh/storages/workspace.json` |
 
+## 下次再验收 / 换新构建
+
+`docker compose stop` 只关容器，环境留着：两个具名卷（profile、插件、源根、任务空间）和镜像都还在。
+
+```bash
+cd docker/acceptance
+docker compose start                 # 几秒
+docker logs dsh-wts-acceptance       # 每次启动 token 都会变，地址要重新读一次 URL=
+```
+
+**换一份新的插件构建时，必须连卷一起清**：
+
+```bash
+docker compose down -v && docker compose up -d --build
+```
+
+理由值得写下来，因为它和本仓库踩过多次的那个坑是同一个：profile 里那条依赖的 specifier 是
+`file:/tmp/plugin.tgz`——**路径没变**，pnpm 就按 lock 里记的那份算，换了内容的同名 tarball 不会让它
+失效（本机实测：`pnpm install`、`pnpm add`、`pnpm install --force`、`remove`+`add` 四种做法全都留着
+旧内容，只有整体重新解析才换掉）。所以 `up --build` 换了镜像、卷里装着的可能仍是上一份包——盘上是新的、
+跑的是旧的。entrypoint 也只在 profile 里**没有**这个包时才 `dsh plugin add`，它不会替你换版本。
+
+判断装进去的是不是新构建，别只看时间戳：在容器里搜一个本次改动独有的标识串（`lib/index.js` 是文本），
+客户端 bundle 被压缩过就比 sha256，并带一个阴性对照。
+
 ## 用例
 
 | # | 验什么 | 怎么点 | 期望 |
