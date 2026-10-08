@@ -4,7 +4,7 @@
  * Finishing a task: what merging would do, which files are the user's own, and the merge, removal, and filing that follow.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, open, readdir, rmdir, rm, symlink } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, open, readdir, rename, rmdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
@@ -633,6 +633,42 @@ async function worktreeRegistered(subprocess, mainRepo, worktreePath) {
   return parseWorktrees(porcelain).some((row) => samePathLocation(row.path, worktreePath))
 }
 
+/** What a directory is renamed to while it is being asked whether it can be removed. */
+const REMOVAL_PROBE_SUFFIX = '.dsh-removal-probe'
+
+/**
+ * Whether this directory can be removed right now, asked without removing anything.
+ *
+ * The question is answered by renaming the directory and renaming it straight back,
+ * which is the cheapest operation that Windows refuses for the same reason it refuses
+ * a delete: a directory that is some process's working directory, or that holds a file
+ * another process opened without sharing delete, cannot be renamed either. Measured
+ * against a file held open: the rename fails with `EPERM` and so does the delete; once
+ * the handle is released both succeed. On Linux an open file blocks neither, so a
+ * rename there means exactly what it says - the delete would work too.
+ *
+ * This is a probe and nothing else: it writes no file, deletes nothing, and puts the
+ * name back before it answers. The one state it can leave behind is a directory still
+ * under the probe name, which it reports instead of hiding - that is a directory the
+ * caller has to rename back by hand, and saying so is the only honest answer.
+ * @param directory - the directory that would be removed.
+ * @returns an empty string when it can be removed, else why it cannot.
+ */
+async function removableNow(directory) {
+  const probe = `${directory}${REMOVAL_PROBE_SUFFIX}`
+  try {
+    await rename(directory, probe)
+  } catch (error) {
+    return `${error?.code ?? 'unremovable'}: ${error?.message ?? error}`
+  }
+  try {
+    await rename(probe, directory)
+  } catch (error) {
+    return `the check renamed it and could not put it back: it is now at ${probe} (${error?.message ?? error})`
+  }
+  return ''
+}
+
 
 async function countDocuments(directory, { maxEntries = 200 } = {}) {
   let seen = 0
@@ -804,6 +840,28 @@ export async function finishTask(subprocess, options) {
     if (recordedNames.has(entry.name)) remains.push(worktreePath)
   }
   if (worktrees.length === 0 && remains.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
+
+  // Asked before anything is merged, removed or filed, because the removal is what
+  // cannot be undone: a worktree some other process is holding cannot be deleted, and
+  // deleting it happens after the merge. Left to fail there it costs a half-finished
+  // task, and on the git measured here (`2.28.0.windows.1`) it also leaves a checkout
+  // git has already unregistered and can never delete. So the whole finish is refused
+  // while anything is in the way, and refusing costs nothing: nothing has happened yet,
+  // which is what makes "close it and finish again" true rather than hopeful.
+  const held = []
+  for (const worktreePath of worktrees) {
+    const blocked = await removableNow(worktreePath)
+    if (blocked !== '') held.push({ path: worktreePath, blocked })
+  }
+  if (held.length > 0) {
+    throw coded(
+      'E5011',
+      `${held.length === 1 ? 'one worktree is' : `${held.length} worktrees are`} held by something outside this process and cannot be `
+      + `removed, so nothing has been merged, removed or filed yet:\n`
+      + held.map((entry) => `  ${entry.path}\n    ${entry.blocked}`).join('\n') + '\n'
+      + '  A dev server, a browser or an editor started in the task space is the usual one; close it, then finish the task again.',
+    )
+  }
 
   const repositories = []
   let failed = false

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import {
@@ -1584,6 +1584,42 @@ describe("finishTask", () => {
       expect(result.failed).toBe(false)
       expect(result.containerRemoved).toBe(true)
     } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses before touching anything when a worktree cannot be removed", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock(fixture.handlers)
+    // A handle held on a file inside the worktree, which is what a dev server, a browser
+    // or an editor amounts to. Node does not share delete on its own opens, so this is
+    // the same blocker those are - measured: the rename the check makes fails with EPERM,
+    // exactly as the delete does.
+    const handle = openSync(join(fixture.taskPath, "alpha", ".git"), "r")
+    try {
+      if (process.platform === "win32") {
+        // Asked and answered before the merge, so the merge that would have run first
+        // never ran and nothing was removed.
+        await expect(fixture.finish(subprocess, { task: "login", merge: true, deleteBranch: true }))
+          .rejects.toMatchObject({ code: "E5011" })
+        await expect(fixture.finish(subprocess, { task: "login", merge: true, deleteBranch: true }))
+          .rejects.toThrow(/cannot be\s+removed, so nothing has been merged, removed or filed/)
+        expect(keys()).not.toContain("merge --no-ff --no-edit main")
+        expect(keys().filter((key) => key.startsWith("worktree remove"))).toEqual([])
+        // And it is still where it was: the check renames the directory and puts the name
+        // back, so a refusal leaves the task space exactly as it found it.
+        expect(existsSync(join(fixture.taskPath, "alpha"))).toBe(true)
+        expect(existsSync(join(fixture.taskPath, "alpha.dsh-removal-probe"))).toBe(false)
+      } else {
+        // On POSIX an open handle blocks neither a rename nor a delete, so there is
+        // nothing to warn about and the finish does what it always did. Asserted rather
+        // than skipped: the branch is the answer, not an absence of one.
+        const result = await fixture.finish(subprocess, { task: "login", merge: true, deleteBranch: true })
+        expect(result.failed).toBe(false)
+        expect(result.repositories.map((entry) => entry.removed)).toEqual([true, true])
+      }
+    } finally {
+      closeSync(handle)
       await fixture.cleanup()
     }
   })

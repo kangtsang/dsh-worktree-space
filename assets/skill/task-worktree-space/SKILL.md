@@ -324,6 +324,12 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
 - `create` reports a **warning** rather than a failure when the task space was made
   but its Workspace could not be registered. The task space is real and usable; what
   is missing is only the entry in the workspace list, and the warning says so.
+- `done` asks first whether its worktrees can actually be removed, and refuses with
+  **E5011** while any of them is held by something outside the process — a dev server,
+  a browser, an editor started in the task space. Nothing has been merged, removed or
+  filed at that point: close it, then finish again. The answer names each directory and
+  what blocked it, and the check only renames a directory and puts the name back, so a
+  refusal leaves the task space exactly as it was.
 - A stray that holds a **link** cannot be filed on a machine that will not create
   symbolic links — an ordinary Windows installation, without Developer Mode: `done`
   keeps it and names the entries in the way. A link is a name for somewhere else, so

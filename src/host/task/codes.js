@@ -73,6 +73,7 @@ export const ERROR_CODES = {
   E5008: 'deploy.js - the deploy script is missing, or it failed while rebuilding the environment',
   E5009: 'deploy.js - the delivery policy names a deploy target the manifest does not offer',
   E5010: 'deploy.js - the deploy manifest exists but cannot be parsed, so no target can be trusted',
+  E5011: 'archive.js - a worktree is held by something outside this process, so removing it would fail',
 
   // --- E6xxx scanning and discovery ---------------------------------------
   E6001: 'discover.js, add.js - a candidate directory is not a source repository',

@@ -41,6 +41,22 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   a warning, never as a failure of a finish that has already taken the worktrees
   down.
 
+### Added
+
+- **A finish now asks whether its worktrees can actually be removed before it does
+  anything, and refuses with E5011 when one of them is held.** The question is answered
+  by renaming a directory and renaming it straight back — the cheapest operation Windows
+  refuses for the *same* reason it refuses a delete: a directory that is some process's
+  working directory, or that holds a file another process opened without sharing delete,
+  cannot be renamed either. Measured here: with a handle held on a file inside, the
+  rename fails with `EPERM` and the delete fails with "being used by another process";
+  release the handle and both succeed. On POSIX an open file blocks neither, so the
+  rename there means what it says. The check writes nothing and deletes nothing, and puts
+  the name back before answering; if it ever could not, it says where the directory now
+  is rather than pretending it is where it was. It runs **before any merge, removal or
+  filing**, so refusing costs nothing — nothing has happened yet, which is what makes
+  "close it and finish again" true rather than hopeful.
+
 ### Fixed (finishing)
 
 - **One link no longer stops an archive, and a half-copied archive is no longer left
