@@ -634,7 +634,11 @@ export function registerTaskTool(ctx, options = {}) {
         value.container = result.containerRemoved ? '' : result.path
         value.tasksRoot = tasksRoot
         value.failed = result.failed
-        value.warnings = result.warnings
+        // The finish reports each warning with the values a screen needs to say it in
+        // the reader's language; a model reads the sentence, so that is what it is
+        // given. The panel gets the whole object through the endpoint, which is why
+        // the sentence stays exactly as the Host wrote it.
+        value.warnings = result.warnings.map((entry) => entry.message)
         // The registration follows the directory. Dropped only when the finish
         // really removed the task space, and kept while the container is still
         // there - the panel's own rule, for the panel's own reason: a registration

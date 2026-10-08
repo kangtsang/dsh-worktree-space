@@ -18,7 +18,7 @@
 import { existsSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { coded } from './codes.js'
+import { coded, warned } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
 import { readTaskMetadata } from './shared.js'
 
@@ -82,7 +82,7 @@ async function tryDocker(subprocess, args) {
  */
 async function requireRecorded(taskPath) {
   const recorded = await readTaskMetadata(taskPath)
-  if (recorded === undefined) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (recorded === undefined) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   return recorded
 }
 
@@ -236,26 +236,45 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
   if (policy.deploy.target === 'none') return undefined
   const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const found = await readDeliveryState(taskPath)
+  // What is missing is named by key rather than by phrase, so a screen can say it in the
+  // reader's language: the phrase below is for this sentence and the log, and nothing
+  // else can rebuild it from a translation.
   const missing = []
   if (found === undefined) {
-    if (bypass) return `the user acknowledged finishing without any recorded ${policy.deploy.target} deployment`
+    if (bypass) {
+      return warned(
+        'delivery-gate-bypassed',
+        `the user acknowledged finishing without any recorded ${policy.deploy.target} deployment`,
+        { target: policy.deploy.target },
+      )
+    }
     throw coded(
       'E5005',
       `the delivery policy requires a ${policy.deploy.target} deployment before merging, and no deployment state was recorded`
         + `${envId === '' ? '' : ` (environment ${envId})`}. Deploy the task space and run its smoke first.`,
+      { target: policy.deploy.target, envId },
     )
   }
   const smoke = found.state?.lastSmoke
-  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('a passing smoke')
+  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('smoke')
   if ((policy.verification === 'agent-then-human' || policy.verification === 'human') && found.state?.humanAck?.at === undefined) {
-    missing.push('the human acceptance ack')
+    missing.push('human-ack')
   }
   if (missing.length === 0) return undefined
-  if (bypass) return `the user acknowledged finishing without ${missing.join(' and ')}`
-  if (missing.length === 1 && missing[0] === 'a passing smoke') {
-    throw coded('E5006', 'the last deployment smoke did not pass, or never ran; run it again and only then merge')
+  const named = missing.map((key) => MISSING_LABELS[key]).join(' and ')
+  if (bypass) {
+    return warned('delivery-gate-bypassed', `the user acknowledged finishing without ${named}`, { missing })
   }
-  throw coded('E5007', `the delivery policy waits for ${missing.join(' and ')} before merging; confirm the acceptance in the Worktree Space panel, or finish anyway from there`)
+  if (missing.length === 1 && missing[0] === 'smoke') {
+    throw coded('E5006', 'the last deployment smoke did not pass, or never ran; run it again and only then merge', { missing })
+  }
+  throw coded('E5007', `the delivery policy waits for ${named} before merging; confirm the acceptance in the Worktree Space panel, or finish anyway from there`, { missing })
+}
+
+/** How this module's own sentences name what a gate is waiting for. */
+const MISSING_LABELS = {
+  smoke: 'a passing smoke',
+  'human-ack': 'the human acceptance ack',
 }
 
 /**
@@ -293,7 +312,7 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
     if (recordedForTarget !== undefined && typeof recordedForTarget.deploymentEnvId === 'string') id = recordedForTarget.deploymentEnvId
   }
   if (id === '') {
-    return { removed: false, containers: 0, warning: 'no deployment environment is recorded for this task space, so there is nothing named to remove' }
+    return { removed: false, containers: 0, warning: warned('no-deployment-recorded', 'no deployment environment is recorded for this task space, so there is nothing named to remove') }
   }
   // A non-docker target has no containers to find by label: its teardown is
   // whatever the manifest's destroy command says, run with the same env id.
@@ -305,7 +324,7 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
     const manifest = await readDeployManifest(taskPath)
     const entry = manifestEntryFor(manifest, policyTarget, 'destroy')
     const out = await runManifestCommand(subprocess, entry.destroy, manifest.dir, id)
-    return { removed: out.ok, containers: 0, ...(out.ok ? {} : { warning: outputTail(out.stderr, out.stdout) }) }
+    return { removed: out.ok, containers: 0, ...(out.ok ? {} : { warning: warned('deploy-destroy-failed', outputTail(out.stderr, out.stdout), { output: outputTail(out.stderr, out.stdout) }) }) }
   }
   const ids = await containerIds(subprocess, id)
   if (ids.length === 0) {
@@ -343,7 +362,7 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
     if (removedForce.ok) {
       removed = true
     } else {
-      warnings.push(`could not remove ${left.length} container${left.length === 1 ? '' : 's'} of environment ${id}: ${removedForce.stderr.trim() !== '' ? removedForce.stderr.trim() : 'docker failed'}`)
+      warnings.push(warned('deploy-containers-left', `could not remove ${left.length} container${left.length === 1 ? '' : 's'} of environment ${id}: ${removedForce.stderr.trim() !== '' ? removedForce.stderr.trim() : 'docker failed'}`, { count: left.length, envId: id, reason: removedForce.stderr.trim() }))
     }
   }
   await preserveStates(taskPath)

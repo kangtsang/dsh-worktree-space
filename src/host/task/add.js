@@ -214,17 +214,17 @@ export async function addTaskRepositories(subprocess, options) {
   }
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
-  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot: tasksRoot.trim() })
 
   const worktrees = await listTaskWorktrees(subprocess, taskPath)
   if (worktrees.length === 0) {
-    throw coded('E2004', `no git worktrees found in ${taskPath}, so there is no branch this task can be extended on`)
+    throw coded('E2004', `no git worktrees found in ${taskPath}, so there is no branch this task can be extended on`, { path: taskPath, reason: 'no-worktrees-to-extend' })
   }
   const metadata = await readTaskMetadata(taskPath)
   const branch = await branchOf(subprocess, metadata, worktrees)
   if (branch === undefined) {
-    throw coded('E2004', `the worktrees in ${taskPath} do not agree on a branch, so this task cannot be extended; finish it or name a new task`)
+    throw coded('E2004', `the worktrees in ${taskPath} do not agree on a branch, so this task cannot be extended; finish it or name a new task`, { path: taskPath, reason: 'branches-disagree' })
   }
   const recorded = await hydrated(subprocess, taskPath, { task, project: projectName, tasksRoot: tasksRoot.trim() }, metadata, worktrees)
 

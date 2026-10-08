@@ -69,6 +69,10 @@ export function createWorktreeApi(connection: ConnectionService) {
       const code = classifyError(result?.error?.code, String(sent)) ?? result?.error?.code
       const error = new Error(String(sent))
       ;(error as Error & { code?: string }).code = code
+      // The values the Host built its sentence from travel with the failure, so a screen
+      // can say the same thing in the reader's language: the sentence above is what the
+      // Host logged, and it is not reworded here.
+      ;(error as Error & { details?: unknown }).details = result?.error?.details
       throw error
     }
     return result.value as T

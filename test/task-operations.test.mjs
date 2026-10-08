@@ -18,6 +18,17 @@ import {
 import { readAudit } from "../src/host/task/audit-log.js"
 
 /**
+ * What a finish said, as one string.
+ *
+ * A warning is reported as the sentence the Host wrote plus the values a screen needs to
+ * say it in another language; an assertion about the wording wants the sentence, and this
+ * is where it says so.
+ * @param result - a finish result.
+ * @returns the warnings' sentences, joined.
+ */
+const warningText = (result) => result.warnings.map((entry) => entry.message).join(" ")
+
+/**
  * Whether this process may create a symbolic link.
  *
  * The one thing the archive's link handling turns on, and the reason that test branches
@@ -1759,8 +1770,8 @@ describe("finishTask documents", () => {
         // Refused before the copy rather than half-way through it: the warning names
         // the entry in the way, and the stray is left exactly as it stands - which is
         // what the user removes an entry from before finishing again.
-        expect(result.warnings.join(" ")).toMatch(/could not archive 'docs'/)
-        expect(result.warnings.join(" ")).toMatch(/holds a link \(logs\)/)
+        expect(warningText(result)).toMatch(/could not archive 'docs'/)
+        expect(warningText(result)).toMatch(/holds a link \(logs\)/)
         expect(existsSync(join(documents, "docs"))).toBe(false)
         expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "logs"))).toBe(true)
         expect(result.strays).toContain("docs")
@@ -1830,7 +1841,7 @@ describe("finishTask documents", () => {
       })
 
       expect(result.archivedStrays).toEqual(["docs"])
-      expect(result.warnings.join(" ")).toMatch(/could not archive 'notes\.md'/)
+      expect(warningText(result)).toMatch(/could not archive 'notes\.md'/)
       expect(existsSync(join(fixtureUnderTest.taskPath, "notes.md"))).toBe(true)
       expect(result.strays).toEqual(["notes.md"])
       // The copy that did work is filed, and the build output is gone: the caller

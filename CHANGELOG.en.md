@@ -41,8 +41,28 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   a warning, never as a failure of a finish that has already taken the worktrees
   down.
 
-### Added
+### Added (interface language)
 
+- **The Host's English sentence now travels with the values it was built from, and the
+  interface says the same thing in its own language.** The Host still writes every
+  failure and every warning once, in English — that is the copy the audit log keeps, and
+  it is kept verbatim — and sends the paths, branch names, counts and missing items beside
+  it as `details` / `values` (`coded(code, message, details)`, and the new
+  `warned(code, message, values)`). The client says the same thing itself for the **codes
+  it knows**, from those values; a code it does not know is shown exactly as the Host
+  wrote it, so nothing is ever lost for want of a translation.
+  **The warnings channel changed with it:** a warning used to be a string rendered
+  verbatim, and is now `{ code, message, values }` like the rest, with the panel building
+  the sentence from the code. The tool — which is what a model reads — still takes
+  `message`, so its output shape is unchanged.
+  This release covers the lifecycle family (E2001/E2002 through the mapping that already
+  existed, E2003, E2004's three situations, E2005), the delivery gate
+  (E5005/E5006/E5007 — what a gate is waiting for travels by key, `smoke` / `human-ack`,
+  because a phrase translated word by word is not a phrase), the removal pre-flight
+  (E5011), and **all eleven warnings** (a branch not deleted, a leftover refused, holding
+  links, or failing to file, deployment cleanup, and the rest). The remaining codes still
+  show the Host's English, and each one is purely additive to finish: the table is
+  `src/client/lib/host-messages.ts`, and the Host side needs its `details`.
 - **A finish now asks whether its worktrees can actually be removed before it does
   anything, and refuses with E5011 when one of them is held.** The question is answered
   by renaming a directory and renaming it straight back — the cheapest operation Windows

@@ -210,4 +210,32 @@ describe("the code table and the public filter are one list", () => {
     const unregistered = [...raised.keys()].filter((code) => !Object.hasOwn(ERROR_CODES, code)).sort()
     expect(unregistered, `raised but not in ERROR_CODES: ${unregistered.join(", ")}`).toEqual([])
   })
+
+  it("registers every warning the host raises, and every sentence it can be said with", async () => {
+    // A warning has no publicCode to flatten it, so an unregistered one is not refused -
+    // it is *shown in English* to a reader whose interface is in another language, which
+    // nothing else would notice. So the codes raised are checked against the table, and
+    // each one is checked against the client's own sentences.
+    const { WARNING_CODES } = await import("../src/host/task/codes.js")
+    const { readFile, readdir } = await import("node:fs/promises")
+    const { fileURLToPath } = await import("node:url")
+
+    const dir = fileURLToPath(new URL("../src/host/", import.meta.url))
+    const raised = new Set()
+    for (const rel of await readdir(dir, { recursive: true })) {
+      if (!rel.endsWith(".js")) continue
+      const source = await readFile(`${dir}${rel}`, "utf8")
+      for (const match of source.matchAll(/\bwarned\(\s*'([^']+)'/g)) raised.add(match[1])
+    }
+    expect(raised.size, "the walk found no warnings - it is looking in the wrong place").toBeGreaterThan(8)
+
+    const unregistered = [...raised].filter((code) => !Object.hasOwn(WARNING_CODES, code)).sort()
+    expect(unregistered, `raised but not in WARNING_CODES: ${unregistered.join(", ")}`).toEqual([])
+
+    // And the other direction: a registered warning with no sentence in the client is a
+    // warning nobody can read, which is the state this table exists to end.
+    const messages = await readFile(fileURLToPath(new URL("../src/client/lib/host-messages.ts", import.meta.url)), "utf8")
+    const missing = Object.keys(WARNING_CODES).filter((code) => !messages.includes(`case "${code}":`)).sort()
+    expect(missing, `in WARNING_CODES but with no sentence in host-messages.ts: ${missing.join(", ")}`).toEqual([])
+  })
 })

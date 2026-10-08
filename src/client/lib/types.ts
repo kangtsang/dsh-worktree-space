@@ -2,6 +2,7 @@ import type { WorkspaceView, IWorkspaces } from "@deepseek-ai/dsh-api-workspace-
 import type { UiWorkspace } from "@deepseek-ai/dsh-client-ui-workspace/client"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import type { ArchiveStrategy } from "./documents"
+import type { HostWarning } from "./host-messages"
 
 /** Workspace row projected by the Host Workspace Controller. */
 export type Workspace = WorkspaceView
@@ -320,7 +321,7 @@ export interface FinishTaskResult {
   removedStrays: string[]
   containerRemoved: boolean
   failed: boolean
-  warnings: string[]
+  warnings: HostWarning[]
 }
 
 /** Answer of `task.preference`: the settings a dialog defaults from. */
@@ -398,7 +399,7 @@ export interface DeploymentStatus {
 export interface DeployDestroyResult {
   removed: boolean
   containers: number
-  warning?: string
+  warning?: HostWarning
 }
 
 /** What re-running the smoke through the deploy script answered. A failed smoke is a result, not an error. */

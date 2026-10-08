@@ -6,10 +6,10 @@ import { format, t } from "../src/client/lib/i18n"
 /**
  * What a failure is said with, and who says it.
  *
- * The Host writes its own sentences and this plugin keeps them: the Host's copy is
- * what its log holds, and it is not this plugin's to translate. What this plugin
- * raises itself is said here instead, because the layers that raise it run below
- * every page and have no dictionary to word anything in.
+ * The Host writes each failure once, in English, because that copy is what its log
+ * holds and what anything showing it verbatim prints. This plugin says the same failure
+ * itself wherever it has a sentence for the code, from the values the Host sends beside
+ * it; everything else is left exactly as the Host wrote it.
  */
 describe("the sentence a failure is shown with", () => {
   it("says this plugin's own failures through the dictionary in force", () => {
@@ -35,5 +35,26 @@ describe("the sentence a failure is shown with", () => {
     expect(errorText(t, Object.assign(new Error("fatal: not a git repository"), { code: "E3004" }))).toBe("fatal: not a git repository")
     // And something thrown that is not an Error at all is still shown as itself.
     expect(errorText(t, "EPERM")).toBe("EPERM")
+  })
+
+  it("says a Host failure itself, from the values sent beside the code", () => {
+    // The one path where the Host's sentence is not what the reader sees: a code this
+    // plugin has words for, said from the values - never read out of the prose, which is
+    // the whole reason the values travel.
+    const held = Object.assign(new Error("one worktree is held by something outside this process"), {
+      code: "E5011",
+      details: { held: [{ path: "/w/a", reason: "EBUSY: resource busy or locked" }] },
+    })
+    expect(errorText(t, held)).toBe(format(t("hostE5011"), { count: "1", held: "  /w/a\n    EBUSY: resource busy or locked" }))
+    expect(errorText(t, held)).toContain("/w/a")
+
+    // The code is what it goes by, not the wording: the same failure sent in another
+    // language would still be said here.
+    const translated = Object.assign(new Error("ein Worktree wird festgehalten"), {
+      code: "E5011",
+      details: { held: [{ path: "/w/a", reason: "EBUSY" }] },
+    })
+    expect(errorText(t, translated)).toContain("/w/a")
+    expect(errorText(t, translated)).not.toContain("festgehalten")
   })
 })

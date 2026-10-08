@@ -3,6 +3,7 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { errorText } from "../lib/error-text"
+import { hostWarningText } from "../lib/host-messages"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
@@ -853,7 +854,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             <p>{result.containerRemoved ? t("finishContainerRemoved") : format(t("finishContainerKept"), { path: slashPath(result.path) })}</p>
             {result.archivedStrays.length ? <p>{format(t("finishArchived"), { path: slashPath(documentsDirectory), names: result.archivedStrays.join(", ") })}</p> : null}
             {result.strays.length ? <p>{format(t("finishStrays"), { names: result.strays.join(", ") })}</p> : null}
-            {result.warnings.map((warning) => <p className="dws-finish-error" key={warning}>{warning}</p>)}
+            {result.warnings.map((warning, index) => (
+              <p className="dws-finish-error" key={`${warning.code ?? "warning"}-${index}`}>{hostWarningText(t, warning)}</p>
+            ))}
             {workspace !== undefined
               ? <p className={registrationError === "" ? undefined : "dws-finish-error"}>
                 {registrationError !== "" ? format(t("archiveWorkspaceKept"), { error: registrationError }) : result.containerRemoved ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptIntact")}

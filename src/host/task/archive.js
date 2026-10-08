@@ -8,7 +8,7 @@ import { cp, mkdir, mkdtemp, open, readdir, rename, rmdir, rm, symlink } from 'n
 import { tmpdir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
-import { coded } from './codes.js'
+import { coded, warned } from './codes.js'
 import { assertDeliveryGate, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
@@ -427,7 +427,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
-  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -454,7 +454,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       kind,
     })
   }
-  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
 
   const repositories = []
   let mergeTarget
@@ -754,7 +754,7 @@ export async function finishTask(subprocess, options) {
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
 
-  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot })
 
   // The record is what makes this directory one of ours, and it is asked before
@@ -775,6 +775,7 @@ export async function finishTask(subprocess, options) {
       `${taskPath} holds no ${TASK_METADATA}, so this plugin has no record of creating it and nothing in it will be deleted.\n`
       + `  What is missing: ${join(taskPath, TASK_METADATA)}\n`
       + '  If this really is a task space this plugin made and its record was removed by hand, restore the file from a backup before finishing it.',
+      { path: taskPath, missing: join(taskPath, TASK_METADATA) },
     )
   }
 
@@ -787,7 +788,7 @@ export async function finishTask(subprocess, options) {
   const recorded = await readTaskMetadata(taskPath)
   const taskBranch = typeof recorded?.branch === 'string' ? recorded.branch : ''
   if (taskBranch === '') {
-    warnings.push(`no task branch is recorded in ${taskPath}; no branch was deleted in any repository`)
+    warnings.push(warned('no-task-branch', `no task branch is recorded in ${taskPath}; no branch was deleted in any repository`, { path: taskPath }))
   }
 
   // The strays policy fills the gaps a caller left: a finish that named no
@@ -839,7 +840,7 @@ export async function finishTask(subprocess, options) {
     if (await isLinkedWorktree(worktreePath)) { worktrees.push(worktreePath); continue }
     if (recordedNames.has(entry.name)) remains.push(worktreePath)
   }
-  if (worktrees.length === 0 && remains.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0 && remains.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
 
   // Asked before anything is merged, removed or filed, because the removal is what
   // cannot be undone: a worktree some other process is holding cannot be deleted, and
@@ -850,16 +851,17 @@ export async function finishTask(subprocess, options) {
   // which is what makes "close it and finish again" true rather than hopeful.
   const held = []
   for (const worktreePath of worktrees) {
-    const blocked = await removableNow(worktreePath)
-    if (blocked !== '') held.push({ path: worktreePath, blocked })
+    const reason = await removableNow(worktreePath)
+    if (reason !== '') held.push({ path: worktreePath, reason })
   }
   if (held.length > 0) {
     throw coded(
       'E5011',
       `${held.length === 1 ? 'one worktree is' : `${held.length} worktrees are`} held by something outside this process and cannot be `
       + `removed, so nothing has been merged, removed or filed yet:\n`
-      + held.map((entry) => `  ${entry.path}\n    ${entry.blocked}`).join('\n') + '\n'
+      + held.map((entry) => `  ${entry.path}\n    ${entry.reason}`).join('\n') + '\n'
       + '  A dev server, a browser or an editor started in the task space is the usual one; close it, then finish the task again.',
+      { held },
     )
   }
 
@@ -1077,11 +1079,13 @@ export async function finishTask(subprocess, options) {
       // recorded before it goes; anything else is named and left alone.
       if (branch !== taskBranch) {
         outcome.branchDeleted = false
-        warnings.push(
+        warnings.push(warned(
+          'branch-left-alone',
           branch === ''
             ? `'${name}' has no branch checked out, so no branch was deleted in '${mainRepo}'`
             : `'${name}' is on '${branch}', not on the task branch '${taskBranch}', so that branch was left alone in '${mainRepo}'`,
-        )
+          { name, mainRepo, branch, taskBranch },
+        ))
       } else {
         const deleted = await gitSucceeded(
           subprocess,
@@ -1093,7 +1097,7 @@ export async function finishTask(subprocess, options) {
           force ? ['branch', '-D', '--', branch] : ['branch', '-d', '--', branch],
         )
         outcome.branchDeleted = deleted
-        if (!deleted) warnings.push(`branch '${branch}' was not deleted in '${name}'`)
+        if (!deleted) warnings.push(warned('branch-not-deleted', `branch '${branch}' was not deleted in '${name}'`, { branch, name }))
       }
     }
     repositories.push(outcome)
@@ -1184,7 +1188,10 @@ export async function finishTask(subprocess, options) {
       const refused = refuseDelete(tasksRoot, join(taskPath, entry.name), `the leftover '${entry.name}'`)
       if (refused !== '') {
         keep.push(entry.name)
-        warnings.push(refused)
+        // The fence's own sentence is what the log keeps; a screen says the same thing
+        // from the name alone, because the refusal is always one of two things and the
+        // reader needs the name, not the wording.
+        warnings.push(warned('leftover-refused', refused, { name: entry.name, path: join(taskPath, entry.name) }))
         strays.pop()
         content.delete(entry.name)
         continue
@@ -1218,12 +1225,14 @@ export async function finishTask(subprocess, options) {
       if (links.length > 0) {
         const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
         const more = links.length > LINK_NAMES_SHOWN ? `, and ${links.length - LINK_NAMES_SHOWN} more` : ''
-        warnings.push(
+        warnings.push(warned(
+          'leftover-holds-links',
           `could not archive '${name}' to '${strayDestination}': it holds ${links.length === 1 ? 'a link' : `${links.length} links`} `
           + `(${named}${more}) and this machine will not let DSH create one, so filing it would either stop part-way or copy `
           + 'whatever the link points at; it is left in the task space exactly as it stands - removing or moving out those '
           + 'entries is what lets the finish complete',
-        )
+          { name, destination: strayDestination, links, shown: LINK_NAMES_SHOWN },
+        ))
         keptByFailure.push(name)
         continue
       }
@@ -1239,7 +1248,7 @@ export async function finishTask(subprocess, options) {
         // `EEXIST` means the destination was already there, which is somebody else's
         // directory and is left exactly as it is.
         if (error?.code !== 'EEXIST') await rm(destination, { recursive: true, force: true }).catch(() => {})
-        warnings.push(`could not archive '${name}' to '${strayDestination}': ${error.message}`)
+        warnings.push(warned('leftover-copy-failed', `could not archive '${name}' to '${strayDestination}': ${error.message}`, { name, destination: strayDestination, reason: error.message }))
         keptByFailure.push(name)
         continue
       }
@@ -1307,7 +1316,7 @@ export async function finishTask(subprocess, options) {
           const outcome = await destroyDeployment(subprocess, taskPath, envId)
           if (outcome.warning !== undefined) warnings.push(outcome.warning)
         } catch (error) {
-          warnings.push(`deployment cleanup failed for ${envId}: ${error.message}`)
+          warnings.push(warned('deploy-cleanup-failed', `deployment cleanup failed for ${envId}: ${error.message}`, { envId, reason: error.message }))
         }
       }
     }

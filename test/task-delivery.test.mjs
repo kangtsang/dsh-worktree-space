@@ -147,10 +147,14 @@ describe('the delivery gate', () => {
 
   it('yields to the user\'s own overrule, as a warning rather than a refusal', async () => {
     // The panel asks "finish anyway?" and the user says yes: the gate steps aside,
-    // and what it hands back is the sentence the finish records, never silence.
+    // and what it hands back is the warning the finish records, never silence. It
+    // carries the sentence the Host writes for its log and the keys a screen needs to
+    // say the same thing in the reader's own language.
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
     const warning = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true, bypass: true })
-    expect(warning).toContain('human acceptance ack')
+    expect(warning.code).toBe('delivery-gate-bypassed')
+    expect(warning.message).toContain('human acceptance ack')
+    expect(warning.values).toEqual({ missing: ['human-ack'] })
     // Without the overrule the same request is still refused - the bypass is the
     // user's say-so, not a hole the gate forgot it had.
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))

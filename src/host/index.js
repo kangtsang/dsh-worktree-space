@@ -551,7 +551,10 @@ export async function recover(operation, classify) {
       code,
       ...(typeof error?.msg === 'string' && error.msg.trim() !== '' ? { msg: error.msg } : {}),
     })
-    return fail(code, message)
+    // The values the failure is about go beside the sentence, so a screen in another
+    // language can say the same thing without reading this one: the sentence above is
+    // what the log keeps, and it stays exactly as it was written.
+    return fail(code, message, error?.details ?? {})
   }
 }
 
