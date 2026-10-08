@@ -8,6 +8,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { projectNameFor } from './naming.js'
 import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
+import { canonicalPath } from './paths.js'
 import { coded } from './codes.js'
 
 /**
@@ -178,6 +179,12 @@ function projectFor(project, sourceRoot) {
   return projectNameFor(source)
 }
 
+/** The registry methods this plugin calls. A service double need not carry all of them. */
+const REGISTRY_METHODS = ['create', 'list', 'delete']
+
+/** Why a task space could not be registered: there was nothing registry-shaped to ask. */
+const NO_WORKSPACE_REGISTRY = 'this deployment serves no Workspace registry to register it with'
+
 /**
  * The Host's Workspace registry, when this deployment serves one.
  *
@@ -187,18 +194,25 @@ function projectFor(project, sourceRoot) {
  * on the client, which is this registry over the wire; a tool call that skipped it
  * left a container on disk DSH did not know about, and one no second create could
  * take the name of - `createTask` reads a leftover of its own as E2002 and refuses.
+ * Finishing a task has the mirror of it, which is why this is read there as well.
  *
  * Probed rather than injected: it is a peer service a deployment need not serve,
  * and a plugin that demanded it would refuse to load instead of reporting a task
- * space the user can still register by hand.
+ * space the user can still register or unregister by hand.
+ *
+ * Anything carrying at least one of {@link REGISTRY_METHODS} counts as one. Each
+ * caller then checks the method it is about to call, so a service double holding
+ * only some of them is used exactly where it has what is needed and reported as
+ * "nothing to register with" where it has not - which is the same answer, and the
+ * same warning, as a deployment that serves no registry at all.
  * @param ctx - the host plugin context.
- * @returns the registry, or undefined when there is none to register with.
+ * @returns the registry, or undefined when there is nothing registry-shaped.
  */
 function workspaceRegistryOf(ctx) {
   if (typeof ctx.get !== 'function') return undefined
   const registry = ctx.get('workspaceRegistry')
-  if (registry === null || registry === undefined || typeof registry.create !== 'function') return undefined
-  return registry
+  if (registry === null || registry === undefined) return undefined
+  return REGISTRY_METHODS.some((name) => typeof registry[name] === 'function') ? registry : undefined
 }
 
 /**
@@ -220,6 +234,7 @@ function workspaceRegistryOf(ctx) {
  * @returns an empty string on success, else why it could not be registered.
  */
 async function registerTaskWorkspace(registry, taskPath, sourceRoot, task) {
+  if (typeof registry.create !== 'function') return NO_WORKSPACE_REGISTRY
   let title
   try {
     const source = typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(sourceRoot) : undefined
@@ -237,6 +252,54 @@ async function registerTaskWorkspace(registry, taskPath, sourceRoot, task) {
   } catch (error) {
     return String(error?.message ?? error)
   }
+}
+
+/**
+ * Drop the Workspace registration that named a task space which is now gone.
+ *
+ * The panel draws the same line for the same reason (`ArchiveTaskDialog`): the
+ * registration goes only once the directory behind it really went. A finish that
+ * keeps the container - a conflict left standing, uncommitted work, strays kept -
+ * has to keep its Workspace too, or the task space would vanish from the list
+ * while it sits there on disk and its sessions would scatter into "Ungrouped".
+ *
+ * The record is found among the registry's own, rather than through
+ * `resolveByPath`: the whole reason this runs here is that the directory has
+ * already been removed, and that lookup canonicalizes through `fs.realpath`, which
+ * is the one thing that cannot answer for a directory that is not there any more.
+ * Record paths are stored canonicalized, so the comparison is the same one the rest
+ * of this plugin makes between two spellings of one location. A registration whose
+ * record path differs from ours in a way that comparison does not cover - a
+ * symlinked container root - is left alone rather than guessed at; removing it by
+ * hand is one click, and a wrong delete is not.
+ *
+ * Nothing here throws: what it could not do is reported to the caller as a warning,
+ * and a finish that has already taken the worktrees down is not re-reported as a
+ * failure over a list entry.
+ * @param registry - the Host's Workspace registry, if this deployment serves one.
+ * @param taskPath - the task space that was removed.
+ * @returns an empty string when there is nothing to report.
+ */
+async function dropTaskWorkspace(registry, taskPath) {
+  if (registry === undefined || typeof registry.list !== 'function' || typeof registry.delete !== 'function') return ''
+  const byHand = '; remove it from the workspace list by hand if it is still there'
+  let registered
+  try {
+    const target = canonicalPath(taskPath)
+    registered = registry.list().filter((entry) => entry !== null && entry !== undefined && canonicalPath(entry.path) === target)
+  } catch (error) {
+    return `the task space is gone but its DSH Workspace registration could not be read (${String(error?.message ?? error)})${byHand}`
+  }
+  const problems = []
+  for (const entry of registered) {
+    try {
+      await registry.delete(entry.id)
+    } catch (error) {
+      problems.push(String(error?.message ?? error))
+    }
+  }
+  if (problems.length === 0) return ''
+  return `the task space is gone but its DSH Workspace registration could not be dropped (${problems.join('; ')})${byHand}`
 }
 
 /**
@@ -482,7 +545,7 @@ export function registerTaskTool(ctx, options = {}) {
         // and the same name would stay unusable either way.
         const registry = workspaceRegistryOf(ctx)
         const unregistered = registry === undefined
-          ? 'this deployment serves no Workspace registry to register it with'
+          ? NO_WORKSPACE_REGISTRY
           : await registerTaskWorkspace(registry, result.path, sourceRoot, result.task)
         if (unregistered !== '') {
           value.warnings.push(
@@ -571,6 +634,16 @@ export function registerTaskTool(ctx, options = {}) {
         value.tasksRoot = tasksRoot
         value.failed = result.failed
         value.warnings = result.warnings
+        // The registration follows the directory. Dropped only when the finish
+        // really removed the task space, and kept while the container is still
+        // there - the panel's own rule, for the panel's own reason: a registration
+        // whose directory is still on disk has to keep showing it. The create from
+        // this tool registered it, so this is the half that keeps a finished task
+        // from leaving an entry pointing at a directory that is gone.
+        if (result.containerRemoved) {
+          const stranded = await dropTaskWorkspace(workspaceRegistryOf(ctx), result.path)
+          if (stranded !== '') value.warnings.push(stranded)
+        }
         value.repositories = result.repositories.map((entry) => ({
           ...emptyRow(entry.name),
           path: entry.path,

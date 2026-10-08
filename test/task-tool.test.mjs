@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { rmSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
@@ -78,6 +79,55 @@ async function createOnce(services = {}) {
     await source.cleanup()
     await rm(container, { recursive: true, force: true })
   }
+}
+
+/** The project layer the task-space fixtures file their task under. */
+const PROJECT = "kratos-admin"
+
+/**
+ * A task space with one worktree on disk and the record a create leaves, plus the
+ * subprocess double that answers for its git reads.
+ *
+ * `keepWorktree` leaves the worktree where it is, which is what a finish that
+ * cannot empty the container looks like from the outside: the removal was asked
+ * for and the directory is still there.
+ * @param options - whether the mocked removal should leave the worktree alone.
+ * @returns the container root, the task space, the double and a cleanup.
+ */
+async function taskSpaceFixture({ keepWorktree = false } = {}) {
+  const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-done-"))
+  const taskPath = join(container, PROJECT, "login")
+  const worktree = join(taskPath, "alpha")
+  await mkdir(worktree, { recursive: true })
+  await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
+  // The record a create leaves behind, and the only thing that says which branch
+  // this task made.
+  await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+    task: "login", project: PROJECT, branch: "task/login",
+  }, null, 2) + "\n")
+  const mainRepo = join(tmpdir(), "multi-worktree-tool-done-main-alpha")
+  const porcelain = `worktree ${mainRepo}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${worktree}\nHEAD bbb\nbranch refs/heads/task/login\n`
+  const subprocess = {
+    spawn: ({ argv }) => {
+      const key = argv.slice(3).join(" ")
+      let exitCode = 0
+      let stdout = ""
+      if (key.startsWith("rev-parse --verify --quiet MERGE_HEAD")) exitCode = 1
+      else if (key.startsWith("rev-parse --abbrev-ref HEAD")) stdout = argv[2] === worktree ? "task/login" : "main"
+      else if (key.startsWith("worktree list --porcelain")) stdout = porcelain
+      // The mocked removal has to change the filesystem: the container only becomes
+      // removable once the directory it held is really gone.
+      else if (key.startsWith("worktree remove") && !keepWorktree) rmSync(argv[5], { recursive: true, force: true })
+      return {
+        done: Promise.resolve({ exitCode, signal: null }),
+        collected: {
+          stdout: { readFrom: () => ({ text: stdout }) },
+          stderr: { readFrom: () => ({ text: "" }) },
+        },
+      }
+    },
+  }
+  return { container, taskPath, subprocess, cleanup: () => rm(container, { recursive: true, force: true }) }
 }
 
 /**
@@ -342,6 +392,107 @@ describe("registerTaskTool", () => {
     expect(value.warnings[0]).toContain("EACCES: permission denied")
     expect(value.warnings[0]).toMatch(/E2002/)
     expectEnvelopeShape(captured[0].output.schema, value)
+  })
+
+  it("drops the Workspace registration once the finish has removed the task space", async () => {
+    const fixture = await taskSpaceFixture()
+    const deleted = []
+    const registry = {
+      // One record that names this task space and one that names a different task:
+      // what makes the pair worth having is that only the first may go.
+      list: () => [
+        { id: "ws-other", path: join(fixture.container, "kratos-api", "other") },
+        { id: "ws-1", path: fixture.taskPath },
+      ],
+      delete: async (id) => { deleted.push(id); return true },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registry })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      // The container really went, so the registration goes with it: a finished
+      // task must not leave a workspace entry pointing at a directory that is gone.
+      expect(value.container).toBe("")
+      expect(deleted).toEqual(["ws-1"])
+      expect(value.warnings.join(" ")).not.toMatch(/Workspace registration/)
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("keeps the registration while the task space is still on disk", async () => {
+    const fixture = await taskSpaceFixture({ keepWorktree: true })
+    const deleted = []
+    const registry = {
+      list: () => [{ id: "ws-1", path: fixture.taskPath }],
+      delete: async (id) => { deleted.push(id) },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registry })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      // The worktree could not be taken down, so the container is still there - and
+      // a task space that is still there has to keep its Workspace, or it would
+      // vanish from the list while sitting on disk and its sessions would scatter
+      // into "Ungrouped".
+      expect(value.container).not.toBe("")
+      expect(deleted).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("reports a registration it could not drop, over a finish that still happened", async () => {
+    // Neither way of failing to reach the registry may turn a finish that already
+    // took the worktrees down into a reported failure, and both have to say what is
+    // left to do by hand.
+    const failing = [
+      () => ({ list: () => { throw new Error("workspace registry is not started yet") }, delete: async () => true }),
+      (path) => ({ list: () => [{ id: "ws-1", path }], delete: async () => { throw new Error("EACCES: permission denied") } }),
+    ]
+    for (const registryFor of failing) {
+      const fixture = await taskSpaceFixture()
+      const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registryFor(fixture.taskPath) })
+      try {
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+          {},
+        )
+        expect(value.container).toBe("")
+        expect(value.warnings.join(" ")).toMatch(/could not be (read|dropped)/)
+        expect(value.warnings.join(" ")).toMatch(/by hand/)
+        expectEnvelopeShape(captured[0].output.schema, value)
+      } finally {
+        await fixture.cleanup()
+      }
+    }
+  })
+
+  it("says nothing about registrations where the deployment serves no registry", async () => {
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      // Nothing was ever registered through this deployment, so there is nothing to
+      // drop and nothing to report: a warning here would be noise on every finish.
+      expect(value.container).toBe("")
+      expect(value.warnings.join(" ")).not.toMatch(/Workspace registration/)
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 
   it("reports an absent container instead of failing", async () => {

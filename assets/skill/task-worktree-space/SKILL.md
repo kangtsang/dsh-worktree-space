@@ -291,6 +291,15 @@ Confirm each destructive step with the user before passing it:
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.
 
+The Workspace registration follows the directory. When the finish removes the task
+space itself, `done` drops the registration too, so the task space leaves the
+workspace list and its sessions move to "Ungrouped". A finish that keeps the
+container — a conflict left standing, uncommitted work, strays that were kept —
+keeps the registration as well, because the directory is still there and the list
+has to go on showing it. A registration that could not be dropped is reported as a
+**warning** over a finish that still happened; remove it from the workspace list by
+hand.
+
 Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`;
 `mergeInProgress` is what marks a repository the finish left on a conflict.
 

@@ -28,6 +28,19 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   that until then the same name is still refused as E2002. The bundled skill's
   "Starting a task" now carries that step too: the session is opened from the panel
   after `create`, and E2002 and E2001 are two different situations.
+- **Finishing a task now takes the registration with the directory.** Registering on
+  `create` made `done` responsible for unregistering, or a cleanly finished task
+  would leave a workspace entry pointing at a directory that is gone. The rule is
+  the panel's own (`ArchiveTaskDialog` drops the registration only once the
+  container is really removed): it is dropped when the container went, and kept when
+  it did not — a conflict left standing, uncommitted work, strays the user asked to
+  keep — because a task space that is still on disk has to keep showing in the list,
+  or it would vanish while its sessions scattered into "Ungrouped". The record is
+  found among the registry's own rather than through `resolveByPath`, which
+  canonicalizes through `fs.realpath` and so cannot answer for a directory that has
+  just been deleted. A registration that could not be read or dropped is reported as
+  a warning, never as a failure of a finish that has already taken the worktrees
+  down.
 
 ## 1.2.1 — 2026-10-06
 
