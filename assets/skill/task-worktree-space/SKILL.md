@@ -99,9 +99,23 @@ Follow this order. Never create a workspace with a guessed location.
 7. **Branch prefix** — `task/` unless the user asks for another one; pass the
    choice as `branchPrefix` and expect the branch to be that prefix plus the task
    name (`hotfix/<task>`, `release-<task>`, …).
-8. **Run `action: "create"`** and report the task directory path and the branch
-   name.
-9. **Work in the task directory**: it is where the task's session belongs.
+8. **Run `action: "create"`.** It does both halves: it makes the task directory,
+   the branch and one worktree per repository **and registers the result as a DSH
+   Workspace**, which is what puts the task space in the workspace list under
+   `<source workspace title>/<task>`.
+9. **Report where it is, and say which entry opens the session.** A session is
+   opened *with* the Workspace, and opening one is not something this tool can do:
+   that is the panel's **Create and open** in the Worktree Space dialog, or
+   picking the registered Workspace in the workspace list. Report the task
+   directory path and the branch name, then name that entry rather than leaving
+   the user to find it.
+   A create that answers with a warning that the Workspace was **not** registered
+   means the deployment serves no workspace registry, or the registration itself
+   failed; the warning names which. Register the directory before anything is
+   opened in it — **Create and open**, or **Register again** when a create is
+   refused — and do not report the task as under way until that is done, because
+   until then nothing in the interface shows the task space.
+10. **Work in the task directory**: it is where the task's session belongs.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
@@ -289,6 +303,18 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
   its own. Point `tasksRoot` somewhere that is not a repository.
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
+- `create` refuses with **E2002** when a task space for exactly this task, project
+  and branch is already on disk — which means an earlier create made the container
+  and stopped before its Workspace was registered, usually one made by this tool
+  before it registered anything. The worktrees and the branch are still there, so
+  nothing is lost: register it (**Create and open**, or **Register again** in the
+  dialog once the refusal is shown), or finish and remove it. Creating again under
+  that name keeps failing until one of the three is done. An **E2001** on the same
+  name is the other situation — the name belongs to a different task space — and it
+  is not recoverable this way.
+- `create` reports a **warning** rather than a failure when the task space was made
+  but its Workspace could not be registered. The task space is real and usable; what
+  is missing is only the entry in the workspace list, and the warning says so.
 - `create` refuses a base that any repository does not have.
 - `add` refuses a repository the task already holds a worktree of: every worktree
   is named after its source repository's directory, so two of them cannot share a

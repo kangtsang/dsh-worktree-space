@@ -4,6 +4,31 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## Unreleased
+
+### Fixed
+
+- **A task space created from an agent session is no longer left unregistered.**
+  `task_worktree_space`'s `create` did the disk half only — the directory, the
+  branch, one worktree per repository — while "register this directory as a DSH
+  Workspace" is a client capability (the panel does it through the client's
+  `ctx.workspaces.create`) with no counterpart on the tool's side. A task space made
+  that way never appeared in the workspace list, had no session that could be opened
+  in it, and **the next `create` under the same name was refused as E2002** —
+  `createTask` reads exactly that leftover container as this task's own, so the only
+  way out was the panel's "Register again", which nothing had told the agent about.
+  `create` now registers the task space itself through the Host's
+  `ctx.workspaceRegistry`, titled by the panel's own rule,
+  `<source workspace title>/<task>`, so a task space made from a session reads in the
+  workspace list exactly like one made from the dialog.
+  The service is probed rather than required: where a deployment serves none, or the
+  registration itself fails, `create` reports a **warning** instead of a failure —
+  the task space on disk is real, and all that is missing is its entry in the list —
+  naming the panel's "Create and open" / "Register again" as the remedy and saying
+  that until then the same name is still refused as E2002. The bundled skill's
+  "Starting a task" now carries that step too: the session is opened from the panel
+  after `create`, and E2002 and E2001 are two different situations.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

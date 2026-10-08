@@ -179,6 +179,67 @@ function projectFor(project, sourceRoot) {
 }
 
 /**
+ * The Host's Workspace registry, when this deployment serves one.
+ *
+ * Making the directory and the worktrees is only half of a create: the other half
+ * is telling DSH the result is a Workspace, and that half is a Host service rather
+ * than a client-only capability. The dialog does it through `ctx.workspaces.create`
+ * on the client, which is this registry over the wire; a tool call that skipped it
+ * left a container on disk DSH did not know about, and one no second create could
+ * take the name of - `createTask` reads a leftover of its own as E2002 and refuses.
+ *
+ * Probed rather than injected: it is a peer service a deployment need not serve,
+ * and a plugin that demanded it would refuse to load instead of reporting a task
+ * space the user can still register by hand.
+ * @param ctx - the host plugin context.
+ * @returns the registry, or undefined when there is none to register with.
+ */
+function workspaceRegistryOf(ctx) {
+  if (typeof ctx.get !== 'function') return undefined
+  const registry = ctx.get('workspaceRegistry')
+  if (registry === null || registry === undefined || typeof registry.create !== 'function') return undefined
+  return registry
+}
+
+/**
+ * Register a task space that has just been made as a DSH Workspace.
+ *
+ * The title follows the dialog's own rule - `<source workspace title>/<task>` - so a
+ * task space created from a session reads in the workspace list exactly like one
+ * created from the panel, and two projects' tasks of one name cannot be read as one.
+ * The registry keeps an existing record's title, so registering a directory that is
+ * already a Workspace is the idempotent no-op it looks like.
+ *
+ * Nothing here throws: whether this succeeded is reported to the caller as a warning
+ * by the action that asked for it, because the create it belongs to has already
+ * happened on disk by then.
+ * @param registry - the Host's Workspace registry.
+ * @param taskPath - the task space the create made.
+ * @param sourceRoot - the directory the task's repositories live in.
+ * @param task - the task's name.
+ * @returns an empty string on success, else why it could not be registered.
+ */
+async function registerTaskWorkspace(registry, taskPath, sourceRoot, task) {
+  let title
+  try {
+    const source = typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(sourceRoot) : undefined
+    if (source !== null && source !== undefined && typeof source.title === 'string' && source.title !== '') {
+      title = `${source.title}/${task}`
+    }
+  } catch {
+    // The source root is not a registered Workspace, or its path no longer resolves.
+    // The registry's own default - the task directory's name - is the right title
+    // then, and neither is a reason to report the create as incomplete.
+  }
+  try {
+    await registry.create(taskPath, title)
+    return ''
+  } catch (error) {
+    return String(error?.message ?? error)
+  }
+}
+
+/**
  * Refuse the one request a call cannot answer for itself.
  *
  * `force` is the whole of the irreversible surface here, and it is irreversible
@@ -411,9 +472,25 @@ export function registerTaskTool(ctx, options = {}) {
         value.branch = result.branch
         value.container = result.path
         value.tasksRoot = result.tasksRoot
-        // `warnings` is left as the envelope's empty array: a create has none to
-        // report now that it no longer pushes, and the field is shared by all
-        // four actions' schemas rather than being this action's own.
+        // The other half of a create: the directory and the worktrees are on disk,
+        // and DSH has to be told the result is a Workspace. Registering it here is
+        // what keeps an agent-made task space from being a container the workspace
+        // list never shows and no second create can take the name of.
+        //
+        // Reported as a warning and never thrown, because the create has already
+        // succeeded: a caller told it failed would not know the worktrees are there,
+        // and the same name would stay unusable either way.
+        const registry = workspaceRegistryOf(ctx)
+        const unregistered = registry === undefined
+          ? 'this deployment serves no Workspace registry to register it with'
+          : await registerTaskWorkspace(registry, result.path, sourceRoot, result.task)
+        if (unregistered !== '') {
+          value.warnings.push(
+            `the task space is on disk but not registered as a DSH Workspace (${unregistered}); register it from the `
+            + 'Worktree Space panel - "Create and open", or "Register again" after a create is refused - and open the '
+            + 'task\'s session there; until it is registered, creating this task again is refused as E2002',
+          )
+        }
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
         value.summary = summarize(action, value)
         return value

@@ -18,15 +18,32 @@ const quietSubprocess = {
 /**
  * A context whose tool runtime captures what the plugin registers.
  * @param subprocess - the subprocess service the tool should use.
+ * @param services - any further service the call under test looks up, by name.
  * @returns the context and the captured definitions.
  */
-function toolContext(subprocess = quietSubprocess) {
+function toolContext(subprocess = quietSubprocess, services = {}) {
   const captured = []
   const ctx = {
     subprocess,
-    get: (name) => (name === "tools" ? { register: (definition) => { captured.push(definition); return () => {} } } : undefined),
+    get: (name) => (name === "tools" ? { register: (definition) => { captured.push(definition); return () => {} } } : services[name]),
   }
   return { ctx, captured }
+}
+
+/**
+ * A subprocess double that answers like a repository with no task branch yet:
+ * every git call succeeds except `show-ref --verify`, which is git's way of saying
+ * the branch does not exist. `quietSubprocess` answers 0 to that too, which reads
+ * as "this branch is already in use" and refuses every create.
+ */
+const creatingSubprocess = {
+  spawn: ({ argv }) => ({
+    done: Promise.resolve({ exitCode: argv.slice(3).join(" ").startsWith("show-ref") ? 1 : 0, signal: null }),
+    collected: {
+      stdout: { readFrom: () => ({ text: "" }) },
+      stderr: { readFrom: () => ({ text: "" }) },
+    },
+  }),
 }
 
 /** A source root holding one repository. */
@@ -34,6 +51,33 @@ async function sourceFixture() {
   const root = await mkdtemp(join(tmpdir(), "multi-worktree-tool-"))
   await mkdir(join(root, "alpha", ".git"), { recursive: true })
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
+}
+
+/**
+ * Run one `create` through a freshly registered tool, then clean up after it.
+ *
+ * The directories go before this returns: what the callers assert on is the value
+ * and whatever the service doubles recorded, both of which outlive the paths they
+ * were made from. The container is a directory of its own rather than the source
+ * root's recommendation, so what is removed here is only what this helper made.
+ * @param services - the services the context serves beyond `tools`.
+ * @returns the action's value and the captured tool definition.
+ */
+async function createOnce(services = {}) {
+  const source = await sourceFixture()
+  const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
+  try {
+    const { ctx, captured } = toolContext(creatingSubprocess, services)
+    registerTaskTool(ctx)
+    const value = await captured[0].execute(
+      { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container },
+      {},
+    )
+    return { value, captured }
+  } finally {
+    await source.cleanup()
+    await rm(container, { recursive: true, force: true })
+  }
 }
 
 /**
@@ -233,6 +277,71 @@ describe("registerTaskTool", () => {
       await rm(container, { recursive: true, force: true })
       await rm(join(container, "..", "multi-worktree-tool-add-elsewhere"), { recursive: true, force: true })
     }
+  })
+
+  it("registers the task space it made as a DSH Workspace", async () => {
+    const records = []
+    const registry = {
+      // The source root is a registered Workspace, as it is whenever a task is
+      // started from the workspace list the user is looking at.
+      resolveByPath: async () => ({ title: "kratos-admin" }),
+      create: async (path, title) => { records.push({ path, title }); return { path, title } },
+    }
+    const { value, captured } = await createOnce({ workspaceRegistry: registry })
+    // Made on disk *and* registered, with the dialog's own title rule, so a task
+    // space created from a session reads in the workspace list exactly like one
+    // created from the panel.
+    expect(value.action).toBe("create")
+    expect(records).toEqual([{ path: value.container, title: "kratos-admin/login" }])
+    expect(value.warnings).toEqual([])
+    expectEnvelopeShape(captured[0].output.schema, value)
+  })
+
+  it("leaves the Workspace title to the registry when the source root is not registered", async () => {
+    const records = []
+    const registry = {
+      resolveByPath: async () => undefined,
+      create: async (path, title) => { records.push({ path, title }) },
+    }
+    await createOnce({ workspaceRegistry: registry })
+    // No title means the registry's own default - the task directory's name -
+    // which is a better answer than an invented one, and is not an error.
+    expect(records).toEqual([{ path: expect.any(String), title: undefined }])
+  })
+
+  it("warns instead of failing when nothing could register the task space", async () => {
+    // Two ways a deployment has no registry to register with: one serves none at
+    // all, and one hands back a service double with nothing on it. Neither may
+    // turn a create that succeeded on disk into a reported failure.
+    for (const services of [{}, { workspaceRegistry: {} }]) {
+      const { value, captured } = await createOnce(services)
+      expect(value.action).toBe("create")
+      expect(value.container).not.toBe("")
+      expect(value.warnings).toHaveLength(1)
+      expect(value.warnings[0]).toMatch(/not registered as a DSH Workspace/)
+      expect(value.warnings[0]).toMatch(/serves no Workspace registry/)
+      // What the caller has to do about it, and what happens if they ignore it.
+      expect(value.warnings[0]).toMatch(/Create and open/)
+      expect(value.warnings[0]).toMatch(/E2002/)
+      expect(value.summary).toContain("Warnings:")
+      expectEnvelopeShape(captured[0].output.schema, value)
+    }
+  })
+
+  it("reports why a registration failed, over a task space that is still there", async () => {
+    const registry = {
+      resolveByPath: async () => undefined,
+      create: async () => { throw new Error("EACCES: permission denied, open '.dsh/storages/workspace.json'") },
+    }
+    const { value, captured } = await createOnce({ workspaceRegistry: registry })
+    // The create happened; only the registration did not. A caller told the create
+    // failed would not know the worktrees are on disk.
+    expect(value.action).toBe("create")
+    expect(value.container).not.toBe("")
+    expect(value.warnings).toHaveLength(1)
+    expect(value.warnings[0]).toContain("EACCES: permission denied")
+    expect(value.warnings[0]).toMatch(/E2002/)
+    expectEnvelopeShape(captured[0].output.schema, value)
   })
 
   it("reports an absent container instead of failing", async () => {
