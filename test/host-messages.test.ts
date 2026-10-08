@@ -1,7 +1,28 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
-import { hostFailureText, hostWarningText, type HostWarning } from "../src/client/lib/host-messages"
-import { format, t } from "../src/client/lib/i18n"
+import { hostFailureText, hostWarningText, type HostValues, type HostWarning } from "../src/client/lib/host-messages"
+import { format, installLocale, t } from "../src/client/lib/i18n"
+
+/**
+ * The sentences themselves, taken from the locale service the plugin registers them with,
+ * so both languages can be checked rather than only the one `t` happens to resolve to.
+ *
+ * `bind` answers in Chinese, which is what `t` does with no locale service at all - so
+ * installing this leaves every other assertion in this file reading exactly as it did.
+ */
+let dictionaries: Record<string, Record<string, string>> = {}
+installLocale({
+  get: () => ({
+    register: (_ns: string, dicts: Record<string, Record<string, string>>) => { dictionaries = dicts; return () => {} },
+    bind: () => (key: string) => dictionaries.zh?.[key] ?? key,
+  }),
+})
+
+/** The translation function a given interface language would use. */
+const inLanguage = (language: "zh" | "en") => (key: string) => dictionaries[language]?.[key] ?? key
+
+/** A placeholder the renderer did not fill in: the one way a template fails visibly. */
+const UNFILLED = /\{[a-zA-Z]\w*\}/
 
 /**
  * The Host's failures and warnings, said in the reader's language.
@@ -74,4 +95,65 @@ describe("a Host warning said here", () => {
     expect(hostWarningText(t, { message: sentence })).toBe(sentence)
     expect(hostWarningText(t, sentence)).toBe(sentence)
   })
+})
+
+describe("every sentence the Host's codes are said with", () => {
+  /**
+   * One row per code: the values the Host sends, and something the sentence has to name.
+   *
+   * The table in `host-messages.ts` is a switch, so a case can be added and never
+   * exercised - and the placeholders live in the dictionaries, so a misspelled one
+   * renders as `{destinaton}` on a failure path, which reads as a broken sentence rather
+   * than as a missing test. Both are caught here, in both languages at once.
+   */
+  const failures: [string, HostValues, string][] = [
+    ["E2003", { path: "/w/login" }, "/w/login"],
+    ["E2004", { path: "/w/login", reason: "none" }, "/w/login"],
+    ["E2004", { path: "/w/login", reason: "no-worktrees-to-extend" }, "/w/login"],
+    ["E2004", { path: "/w/login", reason: "branches-disagree" }, "/w/login"],
+    ["E2005", { path: "/w/login", missing: "/w/login/worktree-space.json" }, "worktree-space.json"],
+    ["E5005", { target: "docker", envId: "demo" }, "docker"],
+    // The environment is named only when there is one.
+    ["E5005", { target: "docker", envId: "" }, "docker"],
+    ["E5006", { missing: ["smoke"] }, ""],
+    ["E5007", { missing: ["smoke", "human-ack"] }, ""],
+    ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }] }, "/w/a"],
+    ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }, { path: "/w/b", reason: "EPERM" }] }, "/w/b"],
+  ]
+
+  const warnings: [string, HostValues, string][] = [
+    ["no-task-branch", { path: "/w/login" }, "/w/login"],
+    ["delivery-gate-bypassed", { target: "docker" }, "docker"],
+    ["delivery-gate-bypassed", { missing: ["human-ack"] }, ""],
+    ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "", taskBranch: "task/x" }, "alpha"],
+    ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "other", taskBranch: "task/x" }, "other"],
+    ["branch-not-deleted", { branch: "task/x", name: "alpha" }, "task/x"],
+    ["leftover-refused", { name: "notes.md", path: "/w/notes.md" }, "notes.md"],
+    ["leftover-holds-links", { name: "deploy", destination: "/a/deploy", links: ["a", "b"], shown: 3 }, "deploy"],
+    // More links than the sentence names: the count is what the reader gets.
+    ["leftover-holds-links", { name: "deploy", destination: "/a/deploy", links: ["a", "b", "c", "d"], shown: 2 }, "2"],
+    ["leftover-copy-failed", { name: "docs", destination: "/a/docs", reason: "EPERM" }, "EPERM"],
+    ["no-deployment-recorded", {}, ""],
+    ["deploy-destroy-failed", { output: "docker: not found" }, "docker: not found"],
+    ["deploy-containers-left", { count: 2, envId: "demo", reason: "docker failed" }, "demo"],
+    ["deploy-cleanup-failed", { envId: "demo", reason: "docker failed" }, "demo"],
+  ]
+
+  for (const language of ["zh", "en"] as const) {
+    it(`says all of them in ${language}, with nothing left unfilled`, () => {
+      const say = inLanguage(language)
+      for (const [code, values, names] of failures) {
+        const said = hostFailureText(say, code, values)
+        expect(said, `${code} has no sentence`).toBeTruthy()
+        expect(said, `${code} left a placeholder in ${language}: ${said}`).not.toMatch(UNFILLED)
+        if (names !== "") expect(said, `${code} did not name '${names}': ${said}`).toContain(names)
+      }
+      for (const [code, values, names] of warnings) {
+        const said = hostWarningText(say, { code, message: `the Host's own sentence for ${code}`, values })
+        expect(said, `${code} fell through instead of being said`).not.toBe(`the Host's own sentence for ${code}`)
+        expect(said, `${code} left a placeholder in ${language}: ${said}`).not.toMatch(UNFILLED)
+        if (names !== "") expect(said, `${code} did not name '${names}': ${said}`).toContain(names)
+      }
+    })
+  }
 })
