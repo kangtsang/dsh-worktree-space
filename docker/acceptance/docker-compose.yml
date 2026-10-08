@@ -1,0 +1,29 @@
+# A DSH web instance to accept this branch against, by hand.
+#
+# The port is published on the host's **loopback only**. DSH refuses to bind anything but
+# 127.0.0.1 inside itself, and says why: the web UI runs code, so a reachable one is remote
+# code execution for whoever reaches it. The entry point binds the container side to
+# 0.0.0.0 because a published port cannot reach a container's loopback — so it is this line
+# that keeps the promise DSH's own guard makes, and it must not be widened to `34822:34822`.
+#
+# The two volumes keep the profile and the task spaces across restarts, so a re-run costs
+# seconds instead of reinstalling DSH.
+services:
+  dsh:
+    build:
+      context: .
+      # Bumped by hand when the plugin version changes; the tarball beside this file is
+      # the build context's copy of it.
+      args:
+        DSH_VERSION: 0.2.0-rc.2
+    image: dsh-worktree-space-acceptance
+    container_name: dsh-wts-acceptance
+    ports:
+      - "127.0.0.1:34822:34822"
+    volumes:
+      - dsh-home:/dsh
+      - dsh-workspace:/workspace
+
+volumes:
+  dsh-home:
+  dsh-workspace:

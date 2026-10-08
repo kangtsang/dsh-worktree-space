@@ -13,3 +13,9 @@ _preview/
 # up as an untracked entry in `git status`, which is not somewhere anyone looks long
 # enough to act on it.
 _test-output/
+# The tarball docker/acceptance/Dockerfile copies into the image. It is `npm pack`
+# output - regenerable from the sources that are already tracked, and a 450 kB copy of
+# them beside itself - so what is committed is the harness, and the README says how to
+# produce the artifact it builds with.
+/docker/acceptance/*.tgz
+
