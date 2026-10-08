@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { existsSync, mkdirSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import {
@@ -16,6 +16,26 @@ import {
   suggestTaskRoot,
 } from "../src/host/task/operations.js"
 import { readAudit } from "../src/host/task/audit-log.js"
+
+/**
+ * Whether this process may create a symbolic link.
+ *
+ * The one thing the archive's link handling turns on, and the reason that test branches
+ * instead of asserting one platform's answer: `fs.cp` recreates a link rather than
+ * copying what it points at, so a machine that refuses to create one cannot file a
+ * stray holding one at all. Probed here the way the plugin probes it.
+ */
+const CAN_CREATE_SYMLINKS = (() => {
+  const probe = mkdtempSync(join(tmpdir(), "multi-worktree-link-probe-"))
+  try {
+    symlinkSync(join(probe, "target"), join(probe, "link"))
+    return true
+  } catch {
+    return false
+  } finally {
+    rmSync(probe, { recursive: true, force: true })
+  }
+})()
 
 /**
  * The metadata record a task space carries: the JSON `createTask` writes and
@@ -874,14 +894,26 @@ describe("finishTask", () => {
     // from here rather than from whatever a worktree has checked out now.
     await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
       task: "login", project: PROJECT, branch: "task/login",
+      // What a create records about the repositories it made worktrees of. A finish
+      // reads it to recognise a repository whose directory git has stopped calling a
+      // worktree, so a fixture without it is not the state the plugin leaves behind.
+      repositories: ["alpha", "beta"].map((name) => ({ name, sourcePath: mainRepos[name], branch: "task/login" })),
     }, null, 2) + "\n")
     const porcelain = (name) =>
       `worktree ${mainRepos[name]}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${join(taskPath, name)}\nHEAD bbb\nbranch refs/heads/task/login\n`
+    // Which repository a question is about. git answers the same from the source
+    // repository and from any of its worktrees, and this double has to as well: a
+    // finish asks from the source repository, because the worktree it is asking
+    // about may have lost its `.git` by then.
+    const repositoryAt = (cwd) => {
+      if (worktrees.has(cwd)) return basename(cwd)
+      return Object.keys(mainRepos).find((candidate) => mainRepos[candidate] === cwd) ?? basename(cwd)
+    }
     const handlers = {
       // The worktrees carry the task branch; each source repository is on `main`,
       // which is the branch its merge therefore lands on.
       "rev-parse --abbrev-ref HEAD": ({ cwd }) => (worktrees.has(cwd) ? "task/login" : "main"),
-      "worktree list --porcelain": ({ cwd }) => porcelain(basename(cwd)),
+      "worktree list --porcelain": ({ cwd }) => porcelain(repositoryAt(cwd)),
       "show-ref --verify --quiet refs/heads/main": "",
       // No merge is standing in these worktrees, which is what Git answers too: the
       // command succeeds only while `MERGE_HEAD` exists. Tests that leave a merge
@@ -893,6 +925,7 @@ describe("finishTask", () => {
       taskPath,
       handlers,
       worktrees,
+      mainRepos,
       /**
        * `finishTask` with the two coordinates this fixture filed the task under,
        * so each test states only the options it is actually about.
@@ -1516,6 +1549,82 @@ describe("finishTask", () => {
     }
   })
 
+  it("finishes a removal git unregistered but could not delete", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixture.handlers,
+      // What git does when its own delete fails: measured on 2.28.0.windows.1 it has
+      // already unregistered the worktree by then and removed its `.git` file, so the
+      // answer to "do you still know this path" is no - which is the case that used to
+      // leave a checkout nobody would ever remove again.
+      "worktree remove": ({ args }) => {
+        if (args[2].endsWith("alpha")) return { exitCode: 255, stderr: "error: failed to delete 'alpha': Invalid argument" }
+        // A removal that reports success has to have happened: the container only
+        // empties once the directory it held is really gone.
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+      // Asked about alpha's repository, git answers with the source repository alone:
+      // alpha is not in the list any more.
+      "worktree list --porcelain": ({ cwd }) => (cwd === fixture.mainRepos.alpha
+        ? `worktree ${fixture.mainRepos.alpha}\nHEAD aaa\nbranch refs/heads/main\n`
+        : fixture.handlers["worktree list --porcelain"]({ cwd })),
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login" })
+
+      // git got past its own checks and only the delete failed, so the delete is
+      // finished here rather than reported as a worktree left behind.
+      expect(result.repositories.find((entry) => entry.name === "alpha")).toMatchObject({ removed: true })
+      expect(existsSync(join(fixture.taskPath, "alpha"))).toBe(false)
+      // Whatever git left of its bookkeeping goes with it.
+      expect(keys()).toContain("worktree prune --expire now")
+      // And the repository the mocked git did remove is untouched by any of this.
+      expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ removed: true })
+      expect(result.failed).toBe(false)
+      expect(result.containerRemoved).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("does not file a repository git no longer knows as the user's documents", async () => {
+    const fixture = await taskFixture()
+    const { subprocess } = subprocessMock(fixture.handlers)
+    const documents = join(fixture.container.root, "archived-docs", "login-2026-09-26-14-30-05")
+    try {
+      // The state a failed removal leaves: git has unregistered the worktree and taken
+      // its `.git` file, the checkout is still on disk, and the record still names it.
+      // Unrecognised, this reads as the user's own writing and gets filed away - a whole
+      // checkout, `node_modules` and all - and no later finish would ever remove it.
+      await rm(join(fixture.taskPath, "alpha", ".git"), { force: true })
+      await writeFile(join(fixture.taskPath, "alpha", "notes.md"), "# left behind\n")
+
+      const result = await fixture.finish(subprocess, { task: "login", documentsDirectory: documents, cleanStray: true })
+
+      const stranded = result.repositories.find((entry) => entry.name === "alpha")
+      expect(stranded).toMatchObject({ removed: false })
+      expect(stranded.error).toMatch(/no longer registered/)
+      expect(stranded.error).toMatch(/removed by hand/)
+      expect(result.failed).toBe(true)
+      // It is a repository of this task, not a leftover of it: nothing was filed, and
+      // nothing was deleted either.
+      expect(existsSync(join(documents, "alpha"))).toBe(false)
+      expect(existsSync(join(fixture.taskPath, "alpha", "notes.md"))).toBe(true)
+      expect(result.strays).not.toContain("alpha")
+      // The record stays with it. It is the only thing left that says this directory is
+      // this task's repository rather than the user's own files, so a later finish can
+      // still tell - and the note it renders is not outlived by the directory it names.
+      expect(existsSync(join(fixture.taskPath, "worktree-space.json"))).toBe(true)
+      // The repository that could be removed went as usual, and the task space stays
+      // because a repository of this task is still in it.
+      expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ removed: true })
+      expect(result.containerRemoved).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("refuses an unknown task", async () => {
     const fixture = await taskFixture()
     const { subprocess } = subprocessMock(fixture.handlers)
@@ -1578,6 +1687,48 @@ describe("finishTask documents", () => {
       expect(result.containerRemoved).toBe(false)
       // The breadcrumb this plugin wrote is cleared either way.
       expect(existsSync(join(fixtureUnderTest.taskPath, "README.en.md"))).toBe(false)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("keeps a stray holding a link where this machine cannot recreate one", async () => {
+    const fixtureUnderTest = await fixture()
+    const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
+    const documents = join(fixtureUnderTest.root, "archived-docs", "login-2026-09-26-14-30-05")
+    try {
+      // The shape the plugin's own users hit: a log or a dependency-store entry that is
+      // a link to somewhere else, often somewhere outside the task space. A junction is
+      // a link the platform reports as one and lets an ordinary user create, which is
+      // what makes this testable on a machine that refuses plain symbolic links.
+      const outside = join(fixtureUnderTest.root, "outside")
+      await mkdir(outside, { recursive: true })
+      await writeFile(join(outside, "gateway.log"), "gateway\n")
+      symlinkSync(outside, join(fixtureUnderTest.taskPath, "docs", "logs"), "junction")
+
+      const result = await finishTask(subprocess, {
+        task: "login",
+        project: PROJECT,
+        tasksRoot: fixtureUnderTest.root,
+        documentsDirectory: documents,
+        cleanStray: true,
+      })
+
+      if (CAN_CREATE_SYMLINKS) {
+        // Nothing to refuse on this machine: the copy recreates the link and the stray
+        // is filed as it always was.
+        expect(existsSync(join(documents, "docs", "logs"))).toBe(true)
+        expect(existsSync(join(fixtureUnderTest.taskPath, "docs"))).toBe(false)
+      } else {
+        // Refused before the copy rather than half-way through it: the warning names
+        // the entry in the way, and the stray is left exactly as it stands - which is
+        // what the user removes an entry from before finishing again.
+        expect(result.warnings.join(" ")).toMatch(/could not archive 'docs'/)
+        expect(result.warnings.join(" ")).toMatch(/holds a link \(logs\)/)
+        expect(existsSync(join(documents, "docs"))).toBe(false)
+        expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "logs"))).toBe(true)
+        expect(result.strays).toContain("docs")
+      }
     } finally {
       await fixtureUnderTest.cleanup()
     }

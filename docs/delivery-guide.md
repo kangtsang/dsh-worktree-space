@@ -80,7 +80,8 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
   conflictedFiles、提交合并、重试 done（提权公开请求，不在场即停）；`stop`。
 - **strays** — 未进 git 的生成物收尾方式：`archive`（自动归档到
   `archived-docs\<项目>\<任务>-<时间戳>` 并清理产物）、`keep`（默认，列出让
-  你挑）、`discard`（仅放弃任务路径允许）。
+  你挑）、`discard`（仅放弃任务路径允许）。含链接（符号链接/交接点）的内容在
+  本机不能创建链接时不归档——留在原地并在 warning 里点名，移走那几个条目即可继续。
 
 项目默认存插件配置 **`deliveryDefaultsJson`**（Plugins 页，JSON 文本）：
 

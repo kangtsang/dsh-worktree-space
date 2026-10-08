@@ -7,7 +7,6 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 ## Unreleased
 
 ### Fixed
-
 - **A task space created from an agent session is no longer left unregistered.**
   `task_worktree_space`'s `create` did the disk half only — the directory, the
   branch, one worktree per repository — while "register this directory as a DSH
@@ -41,6 +40,39 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   just been deleted. A registration that could not be read or dropped is reported as
   a warning, never as a failure of a finish that has already taken the worktrees
   down.
+
+### Fixed (finishing)
+
+- **One link no longer stops an archive, and a half-copied archive is no longer left
+  behind.** `fs.cp` *recreates* a link rather than copying what it points at, and an
+  ordinary Windows installation (no Developer Mode) refuses to create symbolic links at
+  all — measured here: `mklink` answers "You do not have sufficient privilege" and
+  `fs.symlinkSync` throws `EPERM`. So a single link anywhere in a stray aborted the whole
+  copy, and the task space could never be cleared. The process now probes once whether it
+  may create a link, and where it may not, the stray is not copied at all: it stays where
+  it is, the warning names the entries in the way, and removing or moving those out — one
+  delete each, no privilege needed — is what lets the finish continue. A copy that failed
+  used to leave half an archive in `archived-docs` too; that is taken back out now, and
+  only when the destination really was this call's own (`errorOnExist` is what makes an
+  `EEXIST` somebody else's directory, which is left alone).
+- **A directory `git worktree remove` left behind is no longer filed as the user's
+  documents.** Measured here (git `2.28.0.windows.1`), that command **unregisters the
+  worktree before it deletes the directory**: when the delete fails it has already
+  unregistered it and removed its `.git` file, leaving a checkout git no longer knows
+  about. Worktree identity has exactly one test — is `.git` a file — so that leftover read
+  as the user's own content, got filed into the documents directory (a whole checkout,
+  `node_modules` and all, which is what the link above was hit inside), and **no later
+  finish would ever remove it**: a second `done` would only try to archive it again, and
+  would refuse outright with E2004 if it were the last one left. Now, when git's removal
+  fails, git is asked whether it still knows the path. If it does — the up-front refusals:
+  uncommitted work, a lock, a submodule — the failure is reported exactly as before and
+  **not worked around**. If it does not, git had already committed itself to the delete,
+  so the plugin finishes it inside its own fence and then `git worktree prune` clears
+  git's bookkeeping. When both deletes fail, or for a directory an earlier run already
+  orphaned, the directory is reported as a **repository** rather than as a stray: not
+  filed, not cleaned, left exactly as it stands. The plugin's record stays with it, since
+  the record is the only thing left that can say the directory is this task's repository
+  rather than the user's own files — which is what lets a later finish recognise it.
 
 ## 1.2.1 — 2026-10-06
 
