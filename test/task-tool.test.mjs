@@ -678,8 +678,13 @@ describe("registerTaskTool", () => {
       // Workspace only when it is named, and that attachment is what groups it in the sidebar.
       expect(created).toEqual([{ workspaceId: "ws-login" }])
       // The caller's own override, copied and marked as delegated rather than as a switch the
-      // user made - the same event and the same marker DSH seeds into a child agent.
-      expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } }])
+      // user made - the same events DSH seeds into a child agent. `danger-full-access` is a
+      // bundle in DSH's own table ("full file access without approval prompts"), so its
+      // approval policy is written with it.
+      expect(appended).toEqual([
+        { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
+        { type: "approval/policy", data: { policy: "never", source: "delegation" } },
+      ])
       expect(prompts).toEqual([{ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] }])
       expect(value.warnings).toEqual([])
       expect(value.summary).toContain("session-1")
@@ -733,6 +738,8 @@ describe("registerTaskTool", () => {
         { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "workspace-write" },
         { agent: { session: { id: "session-caller" } } },
       )
+      // `workspace-write` is a mode on its own: its preset already carries the deployment's
+      // `ask`, so nothing else is written and the pair stays the one the table names.
       expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
     } finally {
       await fixture.cleanup()

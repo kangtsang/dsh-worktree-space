@@ -115,8 +115,11 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 - **A new setting, Full access for the sessions handed to the agent for conflicts and commits (`handoffFullAccess`, off by default).**
   Switched on, the two sessions this plugin opens for "commit the uncommitted work" and "resolve the merge
   conflict" change: their working directory becomes the **container root** (so they read in the sidebar under
-  the Workspace the plugin registered, instead of in Ungrouped), and one `sandbox/mode` event is appended to
-  **that session's own log** right after it exists, putting its sandbox mode at `danger-full-access`.
+  the Workspace the plugin registered, instead of in Ungrouped), and **two** events are appended to **that
+  session's own log** right after it exists: `sandbox/mode` at `danger-full-access`, and `approval/policy` at
+  `never`. Both are written together because DSH's own table treats them as **one preset**, named "full access",
+  meaning "Full file access without approval prompts" — which is what the user's own switch in the panel
+  produces, so the session reads as that preset rather than as a combination nothing names.
   - **Why it is needed**: a handoff session's default working directory is the one that reaches **both** the
     worktree and the source repository's `.git`, because a linked worktree keeps its git metadata in the
     source repository. That directory is decided by the layout rather than by the plugin, so those sessions
@@ -183,10 +186,13 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 - **The permission follows DSH's own delegation rule.** The default is `inherit`: only the **calling session's own
   explicit sandbox override** is copied — not the deployment default (which the new session lands on anyway) and
   never a one-shot grant — so a session opened this way is **never wider than the one that opened it**. Pass
-  `permission: "danger-full-access"` to ask for more, which the tool's description says is the user's call; the
-  approval policy is left alone (the deployment default, so it asks when it has to go outside). Building, testing
-  and deploying inside the task space need only `workspace-write`. **Committing still writes the source
-  repository's `.git`, outside the task space**, and that remains the handoff's business, with its own switch.
+  `permission: "danger-full-access"` to ask for more, which the tool's description says is the user's call. What
+  is written follows the granularity of DSH's own table: `danger-full-access` is a bundle of both knobs, so
+  `approval/policy: never` is written with it — the session then reads as the preset the panel's own switch
+  produces, instead of as a pair that matches nothing. `workspace-write` is left alone, because its preset
+  already carries `ask`. Building, testing and deploying inside the task space need only `workspace-write`.
+  **Committing still writes the source repository's `.git`, outside the task space**, and that remains the
+  handoff's business, with its own switch.
 - With no session service in the deployment, **nothing is opened and nothing fails**: the answer says no session
   was opened and points at the panel, because the task space itself is fine.
 

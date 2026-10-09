@@ -108,16 +108,19 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   for a handoff**:
   - the working directory becomes the **container root** (`<container root>`), so those sessions belong to the
     Workspace the plugin registered rather than to Ungrouped;
-  - immediately after the session exists, one `sandbox/mode` event is appended to **that session's own log**,
-    putting its sandbox mode at `danger-full-access`.
+  - immediately after the session exists, two events are appended to **that session's own log**: `sandbox/mode`
+    at `danger-full-access`, and `approval/policy` at `never`. Both are written because DSH's own table treats
+    them as **one preset**, whose name is "full access" and whose meaning is "Full file access without approval
+    prompts". Writing only the first leaves a pair that matches no preset (the interface reads it as `custom`),
+    and any approval request that does arise would be put to the user — which is not what that preset means.
 
-  The consequence is what that event says: **that session may then write anywhere the DSH process can**, and
-  stops asking. It is durable state in the session log, reconstructed by replay across a restart, and its
-  scope is **that session** — not the deployment, not any other session.
+  The consequence is what those events say: **that session may then write anywhere the DSH process can**, and
+  there are no approval prompts in it. They are durable state in the session log, reconstructed by replay across
+  a restart, and their scope is **that session** — not the deployment, not any other session.
 
   Boundaries: it happens only when the setting is `on`; the setting is **re-read before each write** and a
-  request that arrives while it is off is refused (`E4012`) without writing anything; the only event written
-  is `sandbox/mode`, and nothing else about the session is touched; and it applies only to sessions the
+  request that arrives while it is off is refused (`E4012`) without writing anything; those two events are the
+  only ones written, and nothing else about the session is touched; and it applies only to sessions the
   plugin has just opened for a handoff. **A session already open is not affected by a later change to the
   switch** — that one is switched in its own session, with DSH's own `/permission`.
 

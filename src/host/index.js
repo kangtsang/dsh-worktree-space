@@ -12,7 +12,7 @@ import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
-import { registerTaskTool } from './task/tool.js'
+import { registerTaskTool, setSessionPermission } from './task/tool.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -1232,11 +1232,12 @@ export function apply(ctx, config = {}) {
       if (sessions === null || sessions === undefined || typeof sessions.get !== 'function') {
         return { widened: false, reason: 'no-sessions-service' }
       }
-      const session = sessions.get(sessionId)
-      if (session === undefined || session === null || typeof session.append !== 'function') {
+      // The whole preset, not half of it: `danger-full-access` in DSH's own table is "Full
+      // file access without approval prompts", so the approval policy is written with the
+      // mode. See `setSessionPermission`.
+      if (!setSessionPermission(sessions.get(sessionId), 'danger-full-access')) {
         return { widened: false, reason: 'no-session' }
       }
-      session.append('sandbox/mode', { mode: 'danger-full-access' })
       return { widened: true, mode: 'danger-full-access' }
     })
 

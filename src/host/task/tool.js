@@ -361,6 +361,32 @@ function inheritedMode(ctx, exec) {
 }
 
 /**
+ * Put one session at a sandbox mode, as DSH's own preset table means it.
+ *
+ * The table bundles two knobs, and one of its entries is more than a mode:
+ * `danger-full-access` is "Full file access without approval prompts", paired with `never`.
+ * A session given the first without the second is not that entry - the pair matches no
+ * preset, so the interface reads it as `custom`, and an approval request that does arise is
+ * put to the user instead of being refused. Both are written here, so what this plugin opens
+ * is exactly what the panel's own switch produces. `workspace-write` needs no such pairing:
+ * its preset carries `ask`, which is the deployment default already.
+ *
+ * `source: 'delegation'` marks a switch a tool made on the user's behalf rather than one
+ * they made themselves. Nothing keys on it - it is the marker DSH seeds into a child agent's
+ * log, and it is written here for the same reason: a reader of that log can tell the two
+ * apart.
+ * @param session - the session to write to.
+ * @param mode - the sandbox mode it is being put at.
+ * @returns whether anything was written.
+ */
+export function setSessionPermission(session, mode) {
+  if (session === undefined || session === null || typeof session.append !== 'function') return false
+  session.append('sandbox/mode', { mode, source: 'delegation' })
+  if (mode === 'danger-full-access') session.append('approval/policy', { policy: 'never', source: 'delegation' })
+  return true
+}
+
+/**
  * Open a session inside a task space and hand it one turn of work.
  *
  * Four steps, and each is a Host service a deployment may or may not serve: the task space
@@ -423,10 +449,7 @@ async function dispatchToSession(ctx, exec, request) {
   }
   const mode = request.requested === 'inherit' ? inheritedMode(ctx, exec) : request.requested
   if (mode !== undefined && typeof sessions?.get === 'function') {
-    const session = sessions.get(sessionId)
-    if (session !== undefined && session !== null && typeof session.append === 'function') {
-      session.append('sandbox/mode', { mode, source: 'delegation' })
-    }
+    setSessionPermission(sessions.get(sessionId), mode)
   }
   try {
     await controller.prompt({ sessionId, content: [{ type: 'text', text: request.prompt }] })

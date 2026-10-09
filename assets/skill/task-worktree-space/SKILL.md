@@ -142,9 +142,11 @@ workspace list and can be followed from there, and both answer with the session 
 Both are given **the permission the calling session carries as its own sandbox
 override, and nothing more** — a session opened this way can never be wider than the
 one that opened it. Pass `permission` only when the user asked for more:
-`danger-full-access` is the whole machine. What a session in the task space can do
-without asking is write **inside the task space**, which is enough to build, test and
-deploy there; committing still writes the source repository's `.git` outside it, so
+`danger-full-access` is the whole machine, and it is written as the whole of what DSH
+means by it — that mode together with `never`, which is what the panel's own switch
+produces ("full file access without approval prompts"). What a session in the task space
+can do without asking is write **inside the task space**, which is enough to build, test
+and deploy there; committing still writes the source repository's `.git` outside it, so
 that stays with the handoff below. A deployment that serves no session service says
 so in a warning instead of opening anything — then the session is the panel's to
 open, and the work is the user's to start.
