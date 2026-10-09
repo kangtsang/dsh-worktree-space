@@ -249,6 +249,18 @@ Confirm each destructive step with the user before passing it:
    stops the plugin reads the plan again, and where the worktrees have all come back
    clean the panel says the commits are done under a green light and waits for the
    user's own **Finish task** press — the step after it is the merge.
+
+   **Where the setting is on, both of these sessions are opened differently.** The
+   profile setting **Full access for the sessions handed to the agent**
+   (`handoffFullAccess`) opens each of them on the **container root** instead of the
+   common ancestor — so they collect under the plugin's own Workspace in the workspace
+   list rather than in Ungrouped — and gives each one `danger-full-access` right after
+   it exists. That is what replaces the elevation above: nothing will be refused, and
+   there is nothing to ask the user to approve, because the whole machine is writable
+   rather than just the directory the metadata sits in. Read what the first message
+   says about the working directory instead of assuming either arrangement: it names
+   the directory and says which access the session was given. Off — the default, and
+   what a Host that does not have the setting does — everything above holds.
 3. **A conflict?** The answer for a repository left on a conflict reports
    `mergeInProgress`, `mergeSite` — the checkout the conflict stands in, inside the
    task space — and `conflictedFiles`. Nothing is opened by itself here either: the

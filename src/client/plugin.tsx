@@ -240,6 +240,7 @@ export const WorktreePlugin = {
             workspaces={workspaces}
             sessions={sessions}
             uiWorkspace={uiWorkspace}
+            config={pluginConfigForm ?? undefined}
             onArchived={() => {
               void refreshClassification()
             }}
@@ -252,6 +253,7 @@ export const WorktreePlugin = {
             workspaces={workspaces}
             uiWorkspace={uiWorkspace}
             sessions={sessions}
+            config={pluginConfigForm ?? undefined}
             onCreate={(target) => setRequest({ kind: "create", target })}
             onOpenSettings={() => {
               // Close first: the dialog covers the main column, and the page it is
@@ -295,7 +297,7 @@ export const WorktreePlugin = {
     // id means, and a hidden row is a preference, not an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
+      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} config={pluginConfigForm ?? undefined} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
     ))
 
     // The plugin's two ways in, each shown or hidden by this plugin's own

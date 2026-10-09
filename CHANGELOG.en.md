@@ -110,6 +110,45 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   the record is the only thing left that can say the directory is this task's repository
   rather than the user's own files — which is what lets a later finish recognise it.
 
+### Added (the sessions handed to an agent can be made into one group)
+
+- **A new setting, Full access for the sessions handed to the agent (`handoffFullAccess`, off by default).**
+  Switched on, the two sessions this plugin opens for "commit the uncommitted work" and "resolve the merge
+  conflict" change: their working directory becomes the **container root** (so they read in the sidebar under
+  the Workspace the plugin registered, instead of in Ungrouped), and one `sandbox/mode` event is appended to
+  **that session's own log** right after it exists, putting its sandbox mode at `danger-full-access`.
+  - **Why it is needed**: a handoff session's default working directory is the one that reaches **both** the
+    worktree and the source repository's `.git`, because a linked worktree keeps its git metadata in the
+    source repository. That directory is decided by the layout rather than by the plugin, so those sessions
+    can only land in a Workspace that happens to sit there — and in Ungrouped where none does. DSH's
+    grouping is computed from the session's cwd on every read (`session.create` takes `workspaceId` or `cwd`,
+    never both, and a Workspace's `sessionIds` are filtered by `sessionPath(id) === workspace.path`), so the
+    only way to put them in a fixed group is to make that group's path the cwd — and the container root does
+    not reach a source repository's `.git`, which is why the access has to be opened at the same time.
+  - **The cost is what it says**: that session may then write anywhere the DSH process can, and the grant is
+    **durable** state in the session log that survives a restart. So it is **off** by default, and it happens
+    only when the user turns it on — in the plugin's settings, or on the card in the finish dialog.
+  - **Re-checked before every write**: the new `task.handoff-access` endpoint re-reads the setting each time
+    and refuses with `E4012` — writing no event — while it is off (a request naming no session is answered
+    with `E4011`). With no session service, or a session that has already gone, it answers that it did not
+    widen, and the handoff carries on: the panel says which access the session actually got rather than
+    pretending the setting took effect.
+  - **A session already open is unaffected**: the switch governs what is opened next. To change one that is
+    already running, switch it in its own session with `/permission`.
+- **The card that offers the handoff now shows that switch and can change it**, with a line saying it applies
+  to the sessions opened after this. A host that serves no configuration form shows the state and no switch.
+- **The container root's two names (`worktree-space`, `dsh-worktree-space`) joined the built-in ignored scan
+  directories.** The container root is now registered as a Workspace, so a scan walks it — and all it holds is
+  task spaces (linked worktrees are skipped) and archived documents, so it holds no repository of its own.
+  The built-in list goes from 23 names to 25, with both READMEs and the `documented-defaults` test updated.
+- **The copy about elevation branches on the setting.** `finishHandoffScopeWide` / `finishHandoffScopeTight` /
+  `finishCommitEscalation` stop being true when it is on — the container root does not hold the source
+  repository's `.git`, and that session no longer needs authorising — so they are replaced by
+  `finishHandoffScopeFullAccess` / `finishCommitFullAccess`, and the agent's first message says
+  `finishPromptScopeFullAccess`.
+- `PERMISSIONS.md` / `PERMISSIONS.en.md` gained a "Session access (off unless the user turns it on)" section
+  and two failure boundaries, stating this capability as it is.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

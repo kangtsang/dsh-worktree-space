@@ -112,6 +112,8 @@ describe("every sentence the Host's codes are said with", () => {
     ["E2004", { path: "/w/login", reason: "no-worktrees-to-extend" }, "/w/login"],
     ["E2004", { path: "/w/login", reason: "branches-disagree" }, "/w/login"],
     ["E2005", { path: "/w/login", missing: "/w/login/worktree-space.json" }, "worktree-space.json"],
+    ["E4011", {}, ""],
+    ["E4012", {}, ""],
     ["E5005", { target: "docker", envId: "demo" }, "docker"],
     // The environment is named only when there is one.
     ["E5005", { target: "docker", envId: "" }, "docker"],

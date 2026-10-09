@@ -114,6 +114,17 @@ const AUDIT_LOG_FIELD = "auditLog"/**
 const AUDIT_LOG_ON = "on"
 const AUDIT_LOG_OFF = "off"
 
+/** The row that decides how much access the sessions handed an agent are opened with. */
+const HANDOFF_ACCESS_FIELD = "handoffFullAccess"
+/**
+ * The two states, as the Host schema spells them. Off is the default and the one that
+ * keeps the sandbox in the conversation: the session is opened on the directory that
+ * reaches the git metadata a commit writes. On opens it on the container root with the
+ * whole disk in reach, so it never has to ask.
+ */
+const HANDOFF_ACCESS_ON = "on"
+const HANDOFF_ACCESS_OFF = "off"
+
 /**
  * The fields this plugin declares in its Host configuration.
  *
@@ -144,6 +155,22 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     fallback: "show",
     hint: t("entryHandoffHint"),
     choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
+  },
+  {
+    // How much access those two entries get. Off is what the plugin has always done -
+    // the session is opened where it can reach the repository's git metadata and asks
+    // when it has to write outside that - and on is the arrangement that puts those
+    // sessions under one Workspace at the price of the whole disk being in reach. The
+    // hint is long on purpose: one of these two states is a permission, and the row is
+    // the only place the cost can be said before someone picks it.
+    field: HANDOFF_ACCESS_FIELD,
+    label: t("handoffFullAccess"),
+    fallback: HANDOFF_ACCESS_OFF,
+    hint: t("handoffFullAccessHint"),
+    choices: [
+      { value: HANDOFF_ACCESS_OFF, key: "handoffFullAccessOff" },
+      { value: HANDOFF_ACCESS_ON, key: "handoffFullAccessOn" },
+    ],
   },
   {
     field: "scanDepth",
@@ -510,7 +537,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }

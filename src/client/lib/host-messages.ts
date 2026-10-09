@@ -71,6 +71,10 @@ export function hostFailureText(t: Translate, code: string, values: HostValues):
     }
     case "E2005":
       return format(t("hostE2005"), { path: text(values.path), missing: text(values.missing) })
+    case "E4011":
+      return t("hostE4011")
+    case "E4012":
+      return t("hostE4012")
     case "E5005": {
       const envId = text(values.envId)
       return format(t("hostE5005"), {

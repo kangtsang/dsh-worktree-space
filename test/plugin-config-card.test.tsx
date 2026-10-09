@@ -163,6 +163,33 @@ describe("the configuration card's agent handoff row", () => {
     expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configHide"))
   })
 
+  it("offers the handoff sessions' access as a choice, off by default and described as a permission", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // Its own row beside the entry it governs, with a note that says what the two states do
+    // and what the wider one costs - a note rather than a label, because one of the two is a
+    // permission over the whole machine and the row is the last place that can be said.
+    expect(hintIn(t("handoffFullAccess"))).toBe(t("handoffFullAccessHint"))
+    // Off is the default and the answer for a Host that serves no such key: the arrangement
+    // that keeps the sandbox in the conversation.
+    expect(screen.getByLabelText(t("handoffFullAccess")).textContent).toContain(t("handoffFullAccessOff"))
+  })
+
+  it("saves the access choice through the form the other rows use, and names both states", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("handoffFullAccess")))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("handoffFullAccessOn") })).toBeTruthy()
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("handoffFullAccessOff") })).toBeTruthy()
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("handoffFullAccessOn") }))
+
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("handoffFullAccess", "on"))
+    expect(read()).toMatchObject({ handoffFullAccess: "on" })
+    expect(screen.getByLabelText(t("handoffFullAccess")).textContent).toContain(t("handoffFullAccessOn"))
+  })
+
   it("offers the entries as shown when the Host serves no such key, which is the default", () => {
     const { form } = configForm("task/", true, "", null)
     render(<PluginConfigCard form={form} />)

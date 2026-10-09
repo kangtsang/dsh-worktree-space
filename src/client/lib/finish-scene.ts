@@ -23,6 +23,20 @@ export interface FinishSceneSession {
    * does not reach it, and there the panel says the elevation is the user's to approve.
    */
   wide: boolean
+  /**
+   * Whether the session was opened with full access, which is the other way it can be
+   * allowed to write a repository's git metadata.
+   *
+   * A session opened on the container root is not `wide` - that directory does not reach
+   * the metadata - and is allowed to write it because the setting gave it the whole
+   * disk. The panel says which of the two applies rather than inferring it from `wide`,
+   * and the sentence the agent is handed says it too.
+   *
+   * Optional because a scene written by an earlier build has no such field, and a scene
+   * comes back from the page's own memory rather than from the Host: absent means the
+   * directory the session was opened on was the one expected to reach the metadata.
+   */
+  fullAccess?: boolean
   /** What the session was opened to do, which is what the panel calls it. */
   kind: "commit" | "conflict"
   sessionId: Awaited<ReturnType<ISessions["create"]>>

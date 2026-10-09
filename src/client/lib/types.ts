@@ -340,6 +340,16 @@ export interface TaskPreference {
   /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
   handoffEntry: string
   /**
+   * `on` when the sessions that a finish hands an agent are opened at the container root
+   * with full access, `off` when each keeps the directory that reaches the git metadata
+   * and asks before writing outside it.
+   *
+   * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}: a
+   * Host that predates the setting answers without it, and absent reads as `off`, which
+   * is what such a Host does.
+   */
+  handoffFullAccess?: string
+  /**
    * `on` when the audit log is being written, `off` when it is not.
    *
    * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}:

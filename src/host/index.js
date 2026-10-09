@@ -20,7 +20,7 @@ export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-accept', 'task.deploy-up', 'task.deploy-smoke', 'task.preference']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-accept', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -57,7 +57,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5005', 'E5006', 'E5007', 'E5008', 'E5009', 'E5010', 'E5011',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
@@ -136,6 +136,18 @@ const DEFAULT_IGNORED_SCAN_DIRECTORIES = [
   'dist-newstyle', '_build', 'blib', 'zig-out',
   // Unreal, which capitalises its generated directories
   'Binaries', 'Intermediate', 'DerivedDataCache',
+  // This plugin's own task container, under both of the names it takes.
+  //
+  // Registering the container root as a Workspace is how the sessions a finish hands
+  // an agent end up under one group rather than in Ungrouped, and that puts the
+  // container in the set of roots a scan walks. What is in it is task spaces, which
+  // are linked worktrees of repositories the scan has already found elsewhere, and
+  // archived documents - so walking it spends budget on directories that hold no
+  // repository of their own. Named rather than skipped by path because a scan is
+  // handed Workspace roots and walks them: the name is the only thing left to compare.
+  // A user whose own directory is called this and does hold repositories can take the
+  // name back off this list on the Plugins page, which is what that setting is for.
+  'worktree-space', 'dsh-worktree-space',
 ]
 
 /**
@@ -316,6 +328,14 @@ let archiveStrategyReference
 let handoffEntryReference
 
 /**
+ * Whether the sessions handed an agent are opened with full access.
+ *
+ * Held, not read, like the entry beside it: the settings card writes it while a dialog
+ * is open, and the endpoint that widens a session asks at use time rather than at load.
+ */
+let handoffFullAccessReference
+
+/**
  * Whether the container root is derived from the source root or named by the user.
  *
  * `default` is the recommendation the plugin has always made; `custom` hands the
@@ -376,6 +396,18 @@ export function configuredArchiveStrategy() {
  */
 export function configuredHandoffEntry() {
   return handoffEntryReference?.get() === 'hide' ? 'hide' : 'show'
+}
+
+/**
+ * Whether the sessions handed an agent are opened with full access.
+ * @returns `'on'` only when the configuration says so; anything else is off, which is
+ *   the shipped default and the answer a Host with no such setting gives.
+ */
+export function configuredHandoffFullAccess() {
+  // Through `settingValue` rather than straight at `.get()`: the Loader hands a live
+  // reference, but a caller passing the value itself - a test, or any future direct call -
+  // would otherwise read as unset, and for this setting "unset" is the refusal.
+  return settingValue(handoffFullAccessReference) === 'on' ? 'on' : 'off'
 }
 
 /**
@@ -678,6 +710,28 @@ export const Config = z.object({
   handoffEntry: z.union(['show', 'hide']).default('show').loose().volatile()
     .description('Offer the two experimental entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
   /**
+   * Whether the sessions a finish hands an agent are opened with full access.
+   *
+   * Off, each handoff session is opened on the directory that reaches both the worktree
+   * and its source repository's git metadata, which is what lets the commit run without
+   * the sandbox asking. That boundary is a property of the layout - it is wherever the
+   * two share a directory - so those sessions land in whatever Workspace sits there, or
+   * in Ungrouped where nothing does.
+   *
+   * On, the session is opened on the container root instead. It collects under one
+   * Workspace that way, and it is given `danger-full-access`, because the metadata a
+   * commit writes now lies outside it. That is the whole disk rather than the
+   * repositories involved, and the grant is a session-log event: it is durable, and it
+   * survives a restart by replay. So this is off by default and stays off unless the
+   * user says otherwise - and the endpoint below checks it again before widening
+   * anything, because it is the authorisation for that write.
+   *
+   * Read through `task.preference`, so the dialog that offers the handoff can say which
+   * of the two it is about to do without reaching for the configuration form.
+   */
+  handoffFullAccess: z.union(['off', 'on']).default('off').loose().volatile()
+    .description('Open the sessions that commit uncommitted work, and the sessions that resolve a merge conflict, at the container root with full access, so they never ask to write a source repository\'s git metadata. Off, each is opened on the directory that reaches that metadata, and asks when it has to write outside it.'),
+  /**
    * Whether the audit log is written.
    *
    * On by default, and that is the setting being worth having: the log is the only
@@ -857,6 +911,9 @@ export function apply(ctx, config = {}) {
   // And for the agent handoff entries: the settings card writes this one, the finish
   // dialog reads it, and shown is what anything but an explicit `hide` means.
   handoffEntryReference = config.handoffEntry
+  // And for how much access those entries get: the card writes it, the endpoint that
+  // widens a session reads it, and off is what anything but an explicit `on` means.
+  handoffFullAccessReference = config.handoffFullAccess
   // And for where a task space goes: the settings card writes the pair, and every
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
@@ -1134,12 +1191,53 @@ export function apply(ctx, config = {}) {
         archiveDocumentsStrategy: configuredArchiveStrategy(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
         handoffEntry: configuredHandoffEntry(),
+        // Which of the two arrangements the next handoff will use: the boundary that
+        // reaches a repository's git metadata, or the container root with full access.
+        // The dialog says which before it opens anything, so it has to know.
+        handoffFullAccess: configuredHandoffFullAccess(),
         // So a dialog can tell someone that what just happened was not recorded
         // rather than leave them to find an empty log and assume the plugin is
         // broken. The answer is the running state, not the configured value, so
         // it cannot disagree with what is actually being written.
         auditLog: auditEnabled() ? 'on' : 'off',
       }
+    })
+
+    /**
+     * Widen one session this plugin has just opened for the user's handoff.
+     *
+     * The one thing here that changes a session rather than a task space, and the only
+     * reason it exists: a handoff session opened on the container root cannot reach the
+     * git metadata that a commit writes, so the setting has to hand it the whole disk.
+     * The mode is what DSH's sandbox reads on every confined call, and this is a write
+     * path of its own - one `sandbox/mode` event on the session's log, which is the
+     * event `setSandboxMode` appends and the one `dsh-subagent` appends for a child it
+     * seeds. It is durable: replaying the log reconstructs it, so it survives a restart.
+     *
+     * The setting is checked here rather than taken from the client's word: it is the
+     * authorisation for this write, so a request that arrives while it is off is refused
+     * (E4012) rather than quietly obeyed.
+     *
+     * A deployment with no session service, or a session that has already gone, is not
+     * an error: the handoff did happen, and the answer says the widening did not, so the
+     * panel can say so and leave the user to switch that session with `/permission`.
+     */
+    if (endpoint === 'task.handoff-access') return recover(async () => {
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      if (sessionId === '') throw coded('E4011', 'A session id is required.')
+      if (configuredHandoffFullAccess() !== 'on') {
+        throw coded('E4012', 'Full access for the sessions handed to an agent is switched off.')
+      }
+      const sessions = typeof ctx.get === 'function' ? ctx.get('sessions') : undefined
+      if (sessions === null || sessions === undefined || typeof sessions.get !== 'function') {
+        return { widened: false, reason: 'no-sessions-service' }
+      }
+      const session = sessions.get(sessionId)
+      if (session === undefined || session === null || typeof session.append !== 'function') {
+        return { widened: false, reason: 'no-session' }
+      }
+      session.append('sandbox/mode', { mode: 'danger-full-access' })
+      return { widened: true, mode: 'danger-full-access' }
     })
 
     if (endpoint === 'task.create') return recover(async () => {

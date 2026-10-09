@@ -244,7 +244,7 @@ data directory, which needs a DSH restart.
 | Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
 | Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, a smaller Workspace is requested |
-| Directories the scan skips | any list of directory names | the plugin's 23 | A scan never descends into directories with these names. The plugin ships 23 dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — and you can add your own or take one of those away. **Removing a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Up to 200 of your own. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
+| Directories the scan skips | any list of directory names | the plugin's 25 | A scan never descends into directories with these names. The plugin ships 25: dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — plus this plugin's own task container, under both names it takes, `worktree-space` and `dsh-worktree-space`. You can add your own or take one of those away. **Removing a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Up to 200 of your own. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
 | Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source Workspace by the rule below and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits, and their tasks cannot crowd each other. A custom directory that shares no common ancestor with the project's directory makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
 | Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
@@ -450,6 +450,27 @@ common ancestor of that worktree and the main checkout. Where that common ancest
 **volume root** (the repositories sit on different volumes, or both the task space and the
 repositories sit directly under the root) there is still just the one session, working in the **task
 space**, and the elevation is yours to approve in that session.
+
+### Putting those sessions in one group (off by default)
+
+That working directory is decided by the layout rather than by the plugin, so those sessions only land in
+a Workspace that happens to sit exactly there — and in the sidebar's Ungrouped where none does. DSH computes
+its groups from each session's working directory, so the only way to collect them into one group is to make
+that group's path the working directory.
+
+**Full access for the sessions handed to the agent** (off by **default**) is that. Turned on:
+
+- both sessions open at the **container root**, so they belong to the Workspace the plugin registered for
+  it (the container root's two names, `worktree-space` and `dsh-worktree-space`, also joined the built-in
+  ignored scan directories, so a scan no longer walks in looking for repositories);
+- right after the session exists, the plugin puts its sandbox mode at `danger-full-access` — the container
+  root does not reach a source repository's `.git`, and the commit has to write there.
+
+Be clear about the cost: **that session may then write anywhere the DSH process can write**, and stops
+asking. The grant is recorded in the session log, so it survives a restart. That is why it is off. The card
+that offers the handoff in the finish dialog shows the state and can change it, and says so plainly: it
+**applies to the sessions opened after this**; one already open is switched in its own session with
+`/permission`. A host that serves no configuration form shows the state there without the switch.
 
 ### The flow and its steps
 

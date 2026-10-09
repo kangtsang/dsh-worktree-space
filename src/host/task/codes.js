@@ -61,6 +61,8 @@ export const ERROR_CODES = {
   E4008: 'archive.js - the merge target is unusable',
   E4009: 'naming.js - the task name or branch prefix is not usable',
   E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
+  E4011: 'index.js - a handoff access request named no session',
+  E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',

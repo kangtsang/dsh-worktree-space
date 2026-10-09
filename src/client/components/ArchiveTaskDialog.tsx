@@ -8,6 +8,7 @@ import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/docume
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
 import { BetaNotice } from "./BetaNotice"
+import type { ConfigFormLike } from "./PluginConfigCard"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions, SessionTarget } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
@@ -20,6 +21,15 @@ interface ArchiveTaskDialogProps {
   sessions: ISessions
   /** The navigation face, which is how the user reaches a session this dialog opened. */
   uiWorkspace: WorkspaceNavigation
+  /**
+   * This plugin's configuration form, when the shell serves one.
+   *
+   * The card in this dialog reads and writes the one setting that decides how much
+   * access a handed-on session is opened with, through the same form the Plugins page
+   * edits - the way the create dialog reads and writes the branch prefix, rather than a
+   * second copy of a setting that lives in the Host.
+   */
+  config?: ConfigFormLike
   /**
    * The user's own answer to "finish anyway?", asked at the finish press when the
    * delivery policy is not satisfied. Carried to the done call, which records it
@@ -74,7 +84,7 @@ interface HandoffTarget {
  * back to Ungrouped with their history intact; and a session still running here
  * stops the archive instead of having its directory pulled out from under it.
  */
-export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, acknowledgeDelivery = false, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
+export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, config, acknowledgeDelivery = false, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
@@ -123,6 +133,21 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * stays on screen, because that is the state of the work rather than an offer.
    */
   const [handoffEntry, setHandoffEntry] = useState(true)
+  /**
+   * Whether the sessions this dialog opens are opened with full access.
+   *
+   * Off until the Host says otherwise, which is the setting's own default and the state
+   * that keeps the sandbox in the conversation. On, each session is opened on the
+   * container root - where it collects under one Workspace - and widened by the Host, so
+   * the commit can write a source repository's git metadata without asking.
+   *
+   * Read from `task.preference` and written through the configuration form, the way the
+   * create dialog handles the branch prefix: one setting, one home, and this is a view of
+   * it that can change it.
+   */
+  const [fullAccess, setFullAccess] = useState(false)
+  /** What went wrong with the switch, or with widening a session the switch was on for. */
+  const [accessError, setAccessError] = useState("")
   // The sessions run outside this dialog, so the rows reporting on them have to
   // follow the Host's list rather than a value read once. The counter is the render.
   const [, setSessionTick] = useState(0)
@@ -257,6 +282,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     void api.preferences().then((served) => {
       if (!live) return
       setHandoffEntry(served?.handoffEntry !== "hide")
+      // Anything but an explicit `on` is off, which covers an older Host that answers
+      // without the field: such a Host opens each session on the boundary that reaches
+      // the metadata, and that is what off means here.
+      setFullAccess(served?.handoffFullAccess === "on")
       setDocumentsDirectory(documentsDirectoryFor(path, new Date(), {
         strategy: served?.archiveDocumentsStrategy ?? DEFAULT_ARCHIVE_PREFERENCE.strategy,
         directory: typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : "",
@@ -384,6 +413,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // directory: only a boundary that really reaches it can be committed in, and the
       // session remembers which of the two it was opened as.
       wide: entries.every((entry) => entry.wide),
+      // And the other way it can be allowed to write that metadata: the session was widened
+      // instead of being opened where the metadata is. One session is widened once, so every
+      // entry that names it agrees; `every` is what says so if one ever does not.
+      fullAccess: entries.every((entry) => entry.fullAccess === true),
     }
   })
   /**
@@ -541,22 +574,25 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    *
    * The directory is named either way, because that is where its git commands are allowed to
    * write. What differs is whether it really reaches the .git of every repository in the
-   * batch: where it does not, the agent is told to ask for the elevation rather than left to
-   * run into the refusal.
+   * batch, or whether the session was widened instead: where neither is true, the agent is
+   * told to ask for the elevation rather than left to run into the refusal.
    */
-  const scopeLine = (boundary: string, wide: boolean) => format(t(wide ? "finishPromptScopeWide" : "finishPromptScopeTight"), { boundary: slashPath(boundary) })
-  const commitPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean) => format(t("finishCommitPrompt"), {
+  const scopeLine = (boundary: string, wide: boolean, fullAccess: boolean) => format(
+    t(fullAccess ? "finishPromptScopeFullAccess" : wide ? "finishPromptScopeWide" : "finishPromptScopeTight"),
+    { boundary: slashPath(boundary) },
+  )
+  const commitPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean, fullAccess: boolean) => format(t("finishCommitPrompt"), {
     task: plan?.task ?? "",
-    scope: scopeLine(boundary, wide),
+    scope: scopeLine(boundary, wide, fullAccess),
     repositories: entries.map((entry) => format(t("finishCommitRepository"), {
       name: entry.name,
       branch: entry.branch ?? "",
       site: slashPath(entry.site),
     })).join("\n"),
   })
-  const conflictPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean) => format(t("finishHandoffPrompt"), {
+  const conflictPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean, fullAccess: boolean) => format(t("finishHandoffPrompt"), {
     task: plan?.task ?? "",
-    scope: scopeLine(boundary, wide),
+    scope: scopeLine(boundary, wide, fullAccess),
     repositories: entries.map((entry) => format(t("finishHandoffRepository"), {
       name: entry.name,
       branch: entry.branch ?? "",
@@ -585,8 +621,85 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * covers, rather than queued a turn per repository - the agent has the whole job from the
    * start and works through it.
    */
-  const openAgentSessions = async (entries: HandoffTarget[], kind: "commit" | "conflict", textFor: (batch: HandoffTarget[], boundary: string, wide: boolean) => string) => {
-    setAuthorizing(true); setHandoffError("")
+  /**
+   * Make the container root a Workspace, so the sessions opened on it collect there.
+   *
+   * Registration is this side's to do - `ctx.workspaces.create`, which is the Host's
+   * registry over the wire, the same half the create dialog registers a task space from -
+   * and it resolves an existing record idempotently, so a root that is already a Workspace
+   * needs no check first. It is attempted only when the setting asks for these sessions to
+   * be opened there: registering a directory nobody is going to use is a row in the user's
+   * workspace list they never asked for.
+   *
+   * Answers the directory to open on, or an empty string when it could not be arranged. A
+   * root that cannot be registered is not a reason to refuse the handoff: the batch falls
+   * back to the boundary that reaches the git metadata - which is where the sandbox asks -
+   * and the panel says that is what happened rather than claiming the setting took effect.
+   */
+  const claimContainerRoot = async (): Promise<string> => {
+    // Slashed, the way the boundary the setting replaces is spelled: the two are the same
+    // kind of value - a working directory for a session - and a Host that takes either
+    // separator should not have to see both styles from one dialog.
+    const root = slashPath(containerRootOf(path))
+    if (root === "") return ""
+    try {
+      await workspaces.create({ path: root })
+      return root
+    } catch (reason: any) {
+      setAccessError(format(t("handoffAccessRootFailed"), { error: errorText(t, reason) }))
+      return ""
+    }
+  }
+
+  /**
+   * Ask the Host to widen the session a batch was just opened in, and say whether it did.
+   *
+   * The setting is what authorises that write and the Host checks it again, so a refusal
+   * here is the truth rather than a dialog that forgot: the handoff carries on with the
+   * session sandboxed, and the row that names the working directory says which access it
+   * actually got.
+   */
+  const widenSession = async (sessionId: FinishSceneSession["sessionId"]): Promise<boolean> => {
+    try {
+      const answer = await api.widenHandoffSession(String(sessionId))
+      if (answer?.widened === true) return true
+      setAccessError(format(t("handoffAccessWidenFailed"), {
+        reason: t(answer?.reason === "no-session" ? "handoffAccessReasonNoSession" : "handoffAccessReasonNoService"),
+      }))
+      return false
+    } catch (reason: any) {
+      setAccessError(format(t("handoffAccessWidenFailed"), { reason: errorText(t, reason) }))
+      return false
+    }
+  }
+
+  /**
+   * Turn the full-access setting on or off, from the panel that lives with the decision.
+   *
+   * The state on screen moves first and moves back if the Host refuses, which is the shape
+   * the configuration card uses for the same reason: a control that only moved after a
+   * round trip would look like it had done nothing when it was clicked. The write goes
+   * through the configuration form, so the Plugins page and this row cannot end up
+   * disagreeing about which state is in force - and a refusal is said out loud rather than
+   * left to a switch that quietly sprang back.
+   */
+  const toggleFullAccess = () => {
+    if (config === undefined) return
+    const next = !fullAccess
+    setAccessError("")
+    setFullAccess(next)
+    void config.set("handoffFullAccess", next ? "on" : "off").then((accepted) => {
+      if (accepted) return
+      setFullAccess(!next)
+      setAccessError(t("handoffAccessNotSaved"))
+    }).catch(() => {
+      setFullAccess(!next)
+      setAccessError(t("handoffAccessNotSaved"))
+    })
+  }
+
+  const openAgentSessions = async (entries: HandoffTarget[], kind: "commit" | "conflict", textFor: (batch: HandoffTarget[], boundary: string, wide: boolean, fullAccess: boolean) => string) => {
+    setAuthorizing(true); setHandoffError(""); setAccessError("")
     const opened: FinishSceneSession[] = []
     const failures: string[] = []
     // Claimed before the first await, so a second step starting while this one is still
@@ -601,25 +714,38 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     const fresh = wanted.filter((entry) => !handoff.some((one) => one.name === entry.name))
     const scoped = fresh.map((entry) => ({ entry, ...scopeFor(entry.site, entry.mainRepo) }))
     const shared = commonBoundary(scoped.map((one) => one.boundary))
-    const batches: Array<{ boundary: string; wide: boolean; sessionId?: FinishSceneSession["sessionId"]; entries: HandoffTarget[] }> = [
+    // Where these sessions are opened, when the setting says so: the container root, which
+    // is where they collect under one Workspace rather than in Ungrouped. Empty means the
+    // boundary that reaches the git metadata is used instead - what the setting being off
+    // asks for, and what a root that could not be registered falls back to. Asked for only
+    // when something is left to hand on: a batch that reuses a session keeps the access
+    // that session was opened with, so nothing here reaches into a conversation under way.
+    const accessRoot = fullAccess && scoped.length > 0 ? await claimContainerRoot() : ""
+    const batches: Array<{ boundary: string; wide: boolean; fullAccess: boolean; sessionId?: FinishSceneSession["sessionId"]; entries: HandoffTarget[] }> = [
       ...spokenFor.map((entry) => {
         const previous = handoff.find((one) => one.name === entry.name)!
-        return { boundary: previous.boundary, wide: previous.wide, sessionId: previous.sessionId, entries: [entry] }
+        return { boundary: previous.boundary, wide: previous.wide, fullAccess: previous.fullAccess === true, sessionId: previous.sessionId, entries: [entry] }
       }),
       // One batch either way, and only when there is something left to hand on. Several
       // repositories are opened on whatever covers them all - their common ancestor where they
       // have one, and the task space where they share nothing but a volume root, which reaches
       // every worktree the Host named even though the git metadata a commit writes may lie
       // outside it. A single repository keeps its own boundary, which is the one that reaches
-      // its metadata.
-      ...(scoped.length === 0 ? [] : [{
-        boundary: shared ?? (scoped.length === 1 ? scoped[0].boundary : path),
-        wide: scoped.length === 1 ? scoped[0].reaches : shared !== undefined,
-        entries: scoped.map((one) => one.entry),
-      }]),
+      // its metadata. With full access on and a container root to open on, all of that is
+      // replaced by the one directory the setting names: it does not reach the metadata, and
+      // it does not have to, because the session is widened instead.
+      ...(scoped.length === 0 ? [] : [accessRoot !== ""
+        ? { boundary: accessRoot, wide: false, fullAccess: true, entries: scoped.map((one) => one.entry) }
+        : {
+          boundary: shared ?? (scoped.length === 1 ? scoped[0].boundary : path),
+          wide: scoped.length === 1 ? scoped[0].reaches : shared !== undefined,
+          fullAccess: false,
+          entries: scoped.map((one) => one.entry),
+        }]),
     ]
     for (const batch of batches) {
       let sessionId: FinishSceneSession["sessionId"]
+      const reused = batch.sessionId !== undefined
       try {
         sessionId = batch.sessionId ?? await sessions.create({ cwd: batch.boundary })
       } catch (reason: any) {
@@ -630,6 +756,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         }
         continue
       }
+      // Widened after the session exists rather than before it: the mode is an event on the
+      // session's own log, so there is nothing to widen until there is a session. A session
+      // this dialog opened earlier keeps the access it was given then - the switch governs
+      // what is opened next, and nothing here reaches into a conversation already under way.
+      const granted = batch.fullAccess && (reused || await widenSession(sessionId))
       try {
         // A session opens blank, so this is its first turn rather than a steer, and the
         // reference is a handle for the length of the call - not something to keep: the
@@ -637,9 +768,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // batch rides in that one turn, so a shared session is not queued a message per
         // repository and its agent can settle the whole list in a single pass.
         await sessions.using(sessionId, { source: "controllerOperation" }, async (reference) => {
-          await reference.binding.session.prompt([{ type: "text", text: textFor(batch.entries, batch.boundary, batch.wide) }], "queue")
+          await reference.binding.session.prompt([{ type: "text", text: textFor(batch.entries, batch.boundary, batch.wide, granted) }], "queue")
         })
-        for (const entry of batch.entries) opened.push({ name: entry.name, site: entry.site, boundary: batch.boundary, wide: batch.wide, kind, sessionId })
+        for (const entry of batch.entries) opened.push({ name: entry.name, site: entry.site, boundary: batch.boundary, wide: batch.wide, fullAccess: granted, kind, sessionId })
       } catch (reason: any) {
         for (const entry of batch.entries) {
           claimed.current.delete(`${kind}:${entry.name}`)
@@ -900,13 +1031,29 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             {/* What is left after the agent's part: the merging the plugin does, said here
                 rather than left to be discovered. */}
             {phase === "conflict" ? <p className="dws-finish-handoff-hint">{t("finishHandoffHint")}</p> : null}
+            {/* The one thing this dialog opens sessions with, said where the opening
+                happens rather than only on the Plugins page: it decides what the rows below
+                can do, and it can be changed from here. The state is named rather than left
+                to a switch position, because the two states are a difference in permission
+                rather than an on and an off of the same thing. */}
+            <p className="dws-finish-handoff-access">
+              <span>{t("handoffAccessLabel")}</span>
+              <strong>{t(fullAccess ? "handoffFullAccessOn" : "handoffFullAccessOff")}</strong>
+              {config === undefined
+                ? null
+                : <button type="button" className="dws-finish-handoff-access-switch" onClick={toggleFullAccess}>
+                  {t(fullAccess ? "handoffAccessSwitchToAsk" : "handoffAccessSwitchToFull")}
+                </button>}
+            </p>
+            <p className="dws-finish-handoff-access-note">{t(config === undefined ? "handoffAccessNoForm" : "handoffAccessScope")}</p>
+            {accessError !== "" ? <p className="dws-finish-handoff-access-note is-error" role="status">{accessError}</p> : null}
             {/* Said before the session exists, because it is what the user has to do once
                 it does: the approval a commit may need is not this dialog's to give. A
                 Host that offers no such entry says the same thing about doing it by hand
                 here, so the line is there either way - the finish stops on this work
                 whether or not an agent may be put on it. */}
             {phase === "commit"
-              ? <p className="dws-finish-handoff-hint">{t(handoffEntry ? "finishCommitEscalation" : "finishCommitManual")}</p>
+              ? <p className="dws-finish-handoff-hint">{t(handoffEntry ? (fullAccess ? "finishCommitFullAccess" : "finishCommitEscalation") : "finishCommitManual")}</p>
               : null}
             {shownHandoff.length > 0 ? <>
               {/* What the sessions are for is said once, not on every row: the job is the
@@ -919,7 +1066,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 job: t(shownSessions.every((session) => session.kind === "conflict") ? "finishHandoffJobConflict" : "finishHandoffJobCommit"),
               })}{shownSessions.map((session, index) => <span key={session.sessionId}>
                 {index > 0 ? "、" : null}
-                <span className="dws-finish-handoff-boundary" title={session.wide ? t("finishHandoffScopeWide") : t("finishHandoffScopeTight")}>{format(t("finishHandoffBoundary"), { path: slashPath(session.boundary) })}</span>
+                <span className="dws-finish-handoff-boundary" title={session.fullAccess === true ? t("finishHandoffScopeFullAccess") : session.wide ? t("finishHandoffScopeWide") : t("finishHandoffScopeTight")}>{format(t("finishHandoffBoundary"), { path: slashPath(session.boundary) })}</span>
               </span>)}</p>
               <ul className="dws-finish-handoff-sessions">{shownHandoff.map((opened) => <li key={`${opened.kind}:${opened.name}`}>
                 <strong>{opened.name}</strong>

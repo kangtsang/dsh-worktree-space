@@ -6,6 +6,7 @@ import type { WorktreeView } from "./WorktreesSettings"
 import { BrandGlyph, ChevronLeft, Settings } from "./icons"
 import { PluginDescription } from "./PluginDescription"
 import type { createWorktreeApi } from "../lib/api"
+import type { ConfigFormLike } from "./PluginConfigCard"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 
 /** What every host of the management page supplies: its services and its frame. */
@@ -28,6 +29,13 @@ export interface WorktreesPageProps {
    * thing, so that stands in — and the dialog passes its own close.
    */
   onLeave?: () => void
+  /**
+   * This plugin's configuration form, when the shell serves one, for the finish dialog's
+   * switch: it is the one place that setting can be changed from the page rather than the
+   * Plugins page, and it is handed down rather than read from a store so a host that has
+   * no form simply does not offer the switch.
+   */
+  config?: ConfigFormLike
 }
 
 /**
@@ -98,7 +106,7 @@ function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
  * keeps its heading and its way back above the two columns, the dialog puts the title in
  * the window's own header, and either way only the rows the view lists scroll.
  */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave }: WorktreesPageProps & {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave, config }: WorktreesPageProps & {
   variant: "panel" | "dialog"
   /** Panel only: the way back to the conversation. */
   onBack?: () => void
@@ -116,6 +124,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     onCreate={onCreate}
     control={{ view, onView: setView }}
     onLeave={onLeave ?? onBack}
+    config={config}
   />
   if (variant === "dialog") return <section className="dws-manage-page" aria-label={t("worktreesTitle")}>
     <WorktreesNav view={view} onView={setView} onOpenSettings={onOpenSettings} />

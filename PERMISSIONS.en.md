@@ -80,6 +80,29 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   separate session**, in which the **host's agent** runs `git add` / `git commit`: those commands are not
   issued by this plugin and are not part of its permission signals.
 
+- **Session access (off unless the user turns it on)**: both of those handoffs open **separate sessions**. By
+  default the plugin picks a working directory that reaches **both the worktree and the source repository's
+  `.git`**, so the session stays inside DSH's sandbox: writing outside that directory — a source repository's
+  git metadata, for instance — is refused by the sandbox and handled by DSH's own elevation approval. **The
+  plugin neither proxies nor bypasses it.**
+
+  With the setting **Full access for the sessions handed to the agent** (`handoffFullAccess`, `off` by
+  default) on, the plugin does two more things to **the sessions it has just opened for a handoff**:
+  - the working directory becomes the **container root** (`<container root>`), so those sessions belong to the
+    Workspace the plugin registered rather than to Ungrouped;
+  - immediately after the session exists, one `sandbox/mode` event is appended to **that session's own log**,
+    putting its sandbox mode at `danger-full-access`.
+
+  The consequence is what that event says: **that session may then write anywhere the DSH process can**, and
+  stops asking. It is durable state in the session log, reconstructed by replay across a restart, and its
+  scope is **that session** — not the deployment, not any other session.
+
+  Boundaries: it happens only when the setting is `on`; the setting is **re-read before each write** and a
+  request that arrives while it is off is refused (`E4012`) without writing anything; the only event written
+  is `sandbox/mode`, and nothing else about the session is touched; and it applies only to sessions the
+  plugin has just opened for a handoff. **A session already open is not affected by a later change to the
+  switch** — that one is switched in its own session, with DSH's own `/permission`.
+
 - **Network**: the plugin itself issues **no HTTP request at all** and runs **no `git push`**. Every `git`
   subcommand it runs is local (see the table below) and writes no remote ref. Git's own credential helpers and
   proxy settings are outside this plugin's control.
@@ -169,6 +192,8 @@ executable artifact.
 | A session in that Workspace is still running | Finishing is refused until that session ends or is stopped |
 | The task space directory still holds anything | The directory is not deleted and the Workspace stays registered |
 | Something cannot be confirmed | This file and `README.md` say "unknown / unverified" rather than reading "not found" as "does not access" |
+| A request to widen a session arrives while the setting is off | Refused with `E4012`, and **no event is written** — off means off; a request that names no session is answered with `E4011` |
+| No session service, or the session has already gone | Answered as "not widened" and the handoff carries on; the panel says which access the session actually got instead of pretending the setting took effect |
 
 ## Relation to the DSH STORE contract
 

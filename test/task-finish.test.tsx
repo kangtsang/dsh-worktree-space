@@ -53,7 +53,7 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", fullAccess, config, widen, plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; fullAccess?: string; config?: any; widen?: () => Promise<unknown>; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
@@ -65,13 +65,25 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     // asks for another one, its directory is empty unless a test sets one, and the agent
     // entries are offered unless a test hides them, which is what a case about the
     // standard flow does.
-    preferences: vi.fn().mockResolvedValue({ defaultBranchPrefix: "task/", archiveDocumentsStrategy: archiveStrategy, archiveDocumentsDirectory: archiveDirectory, handoffEntry }),
+    preferences: vi.fn().mockResolvedValue({
+      defaultBranchPrefix: "task/",
+      archiveDocumentsStrategy: archiveStrategy,
+      archiveDocumentsDirectory: archiveDirectory,
+      handoffEntry,
+      // Left out entirely unless a case asks for it, the way a Host that predates the
+      // setting answers: the dialog has to read that as off.
+      ...(fullAccess === undefined ? {} : { handoffFullAccess: fullAccess }),
+    }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
     status: vi.fn().mockImplementation(async (path: string) => ({ branchLine: "", output: "", changedFiles: statusFor(path) })),
     remove: vi.fn().mockResolvedValue({}),
     prune: vi.fn().mockResolvedValue({}),
     doneTask: vi.fn().mockResolvedValue(result),
+    // What the Host does when the setting is on and a session has just been opened: one
+    // `sandbox/mode` event, reported as done. A case that needs the other answer - a Host
+    // with no session service, or one that refuses - passes its own.
+    widenHandoffSession: vi.fn(widen ?? (async () => ({ widened: true, mode: "danger-full-access" }))),
     // The archive dialog asks the host what archiving would do, and shows the
     // answer: branch, merge target, the branches it could merge into instead,
     // commits and uncommitted files per repository. A chosen target comes back
@@ -130,7 +142,7 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
   // The surface the dialog was drawn in. Following a session has to leave that too, or
   // it stands in front of the conversation the click just asked to see.
   const onLeave = vi.fn()
-  render(<WorktreesSettings api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={sessions as any} onLeave={onLeave} />)
+  render(<WorktreesSettings api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={sessions as any} onLeave={onLeave} config={config} />)
   return { api, workspaces, sessions, created, prompts, snapshots, sessionListeners, uiWorkspace, onLeave }
 }
 
@@ -1312,5 +1324,120 @@ describe("finishing a task", () => {
     expect(option(t("finishMerge"))).toHaveProperty("checked", true)
     expect(screen.getByRole("button", { name: t("finishConfirmAction") })).toBeTruthy()
     expect(next.api.scan).toHaveBeenCalledTimes(1)
+  })
+
+  /** The plugin's configuration form, as the shell hands one to the page. */
+  function configForm(accepted = true) {
+    return { getSnapshot: () => ({ value: {} }), subscribe: () => () => {}, set: vi.fn().mockResolvedValue(accepted) }
+  }
+
+  /** Open the finish dialog on a task space with work nobody committed. */
+  async function openCommitPhase(user: ReturnType<typeof userEvent.setup>) {
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    await waitFor(() => expect(screen.getByText(t("finishCommitTitle"))).toBeTruthy())
+  }
+
+  it("opens the handoff session at the container root, with full access, when the setting is on", async () => {
+    const user = userEvent.setup()
+    const next = setup({ changedFiles: 1, fullAccess: "on", config: configForm() })
+    await openCommitPhase(user)
+    // Which arrangement is about to be used is said before anything is opened, and it is a
+    // permission rather than a mode: the state is named rather than left to a switch position.
+    expect(screen.getByText(t("handoffFullAccessOn"))).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
+
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
+    // The container root instead of the repositories' common ancestor: that is the directory
+    // the sessions collect under, and the whole reason for the setting.
+    expect(next.created[0].cwd).toBe("E:/worktree-space")
+    // A group needs a Workspace to be a group, so the root is registered before the session
+    // is opened on it - through the same call the panel registers a task space with.
+    expect(next.workspaces.create).toHaveBeenCalledWith({ path: "E:/worktree-space" })
+    // Widened after the session exists, because the mode is an event on that session's log.
+    await waitFor(() => expect(next.api.widenHandoffSession).toHaveBeenCalledWith("session-1"))
+    await waitFor(() => expect(next.prompts).toHaveLength(1))
+    // The agent is told which access it has, rather than being told to ask for an elevation
+    // it will never need - and the whole batch still rides in the one turn.
+    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeFullAccess"), { boundary: "E:/worktree-space" }))
+    expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest/kratos-vue-admin")
+    expect(next.prompts[0].text).not.toMatch(/\{[a-z]+\}/)
+    // And the panel says which access the session actually got, in the line that names its
+    // working directory, plus the hint that tells the truth for this arrangement.
+    expect(screen.getAllByTitle(t("finishHandoffScopeFullAccess"))).toHaveLength(1)
+    expect(screen.getByText(t("finishCommitFullAccess"))).toBeTruthy()
+  })
+
+  it("keeps the boundary that reaches the metadata when the container root cannot be registered", async () => {
+    const user = userEvent.setup()
+    const next = setup({ changedFiles: 1, fullAccess: "on", config: configForm() })
+    next.workspaces.create.mockRejectedValue(new Error("cannot register this path"))
+    await openCommitPhase(user)
+    await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
+
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
+    // The arrangement the setting replaced, which is where the sandbox asks - and no attempt
+    // is made to widen a session that was not opened for it.
+    expect(next.created[0].cwd).toBe("E:/worktree-space/kratos-admin/antest")
+    expect(next.api.widenHandoffSession).not.toHaveBeenCalled()
+    // Said out loud: a session that asks for permission it was supposed to have is otherwise
+    // indistinguishable from the setting not working.
+    await waitFor(() => expect(screen.getByText(new RegExp(t("handoffAccessRootFailed").split("{")[0]))).toBeTruthy())
+    expect(screen.getByText(/cannot register this path/)).toBeTruthy()
+  })
+
+  it("says which access the session did not get when the Host cannot widen it", async () => {
+    const user = userEvent.setup()
+    const next = setup({
+      changedFiles: 1,
+      fullAccess: "on",
+      config: configForm(),
+      widen: async () => ({ widened: false, reason: "no-session" }),
+    })
+    await openCommitPhase(user)
+    await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
+
+    await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
+    expect(next.created[0].cwd).toBe("E:/worktree-space")
+    // The session is real and the handoff stands; what did not happen is the widening, and
+    // the panel says so rather than letting the reader discover it when a commit is refused.
+    await waitFor(() => expect(screen.getByText(format(t("handoffAccessWidenFailed"), { reason: t("handoffAccessReasonNoSession") }))).toBeTruthy())
+    expect(screen.getAllByTitle(t("finishHandoffScopeTight"))).toHaveLength(1)
+    await waitFor(() => expect(next.prompts).toHaveLength(1))
+    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeTight"), { boundary: "E:/worktree-space" }))
+  })
+
+  it("turns the setting on from the panel, and keeps it when the Host accepts", async () => {
+    const user = userEvent.setup()
+    const config = configForm()
+    setup({ changedFiles: 1, config })
+    await openCommitPhase(user)
+    expect(screen.getByText(t("handoffFullAccessOff"))).toBeTruthy()
+    expect(screen.getByText(t("handoffAccessScope"))).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: t("handoffAccessSwitchToFull") }))
+    expect(config.set).toHaveBeenCalledWith("handoffFullAccess", "on")
+    await waitFor(() => expect(screen.getByText(t("handoffFullAccessOn"))).toBeTruthy())
+    // The way back is offered as the opposite action, so the button always says what pressing
+    // it does rather than what is currently true.
+    expect(screen.getByRole("button", { name: t("handoffAccessSwitchToAsk") })).toBeTruthy()
+  })
+
+  it("puts the switch back and says so when the Host refuses the write", async () => {
+    const user = userEvent.setup()
+    setup({ changedFiles: 1, config: configForm(false) })
+    await openCommitPhase(user)
+    await user.click(screen.getByRole("button", { name: t("handoffAccessSwitchToFull") }))
+    await waitFor(() => expect(screen.getByText(t("handoffAccessNotSaved"))).toBeTruthy())
+    // Back where it was, because that is the state that is actually in force.
+    expect(screen.getByText(t("handoffFullAccessOff"))).toBeTruthy()
+  })
+
+  it("says the state but offers no switch when the shell served no configuration form", async () => {
+    const user = userEvent.setup()
+    setup({ changedFiles: 1 })
+    await openCommitPhase(user)
+    expect(screen.getByText(t("handoffFullAccessOff"))).toBeTruthy()
+    expect(screen.queryByRole("button", { name: t("handoffAccessSwitchToFull") })).toBeNull()
+    expect(screen.getByText(t("handoffAccessNoForm"))).toBeTruthy()
   })
 })
