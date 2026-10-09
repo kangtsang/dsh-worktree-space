@@ -119,6 +119,13 @@ Follow this order. Never create a workspace with a guessed location.
    pair is refused when the task is created, and the refusal names the fix. Whether a
    merge waits for a deployment and a passing smoke is a separate question: `auto`
    answers who presses the merge, not whether the work was checked.
+   **The gate's human half is not something this tool can sign off.** `done` takes no
+   acknowledgement argument, and `force` is refused outright (E7007); acceptance is
+   recorded only from the Worktree Space panel. When `done` answers with E5007, the
+   user is the one who confirms acceptance there (or finishes anyway there) — report
+   that and stop, and never choose `merge.mode: "auto"` on the user's behalf to get
+   past a gate. `auto` is what the user says when they want a task that merges without
+   them, not what the agent picks to avoid asking.
 9. **Report where it is, and say which entry opens the session.** When this call
    opened one, name the session id it answered with; when it did not, a session is
    opened by hand — the panel's **Create and open** in the Worktree Space dialog, or
