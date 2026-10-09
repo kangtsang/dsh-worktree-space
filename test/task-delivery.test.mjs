@@ -349,19 +349,27 @@ describe('applyStraysPolicy', () => {
     expect(kept.cleanStray).toBe(false)
   })
 
-  it('keeps the shipped behaviour under keep, and never discards without force', () => {
+  it('keeps the shipped behaviour under keep: the policy declines to speak', () => {
     const r = applyStraysPolicy({ strays: 'keep' }, {}, ARCHIVE, TASK)
     expect(r.cleanStray).toBe(false)
-    const d = applyStraysPolicy({ strays: 'discard' }, { force: false }, ARCHIVE, TASK)
-    expect(d.cleanStray).toBe(false)
-    expect(d.discardDocuments).toBe(false)
+    expect(r.discardDocuments).toBe(false)
+    expect(r.documentsDirectory).toBe('')
   })
 
-  it('discard only honours the abandon path, where force already said so', () => {
-    const r = applyStraysPolicy({ strays: 'discard' }, { force: true }, ARCHIVE, TASK)
-    expect(r.cleanStray).toBe(true)
+  it('never deletes from a policy: the discard flag is the caller\'s own', () => {
+    // The abandon path passes both flags; the policy only ever carries them through.
+    const r = applyStraysPolicy({ strays: 'archive' }, { force: true, discardDocuments: true }, ARCHIVE, TASK)
     expect(r.discardDocuments).toBe(true)
+    expect(r.cleanStray).toBe(false)
     expect(r.documentsDirectory).toBe('')
+  })
+
+  it('refuses a policy that names a strays mode the flow does not have', () => {
+    // `discard` was a mode once. A policy naming it is a mistake the create has to hear about,
+    // not one applied quietly behind the user's back.
+    expect(() => normalizeDeliveryPolicy({ strays: 'discard' })).toThrow()
+    expect(normalizeDeliveryPolicy({ strays: 'keep' }).strays).toBe('keep')
+    expect(normalizeDeliveryPolicy({ strays: 'archive' }).strays).toBe('archive')
   })
 
   it('roots the archive under a custom directory when the configuration names one', () => {

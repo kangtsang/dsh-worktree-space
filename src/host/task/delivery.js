@@ -30,8 +30,14 @@ export const VERIFICATION_MODES = ['agent', 'agent-then-human', 'human']
 export const MERGE_MODES = ['auto', 'ask', 'never']
 /** What an unresolved merge conflict does: opens a session for it, asks first, or stops the delivery. */
 export const CONFLICT_MODES = ['agent-auto', 'ask', 'stop']
-/** What happens to the files a task space leaves behind that git never tracked. */
-export const STRAY_MODES = ['archive', 'keep', 'discard']
+/**
+ * What happens to the files a task space leaves behind that git never tracked.
+ *
+ * There is no `discard` here. A policy is the flow's standing answer, and one that deletes the
+ * user's own files is a standing answer nobody can take back; throwing them away stays what it
+ * always was - the caller's own flag, on the abandon path, where `force` already says it.
+ */
+export const STRAY_MODES = ['archive', 'keep']
 
 /**
  * The policy a task carries when nobody said otherwise: delivery off.
@@ -200,19 +206,19 @@ export function resolveDeliveryPolicy(project, explicit, defaults = {}) {
 /**
  * Apply the strays policy to a finish request, in one place and testably.
  *
- * Three policies, mapped onto what {@link `archive.js`} already knows how to do:
+ * Two policies, mapped onto what {@link `archive.js`} already knows how to do:
  * `archive` files the user's content into the archive directory and clears the
- * build output (no per-item waiting), and it is the default; `keep` is the answer a
- * caller asks for when it wants to decide per finish; `discard` throws everything
- * away and is honoured only on the abandon path, where `force` is already the
- * caller saying so.
+ * build output (no per-item waiting), and it is the default; `keep` is the policy
+ * declining to speak, which is the answer a caller asks for when it wants to decide
+ * per finish. Deleting the content is not a mode of this policy: it is the caller's
+ * `discardDocuments` flag, which only the abandon path passes.
  *
  * A caller that decided anything itself - a cleanStray, an archive directory, a
  * discard, a keep list - is honoured verbatim: the policy fills gaps, it does not
  * overrule.
  * @param policy - the task's delivery policy.
  * @param request - what the caller asked for: the cleanStray / discardDocuments
- *   flags, the documents directory, the keep list, and `force`.
+ *   flags, the documents directory, and the keep list.
  * @param archive - the archive preference, used to root the per-task folder when
  *   the policy files things away and the caller named no directory.
  * @param taskPath - the task space directory, for the folder name under the root.
@@ -225,18 +231,12 @@ export function applyStraysPolicy(policy, request, archive, taskPath) {
   const keep = Array.isArray(request.keep) ? request.keep : []
   const callerDecided = cleanStray || discardDocuments || documentsDirectory !== '' || keep.length > 0
 
-  // Discard throws everything away, and only the abandon path says so - force is
-  // already the caller admitting the work is not wanted. Off it, or on a finish
-  // without force, the flag is not honoured: a policy must not become a second,
-  // quieter way to lose work.
-  if (policy.strays === 'discard' && request.force === true) {
-    return { cleanStray: true, discardDocuments: true, documentsDirectory: '' }
-  }
-
   if (callerDecided || policy.strays !== 'archive') {
     // The two flags are independent, as finishTask has always treated them:
     // cleanStray clears the build output, discardDocuments throws the user's
     // content away - one without the other is a decision the caller may make.
+    // This is the only way anything is thrown away: the policy above has no mode
+    // that deletes, so a policy alone can never lose work.
     return { cleanStray, discardDocuments, documentsDirectory }
   }
   // Archive: the caller said nothing, so the policy speaks - file the content

@@ -44,7 +44,7 @@ const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string;
   // The leftovers ride with the three above. It is the finish that deals with them, and the
   // only finish whose handling is not already the user's own to answer is the one this flow
   // runs by itself.
-  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", needsAuto: true, options: [["archive", "deliveryStraysArchive"], ["keep", "deliveryStraysKeep"], ["discard", "deliveryStraysDiscard"]] },
+  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", needsAuto: true, options: [["archive", "deliveryStraysArchive"], ["keep", "deliveryStraysKeep"]] },
 ]
 
 /** Where every dropdown starts: the policy's own default, which is also what a create without it gets. */

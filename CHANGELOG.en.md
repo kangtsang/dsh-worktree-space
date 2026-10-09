@@ -222,14 +222,20 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   content: it deletes none of the user's files and does not hold the finish up. The create dialog's
   starting value, the finish dialog's archive tick (on by default already), the plugin's built-in
   policy and the design document all agree now; pick "left alone" in the project default or for that
-  one task if nothing should be moved. The three options **say their consequence in the label** —
-  "Archived (one finish clears it)", "Left alone (space stays)", "Discarded (only when abandoning)" —
-  and the question mark explains it in full: only archiving lets that finish actually remove the task
-  space; leaving things in place keeps the space non-empty, so it is kept and a second finish is
-  needed. The pair that is easiest to confuse is spelled out too: **"left alone" is really the policy
-  saying nothing** (nothing is deleted), and **"discarded" is honoured only when the task is
-  abandoned** (build output and content go together then) — so on a normal finish the two do the same
-  thing, which is nothing.
+  one task if nothing should be moved. The two options **say their consequence in the label** —
+  "Archived (one finish clears it)" and "Left alone (space stays)" — and the question mark explains it
+  in full: only archiving lets that finish actually remove the task space, while "left alone" is really
+  the **policy saying nothing**: nothing is deleted, so the space is not empty and is kept, and a
+  second finish is needed once it is clear.
+- **"Discarded" is gone from the delivery policy.** A policy is a long-lived answer, and one that
+  deletes the user's files is a long-lived answer nobody can take back; deleting goes back where it
+  belongs - the **caller's own flag** (unticking "archive documents" in the finish dialog deletes for
+  good, and abandoning decides it there too). So **Leftovers** now offers **archived / left alone**
+  only, a policy naming `strays: "discard"` is **refused** (`E4010`) instead of being quietly replaced,
+  and the discard branch in `applyStraysPolicy` that only ran under `force` is gone with it: **only a
+  caller deletes now.** An existing task space whose record says `discard` is read along the lenient path
+  and lands on the default, `archive`: finishing it archives rather than deletes, so the content
+  survives.
 
 - **The panel's create dialog asks for the delivery policy now, decision by decision.** The bottom of
   **Task details** carries eight choices in four rows of two, every one a dropdown: what to deploy to
