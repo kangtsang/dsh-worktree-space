@@ -4,7 +4,7 @@
  * Creating a task: the container, the branch, one worktree per repository, and the file that tells a session what the task is.
  */
 import { existsSync, statSync } from 'node:fs'
-import { cp, mkdir, readdir, rm } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
 import { ERROR_CODES, coded } from './codes.js'
@@ -16,6 +16,181 @@ import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPre
 import { assertIsolated, isInside, refuseDelete } from './paths.js'
 
 import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+
+/** The deploy root a create scaffolds when nothing else provides one. */
+const DEPLOY_ROOT = 'deploy'
+
+/**
+ * The merge script a scaffolded deploy root carries.
+ *
+ * Why it exists: a task space with no `deploy/` has no state file and nothing
+ * that could write one, so `done` refuses its merge (E5005) over a handshake no
+ * session there can carry out. Shipping the handshake in executable form is the
+ * difference between a refusal that names the file and a space that can produce
+ * it. It is deliberately self-contained - `sh`, `awk`, `sed` and `date`, no
+ * `jq`, because there is none - and it merges rather than rewrites, because
+ * `humanAck` and `destroyedAt` in the file are the plugin's own and a deploy
+ * that dropped them would un-accept work the user already looked at.
+ *
+ * Exported so the step that proves the script really runs can execute the very
+ * bytes a create writes, rather than a copy of them that may have drifted.
+ */
+export const WRITE_STATE_SCRIPT = String.raw`#!/bin/sh
+# Merge one deployment fact into this deploy root's .state.json.
+#
+# Why a script: that file is the handshake with the Worktree Space plugin, and
+# every writer of it has to keep the fields it does not own. humanAck is written
+# by the plugin when the user accepts on the panel and destroyedAt when the
+# environment is destroyed; a deploy that rewrote the file from scratch would
+# un-accept work the user already looked at. So this merges: it reads whatever
+# is there, replaces only the one top-level field it was asked for, and writes
+# the whole object back as one line - the shape every reader of it expects.
+#
+# There is no jq on this machine, so the merge is done with awk, which is.
+#
+#   ./write-state.sh url <url>          after up, the acceptance URL
+#   ./write-state.sh smoke pass|fail    after smoke, stamped with the UTC now
+#   ./write-state.sh services <json>    optional service list, as raw JSON
+#
+# It never writes humanAck or destroyedAt: those are the plugin's own.
+set -eu
+
+state="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.state.json"
+
+usage() {
+  echo "usage: write-state.sh url <url> | smoke pass|fail | services <json>" >&2
+  exit 2
+}
+
+# A value is data, not JSON: quote and escape it so it can sit in the object.
+json_string() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$/"/'
+}
+
+# Rewrite the object with top-level key replaced, or added when it was absent.
+# value is raw JSON. It travels by environment rather than awk -v, because -v
+# would eat the backslashes inside it.
+merge() {
+  key="$1"
+  value="$2"
+  [ -f "$state" ] || printf '{}\n' > "$state"
+  # A file that is not an object cannot be merged into. Refusing leaves the
+  # bytes alone, which is the one outcome that cannot lose somebody's ack.
+  if [ "$(sed -e 's/^[[:space:]]*//' "$state" | cut -c1)" != "{" ]; then
+    echo "write-state.sh: $state is not a JSON object; left untouched" >&2
+    exit 1
+  fi
+  tmp="$state.$$.tmp"
+  VALUE="$value" awk -v want="$key" '
+    { text = text $0 }
+    END {
+      n = length(text)
+      i = index(text, "{") + 1
+      out = ""
+      found = 0
+      while (i <= n) {
+        while (i <= n) {
+          c = substr(text, i, 1)
+          if (c == "," || c == " " || c == "\t" || c == "\r") i++; else break
+        }
+        if (i > n) break
+        if (substr(text, i, 1) != "\"") break
+        ks = i
+        i++
+        while (i <= n) {
+          c = substr(text, i, 1)
+          if (c == "\\") { i += 2; continue }
+          if (c == "\"") { i++; break }
+          i++
+        }
+        kraw = substr(text, ks, i - ks)
+        while (i <= n && substr(text, i, 1) ~ /[ \t\r\n]/) i++
+        if (substr(text, i, 1) != ":") break
+        i++
+        while (i <= n && substr(text, i, 1) ~ /[ \t\r\n]/) i++
+        vs = i
+        c = substr(text, i, 1)
+        if (c == "\"") {
+          i++
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (c == "\\") { i += 2; continue }
+            if (c == "\"") { i++; break }
+            i++
+          }
+        } else if (c == "{" || c == "[") {
+          opener = c
+          closer = (c == "{") ? "}" : "]"
+          d = 0
+          instr = 0
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (instr) {
+              if (c == "\\") { i += 2; continue }
+              if (c == "\"") instr = 0
+              i++
+              continue
+            }
+            if (c == "\"") { instr = 1; i++; continue }
+            if (c == opener) d++
+            else if (c == closer) { d--; if (d == 0) { i++; break } }
+            i++
+          }
+        } else {
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (c == "," || c == "}") break
+            i++
+          }
+        }
+        vraw = substr(text, vs, i - vs)
+        sub(/[ \t\r\n]+$/, "", vraw)
+        if (substr(kraw, 2, length(kraw) - 2) == want) { vraw = ENVIRON["VALUE"]; found = 1 }
+        if (out != "") out = out ","
+        out = out kraw ":" vraw
+      }
+      if (!found) {
+        if (out != "") out = out ","
+        out = out "\"" want "\":" ENVIRON["VALUE"]
+      }
+      printf "{%s}\n", out
+    }
+  ' "$state" > "$tmp" || { rm -f "$tmp"; exit 1; }
+  mv "$tmp" "$state"
+}
+
+[ "$#" -ge 1 ] || usage
+
+case "$1" in
+  url)
+    [ "$#" -ge 2 ] || usage
+    merge url "$(json_string "$2")"
+    ;;
+  smoke)
+    [ "$#" -ge 2 ] || usage
+    case "$2" in
+      pass|fail) ;;
+      *) usage ;;
+    esac
+    merge lastSmoke "{\"result\":\"$2\",\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+  services)
+    [ "$#" -ge 2 ] || usage
+    merge services "$2"
+    ;;
+  *)
+    usage
+    ;;
+esac
+`
+
+/**
+ * The shape of the state file, one line of valid JSON.
+ *
+ * JSON has no comments, so this carries the shape and nothing else; why each
+ * field exists is in {@link WRITE_STATE_SCRIPT} beside it.
+ */
+export const STATE_EXAMPLE = '{"url":"http://localhost:5173","services":["web","api"],"lastSmoke":{"result":"pass","at":"2026-01-01T00:00:00Z"}}\n'
 
 /**
  * The facts only the source repository can answer, read before a worktree is
@@ -45,13 +220,18 @@ export async function sourceFacts(subprocess, repoPath) {
  * Whether a container holds nothing but what this plugin put there.
  * @param leftovers - the container's entries.
  * @param created - the worktrees this call created.
+ * @param owned - the file and directory names this call may remove. The
+ *   scaffolded deploy root is added to the plugin's own only when this call
+ *   poured it, because a `deploy/` copied from the source root is the source
+ *   root's work and removing it is not this rollback's to do.
  * @returns whether a failed create may remove the container.
  */
-function holdsOnlyOurs(leftovers, created) {
-  return leftovers.every((name) => TASK_OWNED_FILES.includes(name) || created.some((entry) => basename(entry.path) === name))
+function holdsOnlyOurs(leftovers, created, owned) {
+  return leftovers.every((name) => owned.includes(name) || created.some((entry) => basename(entry.path) === name))
 }
 
-async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
+async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created, scaffoldedDeploy) {
+  const owned = scaffoldedDeploy ? [...TASK_OWNED_FILES, DEPLOY_ROOT] : TASK_OWNED_FILES
   const stranded = []
   for (const entry of created) {
     // The worktree was created by this call and never handed to a caller, so a
@@ -95,7 +275,7 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
     if (error?.code !== 'ENOENT') stranded.push(container)
     return stranded
   }
-  if (!holdsOnlyOurs(leftovers, created)) {
+  if (!holdsOnlyOurs(leftovers, created, owned)) {
     stranded.push(container)
     return stranded
   }
@@ -259,23 +439,40 @@ export async function createTask(subprocess, options) {
   await mkdir(taskPath)
 
   const created = []
+  // Whether this call poured the task space's deploy root out of nothing. It
+  // decides one thing, at rollback: a root this call made is the container's to
+  // take back, while one copied from the source root is not.
+  let scaffoldedDeploy = false
   try {
     // The source root's own deploy root travels with the task space. Both readers look in
     // `<task space>/deploy` first and a manifest's commands run from that directory, so the
     // whole directory comes over - a manifest without the script it names is a deploy that
     // never runs. A source root that carries none is skipped: the space then deploys whatever
     // its own repositories carry, if anything.
-    const sourceDeploy = join(sourceRoot, 'deploy')
+    const sourceDeploy = join(sourceRoot, DEPLOY_ROOT)
     if (existsSync(sourceDeploy)) {
-      await cp(sourceDeploy, join(taskPath, 'deploy'), { recursive: true, force: true })
+      await cp(sourceDeploy, join(taskPath, DEPLOY_ROOT), { recursive: true, force: true })
     }
 
     // The script a create named, under the one name both readers look for. It is copied
     // after the directory above on purpose: naming a script is how a task says it deploys
     // differently from the source root's own `deploy.sh`, and this is what overrides it.
     if (deployScriptPath !== '') {
-      await mkdir(join(taskPath, 'deploy'), { recursive: true })
-      await cp(deployScriptPath, join(taskPath, 'deploy', 'deploy.sh'), { force: true })
+      await mkdir(join(taskPath, DEPLOY_ROOT), { recursive: true })
+      await cp(deployScriptPath, join(taskPath, DEPLOY_ROOT, 'deploy.sh'), { force: true })
+    }
+
+    // Nothing copied a deploy root and no script was named, so the space would
+    // otherwise have neither a state file nor a way to write one - and `done`
+    // then refuses its merge over a handshake no session there can carry out.
+    // The scaffold is that handshake in executable form. It is written only when
+    // the directory is still absent, so a create never overwrites a repository's
+    // own deploy root.
+    if (!existsSync(join(taskPath, DEPLOY_ROOT))) {
+      scaffoldedDeploy = true
+      await mkdir(join(taskPath, DEPLOY_ROOT), { recursive: true })
+      await writeFile(join(taskPath, DEPLOY_ROOT, 'write-state.sh'), WRITE_STATE_SCRIPT, { mode: 0o755 })
+      await writeFile(join(taskPath, DEPLOY_ROOT, '.state.json.example'), STATE_EXAMPLE)
     }
 
     for (const repoPath of selected) {
@@ -307,7 +504,7 @@ export async function createTask(subprocess, options) {
       })),
     }))
   } catch (error) {
-    const stranded = await rollbackTask(subprocess, tasksRoot, taskPath, branch, created)
+    const stranded = await rollbackTask(subprocess, tasksRoot, taskPath, branch, created, scaffoldedDeploy)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
     // The code is decided once, here, and goes into the two places that must not
     // disagree: the record below and the error the caller reads. `recover` takes

@@ -346,9 +346,11 @@ describe("createTask", () => {
       expect(note).toContain("- `alpha`")
       expect(note).toContain("Source repositories are read-only")
       expect(note).toContain("worktree-space.json")
-      // A source root with no deploy root of its own is skipped rather than invented: the
-      // space then deploys only what its own repositories carry.
-      expect(existsSync(join(result.path, "deploy"))).toBe(false)
+      // A source root with no deploy root of its own gets the contract scaffold rather
+      // than an invented deploy script: the space then deploys only what its own
+      // repositories carry, and still has a way to write the state file.
+      expect(existsSync(join(result.path, "deploy", "deploy.sh"))).toBe(false)
+      expect(existsSync(join(result.path, "deploy", "write-state.sh"))).toBe(true)
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -375,6 +377,59 @@ describe("createTask", () => {
 
       expect(await readFile(join(result.path, "deploy", "deploy.yaml"), "utf8")).toContain("up: ./deploy.sh up")
       expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("exit 0")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("scaffolds a deploy root that can write the delivery state when the source root has none", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/scaffold"))
+    try {
+      // The space carries no deploy script of its own, so nothing there would ever
+      // write `.state.json` - and `done` refuses the merge over exactly that file.
+      // The scaffold is the handshake in executable form.
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "scaffold",
+        tasksRoot: container.root,
+      })
+
+      const script = await readFile(join(result.path, "deploy", "write-state.sh"), "utf8")
+      expect(script).toContain(".state.json")
+      // It merges rather than rewrites: the plugin's own fields are named, and are
+      // never written by the script.
+      expect(script).toContain("humanAck")
+      expect(script).toContain("destroyedAt")
+      const example = JSON.parse(await readFile(join(result.path, "deploy", ".state.json.example"), "utf8"))
+      expect(example.url).toBeTruthy()
+      expect(example.lastSmoke.result).toBe("pass")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("never overwrites a source root's own deploy root with the scaffold", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/own"))
+    try {
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "deploy.sh"), "#!/bin/sh\necho own deploy\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "own",
+        tasksRoot: container.root,
+      })
+
+      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("echo own deploy")
+      // The directory was already somebody else's: not one scaffolded file lands in it.
+      expect(existsSync(join(result.path, "deploy", "write-state.sh"))).toBe(false)
+      expect(existsSync(join(result.path, "deploy", ".state.json.example"))).toBe(false)
     } finally {
       await source.cleanup()
       await container.cleanup()

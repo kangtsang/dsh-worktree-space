@@ -283,6 +283,7 @@ export function renderTaskMetadata(metadata) {
       '- `./deploy.sh status --json` is the machine-readable view; `./deploy.sh destroy` tears the environment down when acceptance is over.',
       '- **The deploy root owns its own delivery state.** `./deploy.sh up` must write `<deploy root>/.state.json` (one line; `url`, and `services` if it likes) once the environment is up, and `./deploy.sh smoke` must merge `lastSmoke: {result, at}` into that same file **without dropping what is already in it**. `humanAck` and `destroyedAt` are the plugin\'s and are never the script\'s to write. Without the file the panel can show neither the acceptance URL nor the smoke state, and `done` refuses to merge (E5005).',
       '- Write that state from the script that ran the step and from nothing else: not by hand, not from a transcript of a run that happened elsewhere. The merge gate reads the file as the evidence that the step happened.',
+      '- A space this plugin scaffolded (no `deploy/` of its own was copied in) carries `deploy/write-state.sh`: `./write-state.sh url <url>`, `./write-state.sh smoke pass|fail` and `./write-state.sh services <json>` each merge one field into `.state.json`, keeping `humanAck` and `destroyedAt` - which are never yours to write.',
       '',
     ] : []),
     ...(delivery === undefined ? [] : [
