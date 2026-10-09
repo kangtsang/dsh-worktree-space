@@ -276,13 +276,18 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const sourceReady = suggestion !== null && repositories.length > 0
   const fieldsDisabled = busy || loading || !sourceReady || !!recovery
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
-  const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === ""
   // Which delivery choices are this flow's own to make: the three about a merge are asked at
   // the finish unless the merge happens by itself, so they sit disabled until it does.
   const mergeAutomatic = delivery.mergeMode === "auto"
   // Whether this task deploys anywhere at all: with `none` the three choices that shape a delivery
   // and the four that shape a merge this flow would make are off the panel entirely.
   const deploys = delivery.deployTarget !== "none"
+  // "Merge by itself" and a verification that waits for a person are a pair the Host refuses, and
+  // it refuses it at creation. The dialog says so where the choice is made - both fields marked,
+  // the sentence beside them, and the create button held off - rather than letting that request go
+  // and reading E4010 back.
+  const autoNeedsAgent = deploys && mergeAutomatic && delivery.verification !== "agent"
+  const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === "" && !autoNeedsAgent
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
   const endBusy = () => { busyRef.current = false; setBusy(false) }
@@ -623,12 +628,17 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
               id={`${id}-delivery-${field.key}`}
               value={delivery[field.key]}
               disabled={fieldsDisabled}
+              aria-invalid={autoNeedsAgent && (field.key === "mergeMode" || field.key === "verification") || undefined}
               onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}
             >
               {field.options.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </Select>
           </div>)}
         </div>
+        {/* The pair the Host refuses is marked where it is chosen, not left for the request to come
+            back with E4010: both fields carry aria-invalid (the border says where), and this is the
+            sentence that says what to change. */}
+        {autoNeedsAgent ? <p className="dws-field-note dws-field-note-warning">{t("deliveryAutoNeedsAgent")}</p> : null}
         {/* Where a deployment's own parameters live - not in this dialog. Shown only when a
             target was actually chosen, so the line answers the decision that was made. The one
             exception rides with it: naming a script for a task that deploys nowhere would say

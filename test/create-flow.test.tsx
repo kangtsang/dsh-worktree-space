@@ -197,6 +197,28 @@ describe("native task create flow", () => {
     })
   })
 
+  it("marks the pair the Host refuses where it is chosen, instead of letting the create be rejected", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    // The default verification waits for a person, so "merge by itself" is the conflicting half.
+    await user.selectOptions(screen.getByLabelText(t("deliveryMergeMode")), "auto")
+    expect(screen.getByText(t("deliveryAutoNeedsAgent"))).toBeTruthy()
+    expect(screen.getByLabelText(t("deliveryMergeMode")).getAttribute("aria-invalid")).toBe("true")
+    expect(screen.getByLabelText(t("deliveryVerification")).getAttribute("aria-invalid")).toBe("true")
+    await user.type(nameField(), "Fix login")
+    expect(submit()).toHaveProperty("disabled", true)
+
+    // Naming the agent as the verifier is one of the two fixes the sentence names.
+    await user.selectOptions(screen.getByLabelText(t("deliveryVerification")), "agent")
+    expect(screen.queryByText(t("deliveryAutoNeedsAgent"))).toBeNull()
+    expect(screen.getByLabelText(t("deliveryMergeMode")).getAttribute("aria-invalid")).toBeNull()
+    expect(submit()).toHaveProperty("disabled", false)
+  })
+
   it("sends the deploy script a chosen deployment names", async () => {
     const next = setup()
     next.mount()

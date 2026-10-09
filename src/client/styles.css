@@ -129,6 +129,9 @@
   .dws-input::placeholder { color: var(--wt-muted); }
   .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
   .dws-input:disabled, .dws-select:disabled { opacity: .5; }
+  /* A field whose value cannot be used says so in its own colour, not only in the sentence
+     beside it: the sentence explains, the border points at which control it is about. */
+  .dws-input[aria-invalid="true"], .dws-select[aria-invalid="true"] { border-color: var(--wt-danger); }
   .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
   /* One path and one button, so the field takes the room the row has rather than a
      fixed width: the thing being typed is a path, and paths are all lengths. It
