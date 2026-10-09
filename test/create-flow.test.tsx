@@ -194,7 +194,7 @@ describe("native task create flow", () => {
         verification: "agent",
         merge: { mode: "auto", deleteBranch: false },
         conflicts: "ask",
-        strays: "keep",
+        strays: "archive",
       })
     })
   })

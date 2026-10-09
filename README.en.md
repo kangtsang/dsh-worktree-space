@@ -67,6 +67,9 @@ top right.
   "merge by itself"**: with "only when a merge is asked for" the finish is the user's own press, and all
   four of those — leftovers included — are put to them at that moment. Only a finish the flow runs by
   itself needs them settled here first.
+  The plugin's default for **Leftovers** is **Archived**: a finish copies them into the archive directory
+  (by default `<container root>/archived-docs/…`) instead of leaving them in the space for a second
+  finish, and instead of deleting them; pick "left alone" in that box if nothing should be moved.
   For "merge back by itself when it is done", pick **Merge by itself** and **The agent alone**: those
   two are a pair — merge-by-itself with a verification that waits for a person is refused, and the
   refusal says what to change.

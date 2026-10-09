@@ -262,9 +262,11 @@ is already there, the user removes that single file and finishes the task again.
 
 ## Finishing a task
 
-Run `action: "done"`. By default it **removes the worktrees, keeps every branch,
-and keeps any stray files** the session left in the task space — it does not
-merge, delete a branch, or delete stray files unless asked.
+Run `action: "done"`. By default it **removes the worktrees and keeps every branch**; everything
+else follows the task's delivery policy, and a task nobody configured gets no deployment gate, no
+merge (that waits to be asked for) and stray files **archived** rather than deleted — filing them
+into the archive directory is the safe half, since the archive is a copy and the task space can then
+be removed in one press.
 
 Name the task's own layer as well as the container: pass `tasksRoot` (the container
 root), `task`, and `project` — the source root's directory name. Passing `sourceRoot`
@@ -377,9 +379,11 @@ Confirm each destructive step with the user before passing it:
    space gone without merging anything, that is the abandon path: pass
    `deleteBranch: true` with `force: true` and `merge: false`, which removes the
    worktrees and force-deletes the branches with the commits on them.
-5. **Stray files?** When the outcome lists strays (agent notes, editor caches, a
-   plan), show them and ask which to *keep*; then pass `cleanStray: true` with
-   `keep: [...]` naming those. Keeping everything means passing neither.
+5. **Stray files?** The task's policy decides by default, and the shipped default **archives**
+   them — a copy into the archive directory, which lets the task space be removed in the same
+   finish. Show what the outcome lists, and pass `keep: [...]` to name entries that must stay
+   exactly where they are - the user's own documents, say; `cleanStray: true` only when the user
+   wants the build output cleared as well.
 
 The Workspace registration follows the directory. When the finish removes the task space
 itself, `done` drops the registration too, so the task space leaves the workspace list and

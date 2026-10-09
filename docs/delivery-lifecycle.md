@@ -276,8 +276,10 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 
 ### L1 实现时按推荐取的默认决策（待维护者核对）
 
-- **全局默认策略 = delivery 关**（target `none` / mode `on-request` / verification `agent-then-human` /
-  merge `ask` / conflicts `ask` / strays `keep`）：不为任何存量任务添加闸门，启用靠项目默认配置。
+- **全局默认策略 = 交付关、遗留内容归档**（target `none` / mode `on-request` / verification `agent-then-human` /
+  merge `ask` / conflicts `ask` / strays `archive`）：不部署、不自动合并、不自动删除用户内容；**遗留内容默认
+  归档**——归档是复制一份，内容不会因为它离开任务空间而丢失，而任务空间因此能在一次收尾里被清掉。启用其它口径
+  靠项目默认配置。
 - **项目默认存储**：配置字段 `deliveryDefaultsJson`（JSON 文本，Plugins 页可直接编辑；
   专用 map 编辑控件留待后续）。
 - **人工 ack 语义**：写进 `.state.json` 的 `humanAck`；`up`（新部署）清空、`smoke`（同部署

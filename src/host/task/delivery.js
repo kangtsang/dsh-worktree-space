@@ -53,7 +53,11 @@ export const DEFAULT_DELIVERY_POLICY = Object.freeze({
   // asked for it.
   merge: Object.freeze({ mode: 'ask', target: null, deleteBranch: false }),
   conflicts: 'ask',
-  strays: 'keep',
+  // Leftovers are archived rather than left standing. `keep` would make every finish of a
+  // task nobody configured stop with the space still on disk and ask again; filing them
+  // into the archive directory is the answer that lets one press finish the task, and it
+  // is reversible - the archive is a copy, and the user's own files are not edited.
+  strays: 'archive',
 })
 
 const FIELDS = {
@@ -198,9 +202,10 @@ export function resolveDeliveryPolicy(project, explicit, defaults = {}) {
  *
  * Three policies, mapped onto what {@link `archive.js`} already knows how to do:
  * `archive` files the user's content into the archive directory and clears the
- * build output (no per-item waiting); `keep` is the shipped behaviour, where the
- * caller decides per finish; `discard` throws everything away and is honoured
- * only on the abandon path, where `force` is already the caller saying so.
+ * build output (no per-item waiting), and it is the default; `keep` is the answer a
+ * caller asks for when it wants to decide per finish; `discard` throws everything
+ * away and is honoured only on the abandon path, where `force` is already the
+ * caller saying so.
  *
  * A caller that decided anything itself - a cleanStray, an archive directory, a
  * discard, a keep list - is honoured verbatim: the policy fills gaps, it does not

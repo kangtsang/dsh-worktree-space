@@ -215,6 +215,15 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Added (the merge mode in a task's policy now does something)
 
+- **The default for leftovers is now "archive" instead of "keep".** Archiving is a **copy** into the
+  archive directory (by default `<container root>/archived-docs/<project>/<task>-<timestamp>`), so
+  nothing is lost by the content leaving the task space - while "keep" made every finish stop with the
+  space still on disk and ask for a second one. The default therefore takes the side that keeps the
+  content: it deletes none of the user's files and does not hold the finish up. The create dialog's
+  starting value, the finish dialog's archive tick (on by default already), the plugin's built-in
+  policy and the design document all agree now; pick "left alone" in the project default or for that
+  one task if nothing should be moved.
+
 - **The panel's create dialog asks for the delivery policy now, decision by decision.** The bottom of
   **Task details** carries eight choices in four rows of two, every one a dropdown: what to deploy to
   and when, who verifies the work, how a merge happens, which branch it lands on, whether the branch

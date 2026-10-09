@@ -56,7 +56,7 @@ const DEFAULT_DELIVERY: DeliveryChoice = {
   mergeTarget: "",
   deleteBranch: "keep",
   conflicts: "ask",
-  strays: "keep",
+  strays: "archive",
 }
 
 /**
