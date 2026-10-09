@@ -222,7 +222,14 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   content: it deletes none of the user's files and does not hold the finish up. The create dialog's
   starting value, the finish dialog's archive tick (on by default already), the plugin's built-in
   policy and the design document all agree now; pick "left alone" in the project default or for that
-  one task if nothing should be moved.
+  one task if nothing should be moved. The three options **say their consequence in the label** —
+  "Archived (one finish clears it)", "Left alone (space stays)", "Discarded (only when abandoning)" —
+  and the question mark explains it in full: only archiving lets that finish actually remove the task
+  space; leaving things in place keeps the space non-empty, so it is kept and a second finish is
+  needed. The pair that is easiest to confuse is spelled out too: **"left alone" is really the policy
+  saying nothing** (nothing is deleted), and **"discarded" is honoured only when the task is
+  abandoned** (build output and content go together then) — so on a normal finish the two do the same
+  thing, which is nothing.
 
 - **The panel's create dialog asks for the delivery policy now, decision by decision.** The bottom of
   **Task details** carries eight choices in four rows of two, every one a dropdown: what to deploy to
