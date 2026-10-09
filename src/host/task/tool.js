@@ -454,7 +454,13 @@ async function dispatchToSession(ctx, exec, request) {
     setSessionPermission(sessions.get(sessionId), mode)
   }
   try {
-    await controller.prompt({ sessionId, content: [{ type: 'text', text: request.prompt }] })
+    // The Host's prompt contract takes a cancellation signal beside the request, and the
+    // session-controller's implementation dereferences it without a guard - its own `list`
+    // guards, `prompt` does not - so a handoff that passes only the request dies with
+    // "Cannot read properties of undefined (reading 'throwIfAborted')" and the work never
+    // reaches the session. A handoff is not a cancellable read: it either gets handed over or
+    // the caller is told it did not, so this passes a signal that never aborts.
+    await controller.prompt({ sessionId, content: [{ type: 'text', text: request.prompt }] }, new AbortController().signal)
   } catch (error) {
     return {
       sessionId,

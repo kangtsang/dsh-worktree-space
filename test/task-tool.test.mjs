@@ -687,10 +687,11 @@ describe("registerTaskTool", () => {
     const created = []
     const appended = []
     const prompts = []
+    const signals = []
     const services = {
       sessionController: {
         create: async (place) => { created.push(place); return { sessionId: "session-1" } },
-        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+        prompt: async (request, signal) => { prompts.push(request); signals.push(signal); return { accepted: true } },
       },
       sessions: { get: (id) => (id === "session-1" ? { append: (type, data) => appended.push({ type, data }) } : undefined) },
       workspaceRegistry: {
@@ -713,6 +714,12 @@ describe("registerTaskTool", () => {
       // Named by its Workspace, not by its directory: the controller attaches a session to a
       // Workspace only when it is named, and that attachment is what groups it in the sidebar.
       expect(created).toEqual([{ workspaceId: "ws-login" }])
+      // The Host's prompt contract carries a cancellation signal beside the request, and the
+      // session-controller dereferences it unguarded - so a handoff that passed only the
+      // request died there and left the session without its work. This is that regression.
+      expect(signals).toHaveLength(1)
+      expect(typeof signals[0]?.throwIfAborted).toBe("function")
+      expect(() => signals[0].throwIfAborted()).not.toThrow()
       // The caller's own override, copied and marked as delegated rather than as a switch the
       // user made - the same events DSH seeds into a child agent. `danger-full-access` is a
       // bundle in DSH's own table ("full file access without approval prompts"), so its

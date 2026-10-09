@@ -7,6 +7,13 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 ## Unreleased
 
 ### Fixed
+- **Handing the work to a freshly opened session works now.** The Host's
+  `sessionController.prompt(request, signal)` declares `signal` as required, and its implementation
+  dereferences it without a guard (the same package's `list` guards); this plugin passed the request
+  alone, so that step threw `Cannot read properties of undefined (reading 'throwIfAborted')` — the
+  session was opened and the work never reached it, which came back as "the session was opened but the
+  work could not be handed to it". It now passes a signal that never aborts, which is the contract: a
+  handoff is not a cancellable read — it either gets handed over or the caller is told it did not.
 - **A task space created from an agent session is no longer left unregistered.**
   `task_worktree_space`'s `create` did the disk half only — the directory, the
   branch, one worktree per repository — while "register this directory as a DSH

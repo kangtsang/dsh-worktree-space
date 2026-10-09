@@ -7,6 +7,12 @@
 
 ### 修复
 
+- **修好"把活交给新开的会话"这一步。** 宿主的 `sessionController.prompt(request, signal)` 把 `signal` 声明为
+  **必填**，而它的实现无守卫地解引用（同一个包里 `list` 是带守卫的写法）；插件此前只传了 request，于是这一步抛
+  `Cannot read properties of undefined (reading 'throwIfAborted')`——会话开出来了、活却没交过去，回给你的是一句
+  "the session was opened but the work could not be handed to it"。现在按契约传一个**永不中止**的信号：交活本来
+  就不该被取消（要么交出去，要么如实告诉你没交成）。
+
 - **agent 侧建出来的任务空间不再是一个未注册的半成品。** `task_worktree_space` 的 `create` 过去只做盘上
   那一半——目录、分支、每个仓库的 worktree——而「把这个目录注册成 DSH 工作区」是客户端能力（面板走
   客户端的 `ctx.workspaces.create`），工具侧没有对应的一步。结果是工具建出来的任务空间**不出现在工作区
