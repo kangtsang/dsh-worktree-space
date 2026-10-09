@@ -240,6 +240,25 @@ docker-only through `deploy.sh`. When none of that exists and the user asks to
 deploy, scaffolding that root from the repositories' own run commands is ordinary
 session work; what must not happen is starting the services on the host instead.
 
+**The deploy root writes its own delivery state, and the gate reads that file.** A deploy
+root's scripts own one file beside them — `<deploy root>/.state.json`, or the path
+`DSH_STATE_FILE` names — and it is what the panel and the merge gate read:
+
+- `./deploy.sh up` writes `url` (and whatever `services` it likes) once the environment is
+  up;
+- `./deploy.sh smoke` merges `lastSmoke: { result, at }` into it **without dropping the
+  fields already there** — a pretty rewrite that loses `humanAck` loses the user's
+  acceptance with it;
+- `humanAck` and `destroyedAt` belong to the plugin; they are never the script's to write.
+
+**Nothing else may write that file**: not a hand edit, and not a transcript of a run that
+happened somewhere else. The gate reads it as the evidence that the step happened, so
+writing it from outside turns the gate into a formality — if the state is missing, fix the
+script that should have written it, or tell the user; the human's own way past the gate is
+the panel's "finish anyway". A missing file, or a `lastSmoke.result` that is not `pass`, is
+exactly why the panel shows no acceptance URL and why `done` refuses the merge
+(E5005/E5006).
+
 **Scaffolding writes logs so that the host can still read and archive them.** When a
 service's log directory is bind-mounted out of the container, the service must not be
 asked to split its log by day *and* keep a "current log" symlink beside it: a symlink a
