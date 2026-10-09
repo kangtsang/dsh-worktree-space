@@ -298,6 +298,29 @@ describe('deployment state reads and writes', () => {
     expect(outcome.removed).toBe(true)
   })
 
+  it('tears down containers a nothing-policy space still carries, through the label path', async () => {
+    // `target: none` says no deployment was wanted, but a space can hold containers from a deploy
+    // made outside this flow, and refusing to take those down is the one answer that leaves the
+    // user stuck with them. It goes through the label path - the manifest branch has no entry for
+    // a target the policy does not name, and that is what used to be reached instead.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'none' } } })
+    const calls = []
+    const subprocess = { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      let text = ''
+      if (argv.includes('-q')) text = 'abc123'
+      else if (argv.includes('inspect')) text = 'E:\\space\\deploy\\docker-compose.yml\tE:\\space\\deploy'
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+    const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
+    expect(calls.some((line) => line.includes('compose'))).toBe(true)
+    expect(calls.every((line) => !line.includes('deploy.sh'))).toBe(true)
+    expect(outcome.removed).toBe(true)
+  })
+
   it('answers quietly when there is nothing to tear down', async () => {
     const { root } = await taskFixture({})
     const subprocess = { spawn: vi.fn(() => { throw new Error('docker not found') }) }

@@ -325,13 +325,17 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
   if (id === '') {
     return { removed: false, containers: 0, warning: warned('no-deployment-recorded', 'no deployment environment is recorded for this task space, so there is nothing named to remove') }
   }
-  // A non-docker target has no containers to find by label: its teardown is
-  // whatever the manifest's destroy command says, run with the same env id.
+  // A real host target has no containers to find by label: its teardown is whatever the
+  // manifest's destroy command says, run with the same env id. `none` is not such a target -
+  // it is a policy that expects no deployment at all - but a space can still carry containers
+  // from a deploy made outside this flow, and teardown must never be the thing that gets
+  // refused: containers nobody can take down from here are a worse end state than the policy's
+  // own surprise. It falls through to the label path below, which is what finds them.
   const target = (recordedForTarget !== undefined ? recordedForTarget : await readTaskMetadata(taskPath).catch(() => undefined))
   const policyTarget = typeof target?.delivery === 'object' && target.delivery !== null
     ? String(target.delivery?.deploy?.target ?? 'docker')
     : 'docker'
-  if (policyTarget !== 'docker') {
+  if (policyTarget !== 'docker' && policyTarget !== 'none') {
     const manifest = await readDeployManifest(taskPath)
     const entry = manifestEntryFor(manifest, policyTarget, 'destroy')
     const out = await runManifestCommand(subprocess, entry.destroy, manifest.dir, id)

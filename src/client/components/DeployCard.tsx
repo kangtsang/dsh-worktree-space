@@ -94,6 +94,11 @@ export function DeployCard({ api, path }: Props) {
   if (failed || status === null) return null
   const containers = status.containers.length > 0
   if (status.target === "none" && !status.stateFound && !containers) return null
+  // A policy that deploys nothing offers no deployment to start or smoke - the Host refuses
+  // both - but the space can still hold containers from a deploy made outside this flow, so the
+  // card keeps showing them and keeps the two actions that stay meaningful: tearing them down,
+  // and the acceptance ack, which is the policy's own gate rather than the deployment's.
+  const deploys = status.target !== "none"
 
   const smoke = status.lastSmoke
   const smokeBadge = smoke?.result === "pass"
@@ -121,12 +126,12 @@ export function DeployCard({ api, path }: Props) {
         ? <a className="dws-deploy-url" href={status.url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{status.url}</a>
         : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
       <div className="dws-deploy-actions">
-        {containers
+        {deploys && containers
           ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
           : null}
-        {containers
-          ? null
-          : <Button className="dws-button-ghost dws-deploy-up" disabled={working} title={t("deployUp")} onClick={() => run(() => api.deployUp(path))}><RefreshCw size={14} /><span>{t("deployUp")}</span></Button>}
+        {deploys && !containers
+          ? <Button className="dws-button-ghost dws-deploy-up" disabled={working} title={t("deployUp")} onClick={() => run(() => api.deployUp(path))}><RefreshCw size={14} /><span>{t("deployUp")}</span></Button>
+          : null}
         {status.stateFound && status.humanAck === null && status.url
           ? <Button className="dws-button-ghost dws-deploy-accept" disabled={working} title={t("deployAccept")} onClick={() => run(() => api.acceptDeployment(path))}><Check size={14} /><span>{t("deployAccept")}</span></Button>
           : null}

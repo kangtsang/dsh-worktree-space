@@ -41,6 +41,20 @@ describe("the deployment card", () => {
     expect(container.firstElementChild).toBeNull()
   })
 
+  it("offers no deploy or smoke action for a policy that deploys nothing, but still tears down and accepts", async () => {
+    // Containers can stand in a space whose policy deploys nothing: someone deployed it outside
+    // this flow. The Host refuses to start or smoke such a space, so the card must not offer
+    // those two; teardown and the acceptance ack are what stay meaningful - the first because
+    // nobody else can remove them, the second because it is the policy's own gate.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ target: "none" })) }
+    render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(screen.queryByRole("button", { name: t("deploySmoke") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("deployUp") })).toBeNull()
+    expect(screen.getByRole("button", { name: t("deployDestroy") })).toBeTruthy()
+    expect(screen.getByRole("button", { name: t("deployAccept") })).toBeTruthy()
+  })
+
   it("records the human acceptance through the api", async () => {
     const api = { deployStatus: vi.fn().mockResolvedValue(status()), acceptDeployment: vi.fn().mockResolvedValue({ statePath: "x", humanAck: { at: "2026-10-05T01:00:00Z" } }) }
     render(<DeployCard api={api} path="/task" />)
