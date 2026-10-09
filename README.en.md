@@ -56,6 +56,15 @@ top right.
   tick the repositories to take part, and say where the task space goes. Every repository gets a
   worktree on `<branch prefix><task>` — `task/<task>` by default — starting from each repository's
   current HEAD, or from a named branch or commit.
+  The bottom of **Task details** holds the **delivery policy**: what to deploy to and when, who
+  verifies the work, how a merge happens, which branch it lands on, whether the branch is deleted
+  afterwards, what an unresolved conflict does, and what happens to the files a task space leaves
+  behind — eight choices, two to a row, every one a dropdown, **starting at the built-in defaults**
+  (the answer when nothing is said). What you pick travels with the create request, is written into
+  the task's own record, and **beats that project's stored default**.
+  For "merge back by itself when it is done", pick **Merge by itself** and **The agent alone**: those
+  two are a pair — merge-by-itself with a verification that waits for a person is refused, and the
+  refusal says what to change.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit inside the task space without touching the
   source checkouts.

@@ -140,7 +140,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
-    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string }) => call<CreateTaskResult>("task.create", payload),
+    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string; delivery?: string }) => call<CreateTaskResult>("task.create", payload),
     /**
      * Add repositories to a task that already exists.
      *

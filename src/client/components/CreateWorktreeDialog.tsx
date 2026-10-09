@@ -6,9 +6,73 @@ import { errorText } from "../lib/error-text"
 import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 type BaseMode = "head" | "named"
+
+/** The delivery policy's eight decisions, as the dialog holds them: one dropdown each. */
+interface DeliveryChoice {
+  deployTarget: string
+  deployMode: string
+  verification: string
+  mergeMode: string
+  mergeTarget: string
+  deleteBranch: string
+  conflicts: string
+  strays: string
+}
+
+/**
+ * The eight decisions in the order they are shown: two per row, in the policy's own order.
+ *
+ * Flat keys because the dialog shows one control per decision; the record's nested shape is
+ * built from this on submit. `mergeTarget` offers only the default, because the branches a
+ * merge could land on are each repository's own and the dialog has no list of them - naming
+ * one is the tool's or the configuration's to do.
+ */
+const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; options: [string, string][] }[] = [
+  { key: "deployTarget", label: "deliveryDeployTarget", options: [["none", "deliveryTargetNone"], ["docker", "deliveryTargetDocker"], ["host", "deliveryTargetHost"]] },
+  { key: "deployMode", label: "deliveryDeployMode", options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
+  { key: "verification", label: "deliveryVerification", options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
+  { key: "mergeMode", label: "deliveryMergeMode", options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
+  { key: "mergeTarget", label: "deliveryMergeTarget", options: [["", "deliveryMergeTargetDefault"]] },
+  { key: "deleteBranch", label: "deliveryDeleteBranch", options: [["keep", "deliveryDeleteKeep"], ["remove", "deliveryDeleteRemove"]] },
+  { key: "conflicts", label: "deliveryConflicts", options: [["ask", "deliveryConflictAsk"], ["agent-auto", "deliveryConflictAgentAuto"], ["stop", "deliveryConflictStop"]] },
+  { key: "strays", label: "deliveryStrays", options: [["keep", "deliveryStraysKeep"], ["archive", "deliveryStraysArchive"], ["discard", "deliveryStraysDiscard"]] },
+]
+
+/** Where every dropdown starts: the policy's own default, which is also what a create without it gets. */
+const DEFAULT_DELIVERY: DeliveryChoice = {
+  deployTarget: "none",
+  deployMode: "on-request",
+  verification: "agent-then-human",
+  mergeMode: "ask",
+  mergeTarget: "",
+  deleteBranch: "keep",
+  conflicts: "ask",
+  strays: "keep",
+}
+
+/**
+ * The eight flat choices as the policy the Host reads and records.
+ *
+ * `merge.target` is left out when it is left at the default, which is what "each
+ * repository's checked-out branch" means, and the branch is kept unless the user asked for
+ * the deletion - so a policy this dialog sends says only what the user actually chose.
+ */
+function deliveryPolicyOf(choice: DeliveryChoice) {
+  return {
+    deploy: { target: choice.deployTarget, mode: choice.deployMode },
+    verification: choice.verification,
+    merge: {
+      mode: choice.mergeMode,
+      ...(choice.mergeTarget === "" ? {} : { target: choice.mergeTarget }),
+      deleteBranch: choice.deleteBranch === "remove",
+    },
+    conflicts: choice.conflicts,
+    strays: choice.strays,
+  }
+}
 
 /** Prefix the host uses when the caller names none; a suggestion normally carries it. */
 const FALLBACK_BRANCH_PREFIX = "task/"
@@ -71,6 +135,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const [selected, setSelected] = useState<string[]>([])
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
   const [namedBase, setNamedBase] = useState("")
+  const [delivery, setDelivery] = useState<DeliveryChoice>(DEFAULT_DELIVERY)
   const [saveAsDefault, setSaveAsDefault] = useState(false)
   const [saveRootAsDefault, setSaveRootAsDefault] = useState(false)
   const [error, setError] = useState("")
@@ -86,6 +151,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     setRecovery(null)
     setSaveAsDefault(false)
     setSaveRootAsDefault(false)
+    setDelivery(DEFAULT_DELIVERY)
   }, [target.path])
 
   // The configured default is read from the form the Plugins page edits, and kept
@@ -307,6 +373,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         repos: selected,
         baseRef: baseRef === "" ? undefined : baseRef,
         branchPrefix: effectivePrefix,
+        delivery: JSON.stringify(deliveryPolicyOf(delivery)),
       })
       // The Host's own project name, not the one this dialog derived: cleanup
       // names the task space back to it, so it must be the one that was written.
@@ -503,6 +570,20 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
           </label>
           <p className="dws-field-note">{t("tasksRootStrategyHint")}</p>
         </> : null}
+      </div>
+      {/* The delivery policy last, and at its defaults until the user changes one: eight
+          short choices, two per row. What is sent is what is shown - the choices go into
+          the task's own record, where they beat that project's stored default. */}
+      <div className="dws-field-row">
+        <span className="dws-field-label"><span>{t("deliveryLabel")}</span><span className="dws-field-note">{t("deliveryHint")}</span></span>
+        <div className="dws-delivery-grid">
+          {DELIVERY_FIELDS.map((field) => <div className="dws-delivery-cell" key={field.key}>
+            <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
+            <Select id={`${id}-delivery-${field.key}`} value={delivery[field.key]} disabled={fieldsDisabled} onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}>
+              {field.options.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+            </Select>
+          </div>)}
+        </div>
       </div>
     </div>
   </fieldset>

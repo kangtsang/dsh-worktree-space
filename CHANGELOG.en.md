@@ -215,6 +215,17 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Added (the merge mode in a task's policy now does something)
 
+- **The panel's create dialog asks for the delivery policy now, decision by decision.** The bottom of
+  **Task details** carries eight choices in four rows of two, every one a dropdown: what to deploy to
+  and when, who verifies the work, how a merge happens, which branch it lands on, whether the branch
+  is deleted afterwards, what an unresolved conflict does, and what happens to the files a task space
+  leaves behind. They **start at the built-in defaults** — the answer when nothing is said — and what
+  the user picks travels with the create request, is written into the task's own record, and **beats
+  that project's stored default**, so what the panel shows is what the task runs. `merge.target` offers
+  only "the default (each repository's current branch)": the branches a merge could land on are each
+  repository's own and the dialog has no list of them, so naming one stays with the tool or the
+  configuration.
+
 - **A create can state the delivery policy itself now, as `delivery`.** The three layers (what the request states,
   then the project's stored default, then the built-in one) have always existed — but **the request layer had no
   entrance at all**: the panel's dialog never sends it and the tool's schema had no such field, so in practice only

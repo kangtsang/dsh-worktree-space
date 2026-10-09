@@ -141,6 +141,34 @@ describe("native task create flow", () => {
     await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["/repo/alpha", "/repo/beta"] })))
   })
 
+  it("sends the delivery policy the dialog shows, at its defaults until one is changed", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // Eight decisions, one dropdown each, in the task-info block: what the create sends is
+    // what is on screen.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(8)
+
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => {
+      const calls = next.api.createTask.mock.calls
+      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
+      // The untouched defaults, as the policy record's own shape: `merge.target` is absent
+      // because "the default" means each repository's checked-out branch, and the branch is
+      // kept because nobody asked for the deletion.
+      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
+        deploy: { target: "none", mode: "on-request" },
+        verification: "agent-then-human",
+        merge: { mode: "ask", deleteBranch: false },
+        conflicts: "ask",
+        strays: "keep",
+      })
+    })
+  })
+
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
     const next = setup()
     next.mount()
@@ -164,7 +192,9 @@ describe("native task create flow", () => {
     // the source root, and what identifies them is where they are. The Host cannot
     // rebuild a repository from a directory name when discovery reached it through
     // a level in between.
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/" })
+    // `delivery` rides along on every create; what is inside it is asserted field by field
+    // in the test above, so here it only has to be the string the Host parses.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", delivery: expect.any(String) })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)

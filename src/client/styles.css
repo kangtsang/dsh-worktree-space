@@ -488,6 +488,12 @@
   .dws-details { display: grid; gap: 12px; clear: both; padding: 14px; border: 1px solid var(--wt-line); border-radius: 11px; background: var(--wt-soft); }
   .dws-field-row { display: grid; gap: 5px; }
   .dws-field-row + .dws-field-row { padding-top: 12px; border-top: 1px solid var(--wt-line); }
+  /* The delivery policy is eight dropdowns, two to a row: each one is a short choice, and
+     eight stacked rows would bury the three fields above them. The rows inside the grid are
+     plain cells, so the rule between fields above does not run between the columns. */
+  .dws-delivery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+  .dws-delivery-cell { display: grid; gap: 4px; min-width: 0; }
+  .dws-delivery-label { color: var(--wt-secondary); font-size: 12px; }
   .dws-details .dws-input { background: var(--wt-surface); }
   .dws-field-label { display: block; margin: 0; padding: 0; color: var(--wt-text); font-size: 13px; font-weight: 400; line-height: 20px; }
   /* A field's explanation sits on the label's own line, right-aligned against it, so
