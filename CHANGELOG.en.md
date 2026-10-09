@@ -223,11 +223,11 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   each name carries a **question mark whose hover explains that decision**. What the user picks travels
   with the create request, is written into the task's own record, and **beats that project's stored
   default**, so what the panel shows is what the task runs.
-  **Merge into**, **Branch after merge** and **Conflicts** are **enabled only when Merge is "merge by
-  itself"**: with "only when a merge is asked for" those three are decided at the finish, when a merge
-  is actually wanted, and with "never" no merge is coming to decide them for. Left alone, they are not
-  written into the policy at all, so the project's stored default answers them. **Leftovers** is not in
-  that group on purpose — every finish deals with those, merged or not.
+  **Merge into**, **Branch after merge**, **Conflicts** and **Leftovers** **appear only once Merge is
+  "merge by itself"**: those four are what a finish the flow runs by itself decides, and with "only when
+  a merge is asked for" the finish is the user's own press — all four, leftovers included, are put to
+  them at that moment (and with "never" there is no merge to decide for). Left alone, none of them is
+  written into the policy at all, so the project's stored default answers them.
   `merge.target` has one limit of its own: the branches a merge could land on are each repository's own
   and the dialog has no list of them, so it offers only "the default (each repository's current
   branch)" and naming one stays with the tool or the configuration.

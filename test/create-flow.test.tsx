@@ -147,25 +147,53 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
-    // Eight decisions, one dropdown each, in the task-info block: what the create sends is
-    // what is on screen.
-    expect(document.querySelectorAll("select.dws-select").length).toBe(8)
-    // The three that decide a merge this flow makes itself stay disabled while the merge is
-    // asked for at the finish. `strays` is not one of them: every finish deals with those.
-    expect(document.querySelectorAll("select.dws-select:disabled").length).toBe(3)
+    // Four of the eight are the flow's own decisions; the other four appear only once "merge
+    // by itself" is picked, and the line under the grid says where they went.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
+    expect(screen.queryByText(t("deliveryStrays"))).toBeNull()
 
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
       const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
-      // The untouched defaults, as the policy record's own shape: `merge.target` and
-      // `deleteBranch` are absent because neither is this flow's to decide while the merge is
-      // asked for, and so is `conflicts` - the finish puts all three when a merge is wanted.
+      // The untouched defaults, as the policy record's own shape: everything a finish decides at
+      // its own moment is absent - `merge.target`, `deleteBranch`, `conflicts` and `strays` -
+      // because the finish that presses them is the user's, not this flow's.
       expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
         deploy: { target: "none", mode: "on-request" },
         verification: "agent-then-human",
         merge: { mode: "ask" },
+      })
+    })
+  })
+
+  it("shows the four finish-decided choices once the merge is the flow's own", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
+    // "Merge by itself" is what makes a finish the flow's own, and that is what those four
+    // decisions belong to - so they are on screen from that moment on.
+    await user.selectOptions(screen.getByLabelText(t("deliveryMergeMode")), "auto")
+    await user.selectOptions(screen.getByLabelText(t("deliveryVerification")), "agent")
+    expect(document.querySelectorAll("select.dws-select").length).toBe(8)
+    expect(screen.getByText(t("deliveryStrays"))).toBeTruthy()
+
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => {
+      const calls = next.api.createTask.mock.calls
+      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
+      // Settled by this flow, so they are written down: the branch, the deletion, the conflict
+      // mode and the leftovers all travel with the record now.
+      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
+        deploy: { target: "none", mode: "on-request" },
+        verification: "agent",
+        merge: { mode: "auto", deleteBranch: false },
+        conflicts: "ask",
         strays: "keep",
       })
     })

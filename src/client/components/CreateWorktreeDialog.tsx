@@ -41,8 +41,10 @@ const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string;
   { key: "mergeTarget", label: "deliveryMergeTarget", hint: "deliveryMergeTargetHint", needsAuto: true, options: [["", "deliveryMergeTargetDefault"]] },
   { key: "deleteBranch", label: "deliveryDeleteBranch", hint: "deliveryDeleteBranchHint", needsAuto: true, options: [["keep", "deliveryDeleteKeep"], ["remove", "deliveryDeleteRemove"]] },
   { key: "conflicts", label: "deliveryConflicts", hint: "deliveryConflictsHint", needsAuto: true, options: [["ask", "deliveryConflictAsk"], ["agent-auto", "deliveryConflictAgentAuto"], ["stop", "deliveryConflictStop"]] },
-  // Leftovers are not a merge decision: every finish deals with them, merged or not.
-  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", options: [["keep", "deliveryStraysKeep"], ["archive", "deliveryStraysArchive"], ["discard", "deliveryStraysDiscard"]] },
+  // The leftovers ride with the three above. It is the finish that deals with them, and the
+  // only finish whose handling is not already the user's own to answer is the one this flow
+  // runs by itself.
+  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", needsAuto: true, options: [["keep", "deliveryStraysKeep"], ["archive", "deliveryStraysArchive"], ["discard", "deliveryStraysDiscard"]] },
 ]
 
 /** Where every dropdown starts: the policy's own default, which is also what a create without it gets. */
@@ -65,10 +67,12 @@ const DEFAULT_DELIVERY: DeliveryChoice = {
  * the deletion - so a policy this dialog sends says only what the user actually chose.
  */
 function deliveryPolicyOf(choice: DeliveryChoice) {
-  // Three of the eight only exist when the merge is this flow's own to make: with `ask` the
-  // branch, the deletion and the conflict mode are put at the finish, when a merge is
-  // actually wanted, and with `never` no merge is coming at all. Left out here, they are the
-  // project's stored default to answer - which is what "not decided at creation" means.
+  // Four of the eight are decisions about a finish this flow runs by itself: which branch the
+  // merge lands on, whether the branch is deleted, what a conflict does, and how the leftovers
+  // are handled. With `ask` the finish is the user's own press and every one of them is put
+  // there, at the moment it is actually needed; with `never` no merge is coming at all. Left
+  // out here, they are the project's stored default to answer - which is what "not decided at
+  // creation" means.
   const mergeAutomatic = choice.mergeMode === "auto"
   return {
     deploy: { target: choice.deployTarget, mode: choice.deployMode },
@@ -78,8 +82,7 @@ function deliveryPolicyOf(choice: DeliveryChoice) {
       ...(mergeAutomatic && choice.mergeTarget !== "" ? { target: choice.mergeTarget } : {}),
       ...(mergeAutomatic ? { deleteBranch: choice.deleteBranch === "remove" } : {}),
     },
-    ...(mergeAutomatic ? { conflicts: choice.conflicts } : {}),
-    strays: choice.strays,
+    ...(mergeAutomatic ? { conflicts: choice.conflicts, strays: choice.strays } : {}),
   }
 }
 
@@ -583,13 +586,15 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
           <p className="dws-field-note">{t("tasksRootStrategyHint")}</p>
         </> : null}
       </div>
-      {/* The delivery policy last, and at its defaults until the user changes one: eight
-          short choices, two per row. What is sent is what is shown - the choices go into
-          the task's own record, where they beat that project's stored default. */}
+      {/* The delivery policy last, and at its defaults until the user changes one. Four of the
+          eight are decisions that a finish this flow runs by itself makes, so they appear only
+          once "merge by itself" is chosen; the line under the grid says where they went. What
+          is sent is what is shown - the choices go into the task's own record, where they beat
+          that project's stored default. */}
       <div className="dws-field-row">
         <span className="dws-field-label"><span>{t("deliveryLabel")}</span><span className="dws-field-note">{t("deliveryHint")}</span></span>
         <div className="dws-delivery-grid">
-          {DELIVERY_FIELDS.map((field) => <div className="dws-delivery-cell" key={field.key}>
+          {DELIVERY_FIELDS.filter((field) => field.needsAuto !== true || mergeAutomatic).map((field) => <div className="dws-delivery-cell" key={field.key}>
             <span className="dws-delivery-head">
               <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
               <HoverHint label={t(field.hint)} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
@@ -597,15 +602,15 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             <Select
               id={`${id}-delivery-${field.key}`}
               value={delivery[field.key]}
-              disabled={fieldsDisabled || (field.needsAuto === true && !mergeAutomatic)}
+              disabled={fieldsDisabled}
               onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}
             >
               {field.options.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </Select>
           </div>)}
         </div>
-        {/* The three that are not this flow's to decide are still shown, greyed, rather than
-            hidden: what is missing is a reason, and the reason is this line. */}
+        {/* Four choices are not shown while the finish is the user's own press: what is
+            missing is a reason, and the reason is this line. */}
         {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
       </div>
     </div>
