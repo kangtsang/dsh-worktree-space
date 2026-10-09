@@ -217,6 +217,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         task: made.task,
         project: made.project,
         tasksRoot: tasksRoot.trim(),
+        // A rollback is not a delivery: this removes what a create had already made, so it
+        // says "no merge" rather than leaving the question open for the task's own policy -
+        // which, under `merge.mode: auto`, would land the half-made work on the target branch.
+        merge: false,
         deleteBranch: true,
         force: true,
         // Without this the Host records a task space and a branch being deleted

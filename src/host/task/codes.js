@@ -63,6 +63,7 @@ export const ERROR_CODES = {
   E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
   E4011: 'index.js - a handoff access request named no session',
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
+  E4013: 'tool.js - the task records that this flow does not merge it',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
@@ -106,6 +107,7 @@ export const UNKNOWN = 'E9001'
 export const WARNING_CODES = {
   'no-task-branch': 'archive.js - the record names no branch, so no branch was deleted',
   'delivery-gate-bypassed': 'deploy.js - the delivery gate was overruled and the finish carried on',
+  'human-ack-waived': 'deploy.js - the policy merges by itself, so the human acceptance it also asked for was not waited for',
   'branch-left-alone': 'archive.js - the worktree is not on the task branch, so no branch was deleted',
   'branch-not-deleted': 'archive.js - git did not delete the branch',
   'leftover-refused': 'archive.js - a leftover is a link, or outside the container, and is left alone',

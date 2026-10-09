@@ -90,6 +90,10 @@ created ──► developing ──► deploying ──► verifying ──┬�
   "verification": "agent-then-human",  // agent | agent-then-human | human（决策 D1：默认此项）
   "merge": {
     "mode": "ask",               // auto | ask | never（决策 D3：auto 必须显式开启）
+                                 //   auto = 这份记录说"这条任务自己合回去"：收尾不必再传 merge。
+                                 //   auto 不能与要人验证的模式共存（auto + agent-then-human/human 在建任务时就被拒绝，
+                                 //   因为 auto 没有人可等）；要人验证就用 ask + agent-then-human/human。
+                                 //   never = 这条流程不合并这条任务：工具传 merge: true 会被拒绝（E4013）。
     "target": null,              // null=各源仓库当前检出的分支；可指定如 "develop"
     "deleteBranch": false        // 合并成功后是否删任务分支；默认 false=保留，只有写 true 才删
   },

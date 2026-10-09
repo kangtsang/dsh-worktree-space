@@ -208,6 +208,28 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   default: only an explicit choice deletes - the panel's tick, the tool's `deleteBranch: true`, or that task's own
   policy saying `true`.
 
+### Added (the merge mode in a task's policy now does something)
+
+- **`merge.mode` used to be written into the task's record and read by nobody. All three values now have a
+  behaviour** (the policy is recorded at create time and every later step reads it):
+  - `auto`: the record saying "this task merges back by itself" — the finish then needs no `merge` argument at
+    all, and the merge is part of ending the task.
+  - `ask` (the default, unchanged): a merge only when `merge: true` is passed.
+  - `never`: this flow does not merge the task — a `merge: true` from the tool is refused (`E4013`), and the
+    refusal names the way past it, which is the panel, where the user's own hand does it.
+- **`auto` cannot be combined with a verification that waits for a person**: `merge.mode: auto` with
+  `verification: agent-then-human` or `human` is refused **at create time** (`E4010`), because `auto` has no one
+  to wait for and that acceptance could never arrive. A record from an older version, or one edited by hand, is
+  **not** refused: read back, `auto` means what it says (no waiting for the ack), and the result carries a warning
+  (`human-ack-waived`) rather than dropping it in silence.
+- **The gate is untouched**: `auto` answers who presses the merge, not whether the work was checked — a policy
+  that expects a deployment still needs that deployment and its passing smoke (`E5005`/`E5006`).
+- **A finish's flags now say "stated" rather than "true or false"**: the panel always states them, so the user's
+  tick or untick always outranks the record; the tool and the endpoint leave them out when they said nothing, and
+  the task's own policy answers. One consequence was fixed with it: the **rollback** after a failed create now
+  states `merge: false` explicitly, or under an `auto` policy it would have merged half-made work into the target
+  branch.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

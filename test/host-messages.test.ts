@@ -128,6 +128,7 @@ describe("every sentence the Host's codes are said with", () => {
     ["no-task-branch", { path: "/w/login" }, "/w/login"],
     ["delivery-gate-bypassed", { target: "docker" }, "docker"],
     ["delivery-gate-bypassed", { missing: ["human-ack"] }, ""],
+    ["human-ack-waived", {}, ""],
     ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "", taskBranch: "task/x" }, "alpha"],
     ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "other", taskBranch: "task/x" }, "other"],
     ["branch-not-deleted", { branch: "task/x", name: "alpha" }, "task/x"],

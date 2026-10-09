@@ -364,6 +364,7 @@ describe("native task create flow", () => {
       task: "fix-login",
       project: "repo",
       tasksRoot: "/tasks",
+      merge: false,
       deleteBranch: true,
       force: true,
       // The Host cannot see the dialog's registration failing, so the reason has
@@ -423,6 +424,7 @@ describe("native task create flow", () => {
       task: "fix-login",
       project: "repo",
       tasksRoot: "/tasks",
+      merge: false,
       deleteBranch: true,
       force: true,
       // The Host cannot see the dialog's registration failing, so the reason has

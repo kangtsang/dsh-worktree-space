@@ -10,6 +10,7 @@ import { projectNameFor } from './naming.js'
 import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
 import { canonicalPath } from './paths.js'
 import { coded } from './codes.js'
+import { deliveryPolicyOf } from './delivery.js'
 import { readTaskMetadata, taskSpacePath } from './shared.js'
 
 /**
@@ -25,7 +26,7 @@ const DESCRIPTION = [
   'A create does both halves by default: it makes the directory and the worktrees, and registers the result as a DSH Workspace, which is what puts the task space in the workspace list. Given a prompt as well, it also opens a session in the new task space and hands it that job in the same call - one step, which is what the panel\'s "Create and open" does in one press, except that the session there starts empty and this one is already working. Pass registerWorkspace false only when the user asked for a task space that stays out of that list - it is then on disk, nothing in the interface shows it, and opening a session in it means registering it from the panel. A create that answers with a warning instead says its Workspace was not registered, and names what to do about it.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
-  'Pass merge only when the user asked to merge, and deleteBranch only after a merge: a branch that landed on its target is safe to remove, and that is the tidying-up this tool does on its own.',
+  'Pass merge only when the user asked to merge - unless the task\'s own record already answers: merge.mode "auto" is that record saying the task merges back by itself, and then done merges without the argument, while merge.mode "never" refuses the ask (E4013) and leaves the merge to the user\'s own hand in the panel. The rest of the delivery gate stands either way: a policy that expects a deployment still needs that deployment and a passing smoke, because those are checks on the work rather than answers from a person. The branch is kept unless something explicitly says to delete it: deleteBranch true on this call, or that same standing answer in the task\'s record.',
   'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine.',
   'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
@@ -642,11 +643,11 @@ export function registerTaskTool(ctx, options = {}) {
       baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create). Omitted it registers, which is what the panel does; pass false only when the user asked for a task space that stays out of the workspace list.' },
-      merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
+      merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request - or without the argument when the task records merge.mode "auto", which is the user\'s standing answer that it merges by itself.' },
       prompt: { type: 'string', description: 'The complete, self-contained job for a session (create, dispatch). Given on create, the session is opened in the new task space and handed this in the same call; given on dispatch, it is handed to a session in a task space that already exists. A session does not share this conversation\'s context, so include everything it needs.' },
       permission: { type: 'string', enum: ['inherit', 'workspace-write', 'danger-full-access'], description: 'What the session opened by this call may write (create, dispatch). inherit, the default, copies this session\'s own explicit sandbox override and nothing more, so the new session is never wider than this one. Ask the user before naming danger-full-access: that is the whole machine.' },
       target: { type: 'string', description: 'Branch to merge into (done), for every repository. Omit for the branch each source repository has checked out.' },
-      deleteBranch: { type: 'boolean', description: 'Delete each branch (done), after a merge. Needs merge; deleting a branch that never landed is refused here.' },
+      deleteBranch: { type: 'boolean', description: 'Delete each branch (done), after a merge. Needs merge; deleting a branch that never landed is refused here. Omit it and the branch is kept, unless the task\'s own record asks for the deletion.' },
       cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Never reaches the user\'s own documents here.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },
       force: { type: 'boolean', description: 'Discard uncommitted changes (done). Refused here, always - the user decides that themselves, on the management page.' },
@@ -831,13 +832,29 @@ export function registerTaskTool(ctx, options = {}) {
         refuseIrreversible(args)
         const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
         const project = projectFor(args.project, args.sourceRoot)
+        // A task whose own record says the merge is not this flow's to make: the ask is
+        // refused here, naming the way past, rather than passed down to be dropped in
+        // silence. The panel's own press is the user's, and that one is not this tool's.
+        if (args.merge === true) {
+          const recorded = await readTaskMetadata(taskSpacePath(tasksRoot, project, task))
+          if (deliveryPolicyOf(recorded).merge.mode === 'never') {
+            throw coded(
+              'E4013',
+              `task '${task}' records merge.mode 'never', so this flow does not merge it. `
+                + 'Finish it from the Worktree Space panel if the user wants it merged anyway.',
+            )
+          }
+        }
         const result = await finishTask(ctx.subprocess, {
           task,
           project,
           tasksRoot,
-          merge: args.merge === true,
+          // Absent, not false, when the call did not say: the task's own record answers
+          // "merge by itself" with `merge.mode: auto`, and an explicit `false` has to stay a
+          // no rather than be read as one.
+          merge: typeof args.merge === 'boolean' ? args.merge : undefined,
           target: typeof args.target === 'string' ? args.target : undefined,
-          deleteBranch: args.deleteBranch === true,
+          deleteBranch: typeof args.deleteBranch === 'boolean' ? args.deleteBranch : undefined,
           force: args.force === true,
           cleanStray: args.cleanStray === true,
           keep: Array.isArray(args.keep) ? args.keep : [],

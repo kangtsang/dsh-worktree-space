@@ -244,7 +244,15 @@ was meant.
 
 Confirm each destructive step with the user before passing it:
 
-1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. The
+1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. Unless
+   the task's own record already answers: `merge.mode: auto` is the user's standing
+   answer that this task merges back **by itself**, and then `done` merges without the
+   argument — the call does not have to ask for what the record already decided. The
+   opposite value, `merge.mode: never`, is the record saying this flow does not merge
+   the task at all: an ask is refused (`E4013`), and the way past it is the panel, which
+   is the user's own hand. `auto` is never a way round the rest of the gate — a policy
+   that expects a deployment still needs that deployment and its passing smoke, because
+   those are checks on the work rather than answers from a person. The
    merge puts the **task branch into the target branch** and it lands in the source
    repository; by default the target is the branch each source repository has checked
    out — the task's own starting point. Ask which branch to merge into when the user
@@ -328,8 +336,14 @@ Confirm each destructive step with the user before passing it:
    session; ask for it openly rather than retrying around it, and if the user is not
    there to grant it, stop and report - the delegation covers the decision, never a
    silent permission.
-4. **Delete the branch?** After a merge, and only when the user asks: pass
-   `deleteBranch: true` together with `merge: true`. When the user wants the task
+4. **Delete the branch?** After a merge, and only when the user asks for it: the
+   branch is **kept** unless something explicitly says to delete it — pass
+   `deleteBranch: true` together with `merge: true`, or leave it out and the branch
+   stays. That default is the reversible one: once the task space is gone, the branch is
+   the only record left of how the work was made, and a delete cannot be walked back.
+   A task's own record can say `deleteBranch: true` as a standing answer, and then a
+   merge under `merge.mode: auto` deletes it without the argument — the record is as
+   explicit as the call. When the user wants the task
    space gone without merging anything, that is the abandon path: pass
    `deleteBranch: true` with `force: true` and `merge: false`, which removes the
    worktrees and force-deletes the branches with the commits on them.

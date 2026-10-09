@@ -257,10 +257,21 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
   }
   const smoke = found.state?.lastSmoke
   if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('smoke')
-  if ((policy.verification === 'agent-then-human' || policy.verification === 'human') && found.state?.humanAck?.at === undefined) {
+  // A merge nobody has to confirm cannot be waiting for a confirmation. `auto` is the task's
+  // own record saying the merge happens by itself, and create time refuses it together with a
+  // verification that waits for a person - so this only bites a record that predates that
+  // rule or was edited by hand, and then the merge is taken at its word, with a warning
+  // rather than a silent drop.
+  const waitsForAPerson = policy.verification === 'agent-then-human' || policy.verification === 'human'
+  const ackWaived = waitsForAPerson && policy.merge.mode === 'auto' && found.state?.humanAck?.at === undefined
+  if (waitsForAPerson && !ackWaived && found.state?.humanAck?.at === undefined) {
     missing.push('human-ack')
   }
-  if (missing.length === 0) return undefined
+  if (missing.length === 0) {
+    return ackWaived && !bypass
+      ? warned('human-ack-waived', 'the task merges by itself, so its human acceptance was not waited for', {})
+      : undefined
+  }
   const named = missing.map((key) => MISSING_LABELS[key]).join(' and ')
   if (bypass) {
     return warned('delivery-gate-bypassed', `the user acknowledged finishing without ${named}`, { missing })

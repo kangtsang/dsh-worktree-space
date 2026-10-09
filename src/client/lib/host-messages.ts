@@ -121,6 +121,8 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
         ? format(t("warnDeliveryGateBypassedMissing"), { missing: missingText(t, missing) })
         : format(t("warnDeliveryGateBypassedWithoutDeployment"), { target: text(values.target) })
     }
+    case "human-ack-waived":
+      return t("warnHumanAckWaived")
     case "branch-left-alone":
       return text(values.branch) === ""
         ? format(t("warnBranchLeftAloneNone"), { name: text(values.name), mainRepo: text(values.mainRepo) })

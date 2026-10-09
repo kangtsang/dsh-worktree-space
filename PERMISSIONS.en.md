@@ -57,6 +57,11 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     checkout of the target branch inside it, merges there, then `worktree remove --force` (falling back to
     `worktree prune`) and `rm`s the whole temporary directory — a merge that already succeeded is not reported
     as failed because that directory would not delete.
+    **What triggers it**: normally the user's own hand — the panel's tick, or an agent passing `merge: true`
+    after being told to merge. When the task's record carries `merge.mode: auto` (that project's standing
+    authorisation, recorded when the task was created), the finish merges **without waiting for a press**. The
+    opposite value, `never`, refuses a `merge: true` from the tool (`E4013`): only the user's own hand in the
+    panel merges that task.
   - Rehearsal: a finishing run that has to merge first rehearses the merge inside **that repository's own
     worktree in the task space**. A conflict is left there as it stands; a clean rehearsal is `reset --hard`
     back to the commit recorded before it, after which the step above records the merge on the target branch.

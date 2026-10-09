@@ -94,7 +94,7 @@ const PROJECT = "kratos-admin"
  * @param options - whether the mocked removal should leave the worktree alone.
  * @returns the container root, the task space, the double and a cleanup.
  */
-async function taskSpaceFixture({ keepWorktree = false } = {}) {
+async function taskSpaceFixture({ keepWorktree = false, delivery } = {}) {
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-done-"))
   const taskPath = join(container, PROJECT, "login")
   const worktree = join(taskPath, "alpha")
@@ -104,6 +104,7 @@ async function taskSpaceFixture({ keepWorktree = false } = {}) {
   // this task made.
   await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
     task: "login", project: PROJECT, branch: "task/login",
+    ...(delivery === undefined ? {} : { delivery }),
   }, null, 2) + "\n")
   const mainRepo = join(tmpdir(), "multi-worktree-tool-done-main-alpha")
   const porcelain = `worktree ${mainRepo}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${worktree}\nHEAD bbb\nbranch refs/heads/task/login\n`
@@ -812,6 +813,58 @@ describe("registerTaskTool", () => {
     expect(value.sessionId).toBe("")
     expect(created).toEqual([])
     expect(value.summary).not.toMatch(/is on the work/)
+  })
+
+  it("merges by itself when the task's own record says so, and not when the call said no", async () => {
+    // `merge.mode: auto` is the user's standing answer that this merge happens on its own, so
+    // the call does not have to ask for it. An explicit `merge: false` - an agent that was told
+    // not to merge - stays a no: the hand that said it outranks the record.
+    const auto = { merge: { mode: 'auto' } }
+    const fixture = await taskSpaceFixture({ delivery: auto })
+    try {
+      const { ctx, captured } = toolContext(fixture.subprocess)
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+    const saidNo = await taskSpaceFixture({ delivery: auto })
+    try {
+      const { ctx, captured } = toolContext(saidNo.subprocess)
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: saidNo.container, merge: false },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(false)
+    } finally {
+      await saidNo.cleanup()
+    }
+  })
+
+  it("refuses to merge a task whose own record says this flow does not merge it", async () => {
+    const fixture = await taskSpaceFixture({ delivery: { merge: { mode: 'never' } } })
+    try {
+      const { ctx, captured } = toolContext(fixture.subprocess)
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )).rejects.toMatchObject({ code: "E4013" })
+      // And a finish that does not ask for a merge is not refused: the record forbids the
+      // merge, not the finish.
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 
   it("refuses a permission it does not offer, and a task space that is not there", async () => {

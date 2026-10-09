@@ -729,10 +729,10 @@ export async function finishTask(subprocess, options) {
     task,
     project,
     tasksRoot,
-    merge = false,
+    merge: askedMerge,
     target,
     targets,
-    deleteBranch = false,
+    deleteBranch: askedDeleteBranch,
     force = false,
     cleanStray = false,
     keep = [],
@@ -743,12 +743,6 @@ export async function finishTask(subprocess, options) {
     deliveryArchive,
   } = options
 
-  // Deleting a branch that was merged is routine; deleting one that was not throws
-  // its commits away, so it has to be asked for twice - with `deleteBranch` and with
-  // `force`, which is also what makes git delete it without complaint.
-  if (deleteBranch && !merge && !force) {
-    throw coded('E4007', 'deleting a branch that was never merged requires force')
-  }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
 
   const projectName = validateProjectName(project)
@@ -786,6 +780,23 @@ export async function finishTask(subprocess, options) {
   // container with no readable record deletes no branch at all, and says so.
   const warnings = []
   const recorded = await readTaskMetadata(taskPath)
+  // What the caller said, and then what the task's own record says. `auto` is the record
+  // answering "this merge happens by itself", and an absent request is a caller that said
+  // nothing about it - which is what lets the policy fill either one in. An explicit `false`
+  // - the panel's unticked box, an agent that was told not to merge - stays a no: the hand
+  // that said it outranks the record. `deleteBranch` follows the same rule, and defaults to
+  // keeping the branch, because that is the reversible half.
+  const policyMerge = deliveryPolicyOf(recorded).merge
+  const merge = askedMerge === undefined ? policyMerge.mode === 'auto' : askedMerge === true
+  const deleteBranch = askedDeleteBranch === undefined
+    ? merge && policyMerge.deleteBranch === true
+    : askedDeleteBranch === true
+  // Deleting a branch that was merged is routine; deleting one that was not throws
+  // its commits away, so it has to be asked for twice - with `deleteBranch` and with
+  // `force`, which is also what makes git delete it without complaint.
+  if (deleteBranch && !merge && !force) {
+    throw coded('E4007', 'deleting a branch that was never merged requires force')
+  }
   const taskBranch = typeof recorded?.branch === 'string' ? recorded.branch : ''
   if (taskBranch === '') {
     warnings.push(warned('no-task-branch', `no task branch is recorded in ${taskPath}; no branch was deleted in any repository`, { path: taskPath }))

@@ -117,6 +117,21 @@ function buildPolicy(input, { strict }) {
   const mergeTargetValue = mergeTarget(sourceMerge.target, { strict }) ?? DEFAULT_DELIVERY_POLICY.merge.target
   const deleteBranch = sourceMerge.deleteBranch === undefined ? DEFAULT_DELIVERY_POLICY.merge.deleteBranch : sourceMerge.deleteBranch === true
 
+  // A policy that merges by itself has no one to wait for, so the human half of a
+  // verification mode would be a requirement nothing could satisfy. Refused here, at create
+  // time, rather than recorded and then quietly dropped by the gate - the one combination the
+  // fields can state and the flow cannot honour. Reading a record back does not refuse it: a
+  // record from an older version, or one edited by hand, is no reason to stop a finish, and
+  // `auto` then means what it says (the gate does not wait for the ack; see `deploy.js`).
+  if (strict && mergeMode === 'auto' && verification !== 'agent') {
+    throw coded(
+      'E4010',
+      `merge.mode 'auto' merges by itself, so it cannot be combined with verification '${verification}': `
+        + 'set verification to agent, or leave merge.mode at ask. Merging that waits for a person is ask '
+        + '(and the person confirms in the panel).',
+    )
+  }
+
   return {
     version: 1,
     deploy: { target, mode: deployMode },

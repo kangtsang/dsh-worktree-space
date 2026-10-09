@@ -44,6 +44,9 @@
     其余情况先 `mkdtemp` 出 `os.tmpdir()/dsh-worktree-space-merge-<随机>/`，在其中 `git worktree add`
     一份目标分支的临时检出、完成合并，随后 `worktree remove --force`（失败再 `worktree prune`）
     并 `rm` 掉整个临时目录——合并已经成功时，不因为这个目录删不掉而报失败。
+    **谁来触发这一步**：平时由用户自己的手（面板上勾选合并，或 agent 在你明确要求合并时传 `merge: true`）；
+    而任务记录里写着 `merge.mode: auto` 时（该项目策略的**常驻授权**，建任务时记下），收尾会**不等按键**就合并。
+    写着 `never` 时相反：工具传 `merge: true` 会被拒绝（`E4013`），只有面板里用户自己的手能合。
   - 试合并：带合并的结束任务会先在**任务空间里该仓库自己的 worktree** 中试合并一次；冲突就原样留在那里，
     试合并干净则 `reset --hard` 回到试合并前记录的提交，再由上面那一步在目标分支上记录合并提交。
   - git 自己的登记：`git worktree add/remove` 会写 `<源仓库>/.git/worktrees/<名字>/` 下 git 自己的登记与索引
