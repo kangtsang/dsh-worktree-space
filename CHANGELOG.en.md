@@ -149,27 +149,27 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 - `PERMISSIONS.md` / `PERMISSIONS.en.md` gained a "Session access (off unless the user turns it on)" section
   and two failure boundaries, stating this capability as it is.
 
-### Added (either half of the workspace registration can be turned off)
+### Added (a tool call can decide the workspace registration per call)
 
-- **A new setting, Register the task spaces an agent creates (`toolRegistersWorkspace`, on by default).** Off, a
-  `task_worktree_space` `create` does the disk half only: the task space is made and reported as it always was,
-  and it does **not** join the workspace list. The result still carries a warning saying so, with the way to put
-  it right (the panel's Create and open, or Register again), because a caller that believed it was registered
-  would open a session that cannot exist — and creating the same task again is still refused as E2002. On is the
-  default because off is the state the setting exists to spare someone: a task space nothing in the interface
-  shows and no second create can take the name of. The dialog's own create (Create and open) is not affected:
-  that is the user's own press, and registering is half of what it means.
-- **A new setting, Unregister a finished task space (`finishUnregistersWorkspace`, on by default).** Off, a
-  finish that really removes the task space directory **keeps** the registration: that task's sessions stay in
-  its group instead of falling back to Ungrouped, and what the list has instead is a Workspace whose directory no
-  longer exists. The tool's `done` and the finish dialog's own closing step read the same setting (the dialog
-  through `task.preference`), so one finish ends the same way whichever way it was started.
-- **An unregistration no longer treats "was never there" or "is already gone" as a failure.** Both halves ask the
-  workspace list again after a delete fails, rather than guessing from an error message or code: an entry still
-  in the list (so the delete really did not happen) is reported as a warning or an error, and an entry that has
-  gone is the outcome this was after. A user deleting that Workspace in the interface first, or a task space that
-  was never registered, no longer gets a false "could not be dropped". The result also says where the
-  registration ended up: removed, or kept as configured, with the task space directory gone.
+- **`task_worktree_space` gained `registerWorkspace` on `create` and `unregisterWorkspace` on `done`.** Both are
+  booleans, and **omitting either changes nothing**: `create` still registers the task space it made as a DSH
+  Workspace, and `done` still unregisters it when it really removes the directory. **The interface has no switch
+  for either**: Create and open in the panel means build-and-register, and Finish task means remove-and-unregister
+  — the user's own press, where registering is half of what it means. The tool is the other way in, so its caller
+  says so per call:
+  - `create` with `registerWorkspace: false` does the disk half only: the task space is made and reported as it
+    always was, and it does **not** join the workspace list. The result still carries a warning saying so, with the
+    way to put it right (the panel's Create and open, or Register again), because a caller that believed it was
+    registered would open a session that cannot exist — and creating the same task again is still refused as E2002.
+  - `done` with `unregisterWorkspace: false` **keeps** the registration when the finish really removes the
+    directory: that task's sessions stay in its group instead of falling back to Ungrouped, and what the list has
+    instead is a Workspace whose directory no longer exists. Keeping it is what the caller asked for, so nothing
+    warns about it.
+- **An unregistration no longer treats "was never there" or "is already gone" as a failure.** The tool's `done` and
+  the finish dialog both ask the workspace list again after a delete fails, rather than guessing from an error
+  message or code: an entry still in the list (so the delete really did not happen) is reported as a warning or an
+  error, and an entry that has gone is the outcome this was after. A user deleting that Workspace in the interface
+  first, or a task space that was never registered, no longer gets a false "could not be dropped".
 
 ## 1.2.1 — 2026-10-06
 

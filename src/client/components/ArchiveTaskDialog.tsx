@@ -156,15 +156,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const [fullAccess, setFullAccess] = useState(false)
   /** What went wrong with the switch, or with widening a session the switch was on for. */
   const [accessError, setAccessError] = useState("")
-  /**
-   * Whether finishing this task space also unregisters it.
-   *
-   * On until the Host says otherwise, which is the setting's own default and what this
-   * dialog has always done: the directory is gone, so an entry pointing at it is an entry
-   * nothing can open. Off, the registration is kept - the task's sessions stay in that
-   * group rather than falling back to Ungrouped - and the panel says so in its result.
-   */
-  const [finishUnregisters, setFinishUnregisters] = useState(true)
   // The sessions run outside this dialog, so the rows reporting on them have to
   // follow the Host's list rather than a value read once. The counter is the render.
   const [, setSessionTick] = useState(0)
@@ -303,9 +294,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // without the field: such a Host opens each session on the boundary that reaches
       // the metadata, and that is what off means here.
       setFullAccess(served?.handoffFullAccess === "on")
-      // Off keeps the registration after a finish; anything else - including a Host too old
-      // to answer - is the behaviour this dialog has always had.
-      setFinishUnregisters(served?.finishUnregistersWorkspace !== "off")
       setDocumentsDirectory(documentsDirectoryFor(path, new Date(), {
         strategy: served?.archiveDocumentsStrategy ?? DEFAULT_ARCHIVE_PREFERENCE.strategy,
         directory: typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : "",
@@ -522,11 +510,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // a finish that failed keeps the container - with the worktree whose conflict
       // still has to be resolved - and unregistering it then would hide the task
       // space and scatter its sessions into "Ungrouped" while it sits there on disk.
-      //
-      // And only when the configuration wants it dropped: off, the entry is what keeps that
-      // task's sessions in one group after the directory has gone, and the result below says
-      // so rather than leaving the reader to wonder why the row is still there.
-      if (workspace !== undefined && archived.containerRemoved && finishUnregisters) {
+      if (workspace !== undefined && archived.containerRemoved) {
         try {
           await workspaces.delete(workspace.workspaceId)
         } catch (reason: any) {
@@ -1021,9 +1005,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
               ? <p className={registrationError === "" ? undefined : "dws-finish-error"}>
                 {registrationError !== ""
                   ? format(t("archiveWorkspaceKept"), { error: registrationError })
-                  : result.containerRemoved
-                    ? (finishUnregisters ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptBySetting"))
-                    : t("archiveWorkspaceKeptIntact")}
+                  : result.containerRemoved ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptIntact")}
               </p>
               : null}
           </div> : null}

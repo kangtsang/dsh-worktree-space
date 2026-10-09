@@ -64,14 +64,14 @@ async function sourceFixture() {
  * @param services - the services the context serves beyond `tools`.
  * @returns the action's value and the captured tool definition.
  */
-async function createOnce(services = {}, options = {}) {
+async function createOnce(services = {}, extra = {}) {
   const source = await sourceFixture()
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
   try {
     const { ctx, captured } = toolContext(creatingSubprocess, services)
-    registerTaskTool(ctx, options)
+    registerTaskTool(ctx)
     const value = await captured[0].execute(
-      { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container },
+      { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, ...extra },
       {},
     )
     return { value, captured }
@@ -347,21 +347,21 @@ describe("registerTaskTool", () => {
     expectEnvelopeShape(captured[0].output.schema, value)
   })
 
-  it("makes the task space and leaves registering it to the panel when the setting says so", async () => {
-    // Off is the deliberate choice, so the disk half still happens and is reported as it
-    // always was; what changes is that nothing is registered - and that the result says so,
-    // with the way to do it by hand, because a caller that believed otherwise would open a
-    // session in a task space the interface does not show.
+  it("makes the task space and leaves registering it to the panel when the call asks for that", async () => {
+    // The caller's own choice, so the disk half still happens and is reported as it always was;
+    // what changes is that nothing is registered - and that the result says so, with the way to
+    // do it by hand, because a caller that believed otherwise would open a session in a task
+    // space the interface does not show.
     const records = []
     const registry = {
       resolveByPath: async () => ({ title: "kratos-admin" }),
       create: async (path, title) => { records.push({ path, title }) },
     }
-    const { value } = await createOnce({ workspaceRegistry: registry }, { registersWorkspace: () => false })
+    const { value } = await createOnce({ workspaceRegistry: registry }, { registerWorkspace: false })
     expect(value.action).toBe("create")
     expect(value.container).not.toBe("")
     expect(records).toEqual([])
-    expect(value.warnings.join(" ")).toMatch(/registered by hand/)
+    expect(value.warnings.join(" ")).toMatch(/asked for one that stays out/)
     expect(value.warnings.join(" ")).toMatch(/E2002/)
   })
 
@@ -442,10 +442,10 @@ describe("registerTaskTool", () => {
     }
   })
 
-  it("leaves the registration alone when the setting keeps a finished task's group", async () => {
-    // Off is the deliberate choice here too: the directory goes, the entry stays, and that is
-    // what keeps the task's sessions under one group instead of falling back to Ungrouped. It
-    // is not something that went wrong, so nothing warns about it.
+  it("leaves the registration alone when the finish asks for the group to outlive the directory", async () => {
+    // The caller's own choice: the directory goes, the entry stays, and that is what keeps the
+    // task's sessions under one group instead of falling back to Ungrouped. It is not something
+    // that went wrong, so nothing warns about it.
     const fixture = await taskSpaceFixture()
     const deleted = []
     const registry = {
@@ -454,9 +454,9 @@ describe("registerTaskTool", () => {
     }
     const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registry })
     try {
-      registerTaskTool(ctx, { unregistersWorkspace: () => false })
+      registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, unregisterWorkspace: false },
         {},
       )
       expect(value.container).toBe("")

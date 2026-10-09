@@ -350,15 +350,6 @@ export interface TaskPreference {
    */
   handoffFullAccess?: string
   /**
-   * `on` when finishing a task space also unregisters its Workspace, `off` when the
-   * registration is kept so the task's sessions stay in that group.
-   *
-   * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}: a Host
-   * that predates the setting answers without it, and absent reads as `on`, which is what
-   * such a Host does.
-   */
-  finishUnregistersWorkspace?: string
-  /**
    * `on` when the audit log is being written, `off` when it is not.
    *
    * Optional for the same reason as {@link TaskPreference.archiveDocumentsStrategy}:

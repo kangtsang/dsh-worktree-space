@@ -21,12 +21,13 @@ const DESCRIPTION = [
   'Create, list and finish a per-task Git worktree workspace that spans one or more repositories: inside the task space container, one directory per project (the source root\'s own directory name) holding one directory per task, and under that a worktree of every selected repository, all on one branch.',
   '',
   'Drive it in order: suggest-root, then create, then list, then done. Ask the user for the task name and the Worktree Space container root before creating anything.',
-  'A create does both halves: it makes the directory and the worktrees, and registers the result as a DSH Workspace, which is what puts the task space in the workspace list. Opening a session in it is not something a tool call can do - that is the panel\'s "Create and open", or picking the registered Workspace in the workspace list - so say which entry opens it rather than leaving the user to find it. A create that answers with a warning instead says its Workspace was not registered, and names what to do about it.',
+  'A create does both halves by default: it makes the directory and the worktrees, and registers the result as a DSH Workspace, which is what puts the task space in the workspace list. Pass registerWorkspace false only when the user asked for a task space that stays out of that list - it is then on disk, nothing in the interface shows it, and opening a session in it means registering it from the panel. Opening a session is not something a tool call can do anyway: that is the panel\'s "Create and open", or picking the registered Workspace in the workspace list - so say which entry opens it rather than leaving the user to find it. A create that answers with a warning instead says its Workspace was not registered, and names what to do about it.',
   'Every repository shares one branch, `task/<task>` unless the user asks for another prefix and it is passed as branchPrefix.',
   'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
   'Pass merge only when the user asked to merge, and deleteBranch only after a merge: a branch that landed on its target is safe to remove, and that is the tidying-up this tool does on its own.',
   'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
+  'A finish that really removes the task space unregisters it too, which is what leaves the workspace list without an entry pointing at a directory that is gone; its sessions then fall back to Ungrouped. Pass unregisterWorkspace false only when the user asked to keep that task\'s group: the entry stays, those sessions stay under it, and the list has a Workspace whose directory is gone. An entry that was already gone - the user deleted it, or it was never registered - is not an error.',
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
   'The task\'s delivery policy - whether a merge waits for a passing deployment smoke, and for a human acceptance ack - is decided by the user and recorded in the task metadata at create time. It is not a tool argument, and done enforces it: a refused merge names what is missing, and the way past it is to deploy, smoke, and be accepted - not to retry.',
@@ -477,15 +478,6 @@ export function registerTaskTool(ctx, options = {}) {
   // Where the strays policy files content away, when a done leaves the handling
   // to the policy: the same archive preference the finish dialog reads.
   const configuredArchive = () => typeof options.configuredArchive === 'function' ? options.configuredArchive() : undefined
-  // Whether a create registers what it made as a DSH Workspace. Read per call like the
-  // root above, and defaulting to yes: a caller that says nothing gets the half that
-  // keeps an agent-made task space from being one nothing in the interface shows.
-  const registersWorkspace = () => typeof options.registersWorkspace === 'function' ? options.registersWorkspace() !== false : true
-  // And whether the finish takes that registration away again. Read per call for the same
-  // reason, and defaulting to yes: a caller that says nothing gets the behaviour the panel
-  // has always had, which is what keeps a finished task from leaving an entry pointing at a
-  // directory that is gone.
-  const unregistersWorkspace = () => typeof options.unregistersWorkspace === 'function' ? options.unregistersWorkspace() !== false : true
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -504,12 +496,14 @@ export function registerTaskTool(ctx, options = {}) {
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths, as reported by suggest-root (create, add). Omit for every discovered (create). A bare name is read as relative to sourceRoot, which only names a repository sitting directly in it.' },
       baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
+      registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create). Omitted it registers, which is what the panel does; pass false only when the user asked for a task space that stays out of the workspace list.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request.' },
       target: { type: 'string', description: 'Branch to merge into (done), for every repository. Omit for the branch each source repository has checked out.' },
       deleteBranch: { type: 'boolean', description: 'Delete each branch (done), after a merge. Needs merge; deleting a branch that never landed is refused here.' },
       cleanStray: { type: 'boolean', description: 'Remove leftovers in the task space (done), except keep. Never reaches the user\'s own documents here.' },
       keep: { type: 'array', items: { type: 'string' }, description: 'Entries to keep with cleanStray (done).' },
       force: { type: 'boolean', description: 'Discard uncommitted changes (done). Refused here, always - the user decides that themselves, on the management page.' },
+      unregisterWorkspace: { type: 'boolean', description: 'Unregister the Workspace of the task space a finish removed (done). Omitted it unregisters, which is what the panel does; pass false only when the user asked to keep that task\'s group after finishing.' },
     },
     output: {
       schema: OUTPUT_SCHEMA,
@@ -576,16 +570,15 @@ export function registerTaskTool(ctx, options = {}) {
         // what keeps an agent-made task space from being a container the workspace
         // list never shows and no second create can take the name of.
         //
-        // Left to the panel when the configuration says so, and then it is the user's own
-        // press rather than this tool's - which is the one thing the setting decides. The
-        // warning below is written either way, because what a caller needs to know is the
-        // same in both cases: nothing in the interface shows this task space yet, and until
-        // something registers it the same name cannot be used again.
+        // Left to the panel when the call asks for it, and then it is the user's own press
+        // rather than this tool's. The warning below is written either way, because what a
+        // caller needs to know is the same in both cases: nothing in the interface shows this
+        // task space yet, and until something registers it the same name cannot be used again.
         //
         // Reported as a warning and never thrown, because the create has already
         // succeeded: a caller told it failed would not know the worktrees are there,
         // and the same name would stay unusable either way.
-        const leaveToThePanel = !registersWorkspace()
+        const leaveToThePanel = args.registerWorkspace === false
         const registry = leaveToThePanel ? undefined : workspaceRegistryOf(ctx)
         const unregistered = leaveToThePanel
           ? ''
@@ -594,10 +587,10 @@ export function registerTaskTool(ctx, options = {}) {
             : await registerTaskWorkspace(registry, result.path, sourceRoot, result.task)
         if (leaveToThePanel) {
           value.warnings.push(
-            'the task space is on disk but not registered as a DSH Workspace: this deployment leaves '
-            + 'tool-created task spaces to be registered by hand. Register it from the Worktree Space panel - '
-            + '"Create and open", or "Register again" after a create is refused - and open the task\'s session '
-            + 'there; until it is registered, creating this task again is refused as E2002',
+            'the task space is on disk but not registered as a DSH Workspace, because this call asked for one '
+            + 'that stays out of the workspace list. Register it from the Worktree Space panel - "Create and '
+            + 'open", or "Register again" after a create is refused - and open the task\'s session there; until '
+            + 'it is registered, creating this task again is refused as E2002',
           )
         } else if (unregistered !== '') {
           value.warnings.push(
@@ -697,12 +690,11 @@ export function registerTaskTool(ctx, options = {}) {
         // this tool registered it, so this is the half that keeps a finished task
         // from leaving an entry pointing at a directory that is gone.
         //
-        // Unless the configuration would rather keep the group: off, the entry stays and the
-        // task's sessions stay under it instead of falling back to Ungrouped, and what the
-        // user has is a Workspace whose directory is gone. Nothing is said about that here -
-        // it is the answer they configured, not something that went wrong - and the dialog
-        // says which of the two happened in its own result.
-        if (result.containerRemoved && unregistersWorkspace()) {
+        // Unless the call asks for the group to outlive the directory: off, the entry stays and
+        // the task's sessions stay under it instead of falling back to Ungrouped, and what the
+        // user has is a Workspace whose directory is gone. Nothing is said about that here - it
+        // is what was asked for, not something that went wrong.
+        if (result.containerRemoved && args.unregisterWorkspace !== false) {
           const stranded = await dropTaskWorkspace(workspaceRegistryOf(ctx), result.path)
           if (stranded !== '') value.warnings.push(stranded)
         }

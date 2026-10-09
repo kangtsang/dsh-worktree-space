@@ -53,7 +53,7 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", fullAccess, finishUnregisters, config, widen, plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; fullAccess?: string; finishUnregisters?: string; config?: any; widen?: () => Promise<unknown>; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", fullAccess, config, widen, plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; fullAccess?: string; config?: any; widen?: () => Promise<unknown>; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
@@ -73,7 +73,6 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
       // Left out entirely unless a case asks for it, the way a Host that predates the
       // setting answers: the dialog has to read that as off.
       ...(fullAccess === undefined ? {} : { handoffFullAccess: fullAccess }),
-      ...(finishUnregisters === undefined ? {} : { finishUnregistersWorkspace: finishUnregisters }),
     }),
     // The page merges this status over the scanned row, so a dirty repository has
     // to report it here rather than in the scan fixture.
@@ -1284,23 +1283,6 @@ describe("finishing a task", () => {
 
     await waitFor(() => expect(next.workspaces.delete).toHaveBeenCalledWith("ws-antest"))
     expect(screen.getByText(t("archiveWorkspaceRemoved"))).toBeTruthy()
-  })
-
-  it("keeps the registration when the setting says the group outlives the directory", async () => {
-    const user = userEvent.setup()
-    const next = setup({
-      items: [{ workspaceId: "ws-antest", path: container, title: "worktree-space/antest" }],
-      result: finishResult({ containerRemoved: true }),
-      finishUnregisters: "off",
-    })
-    await ready()
-    await user.click(screen.getByRole("button", { name: t("finishTask") }))
-    await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
-
-    // Nothing is asked of the Host, and the result says which of the two happened rather than
-    // leaving the reader to work out why the row is still in the workspace list.
-    await waitFor(() => expect(screen.getByText(t("archiveWorkspaceKeptBySetting"))).toBeTruthy())
-    expect(next.workspaces.delete).not.toHaveBeenCalled()
   })
 
   it("treats a registration that is already gone as removed, not as a failure", async () => {
