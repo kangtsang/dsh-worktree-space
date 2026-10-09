@@ -87,7 +87,7 @@ created ──► developing ──► deploying ──► verifying ──┬�
     "target": "docker",          // docker | host | dsh-acceptance | none
     "mode": "auto"               // auto | on-request（auto=改完即部署；on-request=用户说了才部署）
   },
-  "verification": "agent-then-human",  // agent | agent-then-human | human（决策 D1：默认此项）
+  "verification": "human",         // agent | agent-then-human | human（决策 D1：默认 human）
   "merge": {
     "mode": "ask",               // auto | ask | never（决策 D3：auto 必须显式开启）
                                  //   auto = 这份记录说"这条任务自己合回去"：收尾不必再传 merge。
@@ -183,7 +183,7 @@ DSH 版本是配方的参数（原 D7 的单最新版语义由此保留）。`sc
 
 ## 4. 验收：agent 自动 + 人工（决策 D1）
 
-`verification: agent | agent-then-human | human`，**默认 `agent-then-human`**（已确认）。
+`verification: agent | agent-then-human | human`，**默认 `human`**（2026-10-09 由维护者从 `agent-then-human` 改成它：验收本来就是人的判断，默认不指望 agent 自验；agent 那层把握仍在，只是不再是默认口径）。
 
 - **agent 能验的**：部署健康（state 文件里 services 全 healthy）、接口冒烟（smoke 契约）、
   以及会话工具能力范围内的点击级验证（浏览器工具走一遍页面）。这一层验「接线正确」。
@@ -276,10 +276,10 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 
 ### L1 实现时按推荐取的默认决策（待维护者核对）
 
-- **全局默认策略 = 交付关、遗留内容归档**（target `none` / mode `on-request` / verification `agent-then-human` /
-  merge `ask` / conflicts `ask` / strays `archive`）：不部署、不自动合并、不自动删除用户内容；**遗留内容默认
-  归档**——归档是复制一份，内容不会因为它离开任务空间而丢失，而任务空间因此能在一次收尾里被清掉。启用其它口径
-  靠项目默认配置。
+- **全局默认策略 = 交付关、验收靠人、遗留内容归档**（target `none` / mode `on-request` / verification `human` /
+  merge `ask` / conflicts `ask` / strays `archive`）：不部署、不自动合并、不自动删除用户内容，验收默认只由人确认；
+  **遗留内容默认归档**——归档是复制一份，内容不会因为它离开任务空间而丢失，而任务空间因此能在一次收尾里被清掉。
+  启用其它口径靠项目默认配置。
 - **项目默认存储**：配置字段 `deliveryDefaultsJson`（JSON 文本，Plugins 页可直接编辑；
   专用 map 编辑控件留待后续）。
 - **人工 ack 语义**：写进 `.state.json` 的 `humanAck`；`up`（新部署）清空、`smoke`（同部署
@@ -301,7 +301,7 @@ docker ps --filter label=dsh.env-id=<deploymentEnvId> → docker compose -p <env
 
 已确认的决策（用户拍板）：
 
-- **D1** 验收默认 `agent-then-human`——自动验证接线正确，产品判断留给人。（已确认 2026-10-05）
+- **D1** 验收默认 `human`——验收本来就是人的判断，默认不指望 agent 自验；`agent-then-human`（agent 冒烟验接线 + 你验产品）仍是可选项。（2026-10-05 原定 `agent-then-human`，2026-10-09 由维护者改为 `human`）
 - **D2** 冲突默认 `ask`；`agent-auto` 作为策略项后置。（已确认）
 - **D3** 自动合并需策略显式开启，闸门全绿才执行；永不 push；abandon 路径永远人审。（已确认）
 - **D4**（修订 2026-10-07：目标收敛为 docker / host / none）部署目标可插拔：清单声明支持范围，

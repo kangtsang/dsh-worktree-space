@@ -78,8 +78,8 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
   **默认禁止 auto**，清单显式 `autoAllowed: true` 才豁免）；`none`（不部署，
   闸门关闭，一切如旧）。~~dsh-acceptance~~ 已移除——DSH 插件验收也是 docker
   承载的网页实例，见设计文档 §3.2 修订。
-- **verification** — `agent-then-human`（默认）：agent 冒烟验接线，你验产品；
-  `agent`：全自动，适合纯接口任务；`human`：必须人工验收。
+- **verification** — `human`（默认）：只能由你确认，合并前就等你这一下；
+  `agent-then-human`：agent 冒烟验接线，你验产品；`agent`：全自动，适合纯接口任务。
 - **merge.mode** — `auto`：闸门全绿自动并回源分支（可指定 `target`，默认各源
   仓库当前检出分支）；`ask`：等确认；`never`。合并只落本地，**永不 push**。
 - **conflicts** — `ask`（默认）：冲突停下等人；`agent-auto`：agent 自动解决

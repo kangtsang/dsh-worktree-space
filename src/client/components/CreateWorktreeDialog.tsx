@@ -31,11 +31,14 @@ interface DeliveryChoice {
  * merge could land on are each repository's own and the dialog has no list of them - naming
  * one is the tool's or the configuration's to do.
  */
-const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string; options: [string, string][]; needsAuto?: boolean }[] = [
+const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string; options: [string, string][]; needsDeploy?: boolean; needsAuto?: boolean }[] = [
   { key: "deployTarget", label: "deliveryDeployTarget", hint: "deliveryDeployTargetHint", options: [["none", "deliveryTargetNone"], ["docker", "deliveryTargetDocker"], ["host", "deliveryTargetHost"]] },
-  { key: "deployMode", label: "deliveryDeployMode", hint: "deliveryDeployModeHint", options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
-  { key: "verification", label: "deliveryVerification", hint: "deliveryVerificationHint", options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
-  { key: "mergeMode", label: "deliveryMergeMode", hint: "deliveryMergeModeHint", options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
+  // These three shape a delivery this flow makes. With no deployment there is no timing to set,
+  // nothing the flow could verify on its own and no merge of its own: the task space is the plain
+  // manual one, and the rest of the policy is the project's default to answer.
+  { key: "deployMode", label: "deliveryDeployMode", hint: "deliveryDeployModeHint", needsDeploy: true, options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
+  { key: "verification", label: "deliveryVerification", hint: "deliveryVerificationHint", needsDeploy: true, options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
+  { key: "mergeMode", label: "deliveryMergeMode", hint: "deliveryMergeModeHint", needsDeploy: true, options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
   // These three are decisions about a merge this flow makes itself. With `ask` they are put
   // at the finish, when a merge is actually wanted; with `never` no merge is coming at all.
   { key: "mergeTarget", label: "deliveryMergeTarget", hint: "deliveryMergeTargetHint", needsAuto: true, options: [["", "deliveryMergeTargetDefault"]] },
@@ -51,7 +54,7 @@ const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string;
 const DEFAULT_DELIVERY: DeliveryChoice = {
   deployTarget: "none",
   deployMode: "on-request",
-  verification: "agent-then-human",
+  verification: "human",
   mergeMode: "ask",
   mergeTarget: "",
   deleteBranch: "keep",
@@ -67,6 +70,12 @@ const DEFAULT_DELIVERY: DeliveryChoice = {
  * the deletion - so a policy this dialog sends says only what the user actually chose.
  */
 function deliveryPolicyOf(choice: DeliveryChoice) {
+  // A space that deploys nothing says exactly that and no more. Without a deployment there is no
+  // timing to set, nothing the flow could verify on its own and no merge of its own - the create is
+  // the plain manual flow, where the merge waits to be asked and the acceptance is the user's. The
+  // rest of the policy is then the project's default to answer, which is the same rule the fields
+  // the panel does not show follow everywhere else: it sends only what it decided.
+  if (choice.deployTarget === "none") return { deploy: { target: "none" } }
   // Four of the eight are decisions about a finish this flow runs by itself: which branch the
   // merge lands on, whether the branch is deleted, what a conflict does, and how the leftovers
   // are handled. With `ask` the finish is the user's own press and every one of them is put
@@ -271,6 +280,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   // Which delivery choices are this flow's own to make: the three about a merge are asked at
   // the finish unless the merge happens by itself, so they sit disabled until it does.
   const mergeAutomatic = delivery.mergeMode === "auto"
+  // Whether this task deploys anywhere at all: with `none` the three choices that shape a delivery
+  // and the four that shape a merge this flow would make are off the panel entirely.
+  const deploys = delivery.deployTarget !== "none"
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
   const endBusy = () => { busyRef.current = false; setBusy(false) }
@@ -602,7 +614,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       <div className="dws-field-row">
         <span className="dws-field-label"><span>{t("deliveryLabel")}</span><span className="dws-field-note">{t("deliveryHint")}</span></span>
         <div className="dws-delivery-grid">
-          {DELIVERY_FIELDS.filter((field) => field.needsAuto !== true || mergeAutomatic).map((field) => <div className="dws-delivery-cell" key={field.key}>
+          {DELIVERY_FIELDS.filter((field) => (field.needsDeploy !== true || deploys) && (field.needsAuto !== true || (deploys && mergeAutomatic))).map((field) => <div className="dws-delivery-cell" key={field.key}>
             <span className="dws-delivery-head">
               <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
               <HoverHint label={t(field.hint)} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
@@ -617,9 +629,6 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             </Select>
           </div>)}
         </div>
-        {/* Four choices are not shown while the finish is the user's own press: what is
-            missing is a reason, and the reason is this line. */}
-        {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
         {/* Where a deployment's own parameters live - not in this dialog. Shown only when a
             target was actually chosen, so the line answers the decision that was made. The one
             exception rides with it: naming a script for a task that deploys nowhere would say
@@ -627,9 +636,12 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         {delivery.deployTarget === "none" ? null : <>
           <p className="dws-field-note">{t("deliveryDeployNote")}</p>
           <div className="dws-field-row">
-            <label className="dws-field-label" htmlFor={`${id}-deploy-script`}><span id={`${id}-deploy-script-label`}>{t("deployScript")}</span><span className="dws-field-note">{t("deployScriptHint")}</span></label>
+            <label className="dws-field-label" htmlFor={`${id}-deploy-script`}><span id={`${id}-deploy-script-label`}>{t("deployScript")}</span></label>
             <Input id={`${id}-deploy-script`} aria-labelledby={`${id}-deploy-script-label`} value={deployScript} disabled={fieldsDisabled} onChange={(event) => setDeployScript(event.target.value)} placeholder={t("deployScriptPlaceholder")} autoComplete="off" spellCheck={false} aria-describedby={`${id}-deploy-script-note`} />
-            <span id={`${id}-deploy-script-note`} className="dws-field-note dws-visually-hidden">{t("deployScriptHint")}</span>
+            {/* Below the field and left-aligned, like the line above it: the label line's own
+                note slot right-aligns, which reads as a mistake once the sentence wraps. The
+                paragraph carries the description itself, so there is no hidden copy of it. */}
+            <p id={`${id}-deploy-script-note`} className="dws-field-note">{t("deployScriptHint")}</p>
           </div>
         </>}
       </div>

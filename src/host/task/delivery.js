@@ -40,18 +40,19 @@ export const CONFLICT_MODES = ['agent-auto', 'ask', 'stop']
 export const STRAY_MODES = ['archive', 'keep']
 
 /**
- * The policy a task carries when nobody said otherwise: delivery off.
+ * The policy a task carries when nobody said otherwise: the manual flow.
  *
  * Every part of this is meant to be switched on per project - the point of the
  * pipeline is to run itself - but the default has to be the shape that changes
- * nothing for a task nobody configured: no deployment expected, so no gate stands
- * between a merge and its green light. A default that deployed and gated would
- * turn every task the user has today into a task that cannot merge.
+ * nothing for a task nobody configured: no deployment expected, no merge of the
+ * flow's own, and the acceptance left to the user, who is the one who asked for the
+ * work in the first place. A default that deployed and merged by itself would turn
+ * every task the user has today into one that merges without them.
  */
 export const DEFAULT_DELIVERY_POLICY = Object.freeze({
   version: 1,
   deploy: Object.freeze({ target: 'none', mode: 'on-request' }),
-  verification: 'agent-then-human',
+  verification: 'human',
   // The branch is kept unless something said to delete it. A task branch is the only
   // record of how the work was made once the task space is gone, and deleting it is the
   // one step here that cannot be walked back: `ask` is the merge default, and this

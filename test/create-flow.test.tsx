@@ -147,9 +147,10 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
-    // Four of the eight are the flow's own decisions; the other four appear only once "merge
-    // by itself" is picked, and the line under the grid says where they went.
-    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
+    // The default is the manual flow: no deployment, so the panel offers that one choice and
+    // nothing else - there is no timing to set, nothing the flow would verify on its own and no
+    // merge of its own. What it does not show, it does not send.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(1)
     expect(screen.queryByText(t("deliveryStrays"))).toBeNull()
 
     await user.type(nameField(), "Fix login")
@@ -157,14 +158,9 @@ describe("native task create flow", () => {
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
       const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
-      // The untouched defaults, as the policy record's own shape: everything a finish decides at
-      // its own moment is absent - `merge.target`, `deleteBranch`, `conflicts` and `strays` -
-      // because the finish that presses them is the user's, not this flow's.
-      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
-        deploy: { target: "none", mode: "on-request" },
-        verification: "agent-then-human",
-        merge: { mode: "ask" },
-      })
+      // Exactly the one decision that was made; the rest of the policy is the project's stored
+      // default - and then the built-in one - to answer.
+      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({ deploy: { target: "none" } })
     })
   })
 
@@ -174,9 +170,11 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
+    // A deployment turns the next three on; "merge by itself" is what makes a finish the flow's
+    // own, and the last four belong to that finish.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(1)
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
     expect(document.querySelectorAll("select.dws-select").length).toBe(4)
-    // "Merge by itself" is what makes a finish the flow's own, and that is what those four
-    // decisions belong to - so they are on screen from that moment on.
     await user.selectOptions(screen.getByLabelText(t("deliveryMergeMode")), "auto")
     await user.selectOptions(screen.getByLabelText(t("deliveryVerification")), "agent")
     expect(document.querySelectorAll("select.dws-select").length).toBe(8)
@@ -190,7 +188,7 @@ describe("native task create flow", () => {
       // Settled by this flow, so they are written down: the branch, the deletion, the conflict
       // mode and the leftovers all travel with the record now.
       expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
-        deploy: { target: "none", mode: "on-request" },
+        deploy: { target: "docker", mode: "on-request" },
         verification: "agent",
         merge: { mode: "auto", deleteBranch: false },
         conflicts: "ask",

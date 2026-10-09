@@ -214,6 +214,20 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 - With no session service in the deployment, **nothing is opened and nothing fails**: the answer says no session
   was opened and points at the panel, because the task space itself is fine.
 
+### Changed (the default verification is the user's own)
+
+- **The default verification changed from `agent-then-human` to `human`**: by default the flow no
+  longer expects the agent to verify for itself, and a merge waits for you alone. `agent-then-human`
+  (the agent smokes the wiring, you judge the product) and `agent` (fully automatic, for pure
+  interface work) stay available.
+- **With "deploy to: nowhere" the panel now shows that one choice and nothing else**: no deployment
+  means no deploy timing and no acceptance or merge of this flow's own - the plain manual flow - and
+  the rest of the policy is the project's stored default to answer (the panel sends only what it
+  showed). The line that used to explain where the other four went goes with it.
+- **The deploy-script field's explanation moved below the input and left-aligned**: it borrowed the
+  label line's own right-aligned note slot, which put the last word of a wrapped sentence at the far
+  right and read as a layout accident.
+
 ### Changed (a task branch is kept unless something said to delete it)
 
 - **The policy's `merge.deleteBranch` default flips from `true` to `false`: a merge keeps the task branch, and only
