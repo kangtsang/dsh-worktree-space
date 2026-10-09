@@ -223,6 +223,14 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   live in the task space's `deploy/deploy.yaml`, not in the dialog (and with no manifest, only docker is
   supported, through `deploy.sh`).
 
+- **A create may also name the deploy script it wants**: `deployScript` is a file path relative to the source
+  root (e.g. `deploy/notify.sh`), copied into the task space as the fixed `deploy/deploy.sh` — the manifest's
+  `./deploy.sh` stays the same while the script behind it differs per task. It lands **after** the whole `deploy/`
+  directory is copied, so it overrides the source root's own `deploy.sh`. The panel grows one input once a deploy
+  target is chosen, and on the tool side it is one flat `create` parameter. A path that leaves the source root, is
+  absolute, or names no existing file is refused as `E4014` **before anything is created**, rather than leaving
+  half a task space behind.
+
 - **The default for leftovers is now "archive" instead of "keep".** Archiving is a **copy** into the
   archive directory (by default `<container root>/archived-docs/<project>/<task>-<timestamp>`), so
   nothing is lost by the content leaving the task space - while "keep" made every finish stop with the

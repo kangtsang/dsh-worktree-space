@@ -99,6 +99,11 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
 `deploy/`，之后每个新建的任务空间就直接可用；只放清单是不够的，命令是相对该目录执行的。**没有清单
 时视作仅 docker**（`deploy.sh up/smoke/destroy`，即 L0 形态，完全兼容）。
 
+创建时还可以**点名一个脚本**：`deployScript` 是相对源码根的文件路径（如 `deploy/notify.sh`），它会被
+复制成任务空间里**固定名字**的 `deploy/deploy.sh`，于是清单不用改，每个任务背后的脚本可以不一样；
+它在整份 `deploy/` 复制之后落地，所以会覆盖源码根原本的 `deploy.sh`。路径跑到源码根之外、或者不是一个
+存在的文件，按 `E4014` 拒绝——**创建之前就拒绝**，不会留下半个任务空间。
+
 ```yaml
 targets:
   docker:

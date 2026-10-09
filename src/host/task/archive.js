@@ -840,9 +840,9 @@ export async function finishTask(subprocess, options) {
 
   // The strays policy fills the gaps a caller left: a finish that named no
   // cleanStray, no directory and no discard takes its handling from the task's
-  // own delivery policy. A caller that decided anything is honoured verbatim,
-  // and `discard` without force stays dead - see applyStraysPolicy. Everything
-  // it decides still passes the isolation check a caller-named directory would.
+  // own delivery policy. A caller that decided anything is honoured verbatim, and
+  // the policy itself never deletes - see applyStraysPolicy. Everything it decides
+  // still passes the isolation check a caller-named directory would.
   const strayed = applyStraysPolicy(deliveryPolicyOf(recorded), {
     cleanStray,
     discardDocuments,

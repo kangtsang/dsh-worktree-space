@@ -381,6 +381,77 @@ describe("createTask", () => {
     }
   })
 
+  it("copies the deploy script the create names in under the fixed name", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // Both readers look for `deploy/deploy.sh`, so the caller names any file and the
+      // fixed name is what a manifest keeps pointing at - the script behind it is what
+      // changes from one task to the next.
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "deploy/notify.sh",
+      })
+
+      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("echo notify")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script that is not there, before anything is made", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // A value that cannot be used refuses the request rather than leaving a half-made
+      // task space: no project layer is made, and no git call runs either.
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "deploy/missing.sh",
+      })).rejects.toMatchObject({ code: "E4014" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script that resolves outside the source root", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // The file really exists - it is just not the source root's to name - so the refusal
+      // is about the boundary rather than about a missing file.
+      await writeFile(join(source.base, "outside.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "../outside.sh",
+      })).rejects.toMatchObject({ code: "E4014" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
   it("starts every repository from a named base and honours a branch prefix", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()

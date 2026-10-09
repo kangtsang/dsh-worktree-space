@@ -3,9 +3,9 @@
  *
  * Creating a task: the container, the branch, one worktree per repository, and the file that tells a session what the task is.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { cp, mkdir, readdir, rm } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
 import { ERROR_CODES, coded } from './codes.js'
 import { prepareContainerRoot } from './container.js'
@@ -13,7 +13,7 @@ import { resolveDeliveryPolicy } from './delivery.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
-import { assertIsolated, refuseDelete } from './paths.js'
+import { assertIsolated, isInside, refuseDelete } from './paths.js'
 
 import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
@@ -108,6 +108,38 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
 }
 
 
+/**
+ * Resolve the one script a create may name, relative to the source root.
+ *
+ * The value is judged where the other request-shape guards are, before anything is
+ * made: a path that escapes the source root, or names nothing, has to refuse the
+ * request rather than surface once a task space exists to clean up. What it resolves
+ * to is copied in under the fixed name `deploy/deploy.sh`, which is the name both
+ * readers look for, so a manifest that says `./deploy.sh` keeps working while the
+ * script behind it changes per task.
+ * @param sourceRoot - the directory the path is relative to.
+ * @param requested - the caller's value; empty means no script was named.
+ * @returns the absolute path of the script, or '' when none was named.
+ * @throws when the value is not a file inside the source root.
+ */
+function resolveDeployScript(sourceRoot, requested) {
+  const value = String(requested ?? '').trim()
+  if (value === '') return ''
+  if (isAbsolute(value)) {
+    throw coded('E4014', `the deploy script must be a path relative to the source root, not an absolute one: ${value}`)
+  }
+  const resolved = resolve(sourceRoot, value)
+  if (!isInside(sourceRoot, resolved)) {
+    throw coded('E4014', `the deploy script must name a file inside the source root, not one outside it: ${value}`)
+  }
+  // A directory carrying that name is not a script either, and copying it would fail at
+  // the fixed file name the readers use - after the worktrees were already cut.
+  if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+    throw coded('E4014', `the deploy script must name a file that exists inside the source root: ${value}`)
+  }
+  return resolved
+}
+
 export async function createTask(subprocess, options) {
   const {
     sourceRoot,
@@ -116,6 +148,10 @@ export async function createTask(subprocess, options) {
     repos,
     baseRef,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
+    // A file path relative to the source root, copied into the task space as
+    // `deploy/deploy.sh`. Empty means the create copies only what the source root
+    // already carries there.
+    deployScript = '',
     configuredRoot = '',
     // How far to look for the repositories a task covers. The same bounds the
     // classification and the suggestion used, so the count on the Workspace card,
@@ -163,6 +199,9 @@ export async function createTask(subprocess, options) {
   if (duplicate !== undefined) {
     throw coded('E4002', `two selected repositories are both named '${duplicate}'; select repositories with distinct names`)
   }
+  // Resolved with the other guards rather than at the copy: a deploy script that cannot
+  // be used is a request that does not add up, and it must fail before the worktrees exist.
+  const deployScriptPath = resolveDeployScript(sourceRoot, deployScript)
 
   const branch = branchNameFor(name, prefix)
   const taskPath = taskSpacePath(tasksRoot, project, name)
@@ -229,6 +268,14 @@ export async function createTask(subprocess, options) {
     const sourceDeploy = join(sourceRoot, 'deploy')
     if (existsSync(sourceDeploy)) {
       await cp(sourceDeploy, join(taskPath, 'deploy'), { recursive: true, force: true })
+    }
+
+    // The script a create named, under the one name both readers look for. It is copied
+    // after the directory above on purpose: naming a script is how a task says it deploys
+    // differently from the source root's own `deploy.sh`, and this is what overrides it.
+    if (deployScriptPath !== '') {
+      await mkdir(join(taskPath, 'deploy'), { recursive: true })
+      await cp(deployScriptPath, join(taskPath, 'deploy', 'deploy.sh'), { force: true })
     }
 
     for (const repoPath of selected) {

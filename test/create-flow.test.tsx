@@ -199,6 +199,43 @@ describe("native task create flow", () => {
     })
   })
 
+  it("sends the deploy script a chosen deployment names", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // The field belongs to the deployment decision: naming a script for a task that
+    // deploys nowhere would say nothing, so it appears only once a target is chosen.
+    expect(screen.queryByRole("textbox", { name: t("deployScript") })).toBeNull()
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    const script = screen.getByRole("textbox", { name: t("deployScript") })
+    expect(script).toHaveProperty("placeholder", t("deployScriptPlaceholder"))
+    await user.type(script, "deploy/notify.sh")
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ deployScript: "deploy/notify.sh" })))
+  })
+
+  it("leaves deployScript out of the request when the field is empty", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    expect(screen.getByRole("textbox", { name: t("deployScript") })).toHaveProperty("value", "")
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledTimes(1))
+    const payload = next.api.createTask.mock.calls[0]?.[0] as Record<string, unknown>
+    // An empty field leaves the request exactly as it was: no key at all, rather than an
+    // empty string the Host would then have to read back as "no script".
+    expect("deployScript" in payload).toBe(false)
+  })
+
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
     const next = setup()
     next.mount()

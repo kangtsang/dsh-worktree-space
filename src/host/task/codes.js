@@ -64,6 +64,7 @@ export const ERROR_CODES = {
   E4011: 'index.js - a handoff access request named no session',
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
   E4013: 'tool.js - the task records that this flow does not merge it',
+  E4014: 'create.js - the requested deploy script is not a file inside the source root',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',

@@ -148,6 +148,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
   const [namedBase, setNamedBase] = useState("")
   const [delivery, setDelivery] = useState<DeliveryChoice>(DEFAULT_DELIVERY)
+  // The one deployment parameter this dialog does set: the script that is copied in as
+  // the fixed `deploy/deploy.sh` both readers look for. Empty means the create copies
+  // only what the source root already carries there.
+  const [deployScript, setDeployScript] = useState("")
   const [saveAsDefault, setSaveAsDefault] = useState(false)
   const [saveRootAsDefault, setSaveRootAsDefault] = useState(false)
   const [error, setError] = useState("")
@@ -164,6 +168,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     setSaveAsDefault(false)
     setSaveRootAsDefault(false)
     setDelivery(DEFAULT_DELIVERY)
+    setDeployScript("")
   }, [target.path])
 
   // The configured default is read from the form the Plugins page edits, and kept
@@ -389,6 +394,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         baseRef: baseRef === "" ? undefined : baseRef,
         branchPrefix: effectivePrefix,
         delivery: JSON.stringify(deliveryPolicyOf(delivery)),
+        // Named only when there is one: an empty field leaves the request exactly as it
+        // was, so the Host copies what the source root carries and nothing else.
+        ...(deployScript.trim() === "" ? {} : { deployScript: deployScript.trim() }),
       })
       // The Host's own project name, not the one this dialog derived: cleanup
       // names the task space back to it, so it must be the one that was written.
@@ -613,8 +621,17 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             missing is a reason, and the reason is this line. */}
         {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
         {/* Where a deployment's own parameters live - not in this dialog. Shown only when a
-            target was actually chosen, so the line answers the decision that was made. */}
-        {delivery.deployTarget === "none" ? null : <p className="dws-field-note">{t("deliveryDeployNote")}</p>}
+            target was actually chosen, so the line answers the decision that was made. The one
+            exception rides with it: naming a script for a task that deploys nowhere would say
+            nothing, so the field appears on the same terms. */}
+        {delivery.deployTarget === "none" ? null : <>
+          <p className="dws-field-note">{t("deliveryDeployNote")}</p>
+          <div className="dws-field-row">
+            <label className="dws-field-label" htmlFor={`${id}-deploy-script`}><span id={`${id}-deploy-script-label`}>{t("deployScript")}</span><span className="dws-field-note">{t("deployScriptHint")}</span></label>
+            <Input id={`${id}-deploy-script`} aria-labelledby={`${id}-deploy-script-label`} value={deployScript} disabled={fieldsDisabled} onChange={(event) => setDeployScript(event.target.value)} placeholder={t("deployScriptPlaceholder")} autoComplete="off" spellCheck={false} aria-describedby={`${id}-deploy-script-note`} />
+            <span id={`${id}-deploy-script-note`} className="dws-field-note dws-visually-hidden">{t("deployScriptHint")}</span>
+          </div>
+        </>}
       </div>
     </div>
   </fieldset>

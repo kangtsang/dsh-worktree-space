@@ -223,11 +223,15 @@ A task space is deployable when one of its repositories carries a
 root beside the worktrees — a `docker-compose.yml` whose build contexts name the
 sibling worktrees. A source root that keeps its own `deploy/` — a `deploy.yaml`
 manifest plus the scripts it names — has that directory copied into every task
-space made from it, so look before scaffolding one. A `deploy.yaml` declares which
-targets exist and what each one runs; without one the space is docker-only through
-`deploy.sh`. When none of that exists and the user asks to deploy, scaffolding
-that root from the repositories' own run commands is ordinary session work; what
-must not happen is starting the services on the host instead.
+space made from it, so look before scaffolding one. A create may instead name one
+script with the `deployScript` argument, a file path relative to the source root;
+it is copied in as the fixed `deploy/deploy.sh`, so the manifest stays the same
+while the script behind it differs per task, and a path that leaves the source
+root or names no file is refused (E4014) before anything is made. A `deploy.yaml`
+declares which targets exist and what each one runs; without one the space is
+docker-only through `deploy.sh`. When none of that exists and the user asks to
+deploy, scaffolding that root from the repositories' own run commands is ordinary
+session work; what must not happen is starting the services on the host instead.
 
 **Scaffolding writes logs so that the host can still read and archive them.** When a
 service's log directory is bind-mounted out of the container, the service must not be

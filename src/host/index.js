@@ -57,7 +57,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4013',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4013', 'E4014',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5005', 'E5006', 'E5007', 'E5008', 'E5009', 'E5010', 'E5011',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
@@ -1255,6 +1255,7 @@ export function apply(ctx, config = {}) {
         tasksRoot: payload.tasksRoot,
         repos,
         baseRef: typeof payload.baseRef === 'string' ? payload.baseRef.trim() : undefined,
+        deployScript: payload.deployScript,
         // A caller that names no prefix gets the configured one; an empty string
         // means the same thing, which is what an emptied dialog field sends.
         branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
