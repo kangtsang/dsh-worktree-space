@@ -397,6 +397,12 @@ export interface DeploymentStatus {
   /** The policy's verification mode, so the finish press knows whether an ack is owed. */
   verification: string
   url: string | null
+  /**
+   * Where the URL came from: the state a deploy recorded, a one-off read of the
+   * deploy root's own `status` command, or nowhere. A derived URL is not a
+   * recorded deployment, and the card says so.
+   */
+  urlSource: "state" | "derived" | "none"
   lastSmoke: { at: string; result: string } | null
   humanAck: { at: string; by?: string } | null
   destroyedAt: string | null

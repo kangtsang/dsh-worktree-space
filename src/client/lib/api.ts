@@ -178,8 +178,16 @@ export function createWorktreeApi(connection: ConnectionService) {
      * A task's deployment, read live: docker by the `dsh.env-id` label for what runs
      * right now, the deploy's state file for the URL, the smoke and the human ack.
      * A dynamic port changes with every deploy, so this is asked, never remembered.
+     *
+     * `derive` asks for the bounded fallback as well: when no state file exists, the
+     * deploy root's own `status` command is read once for a URL. It is off unless
+     * asked, because it runs a command of the task space's own.
      */
-    deployStatus: (path: string, signal?: AbortSignal) => read<DeploymentStatus>("task.deploy-status", { path }, signal),
+    deployStatus: (path: string, options?: { signal?: AbortSignal; derive?: boolean }) => read<DeploymentStatus>(
+      "task.deploy-status",
+      options?.derive === true ? { path, derive: true } : { path },
+      options?.signal,
+    ),
     /**
      * Tear the task's environment down, best effort by the same label: compose first
      * (the containers carry the file and directory to use), then whatever is still

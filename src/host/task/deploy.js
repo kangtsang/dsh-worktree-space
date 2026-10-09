@@ -28,29 +28,50 @@ const STATE_NAME = '.state.json'
 /** How much docker output a single call may hand back. */
 const DOCKER_MAX_BYTES = 512 * 1024
 
+/** How long the fallback `status` command may take before it is stopped. */
+const STATUS_TIMEOUT_MS = 10_000
+
 /**
  * Run one command, as {@link `git.js`} runs git: one spawn seam, one shape of answer.
  *
  * Its own module rather than a sibling in `git.js`, for the same reason that file
  * gives: it is the one spawn point for git, and this is not git.
+ *
+ * A deadline, when one is given, is this side's own: the subprocess seam ships no
+ * timer, only the abort it reacts to and the tree-scoped stop behind it (its own
+ * words), so the clock is one `AbortController` fired here. "It ran out of time"
+ * is then read off that same signal rather than off `exitCode`, which cannot tell
+ * a stop this call asked for from one somebody else sent.
  * @param subprocess - the profile's subprocess service.
  * @param argv - the whole command line, program included.
- * @param options - `cwd` to run in, and `maxBytes` per stream.
- * @returns the exit code with the collected streams.
+ * @param options - `cwd` to run in, `maxBytes` per stream, and `timeoutMs` for a
+ *   deadline (absent or non-positive: no deadline at all).
+ * @returns the exit code with the collected streams, plus whether the deadline
+ *   stopped it.
  */
-async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES } = {}) {
-  const handle = subprocess.spawn({
-    argv,
-    cwd,
-    stdio: { stdin: 'ignore', stdout: { maxBytes }, stderr: { maxBytes } },
-    graceMs: 1000,
-  })
-  const outcome = await handle.done
-  return {
-    ok: outcome.exitCode === 0,
-    exitCode: outcome.exitCode,
-    stdout: handle.collected.stdout?.readFrom(0).text ?? '',
-    stderr: handle.collected.stderr?.readFrom(0).text ?? '',
+async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, timeoutMs } = {}) {
+  const deadlineMs = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : undefined
+  const controller = deadlineMs === undefined ? undefined : new AbortController()
+  const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), deadlineMs)
+  try {
+    const handle = subprocess.spawn({
+      argv,
+      cwd,
+      stdio: { stdin: 'ignore', stdout: { maxBytes }, stderr: { maxBytes } },
+      graceMs: 1000,
+      ...(controller === undefined ? {} : { signal: controller.signal }),
+    })
+    const outcome = await handle.done
+    const timedOut = controller !== undefined && controller.signal.aborted
+    return {
+      ok: !timedOut && outcome.exitCode === 0,
+      exitCode: outcome.exitCode,
+      timedOut,
+      stdout: handle.collected.stdout?.readFrom(0).text ?? '',
+      stderr: handle.collected.stderr?.readFrom(0).text ?? '',
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -155,17 +176,34 @@ async function containerIds(subprocess, envId) {
  * Read live on every call: a dynamic port changes with every deploy, so the panel
  * asks rather than remembers, and the state file only answers for what a deploy
  * wrote down (the url it handed out, the smoke it ran, the ack a user gave).
+ *
+ * `derive` is the bounded fallback for a deploy root that ignores the handshake:
+ * when it is set and there is no state file to read, the manifest's own `status`
+ * command is asked once, under a deadline, and its answer is used for the URL
+ * alone. It is off by default because a status command may be slow or talk to
+ * things, and only the panel's explicit "read it once" press should pay that. The
+ * answer is never written down: `urlSource` says where the URL came from, and the
+ * state file stays exactly as absent as it was.
  * @param subprocess - the profile's subprocess service.
  * @param taskPath - the task space directory.
+ * @param options - `derive: true` to ask the manifest's `status` command when no
+ *   state file exists.
  * @returns the status the panel renders.
  */
-export async function deploymentStatus(subprocess, taskPath) {
+export async function deploymentStatus(subprocess, taskPath, { derive = false } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const policy = deliveryPolicyOf(recorded)
   const found = await readDeliveryState(taskPath)
   const manifest = await readDeployManifest(taskPath)
   const targets = manifest === undefined ? ['docker'] : manifest.broken ? [] : Object.keys(manifest.targets)
+  // Only a missing file opens the fallback: a state that exists is the record this
+  // side reads, and a `url: null` in it means a destroyed environment, not an
+  // invitation to ask a script again.
+  const derived = found === undefined && derive === true
+    ? await derivedStateUrl(subprocess, manifest, policy.deploy.target, envId)
+    : null
+  const stateUrl = found?.state?.url ?? null
   return {
     envId,
     target: policy.deploy.target,
@@ -175,7 +213,8 @@ export async function deploymentStatus(subprocess, taskPath) {
     // manifest entry. A space without a manifest offers docker the L0 way.
     targets,
     autoAllowed: manifest !== undefined && !manifest.broken && manifest.targets[policy.deploy.target]?.autoAllowed === true,
-    url: found?.state?.url ?? null,
+    url: stateUrl ?? derived,
+    urlSource: stateUrl !== null ? 'state' : (derived === null ? 'none' : 'derived'),
     lastSmoke: found?.state?.lastSmoke ?? null,
     humanAck: found?.state?.humanAck ?? null,
     destroyedAt: found?.state?.destroyedAt ?? null,
@@ -183,6 +222,64 @@ export async function deploymentStatus(subprocess, taskPath) {
     statePath: found?.path ?? null,
     containers: envId === '' ? [] : await containersFor(subprocess, envId),
   }
+}
+
+/**
+ * The URL a deploy root's own `status` command reports, when no state file exists.
+ *
+ * Every failure here is an absent URL rather than an error: a space with no
+ * manifest, a manifest without a `status` for the policy's target, a command that
+ * times out, prints nothing, or prints something that is not JSON - none of those
+ * is a reason for the card to show a failure, because none of them is a request
+ * the user made. What they all mean is the same thing this fallback exists to
+ * distinguish: nothing recorded the deployment, and the script did not say either.
+ * @param subprocess - the profile's subprocess service.
+ * @param manifest - what {@link readDeployManifest} found.
+ * @param target - the delivery policy's deploy target.
+ * @param envId - the environment id the command runs with.
+ * @returns the derived URL, or null when there is none to derive.
+ */
+async function derivedStateUrl(subprocess, manifest, target, envId) {
+  if (manifest === undefined || manifest.broken) return null
+  const entry = manifest.targets[target]
+  if (entry === null || typeof entry !== 'object') return null
+  if (typeof entry.status !== 'string' || entry.status === '') return null
+  let out
+  try {
+    out = await runManifestCommand(subprocess, entry.status, manifest.dir, envId, { timeoutMs: STATUS_TIMEOUT_MS })
+  } catch {
+    // A `bash` that is not there, or a spawn that never happened, is the same
+    // absent answer as a script that printed nothing.
+    return null
+  }
+  return urlFromStatusOutput(out.stdout)
+}
+
+/**
+ * The `url` or `URL` a `status` command's stdout tail names.
+ *
+ * The command is free to log before it answers, so the last object that parses is
+ * the answer; only those two top-level keys are read, because a status command's
+ * other fields are its own business.
+ * @param stdout - the command's collected standard output.
+ * @returns the URL, or null when the tail carries none.
+ */
+function urlFromStatusOutput(stdout) {
+  const text = String(stdout ?? '').trim()
+  if (text === '') return null
+  for (let start = text.lastIndexOf('{'); start >= 0; start = text.lastIndexOf('{', start - 1)) {
+    let parsed
+    try {
+      parsed = JSON.parse(text.slice(start))
+    } catch {
+      continue
+    }
+    if (parsed === null || typeof parsed !== 'object') continue
+    for (const key of ['url', 'URL']) {
+      if (typeof parsed[key] === 'string' && parsed[key] !== '') return parsed[key]
+    }
+  }
+  return null
 }
 
 /**
@@ -536,10 +633,11 @@ function manifestEntryFor(manifest, target, field) {
 }
 
 /** Run one manifest command, with the environment id the handshake passes by variable. */
-async function runManifestCommand(subprocess, command, dir, envId) {
+async function runManifestCommand(subprocess, command, dir, envId, options = {}) {
   return runProcess(subprocess, ['bash', '-c', `DSH_ENV_ID='${envId}' ${command}`], {
     cwd: dir,
     maxBytes: 2 * 1024 * 1024,
+    ...options,
   })
 }
 

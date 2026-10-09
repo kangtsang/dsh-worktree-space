@@ -1365,7 +1365,9 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.deploy-status') return recover(async () => {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
       if (!path) throw coded('E4005', 'A task path is required.')
-      return deploymentStatus(ctx.subprocess, path)
+      // The fallback is the caller's to ask for: reading it runs the deploy root's
+      // own `status` command, which the panel pays for only on an explicit press.
+      return deploymentStatus(ctx.subprocess, path, { derive: payload.derive === true })
     })
 
     // Tear the task's environment down, best effort by label. The endpoint answers

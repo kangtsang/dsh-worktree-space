@@ -44,7 +44,7 @@ export function DeployCard({ api, path }: Props) {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const next: DeploymentStatus = await api.deployStatus(path, signal)
+      const next: DeploymentStatus = await api.deployStatus(path, { signal })
       setStatus(next)
       setFailed(false)
       setError("")
@@ -91,6 +91,27 @@ export function DeployCard({ api, path }: Props) {
     run(() => api.destroyDeployment(path))
   }
 
+  /**
+   * The one-off fallback read for a deploy root that wrote no state file.
+   *
+   * Not routed through {@link `run`}: that helper repaints from a `status` on the
+   * answer, which a status read does not carry, and would fall back to a second,
+   * derive-less read - undoing the very thing this press asked for.
+   */
+  async function readOnce() {
+    setWorking(true)
+    try {
+      const next: DeploymentStatus = await api.deployStatus(path, { derive: true })
+      setStatus(next)
+      setFailed(false)
+      setError("")
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : String(readError))
+    } finally {
+      setWorking(false)
+    }
+  }
+
   if (failed || status === null) return null
   const containers = status.containers.length > 0
   if (status.target === "none" && !status.stateFound && !containers) return null
@@ -125,7 +146,18 @@ export function DeployCard({ api, path }: Props) {
       {status.url
         ? <a className="dws-deploy-url" href={status.url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{status.url}</a>
         : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
+      {/* A URL the script printed once is not a deployment anybody recorded, and the
+          row says which of the two it is looking at. */}
+      {status.url && status.urlSource === "derived"
+        ? <span className="dws-deploy-muted dws-deploy-derived">{t("deployUrlDerived")}</span>
+        : null}
       <div className="dws-deploy-actions">
+        {/* Containers are running and nothing recorded them: the deploy root may still
+            answer for itself through its own `status` command. Offered once, and only
+            while a derived URL has not arrived - a second press buys the same answer. */}
+        {containers && !status.stateFound && status.urlSource !== "derived"
+          ? <Button className="dws-button-ghost dws-deploy-derive" disabled={working} title={t("deployDerive")} onClick={readOnce}><RefreshCw size={14} /><span>{t("deployDerive")}</span></Button>
+          : null}
         {deploys && containers
           ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
           : null}

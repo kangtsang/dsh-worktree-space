@@ -9,6 +9,7 @@
  * reading exactly that file.
  */
 import { describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -483,5 +484,64 @@ describe('the deploy manifest', () => {
     expect(status.targets).toEqual(['host'])
     // No autoAllowed in the entry: host stays man-driven by default (D8).
     expect(status.autoAllowed).toBe(false)
+  })
+
+  it('derives a url from the manifest status command only when asked', async () => {
+    // The bounded fallback for a deploy root that ignores the handshake: the manifest
+    // declares a status command, no state file exists, and the panel asked once. It
+    // answers for this read only - the command is not run when `derive` is omitted,
+    // and nothing is written down either way.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  docker:\n    status: ./deploy.sh status\n', 'utf8')
+    const calls = []
+    let text = 'step 1 ok\n{"url":"http://derived:51234","services":["web"]}'
+    const subprocess = { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      const stdout = argv[0] === 'bash' ? text : ''
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text: stdout }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+
+    const derived = await deploymentStatus(subprocess, root, { derive: true })
+    expect(derived.url).toBe('http://derived:51234')
+    expect(derived.urlSource).toBe('derived')
+    // The fallback is not a recorded deployment, and it never becomes one.
+    expect(derived.stateFound).toBe(false)
+    expect(derived.statePath).toBeNull()
+    expect(existsSync(join(root, 'deploy', '.state.json'))).toBe(false)
+    const ran = calls.filter((line) => line.includes('./deploy.sh status'))
+    expect(ran).toHaveLength(1)
+    expect(ran[0]).toContain("DSH_ENV_ID='dsh-public-login'")
+
+    // `URL` is read as well, because a status command is free to shout it.
+    text = '{"URL":"http://upper:1"}'
+    expect((await deploymentStatus(subprocess, root, { derive: true })).url).toBe('http://upper:1')
+
+    calls.length = 0
+    const plain = await deploymentStatus(subprocess, root)
+    expect(plain.url).toBeNull()
+    expect(plain.urlSource).toBe('none')
+    expect(calls.some((line) => line.includes('./deploy.sh status'))).toBe(false)
+  })
+
+  it('answers no derived url when the manifest names no status command', async () => {
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
+    await mkdir(join(root, 'deploy'), { recursive: true })
+    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  docker:\n    up: ./deploy.sh up\n', 'utf8')
+    const calls = []
+    const subprocess = { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+    const status = await deploymentStatus(subprocess, root, { derive: true })
+    expect(status.url).toBeNull()
+    expect(status.urlSource).toBe('none')
+    expect(calls.some((line) => line.includes('bash -c'))).toBe(false)
   })
 })

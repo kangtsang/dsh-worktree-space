@@ -14,6 +14,7 @@ const status = (over = {}) => ({
   envId: "dsh-public-login",
   target: "docker",
   url: "http://localhost:51555",
+  urlSource: "state",
   lastSmoke: { at: "2026-10-05T00:00:00Z", result: "pass" },
   humanAck: null,
   stateFound: true,
@@ -92,6 +93,39 @@ describe("the deployment card", () => {
     fireEvent.click(screen.getByRole("button", { name: t("deploySmoke") }))
     await waitFor(() => expect(api.deploySmoke).toHaveBeenCalledWith("/task"))
     await waitFor(() => expect(screen.getByText(/冒烟失败 \d{4}-\d{2}-\d{2}/)).toBeTruthy())
+  })
+
+  it("offers no fallback read while the state file is the one answering", async () => {
+    const api = { deployStatus: vi.fn().mockResolvedValue(status()) }
+    render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(screen.queryByRole("button", { name: t("deployDerive") })).toBeNull()
+  })
+
+  it("offers the fallback read when containers run with no state file", async () => {
+    // The shape the fallback exists for: something is running, nothing recorded it,
+    // and the deploy root may still answer for itself through its own status command.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ stateFound: false, url: null, lastSmoke: null, urlSource: "none" })) }
+    render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(screen.getByRole("button", { name: t("deployDerive") })).toBeTruthy()
+  })
+
+  it("labels a url that came from the script's own status output", async () => {
+    // A derived URL is not a recorded deployment: the row says which of the two it
+    // came from, and the press that bought it is not offered again.
+    const api = {
+      deployStatus: vi.fn()
+        .mockResolvedValueOnce(status({ stateFound: false, url: null, lastSmoke: null, urlSource: "none" }))
+        .mockResolvedValueOnce(status({ stateFound: false, url: "http://derived:51234", lastSmoke: null, urlSource: "derived" })),
+    }
+    render(<DeployCard api={api} path="/task" />)
+    await settle()
+    fireEvent.click(screen.getByRole("button", { name: t("deployDerive") }))
+    await waitFor(() => expect(screen.getByText("http://derived:51234")).toBeTruthy())
+    expect(screen.getByText(t("deployUrlDerived"))).toBeTruthy()
+    expect(screen.queryByRole("button", { name: t("deployDerive") })).toBeNull()
+    expect(api.deployStatus).toHaveBeenLastCalledWith("/task", { derive: true })
   })
 
   it("destroys on the second press, not the first", async () => {
