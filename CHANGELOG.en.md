@@ -215,6 +215,14 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Added (the merge mode in a task's policy now does something)
 
+- **Creating a task space carries the source root's `deploy/` over with it** (skipped when there is
+  none). The deploy root is a **directory**: a manifest's commands run relative to it (`up: ./deploy.sh
+  up`), so copying `deploy.yaml` alone would be a deploy that never runs - the whole directory travels.
+  Putting one deployment recipe in the source root is therefore enough for every task space made after
+  it. **The panel also says a line now** once a deploy target is chosen: the deployment's parameters
+  live in the task space's `deploy/deploy.yaml`, not in the dialog (and with no manifest, only docker is
+  supported, through `deploy.sh`).
+
 - **The default for leftovers is now "archive" instead of "keep".** Archiving is a **copy** into the
   archive directory (by default `<container root>/archived-docs/<project>/<task>-<timestamp>`), so
   nothing is lost by the content leaving the task space - while "keep" made every finish stop with the

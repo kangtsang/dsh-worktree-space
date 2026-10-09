@@ -346,6 +346,35 @@ describe("createTask", () => {
       expect(note).toContain("- `alpha`")
       expect(note).toContain("Source repositories are read-only")
       expect(note).toContain("worktree-space.json")
+      // A source root with no deploy root of its own is skipped rather than invented: the
+      // space then deploys only what its own repositories carry.
+      expect(existsSync(join(result.path, "deploy"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("carries the source root's deploy root into the task space", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/ship"))
+    try {
+      // The deploy root is a directory and a manifest's commands run from inside it, so the
+      // script the manifest names has to travel with the manifest: a manifest alone would be
+      // a deploy that never runs.
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "deploy.yaml"), "targets:\n  docker:\n    up: ./deploy.sh up\n", "utf8")
+      await writeFile(join(source.root, "deploy", "deploy.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "ship",
+        tasksRoot: container.root,
+      })
+
+      expect(await readFile(join(result.path, "deploy", "deploy.yaml"), "utf8")).toContain("up: ./deploy.sh up")
+      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("exit 0")
     } finally {
       await source.cleanup()
       await container.cleanup()

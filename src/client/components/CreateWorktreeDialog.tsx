@@ -612,6 +612,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         {/* Four choices are not shown while the finish is the user's own press: what is
             missing is a reason, and the reason is this line. */}
         {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
+        {/* Where a deployment's own parameters live - not in this dialog. Shown only when a
+            target was actually chosen, so the line answers the decision that was made. */}
+        {delivery.deployTarget === "none" ? null : <p className="dws-field-note">{t("deliveryDeployNote")}</p>}
       </div>
     </div>
   </fieldset>

@@ -221,7 +221,11 @@ whole environment down afterwards is one command.
 A task space is deployable when one of its repositories carries a
 `deploy/deploy.sh` of its own, or when the space holds a `deploy/` orchestration
 root beside the worktrees — a `docker-compose.yml` whose build contexts name the
-sibling worktrees. When neither exists and the user asks to deploy, scaffolding
+sibling worktrees. A source root that keeps its own `deploy/` — a `deploy.yaml`
+manifest plus the scripts it names — has that directory copied into every task
+space made from it, so look before scaffolding one. A `deploy.yaml` declares which
+targets exist and what each one runs; without one the space is docker-only through
+`deploy.sh`. When none of that exists and the user asks to deploy, scaffolding
 that root from the repositories' own run commands is ordinary session work; what
 must not happen is starting the services on the host instead.
 

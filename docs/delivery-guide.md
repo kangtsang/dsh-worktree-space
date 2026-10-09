@@ -94,7 +94,9 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
 
 ## 4. 部署清单（deploy.yaml）
 
-任务空间的 `deploy/` 目录放 `deploy.yaml`，声明支持的目标和命令。**没有清单
+任务空间的 `deploy/` 目录放 `deploy.yaml`，声明支持的目标和命令。**创建任务空间时，源码根自己的
+`deploy/` 目录会被整个复制过来**（源码根没有就跳过）——所以把清单**和它调用的脚本**一起放进源码根的
+`deploy/`，之后每个新建的任务空间就直接可用；只放清单是不够的，命令是相对该目录执行的。**没有清单
 时视作仅 docker**（`deploy.sh up/smoke/destroy`，即 L0 形态，完全兼容）。
 
 ```yaml

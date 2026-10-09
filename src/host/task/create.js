@@ -4,7 +4,7 @@
  * Creating a task: the container, the branch, one worktree per repository, and the file that tells a session what the task is.
  */
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
 import { ERROR_CODES, coded } from './codes.js'
@@ -221,6 +221,16 @@ export async function createTask(subprocess, options) {
 
   const created = []
   try {
+    // The source root's own deploy root travels with the task space. Both readers look in
+    // `<task space>/deploy` first and a manifest's commands run from that directory, so the
+    // whole directory comes over - a manifest without the script it names is a deploy that
+    // never runs. A source root that carries none is skipped: the space then deploys whatever
+    // its own repositories carry, if anything.
+    const sourceDeploy = join(sourceRoot, 'deploy')
+    if (existsSync(sourceDeploy)) {
+      await cp(sourceDeploy, join(taskPath, 'deploy'), { recursive: true, force: true })
+    }
+
     for (const repoPath of selected) {
       const worktreePath = join(taskPath, basename(repoPath))
       // Read the source facts before the branch exists, so they describe the
