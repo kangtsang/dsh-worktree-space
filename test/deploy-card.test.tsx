@@ -55,6 +55,16 @@ describe("the deployment card", () => {
     expect(screen.getByRole("button", { name: t("deployAccept") })).toBeTruthy()
   })
 
+  it("names what is missing when containers stand with nothing recorded", async () => {
+    // The shape that reads as "the panel is broken": running containers, no URL, no smoke, and no
+    // reason given. The card says who was supposed to write the state and what it costs.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ stateFound: false, url: null, lastSmoke: null })) }
+    const { container } = render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(container.textContent).toContain(t("deployStateMissing"))
+    expect(container.textContent).toContain(t("deployNoUrl"))
+  })
+
   it("records the human acceptance through the api", async () => {
     const api = { deployStatus: vi.fn().mockResolvedValue(status()), acceptDeployment: vi.fn().mockResolvedValue({ statePath: "x", humanAck: { at: "2026-10-05T01:00:00Z" } }) }
     render(<DeployCard api={api} path="/task" />)

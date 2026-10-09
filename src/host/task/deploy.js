@@ -198,7 +198,7 @@ export async function deploymentStatus(subprocess, taskPath) {
 export async function ackAcceptance(taskPath) {
   const found = await readDeliveryState(taskPath)
   if (found === undefined) {
-    throw coded('E5005', 'there is no deployment state to accept: deploy the task space and let the smoke pass first')
+    throw coded('E5005', 'there is no deployment state to accept: this task space has no `deploy/.state.json`, so there is nothing to append a human acceptance to - deploy it first, and have the deploy script write that file')
   }
   const next = { ...found.state, humanAck: { at: new Date().toISOString(), by: 'user' } }
   // Single line, like every other writer of this file: the deploy script reads
@@ -251,7 +251,7 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
     throw coded(
       'E5005',
       `the delivery policy requires a ${policy.deploy.target} deployment before merging, and no deployment state was recorded`
-        + `${envId === '' ? '' : ` (environment ${envId})`}. Deploy the task space and run its smoke first.`,
+        + `${envId === '' ? '' : ` (environment ${envId})`}. A deploy records itself in \`<deploy root>/.state.json\`, which is where the panel reads the acceptance URL and where this gate reads the smoke - so either no deploy has run, or the script that ran it did not write that file. Deploy the task space, and have its script write the state.`,
       { target: policy.deploy.target, envId },
     )
   }
@@ -277,7 +277,7 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
     return warned('delivery-gate-bypassed', `the user acknowledged finishing without ${named}`, { missing })
   }
   if (missing.length === 1 && missing[0] === 'smoke') {
-    throw coded('E5006', 'the last deployment smoke did not pass, or never ran; run it again and only then merge', { missing })
+    throw coded('E5006', 'the recorded deployment state carries no passing smoke: run the task space\'s smoke, and have that script merge `lastSmoke: { result, at }` into `deploy/.state.json`, before merging', { missing })
   }
   throw coded('E5007', `the delivery policy waits for ${named} before merging; confirm the acceptance in the Worktree Space panel, or finish anyway from there`, { missing })
 }

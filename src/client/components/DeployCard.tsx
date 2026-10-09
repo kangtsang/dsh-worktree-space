@@ -140,6 +140,11 @@ export function DeployCard({ api, path }: Props) {
           : null}
       </div>
     </div>
+    {/* Containers with nothing recorded is the shape that reads as "the panel is broken": name
+        what is missing, who was supposed to write it, and what it costs. */}
+    {containers && !status.stateFound
+      ? <span className="dws-deploy-error">{t("deployStateMissing")}</span>
+      : null}
     {error !== "" ? <span className="dws-deploy-error">{error}</span> : null}
   </div>
 }
