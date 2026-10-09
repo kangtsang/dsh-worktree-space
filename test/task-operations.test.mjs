@@ -1752,6 +1752,9 @@ describe("finishTask documents", () => {
       await mkdir(outside, { recursive: true })
       await writeFile(join(outside, "gateway.log"), "gateway\n")
       symlinkSync(outside, join(fixtureUnderTest.taskPath, "docs", "logs"), "junction")
+      // Something ordinary beside the link, so what "条-by-条" means is visible: the notes
+      // are filed, the link is left.
+      await writeFile(join(fixtureUnderTest.taskPath, "docs", "notes.md"), "notes\n")
 
       const result = await finishTask(subprocess, {
         task: "login",
@@ -1767,13 +1770,16 @@ describe("finishTask documents", () => {
         expect(existsSync(join(documents, "docs", "logs"))).toBe(true)
         expect(existsSync(join(fixtureUnderTest.taskPath, "docs"))).toBe(false)
       } else {
-        // Refused before the copy rather than half-way through it: the warning names
-        // the entry in the way, and the stray is left exactly as it stands - which is
-        // what the user removes an entry from before finishing again.
-        expect(warningText(result)).toMatch(/could not archive 'docs'/)
-        expect(warningText(result)).toMatch(/holds a link \(logs\)/)
-        expect(existsSync(join(documents, "docs"))).toBe(false)
+        // Filed what could be filed, and kept what could not: the notes are in the archive,
+        // the link is not, and the link - with the directory holding it - stays where it
+        // stands. Not deleting it is the point: a link is a name for somewhere else, often
+        // outside the task space, so removing it is the user's to do - and the warning names
+        // it so they know exactly what is in the way.
+        expect(existsSync(join(documents, "docs", "notes.md"))).toBe(true)
+        expect(existsSync(join(documents, "docs", "logs"))).toBe(false)
         expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "logs"))).toBe(true)
+        expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "notes.md"))).toBe(false)
+        expect(warningText(result)).toMatch(/except for a link \(logs\)/)
         expect(result.strays).toContain("docs")
       }
     } finally {

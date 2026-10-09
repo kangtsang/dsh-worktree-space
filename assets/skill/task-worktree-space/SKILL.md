@@ -216,6 +216,27 @@ sibling worktrees. When neither exists and the user asks to deploy, scaffolding
 that root from the repositories' own run commands is ordinary session work; what
 must not happen is starting the services on the host instead.
 
+**Scaffolding writes logs so that the host can still read and archive them.** When a
+service's log directory is bind-mounted out of the container, the service must not be
+asked to split its log by day *and* keep a "current log" symlink beside it: a symlink a
+Linux process creates inside a directory mounted from Windows lands on NTFS as a Linux
+symlink (`IO_REPARSE_TAG_LX_SYMLINK`), which Windows can neither recreate nor follow. The
+finish cannot file that leftover into the archive, so it stops with the task space still
+in place and asks the user to deal with the file.
+
+Ask for one plain file instead — the service's own knob, passed **in the environment the
+container actually reads**. For a service whose appender is built from
+`LOG_DIR`/`LOG_ROTATION`, that is `LOG_ROTATION: never` in the compose file's
+`environment:`; check which input drives it rather than writing the value into a YAML
+config the process may never read (a gateway whose appender comes from
+`FileLogConfig::from_env` ignores the same key in its own config file, and the task then
+looks solved while the link keeps appearing). Leaving the logs inside the container and
+reading them with `docker logs` works too, and is what `./deploy.sh logs <service>` does
+anyway.
+
+Retrofitting it into a running stack means the log directory gains a reparse point; if one
+is already there, the user removes that single file and finishes the task again.
+
 - Take the environment id from `worktree-space.md` (`DSH_ENV_ID=...`) and pass it
   to **every** deploy command. It is what keeps this task's containers, images and
   acceptance URL apart from every other task's — never guess one, and never reuse

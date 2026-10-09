@@ -79,18 +79,23 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Fixed (finishing)
 
-- **One link no longer stops an archive, and a half-copied archive is no longer left
-  behind.** `fs.cp` *recreates* a link rather than copying what it points at, and an
+- **An archive is now filed item by item: what can be filed is, and a link is left where it
+  stands, named.** `fs.cp` *recreates* a link rather than copying what it points at, and an
   ordinary Windows installation (no Developer Mode) refuses to create symbolic links at
   all — measured here: `mklink` answers "You do not have sufficient privilege" and
-  `fs.symlinkSync` throws `EPERM`. So a single link anywhere in a stray aborted the whole
-  copy, and the task space could never be cleared. The process now probes once whether it
-  may create a link, and where it may not, the stray is not copied at all: it stays where
-  it is, the warning names the entries in the way, and removing or moving those out — one
-  delete each, no privilege needed — is what lets the finish continue. A copy that failed
-  used to leave half an archive in `archived-docs` too; that is taken back out now, and
-  only when the destination really was this call's own (`errorOnExist` is what makes an
-  `EEXIST` somebody else's directory, which is left alone).
+  `fs.symlinkSync` throws `EPERM`. It used to be all or nothing: one link anywhere in a
+  stray meant the whole directory was not filed, so a single log symlink kept an entire
+  `deploy/` tree in the task space — which this repository's own docker acceptance stack
+  ran into, the container splitting its log by day and leaving a `gateway.log` symlink
+  beside it, a symlink that lands on NTFS as a reparse point this machine cannot recreate.
+  The copy now **skips the links and files everything else**; once it is filed, only the
+  part that was filed is removed, and **the links — with the directories holding them —
+  stay where they are, undeleted**, named by the warning, which says that removing or
+  moving them out is what lets the finish continue. One link is not worth leaving a whole
+  stray behind, and deleting somebody's link is still not this plugin's decision to make. A
+  copy that failed used to leave half an archive in `archived-docs` too; that is taken back
+  out now, and only when the destination really was this call's own (`errorOnExist` is what
+  makes an `EEXIST` somebody else's directory, which is left alone).
 - **A directory `git worktree remove` left behind is no longer filed as the user's
   documents.** Measured here (git `2.28.0.windows.1`), that command **unregisters the
   worktree before it deletes the directory**: when the delete fails it has already
