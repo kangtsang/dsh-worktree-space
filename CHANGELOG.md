@@ -12,6 +12,10 @@
   `Cannot read properties of undefined (reading 'throwIfAborted')`——会话开出来了、活却没交过去，回给你的是一句
   "the session was opened but the work could not be handed to it"。现在按契约传一个**永不中止**的信号：交活本来
   就不该被取消（要么交出去，要么如实告诉你没交成）。
+- **紧接着暴露的第二层：请求形状也不合格。** 宿主的 `prompt` 请求是**有必填字段**的类型——`requestId`、
+  `mode`、`content`、`clientTimeZone`（它的客户端封装 `Session.prompt` 就是权威样例）；插件此前只发了
+  `sessionId` + `content`，于是入口内部的任何非 Remote 失败都被包成 `session/agent-busy` → `prompt rejected`。
+  现在补齐：新铸一个 `requestId`、`mode: "queue"`（交活是排队，不是打断正在跑的回合）、内容、以及调用方的时区。
 
 - **agent 侧建出来的任务空间不再是一个未注册的半成品。** `task_worktree_space` 的 `create` 过去只做盘上
   那一半——目录、分支、每个仓库的 worktree——而「把这个目录注册成 DSH 工作区」是客户端能力（面板走

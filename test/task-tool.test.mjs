@@ -714,9 +714,18 @@ describe("registerTaskTool", () => {
       // Named by its Workspace, not by its directory: the controller attaches a session to a
       // Workspace only when it is named, and that attachment is what groups it in the sidebar.
       expect(created).toEqual([{ workspaceId: "ws-login" }])
-      // The Host's prompt contract carries a cancellation signal beside the request, and the
-      // session-controller dereferences it unguarded - so a handoff that passed only the
-      // request died there and left the session without its work. This is that regression.
+      // The request is the typed shape the Host's own client sends: a minted requestId, the queue
+      // mode, the text, and the caller's zone. Sending the id and the content alone was what the
+      // Host reported as `prompt rejected`.
+      expect(prompts).toHaveLength(1)
+      expect(typeof prompts[0].requestId).toBe("string")
+      expect(prompts[0].requestId).not.toBe("")
+      expect(prompts[0].mode).toBe("queue")
+      expect(prompts[0].sessionId).toBe("session-1")
+      expect(prompts[0].content).toEqual([{ type: "text", text: "build it, then smoke it" }])
+      expect(typeof prompts[0].clientTimeZone).toBe("string")
+      // The signal the contract names as well: declared required and dereferenced unguarded, so a
+      // handoff that omitted it crashed before the request was ever read. This is that regression.
       expect(signals).toHaveLength(1)
       expect(typeof signals[0]?.throwIfAborted).toBe("function")
       expect(() => signals[0].throwIfAborted()).not.toThrow()
@@ -728,7 +737,8 @@ describe("registerTaskTool", () => {
         { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
         { type: "approval/policy", data: { policy: "never", source: "delegation" } },
       ])
-      expect(prompts).toEqual([{ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] }])
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] })
       expect(value.warnings).toEqual([])
       expect(value.summary).toContain("session-1")
       expectEnvelopeShape(captured[0].output.schema, value)
@@ -841,7 +851,8 @@ describe("registerTaskTool", () => {
     // The caller's own override, copied and marked as delegated rather than as a switch the
     // user made - the same event DSH seeds into a child agent.
     expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
-    expect(prompts).toEqual([{ sessionId: "session-1", content: [{ type: "text", text: "add the feature, then run the tests" }] }])
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "add the feature, then run the tests" }] })
     expect(value.warnings).toEqual([])
     expect(value.summary).toMatch(/is on the work/)
     expectEnvelopeShape(captured[0].output.schema, value)

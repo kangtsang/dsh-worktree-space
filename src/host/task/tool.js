@@ -5,6 +5,7 @@
  * what makes the multi-repository workflow usable end to end in the meantime:
  * it drives exactly the same operations the `/api` endpoints do.
  */
+import { randomUUID } from 'node:crypto'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { projectNameFor } from './naming.js'
 import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
@@ -454,13 +455,26 @@ async function dispatchToSession(ctx, exec, request) {
     setSessionPermission(sessions.get(sessionId), mode)
   }
   try {
-    // The Host's prompt contract takes a cancellation signal beside the request, and the
-    // session-controller's implementation dereferences it without a guard - its own `list`
-    // guards, `prompt` does not - so a handoff that passes only the request dies with
-    // "Cannot read properties of undefined (reading 'throwIfAborted')" and the work never
-    // reaches the session. A handoff is not a cancellable read: it either gets handed over or
-    // the caller is told it did not, so this passes a signal that never aborts.
-    await controller.prompt({ sessionId, content: [{ type: 'text', text: request.prompt }] }, new AbortController().signal)
+    // The Host's prompt request is a typed shape whose fields are required, and its own client
+    // (`Session.prompt` in the session-controller) is the reference for one: a freshly minted
+    // requestId, the delivery mode, the content, and the caller's time zone. This call used to
+    // send the session id and the content alone, and admission threw inside itself - which the
+    // Host reports as `prompt rejected` under `session/agent-busy`, the wrapper it puts around
+    // every non-Remote failure in there.
+    //
+    // The second argument is the cancellation signal the contract also names. It is declared
+    // required and dereferenced without a guard (the same package's `list` guards that call), so
+    // omitting it crashed the handoff outright; a handoff is not a cancellable read, so it passes
+    // a signal that never aborts. `mode: 'queue'` is what a handoff is: it waits for the session
+    // to take it rather than steering a turn already running.
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    await controller.prompt({
+      requestId: randomUUID(),
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: request.prompt }],
+      ...(typeof timeZone === 'string' && timeZone !== '' ? { clientTimeZone: timeZone } : {}),
+    }, new AbortController().signal)
   } catch (error) {
     return {
       sessionId,

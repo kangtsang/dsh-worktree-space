@@ -14,6 +14,12 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   session was opened and the work never reached it, which came back as "the session was opened but the
   work could not be handed to it". It now passes a signal that never aborts, which is the contract: a
   handoff is not a cancellable read — it either gets handed over or the caller is told it did not.
+- **A second layer surfaced right behind it: the request shape was wrong too.** The Host's `prompt`
+  request is a typed shape with required fields — `requestId`, `mode`, `content`, `clientTimeZone`
+  (the package's own client, `Session.prompt`, is the reference for one); this plugin sent `sessionId`
+  and `content` alone, so every non-Remote failure inside admission came back wrapped as
+  `session/agent-busy` → `prompt rejected`. The call now mints a `requestId`, passes `mode: "queue"`
+  (a handoff queues; it does not steer a turn already running), the content, and the caller's zone.
 - **A task space created from an agent session is no longer left unregistered.**
   `task_worktree_space`'s `create` did the disk half only — the directory, the
   branch, one worktree per repository — while "register this directory as a DSH
