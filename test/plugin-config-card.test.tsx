@@ -402,3 +402,35 @@ describe("the configuration card's archive destination row", () => {
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "" })
   })
 })
+
+describe("the configuration card's workspace-list rows", () => {
+  it("offers both halves of a task space's life, on by default", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // On in both cases: off is the deliberate choice - a task space an agent made that never
+    // joins the list, or a finished one whose group is kept - so the row's value is what on
+    // does, and the note under it says what each state means.
+    expect(hintIn(t("toolRegistersWorkspace"))).toBe(t("toolRegistersWorkspaceHint"))
+    expect(screen.getByLabelText(t("toolRegistersWorkspace")).textContent).toContain(t("toolRegistersWorkspaceOn"))
+    expect(hintIn(t("finishUnregistersWorkspace"))).toBe(t("finishUnregistersWorkspaceHint"))
+    expect(screen.getByLabelText(t("finishUnregistersWorkspace")).textContent).toContain(t("finishUnregistersWorkspaceOn"))
+  })
+
+  it("saves either of them through the form the other rows use, and names both states", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    fireEvent.click(screen.getByLabelText(t("toolRegistersWorkspace")))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("toolRegistersWorkspaceOff") })).toBeTruthy()
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("toolRegistersWorkspaceOff") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("toolRegistersWorkspace", "off"))
+    expect(read()).toMatchObject({ toolRegistersWorkspace: "off" })
+
+    fireEvent.click(screen.getByLabelText(t("finishUnregistersWorkspace")))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("finishUnregistersWorkspaceOff") })).toBeTruthy()
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("finishUnregistersWorkspaceOff") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("finishUnregistersWorkspace", "off"))
+    expect(read()).toMatchObject({ finishUnregistersWorkspace: "off" })
+  })
+})

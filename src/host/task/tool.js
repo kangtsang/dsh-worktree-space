@@ -281,6 +281,27 @@ async function registerTaskWorkspace(registry, taskPath, sourceRoot, task) {
  * @param taskPath - the task space that was removed.
  * @returns an empty string when there is nothing to report.
  */
+/**
+ * Whether a task space is still registered, asked again after a delete failed.
+ *
+ * The state is what matters, not the code one Host spells the failure with: a record can be
+ * removed in the interface between the read above and the delete here, and a delete of
+ * something that is no longer there is the outcome this was after rather than a problem.
+ * An unreadable list answers `true`, because then it cannot be said that the entry is gone -
+ * the original failure stands rather than being talked away.
+ * @param registry - the Host's Workspace registry.
+ * @param taskPath - the task space whose registration is in question.
+ * @returns whether an entry for that path is still in the list.
+ */
+async function stillRegistered(registry, taskPath) {
+  try {
+    const target = canonicalPath(taskPath)
+    return registry.list().some((entry) => entry !== null && entry !== undefined && canonicalPath(entry.path) === target)
+  } catch {
+    return true
+  }
+}
+
 async function dropTaskWorkspace(registry, taskPath) {
   if (registry === undefined || typeof registry.list !== 'function' || typeof registry.delete !== 'function') return ''
   const byHand = '; remove it from the workspace list by hand if it is still there'
@@ -296,6 +317,11 @@ async function dropTaskWorkspace(registry, taskPath) {
     try {
       await registry.delete(entry.id)
     } catch (error) {
+      // Already gone is not a failure: it is the state this was trying to reach, and it is the
+      // ordinary answer for a task space the user deleted from the list themselves before
+      // finishing it. Asked rather than inferred from the error, because the next Host may
+      // spell "not found" differently and this must not turn that into a false report.
+      if (!(await stillRegistered(registry, taskPath))) continue
       problems.push(String(error?.message ?? error))
     }
   }
@@ -451,6 +477,15 @@ export function registerTaskTool(ctx, options = {}) {
   // Where the strays policy files content away, when a done leaves the handling
   // to the policy: the same archive preference the finish dialog reads.
   const configuredArchive = () => typeof options.configuredArchive === 'function' ? options.configuredArchive() : undefined
+  // Whether a create registers what it made as a DSH Workspace. Read per call like the
+  // root above, and defaulting to yes: a caller that says nothing gets the half that
+  // keeps an agent-made task space from being one nothing in the interface shows.
+  const registersWorkspace = () => typeof options.registersWorkspace === 'function' ? options.registersWorkspace() !== false : true
+  // And whether the finish takes that registration away again. Read per call for the same
+  // reason, and defaulting to yes: a caller that says nothing gets the behaviour the panel
+  // has always had, which is what keeps a finished task from leaving an entry pointing at a
+  // directory that is gone.
+  const unregistersWorkspace = () => typeof options.unregistersWorkspace === 'function' ? options.unregistersWorkspace() !== false : true
 
   return tools.register(defineTool({
     name: 'task_worktree_space',
@@ -541,14 +576,30 @@ export function registerTaskTool(ctx, options = {}) {
         // what keeps an agent-made task space from being a container the workspace
         // list never shows and no second create can take the name of.
         //
+        // Left to the panel when the configuration says so, and then it is the user's own
+        // press rather than this tool's - which is the one thing the setting decides. The
+        // warning below is written either way, because what a caller needs to know is the
+        // same in both cases: nothing in the interface shows this task space yet, and until
+        // something registers it the same name cannot be used again.
+        //
         // Reported as a warning and never thrown, because the create has already
         // succeeded: a caller told it failed would not know the worktrees are there,
         // and the same name would stay unusable either way.
-        const registry = workspaceRegistryOf(ctx)
-        const unregistered = registry === undefined
-          ? NO_WORKSPACE_REGISTRY
-          : await registerTaskWorkspace(registry, result.path, sourceRoot, result.task)
-        if (unregistered !== '') {
+        const leaveToThePanel = !registersWorkspace()
+        const registry = leaveToThePanel ? undefined : workspaceRegistryOf(ctx)
+        const unregistered = leaveToThePanel
+          ? ''
+          : registry === undefined
+            ? NO_WORKSPACE_REGISTRY
+            : await registerTaskWorkspace(registry, result.path, sourceRoot, result.task)
+        if (leaveToThePanel) {
+          value.warnings.push(
+            'the task space is on disk but not registered as a DSH Workspace: this deployment leaves '
+            + 'tool-created task spaces to be registered by hand. Register it from the Worktree Space panel - '
+            + '"Create and open", or "Register again" after a create is refused - and open the task\'s session '
+            + 'there; until it is registered, creating this task again is refused as E2002',
+          )
+        } else if (unregistered !== '') {
           value.warnings.push(
             `the task space is on disk but not registered as a DSH Workspace (${unregistered}); register it from the `
             + 'Worktree Space panel - "Create and open", or "Register again" after a create is refused - and open the '
@@ -645,7 +696,13 @@ export function registerTaskTool(ctx, options = {}) {
         // whose directory is still on disk has to keep showing it. The create from
         // this tool registered it, so this is the half that keeps a finished task
         // from leaving an entry pointing at a directory that is gone.
-        if (result.containerRemoved) {
+        //
+        // Unless the configuration would rather keep the group: off, the entry stays and the
+        // task's sessions stay under it instead of falling back to Ungrouped, and what the
+        // user has is a Workspace whose directory is gone. Nothing is said about that here -
+        // it is the answer they configured, not something that went wrong - and the dialog
+        // says which of the two happened in its own result.
+        if (result.containerRemoved && unregistersWorkspace()) {
           const stranded = await dropTaskWorkspace(workspaceRegistryOf(ctx), result.path)
           if (stranded !== '') value.warnings.push(stranded)
         }

@@ -125,6 +125,17 @@ const HANDOFF_ACCESS_FIELD = "handoffFullAccess"
 const HANDOFF_ACCESS_ON = "on"
 const HANDOFF_ACCESS_OFF = "off"
 
+/** The two rows that decide what the plugin does with DSH's own workspace list. */
+const TOOL_REGISTERS_FIELD = "toolRegistersWorkspace"
+const FINISH_UNREGISTERS_FIELD = "finishUnregistersWorkspace"
+/**
+ * Both are on/off, and both default to on. Off is the deliberate choice in each case - a
+ * task space an agent made that never joins the list, or a finished one whose group is kept
+ * - so the row names what on does rather than leaving "off" to be guessed at.
+ */
+const WORKSPACE_LIST_ON = "on"
+const WORKSPACE_LIST_OFF = "off"
+
 /**
  * The fields this plugin declares in its Host configuration.
  *
@@ -170,6 +181,32 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     choices: [
       { value: HANDOFF_ACCESS_OFF, key: "handoffFullAccessOff" },
       { value: HANDOFF_ACCESS_ON, key: "handoffFullAccessOn" },
+    ],
+  },
+  {
+    // What an agent's create does with DSH's own workspace list. On is what keeps an
+    // agent-made task space from being one nothing in the interface shows and no second
+    // create can take the name of; off leaves the registering to the user's own press.
+    field: TOOL_REGISTERS_FIELD,
+    label: t("toolRegistersWorkspace"),
+    fallback: WORKSPACE_LIST_ON,
+    hint: t("toolRegistersWorkspaceHint"),
+    choices: [
+      { value: WORKSPACE_LIST_ON, key: "toolRegistersWorkspaceOn" },
+      { value: WORKSPACE_LIST_OFF, key: "toolRegistersWorkspaceOff" },
+    ],
+  },
+  {
+    // And what a finish does with it. On is the behaviour the panel has always had - the
+    // directory is gone, so the entry is one nothing can open; off keeps the group, so that
+    // task's sessions stay together instead of falling back to Ungrouped.
+    field: FINISH_UNREGISTERS_FIELD,
+    label: t("finishUnregistersWorkspace"),
+    fallback: WORKSPACE_LIST_ON,
+    hint: t("finishUnregistersWorkspaceHint"),
+    choices: [
+      { value: WORKSPACE_LIST_ON, key: "finishUnregistersWorkspaceOn" },
+      { value: WORKSPACE_LIST_OFF, key: "finishUnregistersWorkspaceOff" },
     ],
   },
   {
@@ -537,7 +574,7 @@ interface PluginConfigCardProps {
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, TOOL_REGISTERS_FIELD, FINISH_UNREGISTERS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }

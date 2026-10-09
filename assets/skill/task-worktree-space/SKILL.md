@@ -102,7 +102,10 @@ Follow this order. Never create a workspace with a guessed location.
 8. **Run `action: "create"`.** It does both halves: it makes the task directory,
    the branch and one worktree per repository **and registers the result as a DSH
    Workspace**, which is what puts the task space in the workspace list under
-   `<source workspace title>/<task>`.
+   `<source workspace title>/<task>`. Where the profile has
+   `toolRegistersWorkspace` off it does the disk half only, and says so in a
+   warning — then the registering is the panel's, and nothing in the interface
+   shows the task space until someone does it.
 9. **Report where it is, and say which entry opens the session.** A session is
    opened *with* the Workspace, and opening one is not something this tool can do:
    that is the panel's **Create and open** in the Worktree Space dialog, or
@@ -110,11 +113,12 @@ Follow this order. Never create a workspace with a guessed location.
    directory path and the branch name, then name that entry rather than leaving
    the user to find it.
    A create that answers with a warning that the Workspace was **not** registered
-   means the deployment serves no workspace registry, or the registration itself
-   failed; the warning names which. Register the directory before anything is
-   opened in it — **Create and open**, or **Register again** when a create is
-   refused — and do not report the task as under way until that is done, because
-   until then nothing in the interface shows the task space.
+   means one of three things, and the warning names which: the deployment serves no
+   workspace registry, the registration itself failed, or the profile leaves
+   tool-created task spaces to be registered by hand. Register the directory before
+   anything is opened in it — **Create and open**, or **Register again** when a
+   create is refused — and do not report the task as under way until that is done,
+   because until then nothing in the interface shows the task space.
 10. **Work in the task directory**: it is where the task's session belongs.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
@@ -303,14 +307,18 @@ Confirm each destructive step with the user before passing it:
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.
 
-The Workspace registration follows the directory. When the finish removes the task
-space itself, `done` drops the registration too, so the task space leaves the
-workspace list and its sessions move to "Ungrouped". A finish that keeps the
-container — a conflict left standing, uncommitted work, strays that were kept —
-keeps the registration as well, because the directory is still there and the list
-has to go on showing it. A registration that could not be dropped is reported as a
-**warning** over a finish that still happened; remove it from the workspace list by
-hand.
+The Workspace registration follows the directory, unless the deployment would rather it did
+not. When the finish removes the task space itself, `done` drops the registration too, so
+the task space leaves the workspace list and its sessions move to "Ungrouped" — **unless the
+profile has `finishUnregistersWorkspace` off**, in which case the registration is kept and
+those sessions stay in that group with nothing left on disk behind it. That is the user's
+answer rather than a failure, so nothing warns about it: the finish result is the same
+either way. A finish that keeps the container — a conflict left standing, uncommitted work,
+strays that were kept — keeps the registration in both settings, because the directory is
+still there and the list has to go on showing it. A registration that could not be dropped,
+while the entry is still in the list, is reported as a **warning** over a finish that still
+happened; remove it from the workspace list by hand. An entry that has already gone is not a
+failure to report: that is the outcome, not something to fix.
 
 Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`;
 `mergeInProgress` is what marks a repository the finish left on a conflict.

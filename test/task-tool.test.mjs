@@ -64,12 +64,12 @@ async function sourceFixture() {
  * @param services - the services the context serves beyond `tools`.
  * @returns the action's value and the captured tool definition.
  */
-async function createOnce(services = {}) {
+async function createOnce(services = {}, options = {}) {
   const source = await sourceFixture()
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
   try {
     const { ctx, captured } = toolContext(creatingSubprocess, services)
-    registerTaskTool(ctx)
+    registerTaskTool(ctx, options)
     const value = await captured[0].execute(
       { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container },
       {},
@@ -347,6 +347,24 @@ describe("registerTaskTool", () => {
     expectEnvelopeShape(captured[0].output.schema, value)
   })
 
+  it("makes the task space and leaves registering it to the panel when the setting says so", async () => {
+    // Off is the deliberate choice, so the disk half still happens and is reported as it
+    // always was; what changes is that nothing is registered - and that the result says so,
+    // with the way to do it by hand, because a caller that believed otherwise would open a
+    // session in a task space the interface does not show.
+    const records = []
+    const registry = {
+      resolveByPath: async () => ({ title: "kratos-admin" }),
+      create: async (path, title) => { records.push({ path, title }) },
+    }
+    const { value } = await createOnce({ workspaceRegistry: registry }, { registersWorkspace: () => false })
+    expect(value.action).toBe("create")
+    expect(value.container).not.toBe("")
+    expect(records).toEqual([])
+    expect(value.warnings.join(" ")).toMatch(/registered by hand/)
+    expect(value.warnings.join(" ")).toMatch(/E2002/)
+  })
+
   it("leaves the Workspace title to the registry when the source root is not registered", async () => {
     const records = []
     const registry = {
@@ -421,6 +439,67 @@ describe("registerTaskTool", () => {
       expectEnvelopeShape(captured[0].output.schema, value)
     } finally {
       await fixture.cleanup()
+    }
+  })
+
+  it("leaves the registration alone when the setting keeps a finished task's group", async () => {
+    // Off is the deliberate choice here too: the directory goes, the entry stays, and that is
+    // what keeps the task's sessions under one group instead of falling back to Ungrouped. It
+    // is not something that went wrong, so nothing warns about it.
+    const fixture = await taskSpaceFixture()
+    const deleted = []
+    const registry = {
+      list: () => [{ id: "ws-1", path: fixture.taskPath }],
+      delete: async (id) => { deleted.push(id) },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registry })
+    try {
+      registerTaskTool(ctx, { unregistersWorkspace: () => false })
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      expect(value.container).toBe("")
+      expect(deleted).toEqual([])
+      expect(value.warnings.join(" ")).not.toMatch(/Workspace registration/)
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("treats a registration that is already gone as done, not as a failure to drop one", async () => {
+    // Two ways a task space turns out not to be registered any more, and neither may be
+    // reported as a problem: it was never there (the user removed it from the list, or the
+    // deployment never registered it), or it went between the read that found it and the
+    // delete that followed - which the delete reports as "not found" and which the question
+    // asked again answers with the truth.
+    const cases = [
+      { name: "never listed", list: () => [], failure: "workspace \"ws-1\" not found" },
+      {
+        name: "went between the read and the delete",
+        list: (() => { let reads = 0; return (path) => (reads++ === 0 ? [{ id: "ws-1", path }] : []) })(),
+        failure: "workspace \"ws-1\" not found",
+      },
+    ]
+    for (const each of cases) {
+      const fixture = await taskSpaceFixture()
+      const registry = {
+        list: () => each.list(fixture.taskPath),
+        delete: async () => { throw new Error(each.failure) },
+      }
+      const { ctx, captured } = toolContext(fixture.subprocess, { workspaceRegistry: registry })
+      try {
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+          {},
+        )
+        expect(value.container, each.name).toBe("")
+        expect(value.warnings.join(" "), each.name).not.toMatch(/Workspace registration/)
+      } finally {
+        await fixture.cleanup()
+      }
     }
   })
 

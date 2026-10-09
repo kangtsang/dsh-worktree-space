@@ -96,6 +96,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   // the finish had just deleted. Every later scan then tried to read that path and
   // reported ENOENT for a workspace the plugin itself had finished.
   const workspace = workspaces.list.getSnapshot().items.find((item) => sameLocation(item.path, path))
+  /**
+   * Whether this task space is still in the workspace list, asked again after a failed delete.
+   *
+   * Reads the same list the lookup above does, which follows the Host rather than a value
+   * taken once: a Workspace the user removed in the interface is gone from it by the time a
+   * delete here fails, and that is how this tells "already gone" from "could not be removed".
+   */
+  const stillRegistered = (target: string) => (workspaces.list.getSnapshot().items ?? []).some((item) => sameLocation(item.path, target))
   const [plan, setPlan] = useState<TaskPlan | null>(null)
   const [loadError, setLoadError] = useState("")
   // Merging is what a task is for, so it is on; deleting the branch and forcing
@@ -148,6 +156,15 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const [fullAccess, setFullAccess] = useState(false)
   /** What went wrong with the switch, or with widening a session the switch was on for. */
   const [accessError, setAccessError] = useState("")
+  /**
+   * Whether finishing this task space also unregisters it.
+   *
+   * On until the Host says otherwise, which is the setting's own default and what this
+   * dialog has always done: the directory is gone, so an entry pointing at it is an entry
+   * nothing can open. Off, the registration is kept - the task's sessions stay in that
+   * group rather than falling back to Ungrouped - and the panel says so in its result.
+   */
+  const [finishUnregisters, setFinishUnregisters] = useState(true)
   // The sessions run outside this dialog, so the rows reporting on them have to
   // follow the Host's list rather than a value read once. The counter is the render.
   const [, setSessionTick] = useState(0)
@@ -286,6 +303,9 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // without the field: such a Host opens each session on the boundary that reaches
       // the metadata, and that is what off means here.
       setFullAccess(served?.handoffFullAccess === "on")
+      // Off keeps the registration after a finish; anything else - including a Host too old
+      // to answer - is the behaviour this dialog has always had.
+      setFinishUnregisters(served?.finishUnregistersWorkspace !== "off")
       setDocumentsDirectory(documentsDirectoryFor(path, new Date(), {
         strategy: served?.archiveDocumentsStrategy ?? DEFAULT_ARCHIVE_PREFERENCE.strategy,
         directory: typeof served?.archiveDocumentsDirectory === "string" ? served.archiveDocumentsDirectory : "",
@@ -502,11 +522,20 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // a finish that failed keeps the container - with the worktree whose conflict
       // still has to be resolved - and unregistering it then would hide the task
       // space and scatter its sessions into "Ungrouped" while it sits there on disk.
-      if (workspace !== undefined && archived.containerRemoved) {
+      //
+      // And only when the configuration wants it dropped: off, the entry is what keeps that
+      // task's sessions in one group after the directory has gone, and the result below says
+      // so rather than leaving the reader to wonder why the row is still there.
+      if (workspace !== undefined && archived.containerRemoved && finishUnregisters) {
         try {
           await workspaces.delete(workspace.workspaceId)
         } catch (reason: any) {
-          setRegistrationError(errorText(t, reason))
+          // Not registered any more is the state this was after, not a failure: the user can
+          // delete a Workspace from the list between this dialog reading it at the top and the
+          // delete here, and the answer to that is to carry on rather than to say the panel
+          // kept something that is not there. Asked again rather than read out of the error,
+          // because what matters is the state, not the code one Host spells it with.
+          if (stillRegistered(path)) setRegistrationError(errorText(t, reason))
         }
       }
       setResult(archived)
@@ -990,7 +1019,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             ))}
             {workspace !== undefined
               ? <p className={registrationError === "" ? undefined : "dws-finish-error"}>
-                {registrationError !== "" ? format(t("archiveWorkspaceKept"), { error: registrationError }) : result.containerRemoved ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptIntact")}
+                {registrationError !== ""
+                  ? format(t("archiveWorkspaceKept"), { error: registrationError })
+                  : result.containerRemoved
+                    ? (finishUnregisters ? t("archiveWorkspaceRemoved") : t("archiveWorkspaceKeptBySetting"))
+                    : t("archiveWorkspaceKeptIntact")}
               </p>
               : null}
           </div> : null}

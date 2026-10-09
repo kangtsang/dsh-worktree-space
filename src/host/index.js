@@ -336,6 +336,23 @@ let handoffEntryReference
 let handoffFullAccessReference
 
 /**
+ * Whether the agent tool registers a task space it has made as a DSH Workspace.
+ *
+ * Held, not read, like the two above it: the settings card writes it while a session may
+ * be running, and the tool asks at the top of every create rather than at load.
+ */
+let toolRegistersWorkspaceReference
+
+/**
+ * Whether a finish drops the registration of the task space it removed.
+ *
+ * Held, not read, like the switch above: the settings card writes it, the tool's `done`
+ * asks at the top of the finish, and the dialog reads the same answer through
+ * `task.preference` rather than keeping a copy of it.
+ */
+let finishUnregistersWorkspaceReference
+
+/**
  * Whether the container root is derived from the source root or named by the user.
  *
  * `default` is the recommendation the plugin has always made; `custom` hands the
@@ -408,6 +425,23 @@ export function configuredHandoffFullAccess() {
   // reference, but a caller passing the value itself - a test, or any future direct call -
   // would otherwise read as unset, and for this setting "unset" is the refusal.
   return settingValue(handoffFullAccessReference) === 'on' ? 'on' : 'off'
+}
+
+/**
+ * Whether the agent tool registers a task space its create has just made.
+ * @returns `'off'` only when the configuration says so; anything else registers, which is
+ *   the shipped default and what a profile that never touches the setting gets.
+ */
+export function configuredToolRegistersWorkspace() {
+  return settingValue(toolRegistersWorkspaceReference) === 'off' ? 'off' : 'on'
+}
+
+/**
+ * Whether a finish unregisters the Workspace of the task space it removed.
+ * @returns `'off'` only when the configuration says so; anything else unregisters.
+ */
+export function configuredFinishUnregistersWorkspace() {
+  return settingValue(finishUnregistersWorkspaceReference) === 'off' ? 'off' : 'on'
 }
 
 /**
@@ -732,6 +766,40 @@ export const Config = z.object({
   handoffFullAccess: z.union(['off', 'on']).default('off').loose().volatile()
     .description('Open the sessions that commit uncommitted work, and the sessions that resolve a merge conflict, at the container root with full access, so they never ask to write a source repository\'s git metadata. Off, each is opened on the directory that reaches that metadata, and asks when it has to write outside it.'),
   /**
+   * Whether the agent tool registers a task space it has just made as a DSH Workspace.
+   *
+   * On by default, because off is the state this setting exists to spare someone: a tool
+   * create that left the container unregistered produced a task space the workspace list
+   * never showed, no session could be opened in, and no second create could take the name
+   * of - `createTask` reads a leftover of its own as E2002 and refuses.
+   *
+   * Off, the tool does the disk half only. It still says so in its result, with the way to
+   * register the directory by hand, because a caller that believed it was registered would
+   * open a session that cannot exist. The dialog's own create is not affected: it registers
+   * through `ctx.workspaces.create` on the client, which is the user's own press rather
+   * than an agent's, and this setting is about what the agent's tool does on its own.
+   */
+  toolRegistersWorkspace: z.union(['on', 'off']).default('on').loose().volatile()
+    .description('Register a task space the agent tool has just created as a DSH Workspace, so it appears in the workspace list and a session can be opened in it. Off, the tool makes the task space and leaves registering it to the panel.'),
+  /**
+   * Whether a finish drops the Workspace registration of the task space it removed.
+   *
+   * On by default, for the reason the dialog has always done it: the directory is gone, so
+   * an entry pointing at it is an entry nothing can open, and unregistering is what lets the
+   * task's sessions fall back to Ungrouped with their history intact.
+   *
+   * Off, the registration is kept: the task's sessions stay under that group in the sidebar
+   * rather than scattering into Ungrouped, and what the user has instead is a Workspace whose
+   * directory no longer exists. That is a preference about the workspace list, not a failure,
+   * so nothing warns about it - the panel says which of the two happened in its result.
+   *
+   * Read by both halves: the tool's `done` through this, the finish dialog through
+   * `task.preference`. A finish that did not remove the container keeps the registration
+   * either way - there is still a directory to show.
+   */
+  finishUnregistersWorkspace: z.union(['on', 'off']).default('on').loose().volatile()
+    .description('Unregister the Workspace of a task space the finish has just removed. Off, the registration is kept, so that task\'s sessions stay grouped instead of falling back to Ungrouped.'),
+  /**
    * Whether the audit log is written.
    *
    * On by default, and that is the setting being worth having: the log is the only
@@ -914,6 +982,12 @@ export function apply(ctx, config = {}) {
   // And for how much access those entries get: the card writes it, the endpoint that
   // widens a session reads it, and off is what anything but an explicit `on` means.
   handoffFullAccessReference = config.handoffFullAccess
+  // And for the half of a create that tells DSH about it: the card writes it, and the
+  // tool reads it once per create, because the next create should follow the answer.
+  toolRegistersWorkspaceReference = config.toolRegistersWorkspace
+  // And for the other end of a task space's life: whether finishing it takes its
+  // registration with it. The panel reads the same answer through `task.preference`.
+  finishUnregistersWorkspaceReference = config.finishUnregistersWorkspace
   // And for where a task space goes: the settings card writes the pair, and every
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
@@ -944,9 +1018,9 @@ export function apply(ctx, config = {}) {
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) }))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), registersWorkspace: () => configuredToolRegistersWorkspace() === 'on', unregistersWorkspace: () => configuredFinishUnregistersWorkspace() === 'on' }))
   } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) })
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), registersWorkspace: () => configuredToolRegistersWorkspace() === 'on', unregistersWorkspace: () => configuredFinishUnregistersWorkspace() === 'on' })
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -1195,6 +1269,12 @@ export function apply(ctx, config = {}) {
         // reaches a repository's git metadata, or the container root with full access.
         // The dialog says which before it opens anything, so it has to know.
         handoffFullAccess: configuredHandoffFullAccess(),
+        // Whether finishing a task space drops its Workspace registration. Read here as well
+        // as by the tool, so the user's own press in the dialog behaves the way the agent's
+        // `done` does rather than the two disagreeing about one setting. The tool's own
+        // registration switch is not in this record: it is about what the agent's create does
+        // on its own, and the dialog's "Create and open" is a press that means both halves.
+        finishUnregistersWorkspace: configuredFinishUnregistersWorkspace(),
         // So a dialog can tell someone that what just happened was not recorded
         // rather than leave them to find an empty log and assume the plugin is
         // broken. The answer is the running state, not the configured value, so

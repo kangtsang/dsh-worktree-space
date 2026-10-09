@@ -69,6 +69,14 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     location) is stored by
     DSH's own plugin configuration service (the Plugins page's live form); **the plugin writes no
     configuration file**, and its `task.preference` endpoint is read-only.
+  - Workspace registration: when a task space is created — the panel's Create and open, or the agent tool's
+    `create` — it is **registered** as a Workspace through DSH's own workspace service, and a finish that really
+    removes the directory **unregisters** it. That writes **DSH's own store**, not a file this plugin writes.
+    Either half can be turned off in the configuration: `toolRegistersWorkspace` (on by default; off leaves the
+    tool's `create` doing the disk half only) and `finishUnregistersWorkspace` (on by default; off keeps the
+    registration, so that task's sessions stay in its group). An unregistration goes by **what the list says
+    now**: a failed delete is followed by reading the list again, and only an entry that is still there is
+    reported as a failure — one that has gone is the outcome, not a problem.
 
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,
