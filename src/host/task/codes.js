@@ -38,7 +38,7 @@ export const ERROR_CODES = {
   // --- E2xxx task space lifecycle -----------------------------------------
   E2001: 'create.js - the task name is taken by a different task space',
   E2002: 'create.js - the task space is this task own, left before its Workspace was registered',
-  E2003: 'archive.js, add.js - no task space at that path',
+  E2003: 'archive.js, add.js, tool.js - no task space at that path',
   E2004: 'archive.js, add.js - the task space holds no git worktrees',
   E2005: 'create.js, add.js - creating or extending failed with no code of its own, and everything was rolled back',
   E2006: 'create.js, add.js - creating or extending failed with no code of its own, and the rollback left something behind',
@@ -63,6 +63,8 @@ export const ERROR_CODES = {
   E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
   E4011: 'index.js - a handoff access request named no session',
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
+  E4013: 'tool.js - the task records that this flow does not merge it',
+  E4014: 'create.js - the requested deploy script is not a file inside the source root',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
@@ -106,6 +108,7 @@ export const UNKNOWN = 'E9001'
 export const WARNING_CODES = {
   'no-task-branch': 'archive.js - the record names no branch, so no branch was deleted',
   'delivery-gate-bypassed': 'deploy.js - the delivery gate was overruled and the finish carried on',
+  'human-ack-waived': 'deploy.js - the policy merges by itself, so the human acceptance it also asked for was not waited for',
   'branch-left-alone': 'archive.js - the worktree is not on the task branch, so no branch was deleted',
   'branch-not-deleted': 'archive.js - git did not delete the branch',
   'leftover-refused': 'archive.js - a leftover is a link, or outside the container, and is left alone',

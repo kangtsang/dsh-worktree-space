@@ -68,10 +68,23 @@ describe('delivery policy', () => {
     expect(() => normalizeDeliveryPolicy({ verification: 'vibes' })).toThrow(/verification/)
   })
 
+  it('refuses a policy that merges by itself while also waiting for a person', () => {
+    // The two fields would state a requirement nothing can satisfy: `auto` has no one to ask,
+    // so the human half of a verification mode could never be given. Refused where a policy is
+    // recorded; reading one back never refuses, because a record from an older version - or one
+    // edited by hand - is no reason to stop a finish, and `auto` then means what it says.
+    expect(() => normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'agent-then-human' })).toThrow(/merge\.mode 'auto'/)
+    expect(() => normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'human' })).toThrow(/set verification to agent/)
+    expect(normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'agent' }).merge.mode).toBe('auto')
+    expect(coerceDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'human' }).merge.mode).toBe('auto')
+  })
+
   it('substitutes defaults per field when the record is read back', () => {
     const policy = coerceDeliveryPolicy({ deploy: { target: 'docker', mode: 'sometimes' }, merge: { mode: 'auto' } })
     expect(policy.deploy).toEqual({ target: 'docker', mode: 'on-request' })
-    expect(policy.merge).toEqual({ mode: 'auto', target: null, deleteBranch: true })
+    // A record that says nothing about the branch keeps it: the field's default is the
+    // reversible answer, and a task branch is the only record of how the work was made.
+    expect(policy.merge).toEqual({ mode: 'auto', target: null, deleteBranch: false })
     expect(policy.verification).toBe(DEFAULT_DELIVERY_POLICY.verification)
     // And a policy read off the record is what the gate reads, whatever the record's age.
     expect(deliveryPolicyOf({ delivery: policy })).toEqual(policy)
@@ -79,7 +92,7 @@ describe('delivery policy', () => {
   })
 
   it('resolves from the request first, then the project default, then none', () => {
-    const defaults = { public: { deploy: { target: 'docker', mode: 'auto' }, merge: { mode: 'auto' } } }
+    const defaults = { public: { deploy: { target: 'docker', mode: 'auto' }, verification: 'agent', merge: { mode: 'auto' } } }
     const explicit = { verification: 'agent' }
     // The request's own policy wins whole; it is not merged with the stored one.
     expect(resolveDeliveryPolicy('public', explicit, defaults).verification).toBe('agent')
@@ -143,6 +156,22 @@ describe('the delivery gate', () => {
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, verification: 'agent' }, state: STATE })
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' }, verification: 'agent' } }, root, { merge: true })).resolves.toBeUndefined()
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: false })).resolves.toBeUndefined()
+  })
+
+  it('merges by itself when the record says so, and says the ack it asked for was not waited for', async () => {
+    // `auto` is the task's own answer that the merge happens on its own. Create time refuses it
+    // together with a verification that waits for a person, so what is read here is a record
+    // that predates that rule or was edited by hand: the merge is taken at its word, with a
+    // warning rather than a silent drop.
+    const auto = { delivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } } }
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } }, state: STATE })
+    const warning = await assertDeliveryGate(auto, root, { merge: true })
+    expect(warning.code).toBe('human-ack-waived')
+    expect(warning.values).toEqual({})
+    // What stays is what is mechanical: a policy that expects a deployment and has none is
+    // still refused, because that is work that was not done, not a person who was not asked.
+    const bare = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } } })
+    await expect(assertDeliveryGate(auto, bare.root, { merge: true })).rejects.toMatchObject({ code: 'E5005' })
   })
 
   it('yields to the user\'s own overrule, as a warning rather than a refusal', async () => {
@@ -320,19 +349,27 @@ describe('applyStraysPolicy', () => {
     expect(kept.cleanStray).toBe(false)
   })
 
-  it('keeps the shipped behaviour under keep, and never discards without force', () => {
+  it('keeps the shipped behaviour under keep: the policy declines to speak', () => {
     const r = applyStraysPolicy({ strays: 'keep' }, {}, ARCHIVE, TASK)
     expect(r.cleanStray).toBe(false)
-    const d = applyStraysPolicy({ strays: 'discard' }, { force: false }, ARCHIVE, TASK)
-    expect(d.cleanStray).toBe(false)
-    expect(d.discardDocuments).toBe(false)
+    expect(r.discardDocuments).toBe(false)
+    expect(r.documentsDirectory).toBe('')
   })
 
-  it('discard only honours the abandon path, where force already said so', () => {
-    const r = applyStraysPolicy({ strays: 'discard' }, { force: true }, ARCHIVE, TASK)
-    expect(r.cleanStray).toBe(true)
+  it('never deletes from a policy: the discard flag is the caller\'s own', () => {
+    // The abandon path passes both flags; the policy only ever carries them through.
+    const r = applyStraysPolicy({ strays: 'archive' }, { force: true, discardDocuments: true }, ARCHIVE, TASK)
     expect(r.discardDocuments).toBe(true)
+    expect(r.cleanStray).toBe(false)
     expect(r.documentsDirectory).toBe('')
+  })
+
+  it('refuses a policy that names a strays mode the flow does not have', () => {
+    // `discard` was a mode once. A policy naming it is a mistake the create has to hear about,
+    // not one applied quietly behind the user's back.
+    expect(() => normalizeDeliveryPolicy({ strays: 'discard' })).toThrow()
+    expect(normalizeDeliveryPolicy({ strays: 'keep' }).strays).toBe('keep')
+    expect(normalizeDeliveryPolicy({ strays: 'archive' }).strays).toBe('archive')
   })
 
   it('roots the archive under a custom directory when the configuration names one', () => {

@@ -75,6 +75,10 @@ export function hostFailureText(t: Translate, code: string, values: HostValues):
       return t("hostE4011")
     case "E4012":
       return t("hostE4012")
+    case "E4013":
+      return t("hostE4013")
+    case "E4014":
+      return t("hostE4014")
     case "E5005": {
       const envId = text(values.envId)
       return format(t("hostE5005"), {
@@ -119,6 +123,8 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
         ? format(t("warnDeliveryGateBypassedMissing"), { missing: missingText(t, missing) })
         : format(t("warnDeliveryGateBypassedWithoutDeployment"), { target: text(values.target) })
     }
+    case "human-ack-waived":
+      return t("warnHumanAckWaived")
     case "branch-left-alone":
       return text(values.branch) === ""
         ? format(t("warnBranchLeftAloneNone"), { name: text(values.name), mainRepo: text(values.mainRepo) })

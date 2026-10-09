@@ -57,6 +57,11 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     checkout of the target branch inside it, merges there, then `worktree remove --force` (falling back to
     `worktree prune`) and `rm`s the whole temporary directory — a merge that already succeeded is not reported
     as failed because that directory would not delete.
+    **What triggers it**: normally the user's own hand — the panel's tick, or an agent passing `merge: true`
+    after being told to merge. When the task's record carries `merge.mode: auto` (that project's standing
+    authorisation, recorded when the task was created), the finish merges **without waiting for a press**. The
+    opposite value, `never`, refuses a `merge: true` from the tool (`E4013`): only the user's own hand in the
+    panel merges that task.
   - Rehearsal: a finishing run that has to merge first rehearses the merge inside **that repository's own
     worktree in the task space**. A conflict is left there as it stands; a clean rehearsal is `reset --hard`
     back to the commit recorded before it, after which the step above records the merge on the target branch.
@@ -78,6 +83,14 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     `unregisterWorkspace: false` keeps the registration (its sessions stay in that group). An unregistration
     goes by **what the list says now**: a failed delete is followed by reading the list again, and only an entry
     that is still there is reported as a failure — one that has gone is the outcome, not a problem.
+  - Sessions: the tool's `create` with a `prompt`, or `action: "dispatch"`, **opens a session** in the task space
+    through DSH's own session service and appends one `sandbox/mode` policy event to **that session's own log**
+    (by default the calling session's **own explicit override** is copied; with no override, none is written and
+    the new session lands on the deployment default, so it is never wider than the caller). The turn of work is
+    then delivered to it as a prompt. Both actions are the caller's per-call decision; the interface's Create and
+    open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
+    not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
+    fails**: the tool answers that no session was opened, and says to open one from the panel.
 
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,
@@ -100,16 +113,19 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   for a handoff**:
   - the working directory becomes the **container root** (`<container root>`), so those sessions belong to the
     Workspace the plugin registered rather than to Ungrouped;
-  - immediately after the session exists, one `sandbox/mode` event is appended to **that session's own log**,
-    putting its sandbox mode at `danger-full-access`.
+  - immediately after the session exists, two events are appended to **that session's own log**: `sandbox/mode`
+    at `danger-full-access`, and `approval/policy` at `never`. Both are written because DSH's own table treats
+    them as **one preset**, whose name is "full access" and whose meaning is "Full file access without approval
+    prompts". Writing only the first leaves a pair that matches no preset (the interface reads it as `custom`),
+    and any approval request that does arise would be put to the user — which is not what that preset means.
 
-  The consequence is what that event says: **that session may then write anywhere the DSH process can**, and
-  stops asking. It is durable state in the session log, reconstructed by replay across a restart, and its
-  scope is **that session** — not the deployment, not any other session.
+  The consequence is what those events say: **that session may then write anywhere the DSH process can**, and
+  there are no approval prompts in it. They are durable state in the session log, reconstructed by replay across
+  a restart, and their scope is **that session** — not the deployment, not any other session.
 
   Boundaries: it happens only when the setting is `on`; the setting is **re-read before each write** and a
-  request that arrives while it is off is refused (`E4012`) without writing anything; the only event written
-  is `sandbox/mode`, and nothing else about the session is touched; and it applies only to sessions the
+  request that arrives while it is off is refused (`E4012`) without writing anything; those two events are the
+  only ones written, and nothing else about the session is touched; and it applies only to sessions the
   plugin has just opened for a handoff. **A session already open is not affected by a later change to the
   switch** — that one is switched in its own session, with DSH's own `/permission`.
 

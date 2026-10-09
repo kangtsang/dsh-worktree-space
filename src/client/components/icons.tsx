@@ -5,6 +5,7 @@ import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon"
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon"
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon"
 import CheckIcon from "@hugeicons/core-free-icons/CheckIcon"
+import CircleQuestionMarkIcon from "@hugeicons/core-free-icons/CircleQuestionMarkIcon"
 import FolderClosedIcon from "@hugeicons/core-free-icons/FolderClosedIcon"
 import FolderGit2Icon from "@hugeicons/core-free-icons/FolderGit2Icon"
 import FolderGitIcon from "@hugeicons/core-free-icons/FolderGitIcon"
@@ -78,6 +79,8 @@ export const FolderClosed = iconOf(FolderClosedIcon)
 export const GitPullRequest = iconOf(GitPullRequestIcon)
 /** The hint glyph: it says nothing on its own, and the hover bubble is where it speaks. */
 export const InformationCircle = iconOf(InformationCircleIcon)
+/** The same hint, asked as a question: what does this choice mean? */
+export const CircleQuestionMark = iconOf(CircleQuestionMarkIcon)
 export const AlertCircle = iconOf(AlertCircleIcon)
 export const Check = iconOf(CheckIcon)
 /** The spinner: a loader, turned by the `dws-spin` animation its call sites add. */

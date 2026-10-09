@@ -12,7 +12,7 @@ import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
-import { registerTaskTool } from './task/tool.js'
+import { registerTaskTool, setSessionPermission } from './task/tool.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -57,7 +57,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4013', 'E4014',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5005', 'E5006', 'E5007', 'E5008', 'E5009', 'E5010', 'E5011',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
@@ -1232,11 +1232,12 @@ export function apply(ctx, config = {}) {
       if (sessions === null || sessions === undefined || typeof sessions.get !== 'function') {
         return { widened: false, reason: 'no-sessions-service' }
       }
-      const session = sessions.get(sessionId)
-      if (session === undefined || session === null || typeof session.append !== 'function') {
+      // The whole preset, not half of it: `danger-full-access` in DSH's own table is "Full
+      // file access without approval prompts", so the approval policy is written with the
+      // mode. See `setSessionPermission`.
+      if (!setSessionPermission(sessions.get(sessionId), 'danger-full-access')) {
         return { widened: false, reason: 'no-session' }
       }
-      session.append('sandbox/mode', { mode: 'danger-full-access' })
       return { widened: true, mode: 'danger-full-access' }
     })
 
@@ -1254,6 +1255,7 @@ export function apply(ctx, config = {}) {
         tasksRoot: payload.tasksRoot,
         repos,
         baseRef: typeof payload.baseRef === 'string' ? payload.baseRef.trim() : undefined,
+        deployScript: payload.deployScript,
         // A caller that names no prefix gets the configured one; an empty string
         // means the same thing, which is what an emptied dialog field sends.
         branchPrefix: typeof payload.branchPrefix === 'string' && payload.branchPrefix !== ''
@@ -1330,10 +1332,13 @@ export function apply(ctx, config = {}) {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
-        merge: payload.merge === true,
+        // Absent, not false, when the caller said nothing: the task's own record answers
+        // `merge.mode: auto` with a merge, and the panel always says what it wants, so an
+        // explicit `false` - the unticked box - stays a no.
+        merge: typeof payload.merge === 'boolean' ? payload.merge : undefined,
         target: typeof payload.target === 'string' ? payload.target : undefined,
         targets: branchTargets(payload.targets),
-        deleteBranch: payload.deleteBranch === true,
+        deleteBranch: typeof payload.deleteBranch === 'boolean' ? payload.deleteBranch : undefined,
         force: payload.force === true,
         cleanStray: payload.cleanStray === true,
         keep: Array.isArray(payload.keep) ? payload.keep.filter((name) => typeof name === 'string') : [],

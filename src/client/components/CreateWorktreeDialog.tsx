@@ -1,14 +1,90 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { AlertCircle, GitPullRequest, Loader2 } from "./icons"
+import { AlertCircle, CircleQuestionMark, GitPullRequest, Loader2 } from "./icons"
+import { HoverHint } from "./HoverHint"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { errorText } from "../lib/error-text"
 import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
 import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 type BaseMode = "head" | "named"
+
+/** The delivery policy's eight decisions, as the dialog holds them: one dropdown each. */
+interface DeliveryChoice {
+  deployTarget: string
+  deployMode: string
+  verification: string
+  mergeMode: string
+  mergeTarget: string
+  deleteBranch: string
+  conflicts: string
+  strays: string
+}
+
+/**
+ * The eight decisions in the order they are shown: two per row, in the policy's own order.
+ *
+ * Flat keys because the dialog shows one control per decision; the record's nested shape is
+ * built from this on submit. `mergeTarget` offers only the default, because the branches a
+ * merge could land on are each repository's own and the dialog has no list of them - naming
+ * one is the tool's or the configuration's to do.
+ */
+const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string; options: [string, string][]; needsAuto?: boolean }[] = [
+  { key: "deployTarget", label: "deliveryDeployTarget", hint: "deliveryDeployTargetHint", options: [["none", "deliveryTargetNone"], ["docker", "deliveryTargetDocker"], ["host", "deliveryTargetHost"]] },
+  { key: "deployMode", label: "deliveryDeployMode", hint: "deliveryDeployModeHint", options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
+  { key: "verification", label: "deliveryVerification", hint: "deliveryVerificationHint", options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
+  { key: "mergeMode", label: "deliveryMergeMode", hint: "deliveryMergeModeHint", options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
+  // These three are decisions about a merge this flow makes itself. With `ask` they are put
+  // at the finish, when a merge is actually wanted; with `never` no merge is coming at all.
+  { key: "mergeTarget", label: "deliveryMergeTarget", hint: "deliveryMergeTargetHint", needsAuto: true, options: [["", "deliveryMergeTargetDefault"]] },
+  { key: "deleteBranch", label: "deliveryDeleteBranch", hint: "deliveryDeleteBranchHint", needsAuto: true, options: [["keep", "deliveryDeleteKeep"], ["remove", "deliveryDeleteRemove"]] },
+  { key: "conflicts", label: "deliveryConflicts", hint: "deliveryConflictsHint", needsAuto: true, options: [["ask", "deliveryConflictAsk"], ["agent-auto", "deliveryConflictAgentAuto"], ["stop", "deliveryConflictStop"]] },
+  // The leftovers ride with the three above. It is the finish that deals with them, and the
+  // only finish whose handling is not already the user's own to answer is the one this flow
+  // runs by itself.
+  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", needsAuto: true, options: [["archive", "deliveryStraysArchive"], ["keep", "deliveryStraysKeep"]] },
+]
+
+/** Where every dropdown starts: the policy's own default, which is also what a create without it gets. */
+const DEFAULT_DELIVERY: DeliveryChoice = {
+  deployTarget: "none",
+  deployMode: "on-request",
+  verification: "agent-then-human",
+  mergeMode: "ask",
+  mergeTarget: "",
+  deleteBranch: "keep",
+  conflicts: "ask",
+  strays: "archive",
+}
+
+/**
+ * The eight flat choices as the policy the Host reads and records.
+ *
+ * `merge.target` is left out when it is left at the default, which is what "each
+ * repository's checked-out branch" means, and the branch is kept unless the user asked for
+ * the deletion - so a policy this dialog sends says only what the user actually chose.
+ */
+function deliveryPolicyOf(choice: DeliveryChoice) {
+  // Four of the eight are decisions about a finish this flow runs by itself: which branch the
+  // merge lands on, whether the branch is deleted, what a conflict does, and how the leftovers
+  // are handled. With `ask` the finish is the user's own press and every one of them is put
+  // there, at the moment it is actually needed; with `never` no merge is coming at all. Left
+  // out here, they are the project's stored default to answer - which is what "not decided at
+  // creation" means.
+  const mergeAutomatic = choice.mergeMode === "auto"
+  return {
+    deploy: { target: choice.deployTarget, mode: choice.deployMode },
+    verification: choice.verification,
+    merge: {
+      mode: choice.mergeMode,
+      ...(mergeAutomatic && choice.mergeTarget !== "" ? { target: choice.mergeTarget } : {}),
+      ...(mergeAutomatic ? { deleteBranch: choice.deleteBranch === "remove" } : {}),
+    },
+    ...(mergeAutomatic ? { conflicts: choice.conflicts, strays: choice.strays } : {}),
+  }
+}
 
 /** Prefix the host uses when the caller names none; a suggestion normally carries it. */
 const FALLBACK_BRANCH_PREFIX = "task/"
@@ -71,6 +147,11 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const [selected, setSelected] = useState<string[]>([])
   const [baseMode, setBaseMode] = useState<BaseMode>("head")
   const [namedBase, setNamedBase] = useState("")
+  const [delivery, setDelivery] = useState<DeliveryChoice>(DEFAULT_DELIVERY)
+  // The one deployment parameter this dialog does set: the script that is copied in as
+  // the fixed `deploy/deploy.sh` both readers look for. Empty means the create copies
+  // only what the source root already carries there.
+  const [deployScript, setDeployScript] = useState("")
   const [saveAsDefault, setSaveAsDefault] = useState(false)
   const [saveRootAsDefault, setSaveRootAsDefault] = useState(false)
   const [error, setError] = useState("")
@@ -86,6 +167,8 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     setRecovery(null)
     setSaveAsDefault(false)
     setSaveRootAsDefault(false)
+    setDelivery(DEFAULT_DELIVERY)
+    setDeployScript("")
   }, [target.path])
 
   // The configured default is read from the form the Plugins page edits, and kept
@@ -185,6 +268,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const fieldsDisabled = busy || loading || !sourceReady || !!recovery
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
   const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === ""
+  // Which delivery choices are this flow's own to make: the three about a merge are asked at
+  // the finish unless the merge happens by itself, so they sit disabled until it does.
+  const mergeAutomatic = delivery.mergeMode === "auto"
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
   const endBusy = () => { busyRef.current = false; setBusy(false) }
@@ -217,6 +303,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         task: made.task,
         project: made.project,
         tasksRoot: tasksRoot.trim(),
+        // A rollback is not a delivery: this removes what a create had already made, so it
+        // says "no merge" rather than leaving the question open for the task's own policy -
+        // which, under `merge.mode: auto`, would land the half-made work on the target branch.
+        merge: false,
         deleteBranch: true,
         force: true,
         // Without this the Host records a task space and a branch being deleted
@@ -303,6 +393,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         repos: selected,
         baseRef: baseRef === "" ? undefined : baseRef,
         branchPrefix: effectivePrefix,
+        delivery: JSON.stringify(deliveryPolicyOf(delivery)),
+        // Named only when there is one: an empty field leaves the request exactly as it
+        // was, so the Host copies what the source root carries and nothing else.
+        ...(deployScript.trim() === "" ? {} : { deployScript: deployScript.trim() }),
       })
       // The Host's own project name, not the one this dialog derived: cleanup
       // names the task space back to it, so it must be the one that was written.
@@ -499,6 +593,45 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
           </label>
           <p className="dws-field-note">{t("tasksRootStrategyHint")}</p>
         </> : null}
+      </div>
+      {/* The delivery policy last, and at its defaults until the user changes one. Four of the
+          eight are decisions that a finish this flow runs by itself makes, so they appear only
+          once "merge by itself" is chosen; the line under the grid says where they went. What
+          is sent is what is shown - the choices go into the task's own record, where they beat
+          that project's stored default. */}
+      <div className="dws-field-row">
+        <span className="dws-field-label"><span>{t("deliveryLabel")}</span><span className="dws-field-note">{t("deliveryHint")}</span></span>
+        <div className="dws-delivery-grid">
+          {DELIVERY_FIELDS.filter((field) => field.needsAuto !== true || mergeAutomatic).map((field) => <div className="dws-delivery-cell" key={field.key}>
+            <span className="dws-delivery-head">
+              <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
+              <HoverHint label={t(field.hint)} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
+            </span>
+            <Select
+              id={`${id}-delivery-${field.key}`}
+              value={delivery[field.key]}
+              disabled={fieldsDisabled}
+              onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}
+            >
+              {field.options.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+            </Select>
+          </div>)}
+        </div>
+        {/* Four choices are not shown while the finish is the user's own press: what is
+            missing is a reason, and the reason is this line. */}
+        {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
+        {/* Where a deployment's own parameters live - not in this dialog. Shown only when a
+            target was actually chosen, so the line answers the decision that was made. The one
+            exception rides with it: naming a script for a task that deploys nowhere would say
+            nothing, so the field appears on the same terms. */}
+        {delivery.deployTarget === "none" ? null : <>
+          <p className="dws-field-note">{t("deliveryDeployNote")}</p>
+          <div className="dws-field-row">
+            <label className="dws-field-label" htmlFor={`${id}-deploy-script`}><span id={`${id}-deploy-script-label`}>{t("deployScript")}</span><span className="dws-field-note">{t("deployScriptHint")}</span></label>
+            <Input id={`${id}-deploy-script`} aria-labelledby={`${id}-deploy-script-label`} value={deployScript} disabled={fieldsDisabled} onChange={(event) => setDeployScript(event.target.value)} placeholder={t("deployScriptPlaceholder")} autoComplete="off" spellCheck={false} aria-describedby={`${id}-deploy-script-note`} />
+            <span id={`${id}-deploy-script-note`} className="dws-field-note dws-visually-hidden">{t("deployScriptHint")}</span>
+          </div>
+        </>}
       </div>
     </div>
   </fieldset>

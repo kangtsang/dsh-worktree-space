@@ -56,6 +56,23 @@ top right.
   tick the repositories to take part, and say where the task space goes. Every repository gets a
   worktree on `<branch prefix><task>` — `task/<task>` by default — starting from each repository's
   current HEAD, or from a named branch or commit.
+  The bottom of **Task details** holds the **delivery policy**: what to deploy to and when, who
+  verifies the work, how a merge happens, which branch it lands on, whether the branch is deleted
+  afterwards, what an unresolved conflict does, and what happens to the files a task space leaves
+  behind — eight choices, two to a row, every one a dropdown, **starting at the plugin's default
+  policy** (the answer when nothing is said); each name carries a **question mark whose hover shows
+  what that choice means**. What you pick travels with the create request, is written into the task's
+  own record, and **beats that project's stored default**.
+  **Merge into**, **Branch after merge**, **Conflicts** and **Leftovers** **appear only once Merge is
+  "merge by itself"**: with "only when a merge is asked for" the finish is the user's own press, and all
+  four of those — leftovers included — are put to them at that moment. Only a finish the flow runs by
+  itself needs them settled here first.
+  The plugin's default for **Leftovers** is **Archived**: a finish copies them into the archive directory
+  (by default `<container root>/archived-docs/…`) instead of leaving them in the space for a second
+  finish, and instead of deleting them; pick "left alone" in that box if nothing should be moved.
+  For "merge back by itself when it is done", pick **Merge by itself** and **The agent alone**: those
+  two are a pair — merge-by-itself with a verification that waits for a person is refused, and the
+  refusal says what to change.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so an agent can edit inside the task space without touching the
   source checkouts.

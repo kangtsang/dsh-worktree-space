@@ -69,7 +69,7 @@ describe.each([
         expect(registered.length).toBe(before + 1)
         const tool = registered[before]
         expect(tool.name).toBe("task_worktree_space")
-        expect(tool.parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "done"])
+        expect(tool.parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "dispatch", "done"])
         expect(tool.description).toContain("worktree workspace")
         expect(providers.length).toBe(skillBefore + 1)
         const candidates = await providers[skillBefore].list({})

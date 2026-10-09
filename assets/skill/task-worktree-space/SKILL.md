@@ -105,12 +105,33 @@ Follow this order. Never create a workspace with a guessed location.
    `<source workspace title>/<task>`. Pass `registerWorkspace: false` only when the
    user asked for a task space that stays out of that list: it is then on disk with
    nothing in the interface showing it, and the result says so.
-9. **Report where it is, and say which entry opens the session.** A session is
-   opened *with* the Workspace, and opening one is not something this tool can do:
-   that is the panel's **Create and open** in the Worktree Space dialog, or
-   picking the registered Workspace in the workspace list. Report the task
-   directory path and the branch name, then name that entry rather than leaving
-   the user to find it.
+   **Given a `prompt` as well, it also opens a session in the new task space and
+   hands it that job in the same call** — one step, which is what the panel's
+   **Create and open** does in one press, except that the session there starts empty
+   and this one is already working. Do that when the user wants the work started, not
+   merely a place to work in; see *Putting a session on the work* below.
+   **The delivery policy may be stated here too, as `delivery`**, when the user has
+   said how this task should be delivered: an explicit policy beats the project's
+   stored default for that one task, and either way the policy is recorded in the
+   task's metadata at create time. Say which fields you set and why. A task that is
+   meant to merge back by itself is `merge.mode: "auto"`, and that cannot be combined
+   with a verification that waits for a person (`agent-then-human` or `human`) — the
+   pair is refused when the task is created, and the refusal names the fix. Whether a
+   merge waits for a deployment and a passing smoke is a separate question: `auto`
+   answers who presses the merge, not whether the work was checked.
+   **The gate's human half is not something this tool can sign off.** `done` takes no
+   acknowledgement argument, and `force` is refused outright (E7007); acceptance is
+   recorded only from the Worktree Space panel. When `done` answers with E5007, the
+   user is the one who confirms acceptance there (or finishes anyway there) — report
+   that and stop, and never choose `merge.mode: "auto"` on the user's behalf to get
+   past a gate. `auto` is what the user says when they want a task that merges without
+   them, not what the agent picks to avoid asking.
+9. **Report where it is, and say which entry opens the session.** When this call
+   opened one, name the session id it answered with; when it did not, a session is
+   opened by hand — the panel's **Create and open** in the Worktree Space dialog, or
+   picking the registered Workspace in the workspace list. Report the task directory
+   path and the branch name, then name that entry rather than leaving the user to
+   find it.
    A create that answers with a warning that the Workspace was **not** registered
    means one of three things, and the warning names which: the call asked for a task
    space that stays out of the list (`registerWorkspace: false`), the deployment
@@ -119,6 +140,32 @@ Follow this order. Never create a workspace with a guessed location.
    again** when a create is refused — and do not report the task as under way until
    that is done, because until then nothing in the interface shows the task space.
 10. **Work in the task directory**: it is where the task's session belongs.
+
+### Putting a session on the work
+
+A session is a conversation with its own context: it does not see this one, so the
+`prompt` has to stand alone. Two ways to open one, and they differ only in *when*:
+
+- **`create` with a `prompt`** starts the task and hands over the first job in one
+  call. This is the one to reach for when the user asks for work to be done rather
+  than for a place to do it.
+- **`dispatch` with a `prompt`** hands a job to a session in a task space that
+  already exists — for the second and later jobs (make it, then smoke it, then fix
+  what the smoke found), because a task space outlives any one conversation.
+
+Both open the session in the task space itself, so it reads under that task in the
+workspace list and can be followed from there, and both answer with the session id.
+Both are given **the permission the calling session carries as its own sandbox
+override, and nothing more** — a session opened this way can never be wider than the
+one that opened it. Pass `permission` only when the user asked for more:
+`danger-full-access` is the whole machine, and it is written as the whole of what DSH
+means by it — that mode together with `never`, which is what the panel's own switch
+produces ("full file access without approval prompts"). What a session in the task space
+can do without asking is write **inside the task space**, which is enough to build, test
+and deploy there; committing still writes the source repository's `.git` outside it, so
+that stays with the handoff below. A deployment that serves no session service says
+so in a warning instead of opening anything — then the session is the panel's to
+open, and the work is the user's to start.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
@@ -181,9 +228,57 @@ whole environment down afterwards is one command.
 A task space is deployable when one of its repositories carries a
 `deploy/deploy.sh` of its own, or when the space holds a `deploy/` orchestration
 root beside the worktrees — a `docker-compose.yml` whose build contexts name the
-sibling worktrees. When neither exists and the user asks to deploy, scaffolding
-that root from the repositories' own run commands is ordinary session work; what
-must not happen is starting the services on the host instead.
+sibling worktrees. A source root that keeps its own `deploy/` — a `deploy.yaml`
+manifest plus the scripts it names — has that directory copied into every task
+space made from it, so look before scaffolding one. A create may instead name one
+script with the `deployScript` argument, a file path relative to the source root;
+it is copied in as the fixed `deploy/deploy.sh`, so the manifest stays the same
+while the script behind it differs per task, and a path that leaves the source
+root or names no file is refused (E4014) before anything is made. A `deploy.yaml`
+declares which targets exist and what each one runs; without one the space is
+docker-only through `deploy.sh`. When none of that exists and the user asks to
+deploy, scaffolding that root from the repositories' own run commands is ordinary
+session work; what must not happen is starting the services on the host instead.
+
+**The deploy root writes its own delivery state, and the gate reads that file.** A deploy
+root's scripts own one file beside them — `<deploy root>/.state.json`, or the path
+`DSH_STATE_FILE` names — and it is what the panel and the merge gate read:
+
+- `./deploy.sh up` writes `url` (and whatever `services` it likes) once the environment is
+  up;
+- `./deploy.sh smoke` merges `lastSmoke: { result, at }` into it **without dropping the
+  fields already there** — a pretty rewrite that loses `humanAck` loses the user's
+  acceptance with it;
+- `humanAck` and `destroyedAt` belong to the plugin; they are never the script's to write.
+
+**Nothing else may write that file**: not a hand edit, and not a transcript of a run that
+happened somewhere else. The gate reads it as the evidence that the step happened, so
+writing it from outside turns the gate into a formality — if the state is missing, fix the
+script that should have written it, or tell the user; the human's own way past the gate is
+the panel's "finish anyway". A missing file, or a `lastSmoke.result` that is not `pass`, is
+exactly why the panel shows no acceptance URL and why `done` refuses the merge
+(E5005/E5006).
+
+**Scaffolding writes logs so that the host can still read and archive them.** When a
+service's log directory is bind-mounted out of the container, the service must not be
+asked to split its log by day *and* keep a "current log" symlink beside it: a symlink a
+Linux process creates inside a directory mounted from Windows lands on NTFS as a Linux
+symlink (`IO_REPARSE_TAG_LX_SYMLINK`), which Windows can neither recreate nor follow. The
+finish cannot file that leftover into the archive, so it stops with the task space still
+in place and asks the user to deal with the file.
+
+Ask for one plain file instead — the service's own knob, passed **in the environment the
+container actually reads**. For a service whose appender is built from
+`LOG_DIR`/`LOG_ROTATION`, that is `LOG_ROTATION: never` in the compose file's
+`environment:`; check which input drives it rather than writing the value into a YAML
+config the process may never read (a gateway whose appender comes from
+`FileLogConfig::from_env` ignores the same key in its own config file, and the task then
+looks solved while the link keeps appearing). Leaving the logs inside the container and
+reading them with `docker logs` works too, and is what `./deploy.sh logs <service>` does
+anyway.
+
+Retrofitting it into a running stack means the log directory gains a reparse point; if one
+is already there, the user removes that single file and finishes the task again.
 
 - Take the environment id from `worktree-space.md` (`DSH_ENV_ID=...`) and pass it
   to **every** deploy command. It is what keeps this task's containers, images and
@@ -201,9 +296,11 @@ must not happen is starting the services on the host instead.
 
 ## Finishing a task
 
-Run `action: "done"`. By default it **removes the worktrees, keeps every branch,
-and keeps any stray files** the session left in the task space — it does not
-merge, delete a branch, or delete stray files unless asked.
+Run `action: "done"`. By default it **removes the worktrees and keeps every branch**; everything
+else follows the task's delivery policy, and a task nobody configured gets no deployment gate, no
+merge (that waits to be asked for) and stray files **archived** rather than deleted — filing them
+into the archive directory is the safe half, since the archive is a copy and the task space can then
+be removed in one press.
 
 Name the task's own layer as well as the container: pass `tasksRoot` (the container
 root), `task`, and `project` — the source root's directory name. Passing `sourceRoot`
@@ -213,7 +310,15 @@ was meant.
 
 Confirm each destructive step with the user before passing it:
 
-1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. The
+1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. Unless
+   the task's own record already answers: `merge.mode: auto` is the user's standing
+   answer that this task merges back **by itself**, and then `done` merges without the
+   argument — the call does not have to ask for what the record already decided. The
+   opposite value, `merge.mode: never`, is the record saying this flow does not merge
+   the task at all: an ask is refused (`E4013`), and the way past it is the panel, which
+   is the user's own hand. `auto` is never a way round the rest of the gate — a policy
+   that expects a deployment still needs that deployment and its passing smoke, because
+   those are checks on the work rather than answers from a person. The
    merge puts the **task branch into the target branch** and it lands in the source
    repository; by default the target is the branch each source repository has checked
    out — the task's own starting point. Ask which branch to merge into when the user
@@ -297,14 +402,22 @@ Confirm each destructive step with the user before passing it:
    session; ask for it openly rather than retrying around it, and if the user is not
    there to grant it, stop and report - the delegation covers the decision, never a
    silent permission.
-4. **Delete the branch?** After a merge, and only when the user asks: pass
-   `deleteBranch: true` together with `merge: true`. When the user wants the task
+4. **Delete the branch?** After a merge, and only when the user asks for it: the
+   branch is **kept** unless something explicitly says to delete it — pass
+   `deleteBranch: true` together with `merge: true`, or leave it out and the branch
+   stays. That default is the reversible one: once the task space is gone, the branch is
+   the only record left of how the work was made, and a delete cannot be walked back.
+   A task's own record can say `deleteBranch: true` as a standing answer, and then a
+   merge under `merge.mode: auto` deletes it without the argument — the record is as
+   explicit as the call. When the user wants the task
    space gone without merging anything, that is the abandon path: pass
    `deleteBranch: true` with `force: true` and `merge: false`, which removes the
    worktrees and force-deletes the branches with the commits on them.
-5. **Stray files?** When the outcome lists strays (agent notes, editor caches, a
-   plan), show them and ask which to *keep*; then pass `cleanStray: true` with
-   `keep: [...]` naming those. Keeping everything means passing neither.
+5. **Stray files?** The task's policy decides by default, and the shipped default **archives**
+   them — a copy into the archive directory, which lets the task space be removed in the same
+   finish. Show what the outcome lists, and pass `keep: [...]` to name entries that must stay
+   exactly where they are - the user's own documents, say; `cleanStray: true` only when the user
+   wants the build output cleared as well.
 
 The Workspace registration follows the directory. When the finish removes the task space
 itself, `done` drops the registration too, so the task space leaves the workspace list and

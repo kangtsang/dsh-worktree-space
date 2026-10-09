@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { rmSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { registerTaskTool } from "../src/host/task/tool.js"
@@ -62,22 +62,31 @@ async function sourceFixture() {
  * were made from. The container is a directory of its own rather than the source
  * root's recommendation, so what is removed here is only what this helper made.
  * @param services - the services the context serves beyond `tools`.
- * @returns the action's value and the captured tool definition.
+ * @param extra - further arguments for the create call.
+ * @param exec - the tool run context.
+ * @param options - `keep` leaves the task space in place and hands back a `cleanup`, for a
+ *   test that has to read what the create recorded before it goes.
+ * @returns the action's value, the captured definition, the container, and a cleanup.
  */
-async function createOnce(services = {}, extra = {}) {
+async function createOnce(services = {}, extra = {}, exec = {}, { keep = false } = {}) {
   const source = await sourceFixture()
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
+  const cleanup = async () => {
+    await source.cleanup()
+    await rm(container, { recursive: true, force: true })
+  }
   try {
     const { ctx, captured } = toolContext(creatingSubprocess, services)
     registerTaskTool(ctx)
     const value = await captured[0].execute(
       { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, ...extra },
-      {},
+      exec,
     )
-    return { value, captured }
-  } finally {
-    await source.cleanup()
-    await rm(container, { recursive: true, force: true })
+    if (!keep) await cleanup()
+    return { value, captured, container, cleanup }
+  } catch (error) {
+    await cleanup()
+    throw error
   }
 }
 
@@ -94,7 +103,7 @@ const PROJECT = "kratos-admin"
  * @param options - whether the mocked removal should leave the worktree alone.
  * @returns the container root, the task space, the double and a cleanup.
  */
-async function taskSpaceFixture({ keepWorktree = false } = {}) {
+async function taskSpaceFixture({ keepWorktree = false, delivery } = {}) {
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-done-"))
   const taskPath = join(container, PROJECT, "login")
   const worktree = join(taskPath, "alpha")
@@ -104,6 +113,7 @@ async function taskSpaceFixture({ keepWorktree = false } = {}) {
   // this task made.
   await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
     task: "login", project: PROJECT, branch: "task/login",
+    ...(delivery === undefined ? {} : { delivery }),
   }, null, 2) + "\n")
   const mainRepo = join(tmpdir(), "multi-worktree-tool-done-main-alpha")
   const porcelain = `worktree ${mainRepo}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${worktree}\nHEAD bbb\nbranch refs/heads/task/login\n`
@@ -160,7 +170,7 @@ describe("registerTaskTool", () => {
     const dispose = registerTaskTool(ctx)
     expect(captured).toHaveLength(1)
     expect(captured[0].name).toBe("task_worktree_space")
-    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "done"])
+    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "dispatch", "done"])
     expect(typeof captured[0].execute).toBe("function")
     expect(typeof dispose).toBe("function")
   })
@@ -327,6 +337,32 @@ describe("registerTaskTool", () => {
       await rm(container, { recursive: true, force: true })
       await rm(join(container, "..", "multi-worktree-tool-add-elsewhere"), { recursive: true, force: true })
     }
+  })
+
+  it("records the delivery policy the create stated, rather than the project default", async () => {
+    // The delivery bar is the user's to set, and a create is where they can state it: what the
+    // call carries is what the task's own record keeps, so one task can merge by itself without
+    // changing the project's stored answer.
+    const { value, cleanup } = await createOnce({}, {
+      delivery: JSON.stringify({ deploy: { target: "none" }, verification: "agent", merge: { mode: "auto", deleteBranch: false } }),
+    }, {}, { keep: true })
+    try {
+      const record = JSON.parse(await readFile(join(value.container, "worktree-space.json"), "utf8"))
+      expect(record.delivery.merge.mode).toBe("auto")
+      expect(record.delivery.verification).toBe("agent")
+      expect(record.delivery.merge.deleteBranch).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("refuses a delivery policy the flow cannot honour, before anything is made", async () => {
+    // `auto` merges by itself and has no one to wait for, so pairing it with a verification
+    // that waits for a person is refused where the policy is recorded - the call sees E4010
+    // rather than a task that quietly ignores half of what it was told.
+    await expect(createOnce({}, {
+      delivery: JSON.stringify({ merge: { mode: "auto" }, verification: "agent-then-human" }),
+    })).rejects.toMatchObject({ code: "E4010" })
   })
 
   it("registers the task space it made as a DSH Workspace", async () => {
@@ -644,5 +680,266 @@ describe("registerTaskTool", () => {
     // Argument validation runs before the action switch, so an unknown action
     // never reaches the tool's own fallback branch.
     await expect(captured[0].execute({ action: "delete-everything" }, {})).rejects.toThrow(/must be one of/)
+  })
+
+  it("opens a session in the task space and hands it the work", async () => {
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const appended = []
+    const prompts = []
+    const signals = []
+    const services = {
+      sessionController: {
+        create: async (place) => { created.push(place); return { sessionId: "session-1" } },
+        prompt: async (request, signal) => { prompts.push(request); signals.push(signal); return { accepted: true } },
+      },
+      sessions: { get: (id) => (id === "session-1" ? { append: (type, data) => appended.push({ type, data }) } : undefined) },
+      workspaceRegistry: {
+        create: async () => ({}),
+        resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin/login" }),
+        list: () => [{ id: "ws-login", path: fixture.taskPath }],
+      },
+      // The calling session's own switch: the only thing `inherit` copies.
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "build it, then smoke it" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.action).toBe("dispatch")
+      expect(value.sessionId).toBe("session-1")
+      // Named by its Workspace, not by its directory: the controller attaches a session to a
+      // Workspace only when it is named, and that attachment is what groups it in the sidebar.
+      expect(created).toEqual([{ workspaceId: "ws-login" }])
+      // The request is the typed shape the Host's own client sends: a minted requestId, the queue
+      // mode, the text, and the caller's zone. Sending the id and the content alone was what the
+      // Host reported as `prompt rejected`.
+      expect(prompts).toHaveLength(1)
+      expect(typeof prompts[0].requestId).toBe("string")
+      expect(prompts[0].requestId).not.toBe("")
+      expect(prompts[0].mode).toBe("queue")
+      expect(prompts[0].sessionId).toBe("session-1")
+      expect(prompts[0].content).toEqual([{ type: "text", text: "build it, then smoke it" }])
+      expect(typeof prompts[0].clientTimeZone).toBe("string")
+      // The signal the contract names as well: declared required and dereferenced unguarded, so a
+      // handoff that omitted it crashed before the request was ever read. This is that regression.
+      expect(signals).toHaveLength(1)
+      expect(typeof signals[0]?.throwIfAborted).toBe("function")
+      expect(() => signals[0].throwIfAborted()).not.toThrow()
+      // The caller's own override, copied and marked as delegated rather than as a switch the
+      // user made - the same events DSH seeds into a child agent. `danger-full-access` is a
+      // bundle in DSH's own table ("full file access without approval prompts"), so its
+      // approval policy is written with it.
+      expect(appended).toEqual([
+        { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
+        { type: "approval/policy", data: { policy: "never", source: "delegation" } },
+      ])
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] })
+      expect(value.warnings).toEqual([])
+      expect(value.summary).toContain("session-1")
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("gives the new session nothing more than the caller has", async () => {
+    // A caller with no override of its own: nothing is written, so the session lands on the
+    // deployment default - which is where the caller is too. That is what makes `inherit` a
+    // safe default rather than a promise about a mode.
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const appended = []
+    const services = {
+      sessionController: { create: async (place) => { created.push(place); return { sessionId: "session-2" } }, prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (...args) => appended.push(args) }) },
+      sandboxPolicy: { overrideOf: () => undefined },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.sessionId).toBe("session-2")
+      expect(appended).toEqual([])
+      // No registry in this deployment, so the directory is the only thing to open on: the
+      // session still opens, it just has no Workspace to be attached to.
+      expect(created).toEqual([{ cwd: fixture.taskPath }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("takes the permission the call names, over the caller's own", async () => {
+    const fixture = await taskSpaceFixture()
+    const appended = []
+    const services = {
+      sessionController: { create: async () => ({ sessionId: "session-3" }), prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "workspace-write" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      // `workspace-write` is a mode on its own: its preset already carries the deployment's
+      // `ask`, so nothing else is written and the pair stays the one the table names.
+      expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("says no session was opened when the deployment serves no session service", async () => {
+    // Not a failure: the task space is still there, and the answer has to say what to do
+    // instead rather than leaving the caller to believe a session is running.
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )
+      expect(value.action).toBe("dispatch")
+      expect(value.sessionId).toBe("")
+      expect(value.warnings.join(" ")).toMatch(/no session service/)
+      expect(value.summary).toMatch(/No session was opened/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("opens a session in the task space it just made, and hands it the work, in one call", async () => {
+    const records = []
+    const created = []
+    const appended = []
+    const prompts = []
+    const services = {
+      workspaceRegistry: {
+        resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin" }),
+        create: async (path, title) => { records.push({ path, title }); return { path, title } },
+      },
+      sessionController: {
+        create: async (place) => { created.push(place); return { sessionId: "session-1" } },
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+      },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => "workspace-write" },
+    }
+    const { value, captured } = await createOnce(
+      services,
+      { prompt: "add the feature, then run the tests" },
+      { agent: { session: { id: "session-caller" } } },
+    )
+    // The task space is still made and registered - once, by the create itself - and a session
+    // is on it as well: one call leaves nothing half-started.
+    expect(value.action).toBe("create")
+    expect(value.sessionId).toBe("session-1")
+    expect(records).toHaveLength(1)
+    // Opened on the Workspace the create just registered, so it reads under that task.
+    expect(created).toEqual([{ workspaceId: "ws-login" }])
+    // The caller's own override, copied and marked as delegated rather than as a switch the
+    // user made - the same event DSH seeds into a child agent.
+    expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "add the feature, then run the tests" }] })
+    expect(value.warnings).toEqual([])
+    expect(value.summary).toMatch(/is on the work/)
+    expectEnvelopeShape(captured[0].output.schema, value)
+  })
+
+  it("opens nothing when the create was not given a job to hand on", async () => {
+    // No prompt, no session: a create that only wants the task space must not have to say so,
+    // and must not need a session service to exist at all.
+    const created = []
+    const { value } = await createOnce({ sessionController: { create: async (place) => { created.push(place); return { sessionId: "x" } }, prompt: async () => ({}) } })
+    expect(value.sessionId).toBe("")
+    expect(created).toEqual([])
+    expect(value.summary).not.toMatch(/is on the work/)
+  })
+
+  it("merges by itself when the task's own record says so, and not when the call said no", async () => {
+    // `merge.mode: auto` is the user's standing answer that this merge happens on its own, so
+    // the call does not have to ask for it. An explicit `merge: false` - an agent that was told
+    // not to merge - stays a no: the hand that said it outranks the record.
+    const auto = { merge: { mode: 'auto' } }
+    const fixture = await taskSpaceFixture({ delivery: auto })
+    try {
+      const { ctx, captured } = toolContext(fixture.subprocess)
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+    const saidNo = await taskSpaceFixture({ delivery: auto })
+    try {
+      const { ctx, captured } = toolContext(saidNo.subprocess)
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: saidNo.container, merge: false },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(false)
+    } finally {
+      await saidNo.cleanup()
+    }
+  })
+
+  it("refuses to merge a task whose own record says this flow does not merge it", async () => {
+    const fixture = await taskSpaceFixture({ delivery: { merge: { mode: 'never' } } })
+    try {
+      const { ctx, captured } = toolContext(fixture.subprocess)
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )).rejects.toMatchObject({ code: "E4013" })
+      // And a finish that does not ask for a merge is not refused: the record forbids the
+      // merge, not the finish.
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        {},
+      )
+      expect(value.repositories[0].merged).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a permission it does not offer, and a task space that is not there", async () => {
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async () => ({ sessionId: "session-4" }), prompt: async () => ({}) },
+    })
+    try {
+      registerTaskTool(ctx)
+      // The declared enum is what refuses a name outside the three, before the branch runs -
+      // the runtime validates arguments ahead of the action, which is why the message is its
+      // own wording rather than one written here.
+      await expect(captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "root" },
+        {},
+      )).rejects.toThrow(/must be one of/)
+      await expect(captured[0].execute(
+        { action: "dispatch", task: "nope", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )).rejects.toThrow(/no task space/)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 })

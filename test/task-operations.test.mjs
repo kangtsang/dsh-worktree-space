@@ -346,6 +346,106 @@ describe("createTask", () => {
       expect(note).toContain("- `alpha`")
       expect(note).toContain("Source repositories are read-only")
       expect(note).toContain("worktree-space.json")
+      // A source root with no deploy root of its own is skipped rather than invented: the
+      // space then deploys only what its own repositories carry.
+      expect(existsSync(join(result.path, "deploy"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("carries the source root's deploy root into the task space", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/ship"))
+    try {
+      // The deploy root is a directory and a manifest's commands run from inside it, so the
+      // script the manifest names has to travel with the manifest: a manifest alone would be
+      // a deploy that never runs.
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "deploy.yaml"), "targets:\n  docker:\n    up: ./deploy.sh up\n", "utf8")
+      await writeFile(join(source.root, "deploy", "deploy.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "ship",
+        tasksRoot: container.root,
+      })
+
+      expect(await readFile(join(result.path, "deploy", "deploy.yaml"), "utf8")).toContain("up: ./deploy.sh up")
+      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("exit 0")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("copies the deploy script the create names in under the fixed name", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // Both readers look for `deploy/deploy.sh`, so the caller names any file and the
+      // fixed name is what a manifest keeps pointing at - the script behind it is what
+      // changes from one task to the next.
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "deploy/notify.sh",
+      })
+
+      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("echo notify")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script that is not there, before anything is made", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // A value that cannot be used refuses the request rather than leaving a half-made
+      // task space: no project layer is made, and no git call runs either.
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "deploy/missing.sh",
+      })).rejects.toMatchObject({ code: "E4014" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script that resolves outside the source root", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // The file really exists - it is just not the source root's to name - so the refusal
+      // is about the boundary rather than about a missing file.
+      await writeFile(join(source.base, "outside.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "../outside.sh",
+      })).rejects.toMatchObject({ code: "E4014" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -1752,6 +1852,9 @@ describe("finishTask documents", () => {
       await mkdir(outside, { recursive: true })
       await writeFile(join(outside, "gateway.log"), "gateway\n")
       symlinkSync(outside, join(fixtureUnderTest.taskPath, "docs", "logs"), "junction")
+      // Something ordinary beside the link, so what "条-by-条" means is visible: the notes
+      // are filed, the link is left.
+      await writeFile(join(fixtureUnderTest.taskPath, "docs", "notes.md"), "notes\n")
 
       const result = await finishTask(subprocess, {
         task: "login",
@@ -1767,13 +1870,16 @@ describe("finishTask documents", () => {
         expect(existsSync(join(documents, "docs", "logs"))).toBe(true)
         expect(existsSync(join(fixtureUnderTest.taskPath, "docs"))).toBe(false)
       } else {
-        // Refused before the copy rather than half-way through it: the warning names
-        // the entry in the way, and the stray is left exactly as it stands - which is
-        // what the user removes an entry from before finishing again.
-        expect(warningText(result)).toMatch(/could not archive 'docs'/)
-        expect(warningText(result)).toMatch(/holds a link \(logs\)/)
-        expect(existsSync(join(documents, "docs"))).toBe(false)
+        // Filed what could be filed, and kept what could not: the notes are in the archive,
+        // the link is not, and the link - with the directory holding it - stays where it
+        // stands. Not deleting it is the point: a link is a name for somewhere else, often
+        // outside the task space, so removing it is the user's to do - and the warning names
+        // it so they know exactly what is in the way.
+        expect(existsSync(join(documents, "docs", "notes.md"))).toBe(true)
+        expect(existsSync(join(documents, "docs", "logs"))).toBe(false)
         expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "logs"))).toBe(true)
+        expect(existsSync(join(fixtureUnderTest.taskPath, "docs", "notes.md"))).toBe(false)
+        expect(warningText(result)).toMatch(/except for a link \(logs\)/)
         expect(result.strays).toContain("docs")
       }
     } finally {

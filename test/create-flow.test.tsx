@@ -141,6 +141,101 @@ describe("native task create flow", () => {
     await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["/repo/alpha", "/repo/beta"] })))
   })
 
+  it("sends the delivery policy the dialog shows, at its defaults until one is changed", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // Four of the eight are the flow's own decisions; the other four appear only once "merge
+    // by itself" is picked, and the line under the grid says where they went.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
+    expect(screen.queryByText(t("deliveryStrays"))).toBeNull()
+
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => {
+      const calls = next.api.createTask.mock.calls
+      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
+      // The untouched defaults, as the policy record's own shape: everything a finish decides at
+      // its own moment is absent - `merge.target`, `deleteBranch`, `conflicts` and `strays` -
+      // because the finish that presses them is the user's, not this flow's.
+      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
+        deploy: { target: "none", mode: "on-request" },
+        verification: "agent-then-human",
+        merge: { mode: "ask" },
+      })
+    })
+  })
+
+  it("shows the four finish-decided choices once the merge is the flow's own", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
+    // "Merge by itself" is what makes a finish the flow's own, and that is what those four
+    // decisions belong to - so they are on screen from that moment on.
+    await user.selectOptions(screen.getByLabelText(t("deliveryMergeMode")), "auto")
+    await user.selectOptions(screen.getByLabelText(t("deliveryVerification")), "agent")
+    expect(document.querySelectorAll("select.dws-select").length).toBe(8)
+    expect(screen.getByText(t("deliveryStrays"))).toBeTruthy()
+
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => {
+      const calls = next.api.createTask.mock.calls
+      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
+      // Settled by this flow, so they are written down: the branch, the deletion, the conflict
+      // mode and the leftovers all travel with the record now.
+      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
+        deploy: { target: "none", mode: "on-request" },
+        verification: "agent",
+        merge: { mode: "auto", deleteBranch: false },
+        conflicts: "ask",
+        strays: "archive",
+      })
+    })
+  })
+
+  it("sends the deploy script a chosen deployment names", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // The field belongs to the deployment decision: naming a script for a task that
+    // deploys nowhere would say nothing, so it appears only once a target is chosen.
+    expect(screen.queryByRole("textbox", { name: t("deployScript") })).toBeNull()
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    const script = screen.getByRole("textbox", { name: t("deployScript") })
+    expect(script).toHaveProperty("placeholder", t("deployScriptPlaceholder"))
+    await user.type(script, "deploy/notify.sh")
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ deployScript: "deploy/notify.sh" })))
+  })
+
+  it("leaves deployScript out of the request when the field is empty", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    expect(screen.getByRole("textbox", { name: t("deployScript") })).toHaveProperty("value", "")
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledTimes(1))
+    const payload = next.api.createTask.mock.calls[0]?.[0] as Record<string, unknown>
+    // An empty field leaves the request exactly as it was: no key at all, rather than an
+    // empty string the Host would then have to read back as "no script".
+    expect("deployScript" in payload).toBe(false)
+  })
+
   it("shows the source root, a live normalized preview, and submits with Enter", async () => {
     const next = setup()
     next.mount()
@@ -164,7 +259,9 @@ describe("native task create flow", () => {
     // the source root, and what identifies them is where they are. The Host cannot
     // rebuild a repository from a directory name when discovery reached it through
     // a level in between.
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/" })
+    // `delivery` rides along on every create; what is inside it is asserted field by field
+    // in the test above, so here it only has to be the string the Host parses.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", delivery: expect.any(String) })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)
@@ -364,6 +461,7 @@ describe("native task create flow", () => {
       task: "fix-login",
       project: "repo",
       tasksRoot: "/tasks",
+      merge: false,
       deleteBranch: true,
       force: true,
       // The Host cannot see the dialog's registration failing, so the reason has
@@ -423,6 +521,7 @@ describe("native task create flow", () => {
       task: "fix-login",
       project: "repo",
       tasksRoot: "/tasks",
+      merge: false,
       deleteBranch: true,
       force: true,
       // The Host cannot see the dialog's registration failing, so the reason has

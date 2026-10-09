@@ -994,17 +994,22 @@ describe("the request that widens a handed-on session", () => {
     }
   }
 
-  it("appends one sandbox mode event, and says the session was widened", async () => {
-    // The mode is what DSH's sandbox reads on every confined call, and the event is its
-    // whole state: one append is the widening, so that is what is asserted rather than a
-    // flag kept somewhere else. `danger-full-access` is what a session needs to write a
-    // source repository's git metadata from a working directory that does not hold it.
+  it("appends the whole full-access preset, and says the session was widened", async () => {
+    // The events are the session's whole permission state, so they are what is asserted
+    // rather than a flag kept somewhere else. `danger-full-access` is what a session needs to
+    // write a source repository's git metadata from a working directory that does not hold
+    // it - and DSH's own table bundles it with `never`, "full file access without approval
+    // prompts", which is written with it so the session is the same one the panel's own
+    // switch produces rather than a pair that matches no preset.
     const { sessions, appended } = sessionsWith(true)
     const handler = handleFor({}, { handoffFullAccess: "on" }, undefined, { sessions })
 
     expect(await handler("task.handoff-access", { sessionId: "session-1" }))
       .toEqual({ ok: true, value: { widened: true, mode: "danger-full-access" } })
-    expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "danger-full-access" } }])
+    expect(appended).toEqual([
+      { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
+      { type: "approval/policy", data: { policy: "never", source: "delegation" } },
+    ])
   })
 
   it("refuses while the setting is off, and appends nothing", async () => {

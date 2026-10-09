@@ -578,15 +578,51 @@ function symlinksRefused() {
 let linkProbe
 
 /**
- * The links a directory holds, named relative to it and bounded.
+ * Remove what an archive has just copied, leaving every link where it stands.
  *
- * Links are not descended into: a link is a name for somewhere else, and walking one
- * would both leave the directory being filed and, where links point back into their
- * own tree - `node_modules/.pnpm` is full of them - never come back. A junction is a
- * link here too, which is what the platform itself reports for one.
- * @param directory - the directory to look through.
- * @param options - how many entries may be looked at before giving up.
- * @returns the relative paths of the links found, in no particular order.
+ * A link inside a stray is the one thing this machine may refuse to recreate, and it is a
+ * name for somewhere else rather than content of its own - so it is not this side's to
+ * delete, and neither is a directory that holds one. Everything else in the stray was
+ * filed into the archive and comes out of the task space here, bottom-up, so a directory
+ * the removal left empty goes with it and one still holding a link stays.
+ * @param directory - the stray, after what could be filed was copied.
+ * @returns whether anything was kept, so a caller can tell a full from a partial removal.
+ */
+async function removeCopiedLeavingLinks(directory) {
+  let kept = false
+  let children
+  try {
+    children = await readdir(directory, { withFileTypes: true })
+  } catch {
+    // Unreadable is not a reason to delete anything: it stays, and says so by being kept.
+    return true
+  }
+  for (const child of children) {
+    const path = join(directory, child.name)
+    if (child.isSymbolicLink()) { kept = true; continue }
+    if (child.isDirectory()) {
+      if (await removeCopiedLeavingLinks(path)) kept = true
+      else await rmdir(path).catch(() => {})
+      continue
+    }
+    await rm(path, { force: true }).catch(() => {})
+  }
+  return kept
+}
+
+/**
+ * Every link below a directory, as paths relative to it.
+ *
+ * The listing is what the reader is given when a stray cannot be filed whole, so it names
+ * entries the way the task space shows them rather than as absolute paths. Links are not
+ * descended into: a link is a name for somewhere else, and walking one would both leave
+ * the directory being filed and, where links point back into their own tree -
+ * `node_modules/.pnpm` is full of them - never come back. A junction is a link here as
+ * much as a symbolic link is: `readdir` reports one as a directory, and
+ * `Dirent.isSymbolicLink` is what tells the two apart.
+ * @param directory - the stray to look through.
+ * @param options - `maxEntries` bounds the walk.
+ * @returns the relative paths, in the order they were found.
  */
 async function findLinks(directory, { maxEntries = 2000 } = {}) {
   const found = []
@@ -729,10 +765,10 @@ export async function finishTask(subprocess, options) {
     task,
     project,
     tasksRoot,
-    merge = false,
+    merge: askedMerge,
     target,
     targets,
-    deleteBranch = false,
+    deleteBranch: askedDeleteBranch,
     force = false,
     cleanStray = false,
     keep = [],
@@ -743,12 +779,6 @@ export async function finishTask(subprocess, options) {
     deliveryArchive,
   } = options
 
-  // Deleting a branch that was merged is routine; deleting one that was not throws
-  // its commits away, so it has to be asked for twice - with `deleteBranch` and with
-  // `force`, which is also what makes git delete it without complaint.
-  if (deleteBranch && !merge && !force) {
-    throw coded('E4007', 'deleting a branch that was never merged requires force')
-  }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
 
   const projectName = validateProjectName(project)
@@ -786,6 +816,23 @@ export async function finishTask(subprocess, options) {
   // container with no readable record deletes no branch at all, and says so.
   const warnings = []
   const recorded = await readTaskMetadata(taskPath)
+  // What the caller said, and then what the task's own record says. `auto` is the record
+  // answering "this merge happens by itself", and an absent request is a caller that said
+  // nothing about it - which is what lets the policy fill either one in. An explicit `false`
+  // - the panel's unticked box, an agent that was told not to merge - stays a no: the hand
+  // that said it outranks the record. `deleteBranch` follows the same rule, and defaults to
+  // keeping the branch, because that is the reversible half.
+  const policyMerge = deliveryPolicyOf(recorded).merge
+  const merge = askedMerge === undefined ? policyMerge.mode === 'auto' : askedMerge === true
+  const deleteBranch = askedDeleteBranch === undefined
+    ? merge && policyMerge.deleteBranch === true
+    : askedDeleteBranch === true
+  // Deleting a branch that was merged is routine; deleting one that was not throws
+  // its commits away, so it has to be asked for twice - with `deleteBranch` and with
+  // `force`, which is also what makes git delete it without complaint.
+  if (deleteBranch && !merge && !force) {
+    throw coded('E4007', 'deleting a branch that was never merged requires force')
+  }
   const taskBranch = typeof recorded?.branch === 'string' ? recorded.branch : ''
   if (taskBranch === '') {
     warnings.push(warned('no-task-branch', `no task branch is recorded in ${taskPath}; no branch was deleted in any repository`, { path: taskPath }))
@@ -793,9 +840,9 @@ export async function finishTask(subprocess, options) {
 
   // The strays policy fills the gaps a caller left: a finish that named no
   // cleanStray, no directory and no discard takes its handling from the task's
-  // own delivery policy. A caller that decided anything is honoured verbatim,
-  // and `discard` without force stays dead - see applyStraysPolicy. Everything
-  // it decides still passes the isolation check a caller-named directory would.
+  // own delivery policy. A caller that decided anything is honoured verbatim, and
+  // the policy itself never deletes - see applyStraysPolicy. Everything it decides
+  // still passes the isolation check a caller-named directory would.
   const strayed = applyStraysPolicy(deliveryPolicyOf(recorded), {
     cleanStray,
     discardDocuments,
@@ -1219,26 +1266,22 @@ export async function finishTask(subprocess, options) {
       // behind - which is what the caller then has to notice and clean up. And filling a
       // link in with whatever it points at is not this side's decision to make about
       // somebody's files: a link is a name for somewhere else, and that somewhere can be
-      // outside the task space entirely. So the whole stray stays where it is, and says
-      // exactly which entries are in the way.
+      // outside the task space entirely. So the links are left out of the copy and stay
+      // where they are, named, and everything else in the stray is filed as usual.
       const links = await symlinksRefused() ? await findLinks(source) : []
-      if (links.length > 0) {
-        const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
-        const more = links.length > LINK_NAMES_SHOWN ? `, and ${links.length - LINK_NAMES_SHOWN} more` : ''
-        warnings.push(warned(
-          'leftover-holds-links',
-          `could not archive '${name}' to '${strayDestination}': it holds ${links.length === 1 ? 'a link' : `${links.length} links`} `
-          + `(${named}${more}) and this machine will not let DSH create one, so filing it would either stop part-way or copy `
-          + 'whatever the link points at; it is left in the task space exactly as it stands - removing or moving out those '
-          + 'entries is what lets the finish complete',
-          { name, destination: strayDestination, links, shown: LINK_NAMES_SHOWN },
-        ))
-        keptByFailure.push(name)
-        continue
-      }
       try {
         await mkdir(strayDestination, { recursive: true })
-        await cp(source, destination, { recursive: true, force: false, errorOnExist: true })
+        if (links.length === 0) {
+          await cp(source, destination, { recursive: true, force: false, errorOnExist: true })
+        } else {
+          const skip = new Set(links.map((entry) => join(source, entry)))
+          await cp(source, destination, {
+            recursive: true,
+            force: false,
+            errorOnExist: true,
+            filter: (from) => !skip.has(from),
+          })
+        }
       } catch (error) {
         // Kept, not cleaned: a copy that failed must not cost the original, so
         // this is excluded from the clean-up below and reported as still there.
@@ -1250,6 +1293,24 @@ export async function finishTask(subprocess, options) {
         if (error?.code !== 'EEXIST') await rm(destination, { recursive: true, force: true }).catch(() => {})
         warnings.push(warned('leftover-copy-failed', `could not archive '${name}' to '${strayDestination}': ${error.message}`, { name, destination: strayDestination, reason: error.message }))
         keptByFailure.push(name)
+        continue
+      }
+      if (links.length > 0) {
+        const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
+        const more = links.length > LINK_NAMES_SHOWN ? `, and ${links.length - LINK_NAMES_SHOWN} more` : ''
+        warnings.push(warned(
+          'leftover-holds-links',
+          `filed '${name}' into '${strayDestination}' except for ${links.length === 1 ? 'a link' : `${links.length} links`} `
+          + `(${named}${more}): this machine will not let DSH create one, so the link and the directories holding it were `
+          + 'left in the task space exactly as they stand - removing or moving those entries out is what lets the finish complete',
+          { name, destination: strayDestination, links, shown: LINK_NAMES_SHOWN },
+        ))
+        // What was filed comes out of the task space; what was not stays, links and the
+        // directories holding them. It is also in `keptByFailure`, so `cleanStray` will not
+        // delete it either: the entry was not filed, and removing it is the user's to do.
+        await removeCopiedLeavingLinks(source)
+        keptByFailure.push(name)
+        archivedStrays.push(name)
         continue
       }
       archivedStrays.push(name)
@@ -1340,7 +1401,12 @@ export async function finishTask(subprocess, options) {
     path: taskPath,
     mergeTarget: repositories.find((entry) => entry.target)?.target,
     repositories,
-    strays: strays.filter((name) => !removedStrays.includes(name) && !archivedStrays.includes(name)),
+    // What is left in the task space: kept because a copy failed, kept because a link could
+    // not be recreated and only part of it could be filed, kept because the fence refused to
+    // remove it, or simply never disposed of. A partly filed stray belongs here even though
+    // it is also in `archivedStrays` - the link it could not file is still on disk.
+    strays: strays.filter((name) => keptByFailure.includes(name)
+      || (!removedStrays.includes(name) && !archivedStrays.includes(name))),
     archivedStrays,
     removedStrays,
     containerRemoved,
