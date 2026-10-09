@@ -112,7 +112,7 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Added (the sessions handed to an agent can be made into one group)
 
-- **A new setting, Full access for the sessions handed to the agent (`handoffFullAccess`, off by default).**
+- **A new setting, Full access for the sessions handed to the agent for conflicts and commits (`handoffFullAccess`, off by default).**
   Switched on, the two sessions this plugin opens for "commit the uncommitted work" and "resolve the merge
   conflict" change: their working directory becomes the **container root** (so they read in the sidebar under
   the Workspace the plugin registered, instead of in Ungrouped), and one `sandbox/mode` event is appended to

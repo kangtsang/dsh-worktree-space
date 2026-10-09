@@ -95,8 +95,9 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   git metadata, for instance — is refused by the sandbox and handled by DSH's own elevation approval. **The
   plugin neither proxies nor bypasses it.**
 
-  With the setting **Full access for the sessions handed to the agent** (`handoffFullAccess`, `off` by
-  default) on, the plugin does two more things to **the sessions it has just opened for a handoff**:
+  With the setting **Full access for the sessions handed to the agent for conflicts and commits**
+  (`handoffFullAccess`, `off` by default) on, the plugin does two more things to **the sessions it has just opened
+  for a handoff**:
   - the working directory becomes the **container root** (`<container root>`), so those sessions belong to the
     Workspace the plugin registered rather than to Ungrouped;
   - immediately after the session exists, one `sandbox/mode` event is appended to **that session's own log**,

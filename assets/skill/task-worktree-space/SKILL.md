@@ -254,8 +254,8 @@ Confirm each destructive step with the user before passing it:
    user's own **Finish task** press — the step after it is the merge.
 
    **Where the setting is on, both of these sessions are opened differently.** The
-   profile setting **Full access for the sessions handed to the agent**
-   (`handoffFullAccess`) opens each of them on the **container root** instead of the
+   profile setting **Full access for the sessions handed to the agent for conflicts and
+   commits** (`handoffFullAccess`) opens each of them on the **container root** instead of the
    common ancestor — so they collect under the plugin's own Workspace in the workspace
    list rather than in Ungrouped — and gives each one `danger-full-access` right after
    it exists. That is what replaces the elevation above: nothing will be refused, and

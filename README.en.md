@@ -458,7 +458,7 @@ a Workspace that happens to sit exactly there — and in the sidebar's Ungrouped
 its groups from each session's working directory, so the only way to collect them into one group is to make
 that group's path the working directory.
 
-**Full access for the sessions handed to the agent** (off by **default**) is that. Turned on:
+**Full access for the sessions handed to the agent for conflicts and commits** (off by **default**) is that. Turned on:
 
 - both sessions open at the **container root**, so they belong to the Workspace the plugin registered for
   it (the container root's two names, `worktree-space` and `dsh-worktree-space`, also joined the built-in
