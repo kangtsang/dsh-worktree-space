@@ -110,6 +110,15 @@ Follow this order. Never create a workspace with a guessed location.
    **Create and open** does in one press, except that the session there starts empty
    and this one is already working. Do that when the user wants the work started, not
    merely a place to work in; see *Putting a session on the work* below.
+   **The delivery policy may be stated here too, as `delivery`**, when the user has
+   said how this task should be delivered: an explicit policy beats the project's
+   stored default for that one task, and either way the policy is recorded in the
+   task's metadata at create time. Say which fields you set and why. A task that is
+   meant to merge back by itself is `merge.mode: "auto"`, and that cannot be combined
+   with a verification that waits for a person (`agent-then-human` or `human`) — the
+   pair is refused when the task is created, and the refusal names the fix. Whether a
+   merge waits for a deployment and a passing smoke is a separate question: `auto`
+   answers who presses the merge, not whether the work was checked.
 9. **Report where it is, and say which entry opens the session.** When this call
    opened one, name the session id it answered with; when it did not, a session is
    opened by hand — the panel's **Create and open** in the Worktree Space dialog, or

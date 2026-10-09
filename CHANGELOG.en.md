@@ -215,6 +215,17 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ### Added (the merge mode in a task's policy now does something)
 
+- **A create can state the delivery policy itself now, as `delivery`.** The three layers (what the request states,
+  then the project's stored default, then the built-in one) have always existed — but **the request layer had no
+  entrance at all**: the panel's dialog never sends it and the tool's schema had no such field, so in practice only
+  the defaults were reachable, and the project default was not on the settings page either. `create` takes
+  `delivery` now, **it beats the project's stored default**, and it goes through the same resolution a
+  panel-made create would (`create.js` resolves it once, before anything is made); a create that states nothing
+  lands where it always did. The bar is still the user's to set: the tool carries what they said, its description
+  says to name the fields you set and never to lower the bar for your own task, and a pair the flow cannot honour
+  (`merge.mode: auto` with a verification that waits for a person) is still refused when the task is created
+  (`E4010`).
+
 - **`merge.mode` used to be written into the task's record and read by nobody. All three values now have a
   behaviour** (the policy is recorded at create time and every later step reads it):
   - `auto`: the record saying "this task merges back by itself" — the finish then needs no `merge` argument at

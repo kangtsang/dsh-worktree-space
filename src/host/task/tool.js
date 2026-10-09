@@ -33,7 +33,7 @@ const DESCRIPTION = [
   'A finish that really removes the task space unregisters it too, which is what leaves the workspace list without an entry pointing at a directory that is gone; its sessions then fall back to Ungrouped. Pass unregisterWorkspace false only when the user asked to keep that task\'s group: the entry stays, those sessions stay under it, and the list has a Workspace whose directory is gone. An entry that was already gone - the user deleted it, or it was never registered - is not an error.',
   'A repository answered with `mergeInProgress` holds an unresolved merge at `mergeSite`: resolve the files listed in `conflictedFiles` in that checkout, commit the merge there, then call done again with the same merge request to finish. Never resolve a conflict by picking a side the user has not picked.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
-  'The task\'s delivery policy - whether a merge waits for a passing deployment smoke, and for a human acceptance ack - is decided by the user and recorded in the task metadata at create time. It is not a tool argument, and done enforces it: a refused merge names what is missing, and the way past it is to deploy, smoke, and be accepted - not to retry.',
+  'The task\'s delivery policy - whether a merge waits for a passing deployment smoke, and for a human acceptance ack - is the user\'s to set, and a create can state it: `delivery` on the create call wins over the project\'s stored default for that one task, and either way the policy is recorded in the task metadata at create time. State it when the user has said how this task should be delivered, and say which fields you set; do not quietly lower the bar for your own task. done enforces the policy: a refused merge names what is missing, and the way past it is to deploy, smoke, and be accepted - not to retry.',
   'The task\'s note names the conflict mode too: a task whose policy is conflicts=agent-auto expects the caller to resolve a returned conflict itself - ask no one, fix the files listed in conflictedFiles in that checkout, commit the merge there, and call done again. Under any other mode a returned conflict is reported and waits for the user.',
 ].join('\n')
 
@@ -642,6 +642,10 @@ export function registerTaskTool(ctx, options = {}) {
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths, as reported by suggest-root (create, add). Omit for every discovered (create). A bare name is read as relative to sourceRoot, which only names a repository sitting directly in it.' },
       baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for the default task/.' },
+      delivery: {
+        type: 'string',
+        description: 'The delivery policy for this one task (create), as a JSON object: an explicit policy wins over the project\'s stored default - which is what a create without it follows - and the built-in default is the last word after that. State it when the user has said how this task should be delivered, and say which fields you set and why; do not quietly lower the bar for your own task. Fields: deploy.target (docker | host | none), deploy.mode (auto | on-request), verification (agent | agent-then-human | human), merge.mode (auto | ask | never), merge.target (a branch name, or omit for each source repository\'s checked-out branch), merge.deleteBranch, conflicts (agent-auto | ask | stop), strays (archive | keep | discard). merge.mode "auto" merges by itself at the finish and cannot be combined with a verification that waits for a person: that pair is refused when the task is created. Example: {"merge":{"mode":"auto","deleteBranch":false},"verification":"agent"}',
+      },
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create). Omitted it registers, which is what the panel does; pass false only when the user asked for a task space that stays out of the workspace list.' },
       merge: { type: 'boolean', description: 'Merge before removing the worktrees (done). Only on request - or without the argument when the task records merge.mode "auto", which is the user\'s standing answer that it merges by itself.' },
       prompt: { type: 'string', description: 'The complete, self-contained job for a session (create, dispatch). Given on create, the session is opened in the new task space and handed this in the same call; given on dispatch, it is handed to a session in a task space that already exists. A session does not share this conversation\'s context, so include everything it needs.' },
@@ -694,6 +698,22 @@ export function registerTaskTool(ctx, options = {}) {
 
       if (action === 'create') {
         const sourceRoot = required(args.sourceRoot, 'sourceRoot')
+        // The policy this call states, if any. It arrives as JSON because the parameter dialect
+        // is flat - no object parameters - and it is parsed here rather than passed on as text
+        // so that a typo is refused with the same E4010 family the policy itself uses, before
+        // anything is made. Carried rather than decided: the delivery bar is the user's to set,
+        // so the call repeats what they said and names the fields it set.
+        let statedPolicy
+        if (typeof args.delivery === 'string' && args.delivery.trim() !== '') {
+          try {
+            statedPolicy = JSON.parse(args.delivery)
+          } catch (error) {
+            throw coded('E4010', `delivery is not valid JSON: ${error.message}`)
+          }
+          if (statedPolicy === null || typeof statedPolicy !== 'object' || Array.isArray(statedPolicy)) {
+            throw coded('E4010', 'delivery must be a JSON object, e.g. {"merge":{"mode":"auto"},"verification":"agent"}')
+          }
+        }
         const result = await createTask(ctx.subprocess, {
           sourceRoot,
           task: required(args.task, 'task'),
@@ -702,9 +722,10 @@ export function registerTaskTool(ctx, options = {}) {
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           configuredRoot: configuredRoot(),
-          // The policy is not a tool argument: the model never picks how a task is
-          // delivered. It reads the same project defaults a dialog-made create
-          // would, so a task started from a session lands on the same answers.
+          // Stated by this call, or nothing: create.js then resolves it against the project's
+          // stored defaults once, before anything is made. A create that states nothing lands on
+          // the same project defaults a panel-made create would.
+          delivery: statedPolicy,
           deliveryDefaults: configuredDeliveryDefaults(),
         })
         const value = envelope(action)

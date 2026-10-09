@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { rmSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { registerTaskTool } from "../src/host/task/tool.js"
@@ -62,11 +62,19 @@ async function sourceFixture() {
  * were made from. The container is a directory of its own rather than the source
  * root's recommendation, so what is removed here is only what this helper made.
  * @param services - the services the context serves beyond `tools`.
- * @returns the action's value and the captured tool definition.
+ * @param extra - further arguments for the create call.
+ * @param exec - the tool run context.
+ * @param options - `keep` leaves the task space in place and hands back a `cleanup`, for a
+ *   test that has to read what the create recorded before it goes.
+ * @returns the action's value, the captured definition, the container, and a cleanup.
  */
-async function createOnce(services = {}, extra = {}, exec = {}) {
+async function createOnce(services = {}, extra = {}, exec = {}, { keep = false } = {}) {
   const source = await sourceFixture()
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
+  const cleanup = async () => {
+    await source.cleanup()
+    await rm(container, { recursive: true, force: true })
+  }
   try {
     const { ctx, captured } = toolContext(creatingSubprocess, services)
     registerTaskTool(ctx)
@@ -74,10 +82,11 @@ async function createOnce(services = {}, extra = {}, exec = {}) {
       { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, ...extra },
       exec,
     )
-    return { value, captured }
-  } finally {
-    await source.cleanup()
-    await rm(container, { recursive: true, force: true })
+    if (!keep) await cleanup()
+    return { value, captured, container, cleanup }
+  } catch (error) {
+    await cleanup()
+    throw error
   }
 }
 
@@ -328,6 +337,32 @@ describe("registerTaskTool", () => {
       await rm(container, { recursive: true, force: true })
       await rm(join(container, "..", "multi-worktree-tool-add-elsewhere"), { recursive: true, force: true })
     }
+  })
+
+  it("records the delivery policy the create stated, rather than the project default", async () => {
+    // The delivery bar is the user's to set, and a create is where they can state it: what the
+    // call carries is what the task's own record keeps, so one task can merge by itself without
+    // changing the project's stored answer.
+    const { value, cleanup } = await createOnce({}, {
+      delivery: JSON.stringify({ deploy: { target: "none" }, verification: "agent", merge: { mode: "auto", deleteBranch: false } }),
+    }, {}, { keep: true })
+    try {
+      const record = JSON.parse(await readFile(join(value.container, "worktree-space.json"), "utf8"))
+      expect(record.delivery.merge.mode).toBe("auto")
+      expect(record.delivery.verification).toBe("agent")
+      expect(record.delivery.merge.deleteBranch).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("refuses a delivery policy the flow cannot honour, before anything is made", async () => {
+    // `auto` merges by itself and has no one to wait for, so pairing it with a verification
+    // that waits for a person is refused where the policy is recorded - the call sees E4010
+    // rather than a task that quietly ignores half of what it was told.
+    await expect(createOnce({}, {
+      delivery: JSON.stringify({ merge: { mode: "auto" }, verification: "agent-then-human" }),
+    })).rejects.toMatchObject({ code: "E4010" })
   })
 
   it("registers the task space it made as a DSH Workspace", async () => {
