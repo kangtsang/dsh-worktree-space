@@ -71,7 +71,9 @@ describe('delivery policy', () => {
   it('substitutes defaults per field when the record is read back', () => {
     const policy = coerceDeliveryPolicy({ deploy: { target: 'docker', mode: 'sometimes' }, merge: { mode: 'auto' } })
     expect(policy.deploy).toEqual({ target: 'docker', mode: 'on-request' })
-    expect(policy.merge).toEqual({ mode: 'auto', target: null, deleteBranch: true })
+    // A record that says nothing about the branch keeps it: the field's default is the
+    // reversible answer, and a task branch is the only record of how the work was made.
+    expect(policy.merge).toEqual({ mode: 'auto', target: null, deleteBranch: false })
     expect(policy.verification).toBe(DEFAULT_DELIVERY_POLICY.verification)
     // And a policy read off the record is what the gate reads, whatever the record's age.
     expect(deliveryPolicyOf({ delivery: policy })).toEqual(policy)

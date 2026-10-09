@@ -196,6 +196,18 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 - With no session service in the deployment, **nothing is opened and nothing fails**: the answer says no session
   was opened and points at the panel, because the task space itself is fine.
 
+### Changed (a task branch is kept unless something said to delete it)
+
+- **The policy's `merge.deleteBranch` default flips from `true` to `false`: a merge keeps the task branch, and only
+  an explicit `true` deletes it.** The default now takes the reversible half: once the task space is gone, the task
+  branch is the only record left of how that work was made, and deleting it is the step that cannot be walked back.
+  What you see does not change: the panel's Delete the branch is unticked by default and the tool's `deleteBranch`
+  is not passed unless asked for. What changed is the **policy's shipped default**, which is written into the task's
+  record and read by the finish later - and had it stayed `true`, "by default" would have become "deleted by
+  default" the moment the finish started honouring the policy. Neither the panel nor the tool is governed by that
+  default: only an explicit choice deletes - the panel's tick, the tool's `deleteBranch: true`, or that task's own
+  policy saying `true`.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

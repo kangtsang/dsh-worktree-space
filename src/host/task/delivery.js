@@ -46,7 +46,12 @@ export const DEFAULT_DELIVERY_POLICY = Object.freeze({
   version: 1,
   deploy: Object.freeze({ target: 'none', mode: 'on-request' }),
   verification: 'agent-then-human',
-  merge: Object.freeze({ mode: 'ask', target: null, deleteBranch: true }),
+  // The branch is kept unless something said to delete it. A task branch is the only
+  // record of how the work was made once the task space is gone, and deleting it is the
+  // one step here that cannot be walked back: `ask` is the merge default, and this
+  // matches it - the flow does the reversible half and leaves the other to whoever
+  // asked for it.
+  merge: Object.freeze({ mode: 'ask', target: null, deleteBranch: false }),
   conflicts: 'ask',
   strays: 'keep',
 })

@@ -91,7 +91,7 @@ created ──► developing ──► deploying ──► verifying ──┬�
   "merge": {
     "mode": "ask",               // auto | ask | never（决策 D3：auto 必须显式开启）
     "target": null,              // null=各源仓库当前检出的分支；可指定如 "develop"
-    "deleteBranch": true         // 合并成功后删任务分支
+    "deleteBranch": false        // 合并成功后是否删任务分支；默认 false=保留，只有写 true 才删
   },
   "conflicts": "ask",            // agent-auto | ask | stop（决策 D2：默认 ask）
   "strays": "archive"            // archive | keep | discard
