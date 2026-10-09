@@ -99,9 +99,26 @@ Follow this order. Never create a workspace with a guessed location.
 7. **Branch prefix** — `task/` unless the user asks for another one; pass the
    choice as `branchPrefix` and expect the branch to be that prefix plus the task
    name (`hotfix/<task>`, `release-<task>`, …).
-8. **Run `action: "create"`** and report the task directory path and the branch
-   name.
-9. **Work in the task directory**: it is where the task's session belongs.
+8. **Run `action: "create"`.** It does both halves: it makes the task directory,
+   the branch and one worktree per repository **and registers the result as a DSH
+   Workspace**, which is what puts the task space in the workspace list under
+   `<source workspace title>/<task>`. Pass `registerWorkspace: false` only when the
+   user asked for a task space that stays out of that list: it is then on disk with
+   nothing in the interface showing it, and the result says so.
+9. **Report where it is, and say which entry opens the session.** A session is
+   opened *with* the Workspace, and opening one is not something this tool can do:
+   that is the panel's **Create and open** in the Worktree Space dialog, or
+   picking the registered Workspace in the workspace list. Report the task
+   directory path and the branch name, then name that entry rather than leaving
+   the user to find it.
+   A create that answers with a warning that the Workspace was **not** registered
+   means one of three things, and the warning names which: the call asked for a task
+   space that stays out of the list (`registerWorkspace: false`), the deployment
+   serves no workspace registry, or the registration itself failed. Register the
+   directory before anything is opened in it — **Create and open**, or **Register
+   again** when a create is refused — and do not report the task as under way until
+   that is done, because until then nothing in the interface shows the task space.
+10. **Work in the task directory**: it is where the task's session belongs.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
@@ -235,6 +252,18 @@ Confirm each destructive step with the user before passing it:
    stops the plugin reads the plan again, and where the worktrees have all come back
    clean the panel says the commits are done under a green light and waits for the
    user's own **Finish task** press — the step after it is the merge.
+
+   **Where the setting is on, both of these sessions are opened differently.** The
+   profile setting **Full access for the sessions handed to the agent for conflicts and
+   commits** (`handoffFullAccess`) opens each of them on the **container root** instead of the
+   common ancestor — so they collect under the plugin's own Workspace in the workspace
+   list rather than in Ungrouped — and gives each one `danger-full-access` right after
+   it exists. That is what replaces the elevation above: nothing will be refused, and
+   there is nothing to ask the user to approve, because the whole machine is writable
+   rather than just the directory the metadata sits in. Read what the first message
+   says about the working directory instead of assuming either arrangement: it names
+   the directory and says which access the session was given. Off — the default, and
+   what a Host that does not have the setting does — everything above holds.
 3. **A conflict?** The answer for a repository left on a conflict reports
    `mergeInProgress`, `mergeSite` — the checkout the conflict stands in, inside the
    task space — and `conflictedFiles`. Nothing is opened by itself here either: the
@@ -277,6 +306,20 @@ Confirm each destructive step with the user before passing it:
    plan), show them and ask which to *keep*; then pass `cleanStray: true` with
    `keep: [...]` naming those. Keeping everything means passing neither.
 
+The Workspace registration follows the directory. When the finish removes the task space
+itself, `done` drops the registration too, so the task space leaves the workspace list and
+its sessions move to "Ungrouped" — **unless the call passed `unregisterWorkspace: false`**,
+which keeps the registration so those sessions stay in that group with nothing left on
+disk behind it. Pass that only when the user asked for it: nothing warns about it, because
+it is the answer that was asked for rather than something that went wrong, and the finish
+result is otherwise the same. A finish that keeps the container — a conflict left standing,
+uncommitted work, strays that were kept — keeps the registration either way, because the
+directory is still there and the list has to go on showing it. A registration that could
+not be dropped,
+while the entry is still in the list, is reported as a **warning** over a finish that still
+happened; remove it from the workspace list by hand. An entry that has already gone is not a
+failure to report: that is the outcome, not something to fix.
+
 Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`;
 `mergeInProgress` is what marks a repository the finish left on a conflict.
 
@@ -289,6 +332,36 @@ Each repository row answers `mergeInProgress`, `mergeSite` and `conflictedFiles`
   its own. Point `tasksRoot` somewhere that is not a repository.
 - `create` refuses a task name whose branch already exists in any repository —
   pick another name.
+- `create` refuses with **E2002** when a task space for exactly this task, project
+  and branch is already on disk — which means an earlier create made the container
+  and stopped before its Workspace was registered, usually one made by this tool
+  before it registered anything. The worktrees and the branch are still there, so
+  nothing is lost: register it (**Create and open**, or **Register again** in the
+  dialog once the refusal is shown), or finish and remove it. Creating again under
+  that name keeps failing until one of the three is done. An **E2001** on the same
+  name is the other situation — the name belongs to a different task space — and it
+  is not recoverable this way.
+- `create` reports a **warning** rather than a failure when the task space was made
+  but its Workspace could not be registered. The task space is real and usable; what
+  is missing is only the entry in the workspace list, and the warning says so.
+- `done` asks first whether its worktrees can actually be removed, and refuses with
+  **E5011** while any of them is held by something outside the process — a dev server,
+  a browser, an editor started in the task space. Nothing has been merged, removed or
+  filed at that point: close it, then finish again. The answer names each directory and
+  what blocked it, and the check only renames a directory and puts the name back, so a
+  refusal leaves the task space exactly as it was.
+- A stray that holds a **link** cannot be filed on a machine that will not create
+  symbolic links — an ordinary Windows installation, without Developer Mode: `done`
+  keeps it and names the entries in the way. A link is a name for somewhere else, so
+  the plugin will not copy whatever it points at instead. Removing or moving those
+  entries out is one delete each and needs no privilege, and finishing again then
+  files the rest.
+- A repository whose worktree `git` has **unregistered but could not delete** is
+  reported as a repository still on disk, never as a stray: `done` will not file a
+  checkout away as the user's documents, and will not delete it either. Read that
+  row's `error`, remove the directory by hand, then finish again. This is rare —
+  `done` finishes git's own delete itself when it can — and happens only while
+  something outside the plugin is holding those files.
 - `create` refuses a base that any repository does not have.
 - `add` refuses a repository the task already holds a worktree of: every worktree
   is named after its source repository's directory, so two of them cannot share a

@@ -12,6 +12,7 @@ import type { RememberedScan, SourceRootClassification, Workspace, Worktree, Wor
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { AddRepositoryDialog } from "./AddRepositoryDialog"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
+import type { ConfigFormLike } from "./PluginConfigCard"
 import { DeployCard } from "./DeployCard"
 import { finishScenes } from "../lib/finish-scene"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
@@ -55,6 +56,12 @@ interface Props {
    * passes its way back to the conversation, the dialog passes its close.
    */
   onLeave?: () => void
+  /**
+   * This plugin's configuration form, when the shell serves one, for the finish dialog's
+   * full-access switch. Left out, the dialog still says which state is in force - it reads
+   * that from the Host - and simply does not offer the way to change it from there.
+   */
+  config?: ConfigFormLike
 }
 type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
@@ -72,7 +79,7 @@ const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? 
 const STATUS_CONCURRENCY = 6
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave, config }: Props) {
   const t = useT()
   const [ownView, setOwnView] = useState<WorktreeView>("spaces")
   const view = control?.view ?? ownView
@@ -836,6 +843,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
       onLeave={onLeave}
+      config={config}
     /> : null}
     {gateConfirm ? <Dialog open onOpenChange={(open) => { if (!open) setGateConfirm(null) }}>
       <DialogContent className="dws-confirm-dialog dws-confirm-narrow" showClose={false}>

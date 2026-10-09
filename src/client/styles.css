@@ -624,6 +624,20 @@
      the dialog's body size: it is the same kind of line, sitting a few lines above that
      notice in the same panel. */
   .dws-finish-handoff-hint { color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The row that says how much access the sessions this panel opens are given, and that can
+     change it. Not small print: it is a permission, so it reads at the panel's own size with
+     the state in the text colour, and the way to change it is a link beside the state rather
+     than a control of the dialog's own - the same shape as opening a session. */
+  .dws-finish-handoff-access { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .dws-finish-handoff-access strong { color: var(--wt-text); }
+  .dws-finish-handoff-access-switch { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
+  .dws-finish-handoff-access-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* What the switch does and does not reach, at the small print's own size: a handoff that
+     is already open is not affected by it, and that is the part worth saying. */
+  .dws-finish-handoff-access-note { color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* A refusal is not small print: the Host did not write the setting, or the session could
+     not be widened, and both are things the reader has to act on. */
+  .dws-finish-handoff-access-note.is-error { color: var(--wt-warn); }
   .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
   .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
   .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }

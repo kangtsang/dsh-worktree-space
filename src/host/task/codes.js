@@ -61,6 +61,8 @@ export const ERROR_CODES = {
   E4008: 'archive.js - the merge target is unusable',
   E4009: 'naming.js - the task name or branch prefix is not usable',
   E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
+  E4011: 'index.js - a handoff access request named no session',
+  E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
@@ -73,6 +75,7 @@ export const ERROR_CODES = {
   E5008: 'deploy.js - the deploy script is missing, or it failed while rebuilding the environment',
   E5009: 'deploy.js - the delivery policy names a deploy target the manifest does not offer',
   E5010: 'deploy.js - the deploy manifest exists but cannot be parsed, so no target can be trusted',
+  E5011: 'archive.js - a worktree is held by something outside this process, so removing it would fail',
 
   // --- E6xxx scanning and discovery ---------------------------------------
   E6001: 'discover.js, add.js - a candidate directory is not a source repository',
@@ -92,6 +95,44 @@ export const ERROR_CODES = {
 export const UNKNOWN = 'E9001'
 
 /**
+ * Every warning code, with the place that raises it. The shape is checked by a test.
+ *
+ * Warnings do not share the table above, because they are not failures: nothing is
+ * refused by one, the operation carries on and reports it, and what the reader is being
+ * told is about work that was left undone rather than about work that did not happen.
+ * They are named for exactly the reason the failures are - a screen has to say them in
+ * the reader's language, and it cannot do that by reading an English sentence.
+ */
+export const WARNING_CODES = {
+  'no-task-branch': 'archive.js - the record names no branch, so no branch was deleted',
+  'delivery-gate-bypassed': 'deploy.js - the delivery gate was overruled and the finish carried on',
+  'branch-left-alone': 'archive.js - the worktree is not on the task branch, so no branch was deleted',
+  'branch-not-deleted': 'archive.js - git did not delete the branch',
+  'leftover-refused': 'archive.js - a leftover is a link, or outside the container, and is left alone',
+  'leftover-holds-links': 'archive.js - a leftover holds links this machine will not recreate, so it was not filed',
+  'leftover-copy-failed': 'archive.js - filing a leftover into the documents directory failed',
+  'no-deployment-recorded': 'deploy.js - no deployment environment is recorded for this task space',
+  'deploy-destroy-failed': 'deploy.js - the destroy command the manifest names failed',
+  'deploy-containers-left': 'deploy.js - containers of the environment could not be removed',
+  'deploy-cleanup-failed': 'archive.js - tearing the deployment down while finishing failed',
+}
+
+/**
+ * A warning: its sentence, and the values a screen needs to say it in another language.
+ *
+ * The message is what the audit log keeps and what anything showing a warning verbatim
+ * prints, so it stays one English sentence written once. The values travel beside it as
+ * data, for the same reason {@link coded} carries them.
+ * @param code - one of {@link WARNING_CODES}.
+ * @param message - the sentence, in the language the log is written in.
+ * @param values - the parts of that sentence a screen has to say for itself.
+ * @returns the warning, for a caller to report.
+ */
+export function warned(code, message, values) {
+  return { code, message, values: values ?? {} }
+}
+
+/**
  * An error carrying one of these codes.
  *
  * The code is written as a literal at every call site rather than referenced
@@ -99,11 +140,17 @@ export const UNKNOWN = 'E9001'
  * raises it. This is only the constructor.
  * @param code - one of {@link ERROR_CODES}.
  * @param message - the message, which stays free of the code.
+ * @param details - the values the failure is about, where a screen has to say the same
+ * thing in another language. The message is written once, in English, because it is
+ * also what the audit log keeps and what anything showing it verbatim prints; a
+ * translated screen cannot recover a path from that sentence without reading English
+ * prose, so the values travel beside it as data instead.
  * @returns the error, with `code` set.
  */
-export function coded(code, message) {
+export function coded(code, message, details) {
   const error = new Error(message)
   error.code = code
+  error.details = details ?? {}
   // The sentence the operation would tell a person, which the message alone
   // cannot: "task space already exists" says what collided, not what it means
   // for the create that was refused, or which of two ways to resolve it applies.

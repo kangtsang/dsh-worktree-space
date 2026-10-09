@@ -182,7 +182,7 @@ export async function createTask(subprocess, options) {
       && existing.task === name
       && existing.project === project
       && existing.branch === branch
-    const error = coded('E2001', `task space already exists: ${taskPath}`)
+    const error = coded('E2001', `task space already exists: ${taskPath}`, { path: taskPath })
     // E2001 and E2002 are two situations behind one guard, and they are read
     // apart by the dialog: one is a name clash to report, the other is a recovery
     // it can offer. The code says which; the sentence says what it means and what

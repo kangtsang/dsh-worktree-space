@@ -1,6 +1,7 @@
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { WorktreesPage } from "./WorktreePanel"
+import type { ConfigFormLike } from "./PluginConfigCard"
 import { PluginDescription } from "./PluginDescription"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
 import type { createWorktreeApi } from "../lib/api"
@@ -16,6 +17,8 @@ interface WorktreeManagePanelProps {
   /** Shows the Host's Plugins page, from the navigation column's gear row. */
   onOpenSettings?: () => void
   onClose: () => void
+  /** This plugin's configuration form, when the shell serves one; see {@link WorktreesPageProps}. */
+  config?: ConfigFormLike
 }
 
 /**
@@ -28,7 +31,7 @@ interface WorktreeManagePanelProps {
  * the same lists — inside the dialog's own header and footer chrome, so the two ways
  * in are one page seen twice rather than two implementations of it.
  */
-export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose }: WorktreeManagePanelProps) {
+export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config }: WorktreeManagePanelProps) {
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -46,6 +49,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           onOpenSettings={onOpenSettings}
           variant="dialog"
           onLeave={onClose}
+          config={config}
         />
       </DialogContent>
     </Dialog>

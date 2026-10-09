@@ -13,7 +13,7 @@ import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js
 // one place, because the switch is global state and so is its reset.
 afterEach(() => setAuditEnabled(true))
 
-function handleFor(outputs = {}, config, asked) {
+function handleFor(outputs = {}, config, asked, services) {
   const routes = new Map()
   const subprocess = {
     spawn({ argv }) {
@@ -42,6 +42,11 @@ function handleFor(outputs = {}, config, asked) {
       return () => routes.delete(route.path)
     } } },
     effect(effect) { return effect() },
+    // Only when a test asks for peer services, and off unless it does: the handlers reach
+    // for those through `ctx.get` and are written to carry on when there is none, so a
+    // fixture that always answered one would be a different context from the one every
+    // other test here runs against.
+    ...(services === undefined ? {} : { get: (name) => services[name] }),
   }
   apply(ctx, config)
   const handler = async (endpoint, payload = {}, signal, method = `dsh-worktree-space/${endpoint}`) => {
@@ -306,7 +311,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-accept", "task.deploy-up", "task.deploy-smoke", "task.preference",
+      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-accept", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -508,6 +513,26 @@ describe("worktree RPC contract", () => {
     // never true for a `{ get }`, so the setting could not turn anything off.
     expect((await handleFor({}, { auditLog: "off" })("task.preference")).value).toMatchObject({ auditLog: "off" })
     expect((await handleFor({}, { auditLog: "on" })("task.preference")).value).toMatchObject({ auditLog: "on" })
+  })
+
+  it("answers which arrangement the next handoff uses, and off is the default", async () => {
+    // Off is what the plugin has always done, so a profile that never touches the setting
+    // keeps the boundary that reaches the git metadata - and a Host that predates the
+    // setting answers without it, which the dialog reads as the same thing.
+    let access
+    const handler = handleFor({}, { handoffFullAccess: { get: () => access } })
+    expect((await handler("task.preference")).value).toMatchObject({ handoffFullAccess: "off" })
+    access = "on"
+    expect((await handler("task.preference")).value).toMatchObject({ handoffFullAccess: "on" })
+    access = "off"
+    expect((await handler("task.preference")).value).toMatchObject({ handoffFullAccess: "off" })
+
+    // The plain string, which is what `apply` receives when a profile row carries a value
+    // rather than a live reference. Reading only the reference is the pair of bugs these two
+    // pin down: `{ get }.get()` is fine but `"on".get()` is undefined, so a plain `on` would
+    // read as off - a setting that could be switched on and never take effect.
+    expect((await handleFor({}, { handoffFullAccess: "on" })("task.preference")).value).toMatchObject({ handoffFullAccess: "on" })
+    expect((await handleFor({}, { handoffFullAccess: "off" })("task.preference")).value).toMatchObject({ handoffFullAccess: "off" })
   })
 
   it("counts the commits a worktree carries back when a target is named", async () => {
@@ -952,5 +977,69 @@ describe("the scan limits the running entry is held to", () => {
     } finally {
       await fixture.cleanup()
     }
+  })
+})
+
+describe("the request that widens a handed-on session", () => {
+  /** A session service that records what is appended to the session it is asked for. */
+  function sessionsWith(known) {
+    const appended = []
+    return {
+      appended,
+      sessions: {
+        get: (id) => (known && id === "session-1"
+          ? { append: (type, data) => appended.push({ type, data }) }
+          : undefined),
+      },
+    }
+  }
+
+  it("appends one sandbox mode event, and says the session was widened", async () => {
+    // The mode is what DSH's sandbox reads on every confined call, and the event is its
+    // whole state: one append is the widening, so that is what is asserted rather than a
+    // flag kept somewhere else. `danger-full-access` is what a session needs to write a
+    // source repository's git metadata from a working directory that does not hold it.
+    const { sessions, appended } = sessionsWith(true)
+    const handler = handleFor({}, { handoffFullAccess: "on" }, undefined, { sessions })
+
+    expect(await handler("task.handoff-access", { sessionId: "session-1" }))
+      .toEqual({ ok: true, value: { widened: true, mode: "danger-full-access" } })
+    expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "danger-full-access" } }])
+  })
+
+  it("refuses while the setting is off, and appends nothing", async () => {
+    // The setting is the authorisation for this write, so it is checked here rather than
+    // taken from the client that asked: a stale dialog, or anything else that finds this
+    // route, must not be able to widen a session by itself.
+    const { sessions, appended } = sessionsWith(true)
+    const off = handleFor({}, { handoffFullAccess: "off" }, undefined, { sessions })
+    expect(await off("task.handoff-access", { sessionId: "session-1" }))
+      .toMatchObject({ ok: false, error: { code: "E4012" } })
+    expect(appended).toEqual([])
+
+    // And unset is off too: a profile that never touched the setting has not agreed to it.
+    const unset = handleFor({}, {}, undefined, { sessions })
+    expect(await unset("task.handoff-access", { sessionId: "session-1" }))
+      .toMatchObject({ ok: false, error: { code: "E4012" } })
+    expect(appended).toEqual([])
+  })
+
+  it("says it did not widen when there is no session to widen", async () => {
+    // Not a failure: the handoff has already happened, and the panel then says which
+    // access the session actually got rather than claiming the setting took effect.
+    const gone = handleFor({}, { handoffFullAccess: "on" }, undefined, { sessions: { get: () => undefined } })
+    expect(await gone("task.handoff-access", { sessionId: "gone" }))
+      .toEqual({ ok: true, value: { widened: false, reason: "no-session" } })
+
+    // A deployment that composes no session service at all.
+    const none = handleFor({}, { handoffFullAccess: "on" })
+    expect(await none("task.handoff-access", { sessionId: "session-1" }))
+      .toEqual({ ok: true, value: { widened: false, reason: "no-sessions-service" } })
+  })
+
+  it("refuses a request that names no session", async () => {
+    const handler = handleFor({}, { handoffFullAccess: "on" })
+    expect(await handler("task.handoff-access", {}))
+      .toMatchObject({ ok: false, error: { code: "E4011" } })
   })
 })

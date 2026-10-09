@@ -24,6 +24,11 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES = [
   "vendor", "deps", "elm-stuff",
   "dist-newstyle", "_build", "blib", "zig-out",
   "binaries", "intermediate", "deriveddatacache",
+  // This plugin's own task container, under both of the names it takes. The container
+  // root is registered as a Workspace - that is how the sessions a finish hands an
+  // agent end up under one group - so a scan walks it, and what is in it holds no
+  // repository of its own.
+  "worktree-space", "dsh-worktree-space",
 ]
 
 /**

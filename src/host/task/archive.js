@@ -4,16 +4,16 @@
  * Finishing a task: what merging would do, which files are the user's own, and the merge, removal, and filing that follow.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, open, readdir, rmdir, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, open, readdir, rename, rmdir, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
-import { coded } from './codes.js'
+import { coded, warned } from './codes.js'
 import { assertDeliveryGate, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
-import { assertIsolated, refuseDelete } from './paths.js'
+import { assertIsolated, refuseDelete, samePathLocation } from './paths.js'
 
 import { TASK_METADATA, TASK_OWNED_FILES, isLinkedWorktree, readTaskMetadata, taskSpacePath } from './shared.js'
 
@@ -427,7 +427,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
-  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot })
 
   const entries = await readdir(taskPath, { withFileTypes: true })
@@ -454,7 +454,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       kind,
     })
   }
-  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
 
   const repositories = []
   let mergeTarget
@@ -509,6 +509,9 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
 
 export const DOCUMENT_EXTENSIONS = new Set(['.md', '.markdown', '.mdx', '.txt', '.rst', '.adoc'])
 
+/** How many links a warning names before it says how many more there are. */
+const LINK_NAMES_SHOWN = 3
+
 
 const BUILD_DIRECTORIES = new Set([
   'node_modules', 'dist', 'build', 'out', 'output', 'target', 'bin', 'obj', 'coverage',
@@ -543,6 +546,127 @@ function strayKind(name, directory) {
 function isDocument(name) {
   const dot = name.lastIndexOf('.')
   return dot > 0 && DOCUMENT_EXTENSIONS.has(name.slice(dot).toLowerCase())
+}
+
+/**
+ * Whether this process is refused the right to create a symbolic link.
+ *
+ * Windows needs `SeCreateSymbolicLinkPrivilege` for that: Developer Mode grants it to
+ * an ordinary user, an ordinary installation does not. The answer decides whether a
+ * stray holding a link can be filed at all, because `fs.cp` recreates links rather
+ * than copying what they point at - on a machine that refuses, the copy stops part-way
+ * with an `EPERM` about the link and leaves half an archive behind. Probed rather than
+ * assumed, and asked once: nothing about the process's token changes while it runs.
+ * @returns whether a link could not be created here.
+ */
+function symlinksRefused() {
+  linkProbe ??= (async () => {
+    const probe = await mkdtemp(join(tmpdir(), 'dsh-worktree-link-'))
+    try {
+      await symlink(join(probe, 'target'), join(probe, 'link'))
+      return false
+    } catch {
+      return true
+    } finally {
+      await rm(probe, { recursive: true, force: true }).catch(() => {})
+    }
+  })()
+  return linkProbe
+}
+
+/** The one probe {@link symlinksRefused} keeps, so the question is asked once. */
+let linkProbe
+
+/**
+ * The links a directory holds, named relative to it and bounded.
+ *
+ * Links are not descended into: a link is a name for somewhere else, and walking one
+ * would both leave the directory being filed and, where links point back into their
+ * own tree - `node_modules/.pnpm` is full of them - never come back. A junction is a
+ * link here too, which is what the platform itself reports for one.
+ * @param directory - the directory to look through.
+ * @param options - how many entries may be looked at before giving up.
+ * @returns the relative paths of the links found, in no particular order.
+ */
+async function findLinks(directory, { maxEntries = 2000 } = {}) {
+  const found = []
+  const queue = [directory]
+  let seen = 0
+  while (queue.length > 0 && seen < maxEntries) {
+    const current = queue.shift()
+    let children
+    try {
+      children = await readdir(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const child of children) {
+      seen += 1
+      if (seen > maxEntries) break
+      const path = join(current, child.name)
+      if (child.isSymbolicLink()) {
+        found.push(relative(directory, path))
+        continue
+      }
+      if (child.isDirectory()) queue.push(path)
+    }
+  }
+  return found
+}
+
+/**
+ * Whether git still has this worktree registered.
+ *
+ * The question a failed removal turns on, and the reason it is asked of git rather
+ * than of the directory: `git worktree remove` unregisters a worktree *before* it
+ * deletes the directory, so a delete that failed leaves a checkout whose `.git` file
+ * is already gone. Asking git is the same answer in one call and does not assume that
+ * the file and the registration cannot come apart - this is exactly the case where
+ * they do.
+ * @param subprocess - the profile's subprocess service.
+ * @param mainRepo - the source repository the worktree belongs to.
+ * @param worktreePath - the worktree's directory.
+ * @returns whether git still knows about it.
+ */
+async function worktreeRegistered(subprocess, mainRepo, worktreePath) {
+  const porcelain = await tryRunGit(subprocess, mainRepo, ['worktree', 'list', '--porcelain'])
+  return parseWorktrees(porcelain).some((row) => samePathLocation(row.path, worktreePath))
+}
+
+/** What a directory is renamed to while it is being asked whether it can be removed. */
+const REMOVAL_PROBE_SUFFIX = '.dsh-removal-probe'
+
+/**
+ * Whether this directory can be removed right now, asked without removing anything.
+ *
+ * The question is answered by renaming the directory and renaming it straight back,
+ * which is the cheapest operation that Windows refuses for the same reason it refuses
+ * a delete: a directory that is some process's working directory, or that holds a file
+ * another process opened without sharing delete, cannot be renamed either. Measured
+ * against a file held open: the rename fails with `EPERM` and so does the delete; once
+ * the handle is released both succeed. On Linux an open file blocks neither, so a
+ * rename there means exactly what it says - the delete would work too.
+ *
+ * This is a probe and nothing else: it writes no file, deletes nothing, and puts the
+ * name back before it answers. The one state it can leave behind is a directory still
+ * under the probe name, which it reports instead of hiding - that is a directory the
+ * caller has to rename back by hand, and saying so is the only honest answer.
+ * @param directory - the directory that would be removed.
+ * @returns an empty string when it can be removed, else why it cannot.
+ */
+async function removableNow(directory) {
+  const probe = `${directory}${REMOVAL_PROBE_SUFFIX}`
+  try {
+    await rename(directory, probe)
+  } catch (error) {
+    return `${error?.code ?? 'unremovable'}: ${error?.message ?? error}`
+  }
+  try {
+    await rename(probe, directory)
+  } catch (error) {
+    return `the check renamed it and could not put it back: it is now at ${probe} (${error?.message ?? error})`
+  }
+  return ''
 }
 
 
@@ -630,7 +754,7 @@ export async function finishTask(subprocess, options) {
   const projectName = validateProjectName(project)
   const taskPath = taskSpacePath(tasksRoot, projectName, task)
 
-  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`)
+  if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot })
 
   // The record is what makes this directory one of ours, and it is asked before
@@ -651,6 +775,7 @@ export async function finishTask(subprocess, options) {
       `${taskPath} holds no ${TASK_METADATA}, so this plugin has no record of creating it and nothing in it will be deleted.\n`
       + `  What is missing: ${join(taskPath, TASK_METADATA)}\n`
       + '  If this really is a task space this plugin made and its record was removed by hand, restore the file from a backup before finishing it.',
+      { path: taskPath, missing: join(taskPath, TASK_METADATA) },
     )
   }
 
@@ -663,7 +788,7 @@ export async function finishTask(subprocess, options) {
   const recorded = await readTaskMetadata(taskPath)
   const taskBranch = typeof recorded?.branch === 'string' ? recorded.branch : ''
   if (taskBranch === '') {
-    warnings.push(`no task branch is recorded in ${taskPath}; no branch was deleted in any repository`)
+    warnings.push(warned('no-task-branch', `no task branch is recorded in ${taskPath}; no branch was deleted in any repository`, { path: taskPath }))
   }
 
   // The strays policy fills the gaps a caller left: a finish that named no
@@ -692,16 +817,61 @@ export async function finishTask(subprocess, options) {
   if (gateWarning !== undefined) warnings.push(gateWarning)
 
   const entries = await readdir(taskPath, { withFileTypes: true })
+  // The repositories the container's own record names. It is what still recognises a
+  // repository whose directory git has stopped calling a worktree - see below - and it
+  // is read before anything is removed, so the names survive the run that removes them.
+  const recordedNames = new Set(
+    (Array.isArray(recorded?.repositories) ? recorded.repositories : [])
+      .map((entry) => (typeof entry?.name === 'string' ? entry.name : ''))
+      .filter((name) => name !== ''),
+  )
   const worktrees = []
+  // A directory this task recorded as a repository, whose `.git` is gone: git
+  // unregisters a worktree before it deletes the directory, so a removal that failed
+  // halfway leaves exactly this - a checkout git no longer knows about, holding the
+  // worktree's files. Left unrecognised it reads as the user's own content, gets filed
+  // into the documents directory (a whole checkout, `node_modules` and all), and no
+  // later finish will ever remove it. The record is the only thing that can still tell
+  // the two apart, and that is what it is for.
+  const remains = []
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const worktreePath = join(taskPath, entry.name)
-    if (await isLinkedWorktree(worktreePath)) worktrees.push(worktreePath)
+    if (await isLinkedWorktree(worktreePath)) { worktrees.push(worktreePath); continue }
+    if (recordedNames.has(entry.name)) remains.push(worktreePath)
   }
-  if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`)
+  if (worktrees.length === 0 && remains.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
+
+  // Asked before anything is merged, removed or filed, because the removal is what
+  // cannot be undone: a worktree some other process is holding cannot be deleted, and
+  // deleting it happens after the merge. Left to fail there it costs a half-finished
+  // task, and on the git measured here (`2.28.0.windows.1`) it also leaves a checkout
+  // git has already unregistered and can never delete. So the whole finish is refused
+  // while anything is in the way, and refusing costs nothing: nothing has happened yet,
+  // which is what makes "close it and finish again" true rather than hopeful.
+  const held = []
+  for (const worktreePath of worktrees) {
+    const reason = await removableNow(worktreePath)
+    if (reason !== '') held.push({ path: worktreePath, reason })
+  }
+  if (held.length > 0) {
+    throw coded(
+      'E5011',
+      `${held.length === 1 ? 'one worktree is' : `${held.length} worktrees are`} held by something outside this process and cannot be `
+      + `removed, so nothing has been merged, removed or filed yet:\n`
+      + held.map((entry) => `  ${entry.path}\n    ${entry.reason}`).join('\n') + '\n'
+      + '  A dev server, a browser or an editor started in the task space is the usual one; close it, then finish the task again.',
+      { held },
+    )
+  }
 
   const repositories = []
   let failed = false
+  // Directories this run must leave exactly as they are: a repository of this task that
+  // could not be removed. They are reported as repositories, and the stray pass below
+  // skips them by name - a checkout that survived a removal is not something to file
+  // away or to delete as a leftover.
+  const strandedByRemoval = new Set()
 
   for (const worktreePath of worktrees) {
     const name = basename(worktreePath)
@@ -865,10 +1035,38 @@ export async function finishTask(subprocess, options) {
       continue
     }
     if (!(await gitSucceeded(subprocess, mainRepo, removeArgs))) {
-      outcome.error = 'failed to remove the worktree (uncommitted changes? force it deliberately)'
-      repositories.push(outcome)
-      failed = true
-      continue
+      // git unregisters a worktree before it deletes the directory, so a delete that
+      // failed leaves a checkout git no longer knows about: no `.git` file, no
+      // administrative directory, and nothing on disk that says this is a worktree
+      // rather than the user's own file. What git did not finish is finished here -
+      // under the fence checked above, and only once git itself is done with the path,
+      // which is what "no longer registered" says. A refusal git made up front
+      // (uncommitted work, a lock, a submodule) leaves the worktree registered, and is
+      // reported as it always was rather than worked around: those are exactly the
+      // refusals that must not be bypassed.
+      if (await worktreeRegistered(subprocess, mainRepo, worktreePath)) {
+        outcome.error = 'failed to remove the worktree (uncommitted changes? force it deliberately)'
+        repositories.push(outcome)
+        failed = true
+        continue
+      }
+      try {
+        await rm(worktreePath, { recursive: true, force: true })
+      } catch (error) {
+        // Both deletes failed, so the directory is held by something outside this
+        // process. It is named as a repository that is still there - not left to the
+        // stray pass, which would file the checkout away as documents.
+        outcome.error = `git unregistered this worktree but could not delete it, and the plugin could not either (${error.message}); it is still on disk at ${worktreePath} and has to be removed by hand`
+        repositories.push(outcome)
+        failed = true
+        strandedByRemoval.add(name)
+        continue
+      }
+      // Whatever git left of its own bookkeeping goes with it. Measured on the git
+      // that produced this case (`2.28.0.windows.1`) the administrative directory is
+      // already gone; a version that kept it would otherwise leave the source
+      // repository holding an entry for a directory that is not there.
+      await gitSucceeded(subprocess, mainRepo, ['worktree', 'prune', '--expire', 'now'])
     }
     outcome.removed = true
 
@@ -881,11 +1079,13 @@ export async function finishTask(subprocess, options) {
       // recorded before it goes; anything else is named and left alone.
       if (branch !== taskBranch) {
         outcome.branchDeleted = false
-        warnings.push(
+        warnings.push(warned(
+          'branch-left-alone',
           branch === ''
             ? `'${name}' has no branch checked out, so no branch was deleted in '${mainRepo}'`
             : `'${name}' is on '${branch}', not on the task branch '${taskBranch}', so that branch was left alone in '${mainRepo}'`,
-        )
+          { name, mainRepo, branch, taskBranch },
+        ))
       } else {
         const deleted = await gitSucceeded(
           subprocess,
@@ -897,10 +1097,33 @@ export async function finishTask(subprocess, options) {
           force ? ['branch', '-D', '--', branch] : ['branch', '-d', '--', branch],
         )
         outcome.branchDeleted = deleted
-        if (!deleted) warnings.push(`branch '${branch}' was not deleted in '${name}'`)
+        if (!deleted) warnings.push(warned('branch-not-deleted', `branch '${branch}' was not deleted in '${name}'`, { branch, name }))
       }
     }
     repositories.push(outcome)
+  }
+
+  // A repository of this task whose directory is still there and whose worktree git no
+  // longer knows about. Nothing this run can do finishes it, and saying so is the whole
+  // of what is left: it is reported as a repository, which is also what keeps it out of
+  // the stray pass below rather than filed away as the user's documents.
+  for (const worktreePath of remains) {
+    const name = basename(worktreePath)
+    strandedByRemoval.add(name)
+    failed = true
+    repositories.push({
+      name,
+      path: worktreePath,
+      mainRepo: '',
+      branch: '',
+      merged: false,
+      removed: false,
+      branchDeleted: false,
+      mergeInProgress: false,
+      mergeSite: '',
+      conflictedFiles: [],
+      error: `this worktree is no longer registered in its source repository and is still on disk at ${worktreePath}; git unregistered it but could not delete it, so it has to be removed by hand before the task space can be cleared`,
+    })
   }
 
   const leftovers = await readdir(taskPath, { withFileTypes: true })
@@ -920,7 +1143,12 @@ export async function finishTask(subprocess, options) {
   // badly, not an edge case.
   let stillOpen = false
   for (const entry of leftovers) {
-    if (entry.isDirectory() && await isLinkedWorktree(join(taskPath, entry.name))) { stillOpen = true; break }
+    if (!entry.isDirectory()) continue
+    // A repository whose directory survived its removal keeps the record too. The
+    // record is what says this task had that repository and which branch it was on -
+    // the only thing left that can tell the remains apart from the user's own files,
+    // and therefore the only thing a later finish could recognise them by.
+    if (strandedByRemoval.has(entry.name) || await isLinkedWorktree(join(taskPath, entry.name))) { stillOpen = true; break }
   }
   if (!stillOpen) {
     for (const name of TASK_OWNED_FILES) await rm(join(taskPath, name), { force: true })
@@ -937,6 +1165,11 @@ export async function finishTask(subprocess, options) {
   const content = new Set()
   for (const entry of remainingEntries) {
     if (entry.isDirectory() && await isLinkedWorktree(join(taskPath, entry.name))) continue
+    // A repository that could not be removed is not a leftover of anything. It was
+    // reported above as a repository, and filing a checkout away as documents - or
+    // deleting it as build output - would be this side's own decision to make about
+    // work that is not its. It stays until the user removes it.
+    if (entry.isDirectory() && strandedByRemoval.has(entry.name)) continue
     // The plugin's own files are not leftovers of anything. The record is kept on
     // purpose - a repository that stopped still needs it to be finished a second
     // time - and `strayKind` files it as content, so without this it would be
@@ -955,7 +1188,10 @@ export async function finishTask(subprocess, options) {
       const refused = refuseDelete(tasksRoot, join(taskPath, entry.name), `the leftover '${entry.name}'`)
       if (refused !== '') {
         keep.push(entry.name)
-        warnings.push(refused)
+        // The fence's own sentence is what the log keeps; a screen says the same thing
+        // from the name alone, because the refusal is always one of two things and the
+        // reader needs the name, not the wording.
+        warnings.push(warned('leftover-refused', refused, { name: entry.name, path: join(taskPath, entry.name) }))
         strays.pop()
         content.delete(entry.name)
         continue
@@ -975,13 +1211,44 @@ export async function finishTask(subprocess, options) {
     if (strayDestination === '') {
       if (!strayDiscardDocuments) continue
     } else {
+      const source = join(taskPath, name)
+      const destination = join(strayDestination, name)
+      // Asked before the copy rather than after it has failed: `fs.cp` recreates a link
+      // instead of copying what it points at, so on a machine that will not create one
+      // the copy stops part-way with an `EPERM` naming a link and leaves half an archive
+      // behind - which is what the caller then has to notice and clean up. And filling a
+      // link in with whatever it points at is not this side's decision to make about
+      // somebody's files: a link is a name for somewhere else, and that somewhere can be
+      // outside the task space entirely. So the whole stray stays where it is, and says
+      // exactly which entries are in the way.
+      const links = await symlinksRefused() ? await findLinks(source) : []
+      if (links.length > 0) {
+        const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
+        const more = links.length > LINK_NAMES_SHOWN ? `, and ${links.length - LINK_NAMES_SHOWN} more` : ''
+        warnings.push(warned(
+          'leftover-holds-links',
+          `could not archive '${name}' to '${strayDestination}': it holds ${links.length === 1 ? 'a link' : `${links.length} links`} `
+          + `(${named}${more}) and this machine will not let DSH create one, so filing it would either stop part-way or copy `
+          + 'whatever the link points at; it is left in the task space exactly as it stands - removing or moving out those '
+          + 'entries is what lets the finish complete',
+          { name, destination: strayDestination, links, shown: LINK_NAMES_SHOWN },
+        ))
+        keptByFailure.push(name)
+        continue
+      }
       try {
         await mkdir(strayDestination, { recursive: true })
-        await cp(join(taskPath, name), join(strayDestination, name), { recursive: true, force: false, errorOnExist: true })
+        await cp(source, destination, { recursive: true, force: false, errorOnExist: true })
       } catch (error) {
         // Kept, not cleaned: a copy that failed must not cost the original, so
         // this is excluded from the clean-up below and reported as still there.
-        warnings.push(`could not archive '${name}' to '${strayDestination}': ${error.message}`)
+        //
+        // What the failed copy left is not an archive and is taken back out - but only
+        // when it is this call's own. `errorOnExist` is what makes that true: an
+        // `EEXIST` means the destination was already there, which is somebody else's
+        // directory and is left exactly as it is.
+        if (error?.code !== 'EEXIST') await rm(destination, { recursive: true, force: true }).catch(() => {})
+        warnings.push(warned('leftover-copy-failed', `could not archive '${name}' to '${strayDestination}': ${error.message}`, { name, destination: strayDestination, reason: error.message }))
         keptByFailure.push(name)
         continue
       }
@@ -1049,7 +1316,7 @@ export async function finishTask(subprocess, options) {
           const outcome = await destroyDeployment(subprocess, taskPath, envId)
           if (outcome.warning !== undefined) warnings.push(outcome.warning)
         } catch (error) {
-          warnings.push(`deployment cleanup failed for ${envId}: ${error.message}`)
+          warnings.push(warned('deploy-cleanup-failed', `deployment cleanup failed for ${envId}: ${error.message}`, { envId, reason: error.message }))
         }
       }
     }

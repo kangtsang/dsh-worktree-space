@@ -69,6 +69,10 @@ export function createWorktreeApi(connection: ConnectionService) {
       const code = classifyError(result?.error?.code, String(sent)) ?? result?.error?.code
       const error = new Error(String(sent))
       ;(error as Error & { code?: string }).code = code
+      // The values the Host built its sentence from travel with the failure, so a screen
+      // can say the same thing in the reader's language: the sentence above is what the
+      // Host logged, and it is not reworded here.
+      ;(error as Error & { details?: unknown }).details = result?.error?.details
       throw error
     }
     return result.value as T
@@ -159,6 +163,17 @@ export function createWorktreeApi(connection: ConnectionService) {
     planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
     doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string; acknowledgeDelivery?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    /**
+     * Widen a session this dialog has just opened, so the commit it is there to make can
+     * write a source repository's git metadata without asking.
+     *
+     * Called only when `handoffFullAccess` is on, and the Host checks that setting again
+     * before writing anything: the setting is the authorisation, not this call. A Host
+     * that cannot widen - no session service, or a session already gone - answers that it
+     * did not rather than failing, because the handoff itself did happen, and the panel
+     * says so instead of pretending the session is unrestricted.
+     */
+    widenHandoffSession: (sessionId: string) => call<{ widened: boolean; reason?: string; mode?: string }>("task.handoff-access", { sessionId }),
     /**
      * A task's deployment, read live: docker by the `dsh.env-id` label for what runs
      * right now, the deploy's state file for the URL, the smoke and the human ack.

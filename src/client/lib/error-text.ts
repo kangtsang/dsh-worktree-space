@@ -1,4 +1,5 @@
 import { format } from "./i18n"
+import { hostFailureText, type HostValues } from "./host-messages"
 
 /**
  * What a failure this plugin raises is named by, rather than what it says.
@@ -35,15 +36,16 @@ export function failure(code: FailureCode, values: Record<string, string> = {}):
  *
  * Most failures arrive from the Host carrying a sentence it wrote for a person, and
  * that sentence is what is shown: reworded here it would stop matching what the Host
- * logged, and the Host's copy is not this plugin's to translate. So those fall
- * through untouched, and only the codes above — the ones this plugin raised — are
- * said here.
+ * logged, and the Host's copy is not this plugin's to translate. What this side does
+ * instead is say the same thing itself wherever it has a sentence for the code — in the
+ * reader's language, from the values the Host sent beside its own. Everything else falls
+ * through untouched.
  * @param t - the translation function in force.
  * @param reason - whatever the call rejected with.
  * @returns the sentence to put on screen.
  */
 export function errorText(t: (key: string) => string, reason: unknown): string {
-  const coded = reason as { code?: unknown; values?: Record<string, string> } | null | undefined
+  const coded = reason as { code?: unknown; values?: Record<string, string>; details?: HostValues } | null | undefined
   switch (String(coded?.code ?? "")) {
     case "worktree-timeout":
       return t("worktreeRequestTimedOut")
@@ -55,9 +57,11 @@ export function errorText(t: (key: string) => string, reason: unknown): string {
       return t("repositoryPathRequired")
     case "not-a-git-repository":
       return format(t("repositoryNotGitRepository"), { path: coded?.values?.path ?? "" })
-    default:
-      // The Host's own sentence, or whatever a rejection carried that was not one of
-      // ours — exactly what was shown before this function existed.
+    default: {
+      // A Host failure this plugin can say for itself, or the Host's own sentence.
+      const said = hostFailureText(t, String(coded?.code ?? ""), coded?.details ?? {})
+      if (said !== undefined) return said
       return String((reason as { message?: unknown } | null)?.message ?? reason)
+    }
   }
 }

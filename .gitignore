@@ -13,3 +13,4 @@ _preview/
 # up as an untracked entry in `git status`, which is not somewhere anyone looks long
 # enough to act on it.
 _test-output/
+
