@@ -114,6 +114,7 @@ describe("every sentence the Host's codes are said with", () => {
     ["E2005", { path: "/w/login", missing: "/w/login/worktree-space.json" }, "worktree-space.json"],
     ["E4011", {}, ""],
     ["E4012", {}, ""],
+    ["E4013", {}, ""],
     ["E5005", { target: "docker", envId: "demo" }, "docker"],
     // The environment is named only when there is one.
     ["E5005", { target: "docker", envId: "" }, "docker"],

@@ -64,7 +64,7 @@ async function sourceFixture() {
  * @param services - the services the context serves beyond `tools`.
  * @returns the action's value and the captured tool definition.
  */
-async function createOnce(services = {}, extra = {}) {
+async function createOnce(services = {}, extra = {}, exec = {}) {
   const source = await sourceFixture()
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
   try {
@@ -72,7 +72,7 @@ async function createOnce(services = {}, extra = {}) {
     registerTaskTool(ctx)
     const value = await captured[0].execute(
       { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, ...extra },
-      {},
+      exec,
     )
     return { value, captured }
   } finally {
@@ -160,7 +160,7 @@ describe("registerTaskTool", () => {
     const dispose = registerTaskTool(ctx)
     expect(captured).toHaveLength(1)
     expect(captured[0].name).toBe("task_worktree_space")
-    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "done"])
+    expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "dispatch", "done"])
     expect(typeof captured[0].execute).toBe("function")
     expect(typeof dispose).toBe("function")
   })
@@ -644,5 +644,189 @@ describe("registerTaskTool", () => {
     // Argument validation runs before the action switch, so an unknown action
     // never reaches the tool's own fallback branch.
     await expect(captured[0].execute({ action: "delete-everything" }, {})).rejects.toThrow(/must be one of/)
+  })
+
+  it("opens a session in the task space and hands it the work", async () => {
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const appended = []
+    const prompts = []
+    const services = {
+      sessionController: {
+        create: async (place) => { created.push(place); return { sessionId: "session-1" } },
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+      },
+      sessions: { get: (id) => (id === "session-1" ? { append: (type, data) => appended.push({ type, data }) } : undefined) },
+      workspaceRegistry: {
+        create: async () => ({}),
+        resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin/login" }),
+        list: () => [{ id: "ws-login", path: fixture.taskPath }],
+      },
+      // The calling session's own switch: the only thing `inherit` copies.
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "build it, then smoke it" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.action).toBe("dispatch")
+      expect(value.sessionId).toBe("session-1")
+      // Named by its Workspace, not by its directory: the controller attaches a session to a
+      // Workspace only when it is named, and that attachment is what groups it in the sidebar.
+      expect(created).toEqual([{ workspaceId: "ws-login" }])
+      // The caller's own override, copied and marked as delegated rather than as a switch the
+      // user made - the same event and the same marker DSH seeds into a child agent.
+      expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } }])
+      expect(prompts).toEqual([{ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] }])
+      expect(value.warnings).toEqual([])
+      expect(value.summary).toContain("session-1")
+      expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("gives the new session nothing more than the caller has", async () => {
+    // A caller with no override of its own: nothing is written, so the session lands on the
+    // deployment default - which is where the caller is too. That is what makes `inherit` a
+    // safe default rather than a promise about a mode.
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const appended = []
+    const services = {
+      sessionController: { create: async (place) => { created.push(place); return { sessionId: "session-2" } }, prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (...args) => appended.push(args) }) },
+      sandboxPolicy: { overrideOf: () => undefined },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.sessionId).toBe("session-2")
+      expect(appended).toEqual([])
+      // No registry in this deployment, so the directory is the only thing to open on: the
+      // session still opens, it just has no Workspace to be attached to.
+      expect(created).toEqual([{ cwd: fixture.taskPath }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("takes the permission the call names, over the caller's own", async () => {
+    const fixture = await taskSpaceFixture()
+    const appended = []
+    const services = {
+      sessionController: { create: async () => ({ sessionId: "session-3" }), prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "workspace-write" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("says no session was opened when the deployment serves no session service", async () => {
+    // Not a failure: the task space is still there, and the answer has to say what to do
+    // instead rather than leaving the caller to believe a session is running.
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )
+      expect(value.action).toBe("dispatch")
+      expect(value.sessionId).toBe("")
+      expect(value.warnings.join(" ")).toMatch(/no session service/)
+      expect(value.summary).toMatch(/No session was opened/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("opens a session in the task space it just made, and hands it the work, in one call", async () => {
+    const records = []
+    const created = []
+    const appended = []
+    const prompts = []
+    const services = {
+      workspaceRegistry: {
+        resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin" }),
+        create: async (path, title) => { records.push({ path, title }); return { path, title } },
+      },
+      sessionController: {
+        create: async (place) => { created.push(place); return { sessionId: "session-1" } },
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+      },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => "workspace-write" },
+    }
+    const { value, captured } = await createOnce(
+      services,
+      { prompt: "add the feature, then run the tests" },
+      { agent: { session: { id: "session-caller" } } },
+    )
+    // The task space is still made and registered - once, by the create itself - and a session
+    // is on it as well: one call leaves nothing half-started.
+    expect(value.action).toBe("create")
+    expect(value.sessionId).toBe("session-1")
+    expect(records).toHaveLength(1)
+    // Opened on the Workspace the create just registered, so it reads under that task.
+    expect(created).toEqual([{ workspaceId: "ws-login" }])
+    // The caller's own override, copied and marked as delegated rather than as a switch the
+    // user made - the same event DSH seeds into a child agent.
+    expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
+    expect(prompts).toEqual([{ sessionId: "session-1", content: [{ type: "text", text: "add the feature, then run the tests" }] }])
+    expect(value.warnings).toEqual([])
+    expect(value.summary).toMatch(/is on the work/)
+    expectEnvelopeShape(captured[0].output.schema, value)
+  })
+
+  it("opens nothing when the create was not given a job to hand on", async () => {
+    // No prompt, no session: a create that only wants the task space must not have to say so,
+    // and must not need a session service to exist at all.
+    const created = []
+    const { value } = await createOnce({ sessionController: { create: async (place) => { created.push(place); return { sessionId: "x" } }, prompt: async () => ({}) } })
+    expect(value.sessionId).toBe("")
+    expect(created).toEqual([])
+    expect(value.summary).not.toMatch(/is on the work/)
+  })
+
+  it("refuses a permission it does not offer, and a task space that is not there", async () => {
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async () => ({ sessionId: "session-4" }), prompt: async () => ({}) },
+    })
+    try {
+      registerTaskTool(ctx)
+      // The declared enum is what refuses a name outside the three, before the branch runs -
+      // the runtime validates arguments ahead of the action, which is why the message is its
+      // own wording rather than one written here.
+      await expect(captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "root" },
+        {},
+      )).rejects.toThrow(/must be one of/)
+      await expect(captured[0].execute(
+        { action: "dispatch", task: "nope", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )).rejects.toThrow(/no task space/)
+    } finally {
+      await fixture.cleanup()
+    }
   })
 })

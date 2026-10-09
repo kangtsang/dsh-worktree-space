@@ -171,6 +171,25 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   error, and an entry that has gone is the outcome this was after. A user deleting that Workspace in the interface
   first, or a task space that was never registered, no longer gets a false "could not be dropped".
 
+### Added (handing work to a session in the task space)
+
+- **`task_worktree_space` gained `action: "dispatch"`: open a session in the task space and hand it one prompt.**
+  This is the one step of that automation chain which used to be a press in the interface and nothing else —
+  opening a session was a GUI action. The session opens in the task space itself, so it reads under that task's
+  group in the workspace list and can be followed from there. `create` with a `prompt` does it **in the same
+  call** (make + register + open + hand over, in one step, which is what the panel's Create and open means —
+  except that the session there starts empty and this one is already working). Both are optional: a `create`
+  without a `prompt` behaves exactly as it did.
+- **The permission follows DSH's own delegation rule.** The default is `inherit`: only the **calling session's own
+  explicit sandbox override** is copied — not the deployment default (which the new session lands on anyway) and
+  never a one-shot grant — so a session opened this way is **never wider than the one that opened it**. Pass
+  `permission: "danger-full-access"` to ask for more, which the tool's description says is the user's call; the
+  approval policy is left alone (the deployment default, so it asks when it has to go outside). Building, testing
+  and deploying inside the task space need only `workspace-write`. **Committing still writes the source
+  repository's `.git`, outside the task space**, and that remains the handoff's business, with its own switch.
+- With no session service in the deployment, **nothing is opened and nothing fails**: the answer says no session
+  was opened and points at the panel, because the task space itself is fine.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

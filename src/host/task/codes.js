@@ -38,7 +38,7 @@ export const ERROR_CODES = {
   // --- E2xxx task space lifecycle -----------------------------------------
   E2001: 'create.js - the task name is taken by a different task space',
   E2002: 'create.js - the task space is this task own, left before its Workspace was registered',
-  E2003: 'archive.js, add.js - no task space at that path',
+  E2003: 'archive.js, add.js, tool.js - no task space at that path',
   E2004: 'archive.js, add.js - the task space holds no git worktrees',
   E2005: 'create.js, add.js - creating or extending failed with no code of its own, and everything was rolled back',
   E2006: 'create.js, add.js - creating or extending failed with no code of its own, and the rollback left something behind',

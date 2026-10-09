@@ -105,12 +105,17 @@ Follow this order. Never create a workspace with a guessed location.
    `<source workspace title>/<task>`. Pass `registerWorkspace: false` only when the
    user asked for a task space that stays out of that list: it is then on disk with
    nothing in the interface showing it, and the result says so.
-9. **Report where it is, and say which entry opens the session.** A session is
-   opened *with* the Workspace, and opening one is not something this tool can do:
-   that is the panel's **Create and open** in the Worktree Space dialog, or
-   picking the registered Workspace in the workspace list. Report the task
-   directory path and the branch name, then name that entry rather than leaving
-   the user to find it.
+   **Given a `prompt` as well, it also opens a session in the new task space and
+   hands it that job in the same call** — one step, which is what the panel's
+   **Create and open** does in one press, except that the session there starts empty
+   and this one is already working. Do that when the user wants the work started, not
+   merely a place to work in; see *Putting a session on the work* below.
+9. **Report where it is, and say which entry opens the session.** When this call
+   opened one, name the session id it answered with; when it did not, a session is
+   opened by hand — the panel's **Create and open** in the Worktree Space dialog, or
+   picking the registered Workspace in the workspace list. Report the task directory
+   path and the branch name, then name that entry rather than leaving the user to
+   find it.
    A create that answers with a warning that the Workspace was **not** registered
    means one of three things, and the warning names which: the call asked for a task
    space that stays out of the list (`registerWorkspace: false`), the deployment
@@ -119,6 +124,30 @@ Follow this order. Never create a workspace with a guessed location.
    again** when a create is refused — and do not report the task as under way until
    that is done, because until then nothing in the interface shows the task space.
 10. **Work in the task directory**: it is where the task's session belongs.
+
+### Putting a session on the work
+
+A session is a conversation with its own context: it does not see this one, so the
+`prompt` has to stand alone. Two ways to open one, and they differ only in *when*:
+
+- **`create` with a `prompt`** starts the task and hands over the first job in one
+  call. This is the one to reach for when the user asks for work to be done rather
+  than for a place to do it.
+- **`dispatch` with a `prompt`** hands a job to a session in a task space that
+  already exists — for the second and later jobs (make it, then smoke it, then fix
+  what the smoke found), because a task space outlives any one conversation.
+
+Both open the session in the task space itself, so it reads under that task in the
+workspace list and can be followed from there, and both answer with the session id.
+Both are given **the permission the calling session carries as its own sandbox
+override, and nothing more** — a session opened this way can never be wider than the
+one that opened it. Pass `permission` only when the user asked for more:
+`danger-full-access` is the whole machine. What a session in the task space can do
+without asking is write **inside the task space**, which is enough to build, test and
+deploy there; committing still writes the source repository's `.git` outside it, so
+that stays with the handoff below. A deployment that serves no session service says
+so in a warning instead of opening anything — then the session is the panel's to
+open, and the work is the user's to start.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.

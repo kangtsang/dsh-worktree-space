@@ -78,6 +78,14 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     `unregisterWorkspace: false` keeps the registration (its sessions stay in that group). An unregistration
     goes by **what the list says now**: a failed delete is followed by reading the list again, and only an entry
     that is still there is reported as a failure — one that has gone is the outcome, not a problem.
+  - Sessions: the tool's `create` with a `prompt`, or `action: "dispatch"`, **opens a session** in the task space
+    through DSH's own session service and appends one `sandbox/mode` policy event to **that session's own log**
+    (by default the calling session's **own explicit override** is copied; with no override, none is written and
+    the new session lands on the deployment default, so it is never wider than the caller). The turn of work is
+    then delivered to it as a prompt. Both actions are the caller's per-call decision; the interface's Create and
+    open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
+    not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
+    fails**: the tool answers that no session was opened, and says to open one from the panel.
 
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,
