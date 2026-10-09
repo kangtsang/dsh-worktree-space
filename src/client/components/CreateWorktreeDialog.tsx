@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { AlertCircle, GitPullRequest, Loader2 } from "./icons"
+import { AlertCircle, CircleQuestionMark, GitPullRequest, Loader2 } from "./icons"
+import { HoverHint } from "./HoverHint"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { errorText } from "../lib/error-text"
@@ -30,15 +31,18 @@ interface DeliveryChoice {
  * merge could land on are each repository's own and the dialog has no list of them - naming
  * one is the tool's or the configuration's to do.
  */
-const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; options: [string, string][] }[] = [
-  { key: "deployTarget", label: "deliveryDeployTarget", options: [["none", "deliveryTargetNone"], ["docker", "deliveryTargetDocker"], ["host", "deliveryTargetHost"]] },
-  { key: "deployMode", label: "deliveryDeployMode", options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
-  { key: "verification", label: "deliveryVerification", options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
-  { key: "mergeMode", label: "deliveryMergeMode", options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
-  { key: "mergeTarget", label: "deliveryMergeTarget", options: [["", "deliveryMergeTargetDefault"]] },
-  { key: "deleteBranch", label: "deliveryDeleteBranch", options: [["keep", "deliveryDeleteKeep"], ["remove", "deliveryDeleteRemove"]] },
-  { key: "conflicts", label: "deliveryConflicts", options: [["ask", "deliveryConflictAsk"], ["agent-auto", "deliveryConflictAgentAuto"], ["stop", "deliveryConflictStop"]] },
-  { key: "strays", label: "deliveryStrays", options: [["keep", "deliveryStraysKeep"], ["archive", "deliveryStraysArchive"], ["discard", "deliveryStraysDiscard"]] },
+const DELIVERY_FIELDS: { key: keyof DeliveryChoice; label: string; hint: string; options: [string, string][]; needsAuto?: boolean }[] = [
+  { key: "deployTarget", label: "deliveryDeployTarget", hint: "deliveryDeployTargetHint", options: [["none", "deliveryTargetNone"], ["docker", "deliveryTargetDocker"], ["host", "deliveryTargetHost"]] },
+  { key: "deployMode", label: "deliveryDeployMode", hint: "deliveryDeployModeHint", options: [["on-request", "deliveryModeOnRequest"], ["auto", "deliveryModeAuto"]] },
+  { key: "verification", label: "deliveryVerification", hint: "deliveryVerificationHint", options: [["agent", "deliveryVerifyAgent"], ["agent-then-human", "deliveryVerifyAgentThenHuman"], ["human", "deliveryVerifyHuman"]] },
+  { key: "mergeMode", label: "deliveryMergeMode", hint: "deliveryMergeModeHint", options: [["ask", "deliveryMergeAsk"], ["auto", "deliveryMergeAuto"], ["never", "deliveryMergeNever"]] },
+  // These three are decisions about a merge this flow makes itself. With `ask` they are put
+  // at the finish, when a merge is actually wanted; with `never` no merge is coming at all.
+  { key: "mergeTarget", label: "deliveryMergeTarget", hint: "deliveryMergeTargetHint", needsAuto: true, options: [["", "deliveryMergeTargetDefault"]] },
+  { key: "deleteBranch", label: "deliveryDeleteBranch", hint: "deliveryDeleteBranchHint", needsAuto: true, options: [["keep", "deliveryDeleteKeep"], ["remove", "deliveryDeleteRemove"]] },
+  { key: "conflicts", label: "deliveryConflicts", hint: "deliveryConflictsHint", needsAuto: true, options: [["ask", "deliveryConflictAsk"], ["agent-auto", "deliveryConflictAgentAuto"], ["stop", "deliveryConflictStop"]] },
+  // Leftovers are not a merge decision: every finish deals with them, merged or not.
+  { key: "strays", label: "deliveryStrays", hint: "deliveryStraysHint", options: [["keep", "deliveryStraysKeep"], ["archive", "deliveryStraysArchive"], ["discard", "deliveryStraysDiscard"]] },
 ]
 
 /** Where every dropdown starts: the policy's own default, which is also what a create without it gets. */
@@ -61,15 +65,20 @@ const DEFAULT_DELIVERY: DeliveryChoice = {
  * the deletion - so a policy this dialog sends says only what the user actually chose.
  */
 function deliveryPolicyOf(choice: DeliveryChoice) {
+  // Three of the eight only exist when the merge is this flow's own to make: with `ask` the
+  // branch, the deletion and the conflict mode are put at the finish, when a merge is
+  // actually wanted, and with `never` no merge is coming at all. Left out here, they are the
+  // project's stored default to answer - which is what "not decided at creation" means.
+  const mergeAutomatic = choice.mergeMode === "auto"
   return {
     deploy: { target: choice.deployTarget, mode: choice.deployMode },
     verification: choice.verification,
     merge: {
       mode: choice.mergeMode,
-      ...(choice.mergeTarget === "" ? {} : { target: choice.mergeTarget }),
-      deleteBranch: choice.deleteBranch === "remove",
+      ...(mergeAutomatic && choice.mergeTarget !== "" ? { target: choice.mergeTarget } : {}),
+      ...(mergeAutomatic ? { deleteBranch: choice.deleteBranch === "remove" } : {}),
     },
-    conflicts: choice.conflicts,
+    ...(mergeAutomatic ? { conflicts: choice.conflicts } : {}),
     strays: choice.strays,
   }
 }
@@ -251,6 +260,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const fieldsDisabled = busy || loading || !sourceReady || !!recovery
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
   const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === ""
+  // Which delivery choices are this flow's own to make: the three about a merge are asked at
+  // the finish unless the merge happens by itself, so they sit disabled until it does.
+  const mergeAutomatic = delivery.mergeMode === "auto"
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
   const endBusy = () => { busyRef.current = false; setBusy(false) }
@@ -578,12 +590,23 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         <span className="dws-field-label"><span>{t("deliveryLabel")}</span><span className="dws-field-note">{t("deliveryHint")}</span></span>
         <div className="dws-delivery-grid">
           {DELIVERY_FIELDS.map((field) => <div className="dws-delivery-cell" key={field.key}>
-            <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
-            <Select id={`${id}-delivery-${field.key}`} value={delivery[field.key]} disabled={fieldsDisabled} onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}>
+            <span className="dws-delivery-head">
+              <label className="dws-delivery-label" htmlFor={`${id}-delivery-${field.key}`}>{t(field.label)}</label>
+              <HoverHint label={t(field.hint)} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
+            </span>
+            <Select
+              id={`${id}-delivery-${field.key}`}
+              value={delivery[field.key]}
+              disabled={fieldsDisabled || (field.needsAuto === true && !mergeAutomatic)}
+              onChange={(event) => setDelivery({ ...delivery, [field.key]: event.target.value })}
+            >
               {field.options.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
             </Select>
           </div>)}
         </div>
+        {/* The three that are not this flow's to decide are still shown, greyed, rather than
+            hidden: what is missing is a reason, and the reason is this line. */}
+        {mergeAutomatic ? null : <p className="dws-field-note">{t("deliveryAskNote")}</p>}
       </div>
     </div>
   </fieldset>

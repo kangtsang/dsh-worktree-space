@@ -219,12 +219,18 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
   **Task details** carries eight choices in four rows of two, every one a dropdown: what to deploy to
   and when, who verifies the work, how a merge happens, which branch it lands on, whether the branch
   is deleted afterwards, what an unresolved conflict does, and what happens to the files a task space
-  leaves behind. They **start at the built-in defaults** — the answer when nothing is said — and what
-  the user picks travels with the create request, is written into the task's own record, and **beats
-  that project's stored default**, so what the panel shows is what the task runs. `merge.target` offers
-  only "the default (each repository's current branch)": the branches a merge could land on are each
-  repository's own and the dialog has no list of them, so naming one stays with the tool or the
-  configuration.
+  leaves behind. They **start at the plugin's default policy** — the answer when nothing is said — and
+  each name carries a **question mark whose hover explains that decision**. What the user picks travels
+  with the create request, is written into the task's own record, and **beats that project's stored
+  default**, so what the panel shows is what the task runs.
+  **Merge into**, **Branch after merge** and **Conflicts** are **enabled only when Merge is "merge by
+  itself"**: with "only when a merge is asked for" those three are decided at the finish, when a merge
+  is actually wanted, and with "never" no merge is coming to decide them for. Left alone, they are not
+  written into the policy at all, so the project's stored default answers them. **Leftovers** is not in
+  that group on purpose — every finish deals with those, merged or not.
+  `merge.target` has one limit of its own: the branches a merge could land on are each repository's own
+  and the dialog has no list of them, so it offers only "the default (each repository's current
+  branch)" and naming one stays with the tool or the configuration.
 
 - **A create can state the delivery policy itself now, as `delivery`.** The three layers (what the request states,
   then the project's stored default, then the built-in one) have always existed — but **the request layer had no

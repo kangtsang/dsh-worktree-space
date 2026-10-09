@@ -59,9 +59,13 @@ top right.
   The bottom of **Task details** holds the **delivery policy**: what to deploy to and when, who
   verifies the work, how a merge happens, which branch it lands on, whether the branch is deleted
   afterwards, what an unresolved conflict does, and what happens to the files a task space leaves
-  behind — eight choices, two to a row, every one a dropdown, **starting at the built-in defaults**
-  (the answer when nothing is said). What you pick travels with the create request, is written into
-  the task's own record, and **beats that project's stored default**.
+  behind — eight choices, two to a row, every one a dropdown, **starting at the plugin's default
+  policy** (the answer when nothing is said); each name carries a **question mark whose hover shows
+  what that choice means**. What you pick travels with the create request, is written into the task's
+  own record, and **beats that project's stored default**.
+  **Merge into**, **Branch after merge** and **Conflicts** are **enabled only when Merge is "merge by
+  itself"**: with "only when a merge is asked for" those three are put to you at the finish, not fixed
+  here, and **Leftovers** is not a merge decision at all — every finish deals with those.
   For "merge back by itself when it is done", pick **Merge by itself** and **The agent alone**: those
   two are a pair — merge-by-itself with a verification that waits for a person is refused, and the
   refusal says what to change.

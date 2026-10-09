@@ -150,20 +150,22 @@ describe("native task create flow", () => {
     // Eight decisions, one dropdown each, in the task-info block: what the create sends is
     // what is on screen.
     expect(document.querySelectorAll("select.dws-select").length).toBe(8)
+    // The three that decide a merge this flow makes itself stay disabled while the merge is
+    // asked for at the finish. `strays` is not one of them: every finish deals with those.
+    expect(document.querySelectorAll("select.dws-select:disabled").length).toBe(3)
 
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
       const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
-      // The untouched defaults, as the policy record's own shape: `merge.target` is absent
-      // because "the default" means each repository's checked-out branch, and the branch is
-      // kept because nobody asked for the deletion.
+      // The untouched defaults, as the policy record's own shape: `merge.target` and
+      // `deleteBranch` are absent because neither is this flow's to decide while the merge is
+      // asked for, and so is `conflicts` - the finish puts all three when a merge is wanted.
       expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
         deploy: { target: "none", mode: "on-request" },
         verification: "agent-then-human",
-        merge: { mode: "ask", deleteBranch: false },
-        conflicts: "ask",
+        merge: { mode: "ask" },
         strays: "keep",
       })
     })
