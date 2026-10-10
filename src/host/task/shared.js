@@ -175,7 +175,8 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * note, the gate and the panel read one record instead of three opinions.
  */
 export function taskMetadata(details) {
-  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [], delivery } = details
+  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [], delivery, sessions } = details
+  const known = normalizeSessions(sessions)
   return {
     version: 1,
     task,
@@ -187,6 +188,11 @@ export function taskMetadata(details) {
     deploymentEnvId: deploymentEnvIdFor(project, task),
     delivery: coerceDeliveryPolicy(delivery),
     createdAt: new Date().toISOString(),
+    // Optional, and absent rather than empty on a record that has no session yet:
+    // every reader treats a missing key as "unknown", which is what a record made
+    // before this field existed says, and an empty array would claim the task has
+    // no session where the truth is that nobody wrote one down.
+    ...(known.length === 0 ? {} : { sessions: known }),
     repositories: repositories.map((entry) => ({
       name: entry.name,
       sourcePath: entry.sourcePath,
@@ -194,6 +200,97 @@ export function taskMetadata(details) {
       ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
       branch: entry.branch ?? branch,
     })),
+  }
+}
+
+/**
+ * The roles a recorded session can have in a task.
+ *
+ * `task` is the session the task was dispatched to — the one that does the work;
+ * `handoff` is a session this plugin opened for the user's own handoff (a commit,
+ * or a conflict to resolve). The distinction is what lets a reader tell the
+ * session that is running the task from one that was only ever asked a question
+ * about it.
+ */
+export const TASK_SESSION_ROLES = ['task', 'handoff']
+
+/**
+ * Normalize the sessions a record carries into the shape this plugin writes.
+ *
+ * Two shapes are read, because the field is optional and because a record may have
+ * been hand-edited: an array of `{ sessionId, at, role }` entries (what this
+ * version writes) and a bare `sessionId` string (the shorter spelling a reader
+ * might use). A malformed entry is dropped rather than throwing: a record whose
+ * session list is partly garbage still names the task, and refusing the whole
+ * record over one bad entry would turn a readable task into a stranger.
+ * @param value - whatever the record held under `sessions`, or `sessionId`.
+ * @returns the normalized entries, possibly empty, each with a non-empty id.
+ */
+export function normalizeSessions(value) {
+  const entries = Array.isArray(value) ? value : (value === undefined || value === null ? [] : [value])
+  const normalized = []
+  for (const raw of entries) {
+    const entry = typeof raw === 'string' ? { sessionId: raw } : raw
+    if (entry === null || typeof entry !== 'object') continue
+    const sessionId = typeof entry.sessionId === 'string' ? entry.sessionId.trim() : ''
+    if (sessionId === '') continue
+    const role = TASK_SESSION_ROLES.includes(entry.role) ? entry.role : 'task'
+    const at = typeof entry.at === 'string' && entry.at !== '' ? entry.at : undefined
+    normalized.push({ sessionId, ...(at === undefined ? {} : { at }), role })
+  }
+  return normalized
+}
+
+/**
+ * The sessions a task's record names.
+ *
+ * Backward compatible in both directions: a record written before this field
+ * existed answers an empty list — not an error, and not a claim that the task has
+ * no session, only that none was written down — and a record that carries the
+ * shorter `sessionId` spelling is read as one entry.
+ * @param metadata - a record from {@link readTaskMetadata}, or undefined.
+ * @returns the entries, possibly empty.
+ */
+export function taskSessionsOf(metadata) {
+  if (metadata === null || metadata === undefined || typeof metadata !== 'object') return []
+  if (Array.isArray(metadata.sessions)) return normalizeSessions(metadata.sessions)
+  return normalizeSessions(metadata.sessionId)
+}
+
+/**
+ * The record a create or a dispatch keeps, with one session added.
+ *
+ * Written back through {@link writeTaskMetadata}, so the JSON record and the note
+ * rendered from it stay one document. The session is appended rather than
+ * replaced: a task may have been dispatched to several sessions over its life
+ * (the first one lost, a second opened in the same task space), and which of them
+ * is current is a question the reader answers by timestamp, not by the record
+ * forgetting the earlier ones.
+ *
+ * Nothing here throws: a record that cannot be written leaves the session
+ * unrecorded, which the caller reports as a warning. The session itself is
+ * already running — failing the dispatch over a bookkeeping write would lose the
+ * work to save the note about it.
+ * @param taskPath - the task space directory.
+ * @param metadata - the record as it was read.
+ * @param sessionId - the session to record.
+ * @param role - what that session is doing here; `task` unless said otherwise.
+ * @returns whether the record was written.
+ */
+export async function recordTaskSession(taskPath, metadata, sessionId, role = 'task') {
+  const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (id === '' || metadata === null || metadata === undefined || typeof metadata !== 'object') return false
+  const known = taskSessionsOf(metadata)
+  if (known.some((entry) => entry.sessionId === id)) return true
+  const written = {
+    ...metadata,
+    sessions: [...known, { sessionId: id, at: new Date().toISOString(), role: TASK_SESSION_ROLES.includes(role) ? role : 'task' }],
+  }
+  try {
+    await writeTaskMetadata(taskPath, written)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -256,6 +353,10 @@ async function parseLegacyBreadcrumb(taskPath) {
  */
 export function renderTaskMetadata(metadata) {
   const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [], deploymentEnvId, delivery } = metadata
+  // The sessions this task was dispatched to, rendered so a reader of the note can
+  // name one without searching: `wts_session_tool_status` takes exactly this id.
+  // The newest is named first, because that is the one still working.
+  const sessions = [...taskSessionsOf(metadata)].reverse()
   const lines = [
     `# Task: ${task}`,
     '',
@@ -264,9 +365,16 @@ export function renderTaskMetadata(metadata) {
     `- Base: ${baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '' ? "each repository's current HEAD" : `\`${baseRef}\``}`,
     ...(typeof createdAt === 'string' && createdAt !== '' ? [`- Created: ${createdAt}`] : []),
     `- Source root: \`${sourceRoot}\``,
+    ...(sessions.length === 0 ? [] : [`- Sessions: ${sessions.map((entry) => `\`${entry.sessionId}\` (${entry.role})`).join(', ')}`]),
     '- This folder is the agent session working directory.',
     '- The facts above are stored in `worktree-space.json`; this file is generated from it.',
     '',
+    ...(sessions.length === 0 ? [] : [
+      '## Sessions',
+      '- The sessions above were opened for this task; the newest is the one that was working most recently.',
+      '- Watch one with `wts_session_tool_status` (its `lastActivity` tells "stuck" from "busy with a long step"), read it with `wts_session_tool_read`, and correct it with `wts_session_tool_send` — pass `mode: "steer"` for anything time-sensitive, because `queue` is only read at a turn boundary.',
+      '',
+    ]),
     '## Repositories',
     ...repositories.map((entry) => `- \`${entry.name}\``),
     '',

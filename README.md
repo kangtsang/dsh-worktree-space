@@ -25,6 +25,7 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 - [🔐 权限与失败边界](#-权限与失败边界)
 - [🛠️ 使用](#-使用)　[⚙️ 配置](#-配置) · [➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🏁 结束](#-结束-worktree-space)　[各选项组合](#各选项组合的行为)
 - [🤖 实验性：把提交与冲突交给 agent](#-实验性把提交与冲突交给-agent)　[两个按钮](#两个按钮和它们做什么) · [流程和步骤](#流程和步骤)
+- [🎛️ 会话控制工具](#️-会话控制工具)　[八个工具](#八个工具) · [何时用哪个](#何时用哪个) · [记录会话 id](#记录会话-id)
 - [📝 操作日志](#-操作日志)
 - [📄 配套文档](#-配套文档)
 
@@ -401,6 +402,52 @@ Git 仓库及其 worktree，任务空间视图展示每个任务及其各仓库�
    任务分支里」通常答「是」，试合并直接跳过；只有目标分支又有人推了新提交，才照样先试一遍。
 
 面板底部的 **确认结束任务** 或 **继续结束任务** 始终由用户操作确认才会执行。
+
+## 🎛️ 会话控制工具
+
+任务空间把活交给一个**独立会话**：它有自己的上下文、自己的审批门、自己的工作目录。派活的会话**不是**它的
+父会话，所以既有的父子通道（`send_message`）会直接拒绝——`belongs to another parent session`。这八个工具
+是派活方唯一的通道，用来回答「它还在不在动、在做什么、能不能补一句话、丢了怎么接回来」。
+
+### 八个工具
+
+| 工具 | 做什么 |
+| --- | --- |
+| `wts_session_tool_find` | 按工作目录 / 标题 / id 找会话，返回 `sessionId`、是否在线、工作目录、标题 |
+| `wts_session_tool_status` | 看进度：`running`、`openTurn`、`lastActivity`、`pendingWork`、`lastReply`、推理尾巴；离线会话从持久化日志回答 |
+| `wts_session_tool_read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
+| `wts_session_tool_send` | 发消息，`mode` 取 `queue` 或 `steer` |
+| `wts_session_tool_create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
+| `wts_session_tool_resume` | 把离线会话拉回在线，之后可直接 `send` / `read` / `wait` |
+| `wts_session_tool_wait` | 等这一次输出；超时返回**已存在的**最近输出并标 `stale`，不是空 |
+| `wts_session_tool_cancel` | 中止当前回合，可选是否保留排队中的工作 |
+
+### 何时用哪个
+
+- **判「卡住」还是「在跑长步骤」，只看 `lastActivity`。** 文件时间、mtime、日志尾部都不可靠——构建期间三者
+  都可能长时间不动，而会话自己的日志时钟不会。`wts_session_tool_status` 传 `stalledMsThreshold` 后，**只有
+  running 会话**会被标 `stalled`；空闲会话「很久没事件」是正常状态。
+- **有时效性的一律用 `steer`，`queue` 只用于「到回合边界再看」的内容。** `queue` 的消息只在该会话的回合边界
+  被读取，而派出去的长任务常常整单就是**一个长回合**，于是消息一直挂在待处理队列里不被读到——从外面看就像
+  会话「无视了要求」。用 `wts_session_tool_read` 读它的消息记录才能分辨「没送到」与「没照做」。
+- **恢复链条**：兜底发现异常 → 先用 `status` 判「在跑但卡住」还是「已离线」→ 离线用 `resume` 拉回，丢了用
+  `create` 在**同一个任务空间**重开 → **无论哪条都先读它的最后状态再决定发什么**，不要盲发。
+- **`lastTurnEnd` 是「做完了」与「被错误打断后静默停摆」的唯一判别依据**：两者都表现为空闲且没有排队工作。
+  它不是 `completed` 时，`wts_session_tool_status` 会点名 `error` / `interrupted` / `blocked` / `max-tokens`。
+
+这些工具**只做上面这些**：没有自动轮询的看门狗、没有按规则自动 steer/cancel、没有归档、没有按推理内容
+终止会话。判断力留给派活的那个会话——自动 steer 的判断不如它看一眼真实状态。
+
+### 记录会话 id
+
+`task_worktree_space` 的 `create` 与 `dispatch` 本来就知道自己开出来的会话 id，所以它写进任务自己的记录
+（`worktree-space.json` 的 `sessions`，每项 `{ sessionId, at, role }`），并显示在：
+
+- 任务空间里的 `worktree-space.md`（「Sessions」一节，最新在前）；
+- `task_worktree_space` 的 `list` 输出（`sessions` 字段与摘要行）。
+
+`list` 同时回显每个任务 `deploy/.state.json` 的 `url` 与 `lastSmoke`（`deployment` 字段），省一次文件往返。
+记录里没有这个字段的旧任务**照旧可读**：`sessions` 为空，不代表这个任务没有会话，只代表没人记下来。
 
 ## 📝 操作日志
 

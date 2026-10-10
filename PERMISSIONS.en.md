@@ -91,6 +91,16 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
     not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
     fails**: the tool answers that no session was opened, and says to open one from the panel.
+  - The session-control tools (`wts_session_tool_*`): **reading** any session's event log (a live one through the
+    host's session service, an offline one through session persistence — the same records the panel reads),
+    **sending** a message to a session (`steer` injects into the running turn, `queue` appends a turn),
+    **opening** and **resuming** sessions, and **aborting** a session's active turn. What is written is **DSH's
+    own session log**, not a file this plugin writes. All eight are the **caller's per-call decision**: the plugin
+    polls nothing on its own, never steers by itself, and never terminates a session by itself. Where the
+    deployment serves no such service it **does not fail** — each tool answers "this deployment does not offer X",
+    and the tool itself is registered all the same. The session id recorded when a task space is dispatched (the
+    `sessions` field of `worktree-space.json`) goes into this plugin's own task record, which is the same
+    boundary as above.
 
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,

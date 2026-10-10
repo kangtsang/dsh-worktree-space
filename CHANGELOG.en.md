@@ -6,6 +6,44 @@ The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Unreleased
 
+### Added (the session-control tools)
+
+- **Eight session-control tools, so the dispatcher can watch, correct and recover the session a task space
+  is worked in.** A task space hands its work to a **session of its own**, and the session that dispatched
+  it is **not its parent** — the ordinary parent/child channel refuses outright (`send_message` →
+  `belongs to another parent session`) — so until now the dispatcher could neither tell whether that work
+  was still moving nor say anything to it. The eight tools are that channel: `wts_session_tool_find`
+  (locate by directory, title or id), `_status` (`running`, `openTurn`, `lastActivity`, `pendingWork`,
+  `lastReply`, reasoning tail), `_read` (count, `role` filter, `sinceSeq` paging), `_send` (with `mode`
+  `queue` or `steer`), `_create` (open a session in a named directory), `_resume` (bring an offline one
+  back online), `_wait` (wait for one output) and `_cancel` (abort the active turn, choosing whether the
+  queued work is kept).
+  **Two design points are worth naming.** First, `lastActivity` is the only reliable answer to "stuck" or
+  "busy with a long step": during a build, file times, mtimes and log tails all sit still while the
+  session's own clock keeps running; with `stalledMsThreshold`, **only a running session** is marked
+  stalled. Second, **a timeout is not an empty answer**: `_wait` returns the output that already existed,
+  marked `stale`, because a caller whose wait expired still has to know what the session last said.
+  The set is **deliberately smaller than the third-party plugin it mirrors**: no polling watchdog, no
+  automatic steer or cancel, no archiving, and no termination on reasoning content — the dispatcher is
+  already the decision maker, and an automatic steer is worse at it than one look at the real state. Every
+  capability is **probed rather than assumed**: where a deployment serves no session service the tools are
+  still registered, and each answers "this deployment does not offer X" instead of throwing a `TypeError`
+  out of a service lookup — which would hand the model a stack trace it cannot act on.
+
+### Added (what a dispatch knows is recorded)
+
+- **A `create` or a `dispatch` writes the session id it opened into the task's own record, and `list`
+  echoes the deployment state beside it.** The id was already in the call's hand; it is now written into
+  `worktree-space.json` as `sessions` (each entry `{ sessionId, at, role }`) and shown in the task space's
+  own `worktree-space.md` (a "Sessions" section, newest first) and in the `list` output of
+  `task_worktree_space` — so the dispatcher no longer has to search for the session by directory. `list`
+  also echoes each task's `deploy/.state.json` `url` and `lastSmoke` (the `deployment` field), read the
+  same way the panel reads them (the same `deploy/.state.json`), which saves a file round trip.
+  **Backward compatible**: the field is optional, and a record without it reads **exactly** as it did
+  before (`sessions` empty means nobody wrote one down, not that the task has no session); the record's
+  version is unchanged. A record that cannot be written is reported as a warning and never fails the call:
+  the session is already running, and losing the work to save the note about it would be the worse trade.
+
 ### Fixed
 - **Handing the work to a freshly opened session works now.** The Host's
   `sessionController.prompt(request, signal)` declares `signal` as required, and its implementation

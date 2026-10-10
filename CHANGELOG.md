@@ -5,6 +5,35 @@
 
 ## 未发布
 
+### 新增（会话控制工具）
+
+- **八个会话控制工具，让派活方能盯住、纠偏并接回任务空间里的会话。** 任务空间把活交给一个**独立会话**，而派活的
+  会话**不是它的父会话**——既有的父子通道会直接拒绝（`send_message` → `belongs to another parent session`），
+  所以派出去之后，父会话此前既不知道它还在不在动，也补不上一句话。新增的八个工具补上这条通道：
+  `wts_session_tool_find`（按工作目录 / 标题 / id 定位）、`_status`（`running`、`openTurn`、`lastActivity`、
+  `pendingWork`、`lastReply`、推理尾巴）、`_read`（条数、`role` 过滤、`sinceSeq` 翻页）、`_send`（`mode` 取
+  `queue` 或 `steer`）、`_create`（在指定目录开新会话）、`_resume`（离线拉回在线）、`_wait`（等一次输出）、
+  `_cancel`（中止当前回合，可选保留排队工作）。
+  **两个设计点值得点名。** 其一，`lastActivity` 是「卡住」与「在跑长步骤」的唯一可靠信号：构建期间文件时间、
+  mtime、日志尾部都可能长时间不动，只有会话自己的日志时钟在走；传 `stalledMsThreshold` 后**只有 running 会话**
+  会被标 `stalled`。其二，**超时不是空答案**：`_wait` 在预算用尽时返回**已存在的**最近输出并标 `stale`，因为
+  等超时的调用方仍然需要知道这个会话最后说了什么。
+  这组工具**刻意比它镜像的第三方插件小**：没有自动轮询的看门狗、没有按规则自动 steer/cancel、没有归档、
+  没有按推理内容终止——派活方自己就是决策者，自动 steer 的判断不如它看一眼真实状态。能力一律**探测**而非
+  假定：部署没有会话服务时，工具照常注册，每个都回一句「this deployment does not offer X」，而不是从服务查找
+  里抛一个 `TypeError`（那样模型拿到的只是一段没法照着做的堆栈）。
+
+### 新增（派出去的信息记进任务记录）
+
+- **`create` / `dispatch` 把会话 id 写进任务自己的记录，`list` 一并回显部署状态。** 会话 id 本来就在调用手里，
+  现在写进 `worktree-space.json` 的 `sessions`（每项 `{ sessionId, at, role }`），并显示在任务空间里的
+  `worktree-space.md`（「Sessions」一节，最新在前）与 `task_worktree_space` 的 `list` 输出里——父会话因此
+  不必再「按 cwd 搜会话」。`list` 同时回显每个任务 `deploy/.state.json` 的 `url` 与 `lastSmoke`（`deployment`
+  字段），读法与面板一致（同一份 `deploy/.state.json`），少一次文件往返。
+  **向后兼容**：这个字段是可选的，没有它的旧记录读起来与以前**逐字相同**（`sessions` 为空只表示没人记下来，
+  不表示这个任务没有会话），记录版本号不变。写记录失败只报一条 warning、不让调用失败：会话已经在跑了，
+  为记账把这次派活报成失败，是更糟的一笔交易。
+
 ### 修复
 
 - **修好"把活交给新开的会话"这一步。** 宿主的 `sessionController.prompt(request, signal)` 把 `signal` 声明为

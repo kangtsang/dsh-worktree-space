@@ -13,6 +13,7 @@ import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTas
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { registerTaskTool, setSessionPermission } from './task/tool.js'
+import { registerSessionTools } from './session-tools.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -947,6 +948,25 @@ export function apply(ctx, config = {}) {
     ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) }))
   } else {
     registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) })
+  }
+
+  // The session-control tools: finding, watching, reading, messaging, resuming
+  // and stopping the sessions a task space is worked in. A dispatched session is
+  // not this session's child, so the ordinary parent/child channel refuses to
+  // reach it, and these are the only way to ask whether that work is still moving.
+  //
+  // Only `tools` is injected. The session services the tools use - `agents`,
+  // `sessions`, `sessionController`, `sessionPersistence`, `workspaceRegistry`,
+  // `agentPresets`, `sessionTitle` - are probed per call instead, because
+  // injecting them would make a profile that serves any one of them differently
+  // mount **no session tools at all**: silent, and indistinguishable from the
+  // plugin not being installed. Probing answers "this deployment does not offer
+  // X", which a caller can act on, and it is the same rule the rest of this
+  // plugin follows for a peer service a deployment need not serve.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['tools'], (toolsCtx) => registerSessionTools(toolsCtx))
+  } else {
+    registerSessionTools(ctx)
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on

@@ -13,8 +13,9 @@ import { discoverSourceRepos, isSourceRepository } from './discover.js'
 import { tryRunGit } from './git.js'
 import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
 import { assertIsolated, isInside } from './paths.js'
+import { deliveryStateSummary } from './deploy.js'
 
-import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot } from './shared.js'
+import { isLinkedWorktree, listTaskWorktrees, readTaskMetadata, resolveTasksRoot, taskSessionsOf } from './shared.js'
 
 export async function classifySourceRoot(sourceRoot, { signal, ...bounds } = {}) {
   const repositories = await discoverSourceRepos(sourceRoot, { signal, ...bounds })
@@ -226,10 +227,21 @@ export async function listTasks(subprocess, { tasksRoot } = {}) {
     for (const entry of await readdir(projectPath, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const taskPath = join(projectPath, entry.name)
+      // The record is read for every task, so a caller listing a container also
+      // learns which session is on each task and what each one's deployment
+      // recorded - two facts that otherwise cost a round trip per task. Both are
+      // read from the same files the panel reads, so the two can never disagree.
+      const recorded = await readTaskMetadata(taskPath)
+      const sessions = taskSessionsOf(recorded)
       tasks.push({
         name: entry.name,
         project: project.name,
         path: taskPath,
+        // A container that holds no record and no worktree is not a task this
+        // plugin made; it is still listed (the dialog needs to see it to offer
+        // recovery), and it simply answers with no sessions and no deployment.
+        ...(sessions.length === 0 ? {} : { sessions }),
+        delivery: await deliveryStateSummary(taskPath),
         repositories: await listTaskWorktrees(subprocess, taskPath),
       })
     }

@@ -12,7 +12,7 @@ import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot
 import { canonicalPath } from './paths.js'
 import { coded } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
-import { readTaskMetadata, taskSpacePath } from './shared.js'
+import { readTaskMetadata, recordTaskSession, taskSpacePath } from './shared.js'
 
 /**
  * Model-facing description: what this is for, the order to drive it in, and the
@@ -29,7 +29,8 @@ const DESCRIPTION = [
   'A create may name a deploy script to copy in as the fixed `deploy/deploy.sh`: pass deployScript, a file path relative to the source root, and it replaces whatever the source root\'s own deploy root carried, so a manifest that names `./deploy.sh` keeps working while the script behind it changes per task.',
   'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
   'Pass merge only when the user asked to merge - unless the task\'s own record already answers: merge.mode "auto" is that record saying the task merges back by itself, and then done merges without the argument, while merge.mode "never" refuses the ask (E4013) and leaves the merge to the user\'s own hand in the panel. The rest of the delivery gate stands either way: a policy that expects a deployment still needs that deployment and a passing smoke, because those are checks on the work rather than answers from a person. The branch is kept unless something explicitly says to delete it: deleteBranch true on this call, or that same standing answer in the task\'s record.',
-  'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine.',
+  'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine. The session id a create or a dispatch opened is written into the task\'s own record, and `list` reports it together with what each task\'s deploy recorded (the acceptance URL and the last smoke) - so neither has to be searched for or read out of a file.',
+  'Watch and correct that session through the session-control tools: wts_session_tool_find locates a session by directory, title or id; wts_session_tool_status reports running, openTurn, lastActivity, pendingWork and lastReply; wts_session_tool_read reads its messages; wts_session_tool_send says something to it; wts_session_tool_wait waits for one output; wts_session_tool_resume brings an offline session back; wts_session_tool_cancel stops it. A dispatched session is NOT this session\'s child, so send_message cannot reach it. Anything time-sensitive must be sent with mode "steer": mode "queue" is only read at a turn boundary, and a long task is often one long turn.',
   'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
   'A finish that really removes the task space unregisters it too, which is what leaves the workspace list without an entry pointing at a directory that is gone; its sessions then fall back to Ungrouped. Pass unregisterWorkspace false only when the user asked to keep that task\'s group: the entry stays, those sessions stay under it, and the list has a Workspace whose directory is gone. An entry that was already gone - the user deleted it, or it was never registered - is not an error.',
@@ -82,6 +83,42 @@ const OUTPUT_SCHEMA = {
     tasksRoot: { type: 'string', required: true },
     suggested: { type: 'string', required: true },
     sessionId: { type: 'string', required: true },
+    /**
+     * The sessions this task space has been worked in, newest first, as the
+     * record carries them. Filled by `list`, and by the `create` / `dispatch`
+     * that just opened one; empty when nothing has been recorded.
+     */
+    sessions: {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          sessionId: { type: 'string', required: true },
+          role: { type: 'string', required: true },
+          at: { type: 'string', required: true },
+        },
+      },
+    },
+    /**
+     * What each task's deploy recorded, as `list` reads it: the acceptance URL and
+     * the last smoke, so a caller does not have to open `deploy/.state.json`.
+     */
+    deployment: {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          task: { type: 'string', required: true },
+          url: { type: 'string', required: true },
+          smoke: { type: 'string', required: true },
+          smokeAt: { type: 'string', required: true },
+        },
+      },
+    },
     failed: { type: 'boolean', required: true },
     warnings: { type: 'array', required: true, items: { type: 'string' } },
     repositories: {
@@ -125,6 +162,8 @@ function envelope(action) {
     tasksRoot: '',
     suggested: '',
     sessionId: '',
+    sessions: [],
+    deployment: [],
     failed: false,
     warnings: [],
     repositories: [],
@@ -547,7 +586,16 @@ function summarize(action, value) {
   if (action === 'list') {
     if (value.repositories.length === 0 && value.container === '') return `No task space at ${value.tasksRoot}.`
     const perTask = value.repositories.filter((row) => row.name !== '').length
-    return `${value.repositories.length} task${value.repositories.length === 1 ? '' : 's'} under ${value.tasksRoot} (${perTask} worktree${perTask === 1 ? '' : 's'}).`
+    // The two facts a caller would otherwise have to fetch per task: the session
+    // that is on the work, and the acceptance URL a deploy recorded.
+    const sessions = value.sessions.length === 0
+      ? ''
+      : ` Sessions: ${value.sessions.map((entry) => entry.sessionId).join(', ')}.`
+    const deployed = value.deployment.filter((entry) => entry.url !== '')
+    const acceptance = deployed.length === 0
+      ? ''
+      : ` Acceptance: ${deployed.map((entry) => `${entry.task} -> ${entry.url}${entry.smoke === '' ? '' : ` (smoke ${entry.smoke})`}`).join('; ')}.`
+    return `${value.repositories.length} task${value.repositories.length === 1 ? '' : 's'} under ${value.tasksRoot} (${perTask} worktree${perTask === 1 ? '' : 's'}).${sessions}${acceptance}`
   }
   if (action === 'dispatch') {
     const opened = value.sessionId === ''
@@ -814,6 +862,19 @@ export function registerTaskTool(ctx, options = {}) {
           })
           value.sessionId = opened.sessionId
           if (opened.reason !== '') value.warnings.push(opened.reason)
+          // §4.3: the session id this call already knows is written into the task's
+          // own record, so the dispatching session - and the note a session in the
+          // task space reads - can name it without searching for it. Reported as a
+          // warning when it could not be written, never as a failure: the session
+          // is running, and losing the work to save the note about it would be the
+          // worse trade.
+          if (opened.sessionId !== '') {
+            const recorded = await readTaskMetadata(result.path)
+            if (!(await recordTaskSession(result.path, recorded, opened.sessionId, 'task'))) {
+              value.warnings.push(`the session id (${opened.sessionId}) could not be written into the task's record at `
+                + `${result.path}; find it again with wts_session_tool_find, by the task space directory`)
+            }
+          }
         }
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
         value.summary = summarize(action, value)
@@ -854,6 +915,20 @@ export function registerTaskTool(ctx, options = {}) {
           // Named the way the layout reads - project, task, repository - so two
           // projects' tasks of the same name cannot be read as one.
           const label = `${task.project}/${task.name}`
+          // The task's own two facts, so a caller can name the session that is
+          // working on it and read the acceptance URL without a second call. Both
+          // are the task's, not a repository's, which is why they are reported
+          // once per task and not once per row.
+          for (const entry of [...(task.sessions ?? [])].reverse()) {
+            value.sessions.push({ sessionId: entry.sessionId, role: entry.role, at: entry.at ?? '' })
+          }
+          const state = task.delivery ?? { url: null, lastSmoke: null }
+          value.deployment.push({
+            task: label,
+            url: state.url ?? '',
+            smoke: state.lastSmoke?.result ?? '',
+            smokeAt: state.lastSmoke?.at ?? '',
+          })
           if (task.repositories.length === 0) {
             value.repositories.push({ ...emptyRow(label), path: task.path })
             continue
@@ -984,6 +1059,15 @@ export function registerTaskTool(ctx, options = {}) {
         })
         value.sessionId = opened.sessionId
         if (opened.reason !== '') value.warnings.push(opened.reason)
+        // §4.3, the same recording a create does: a dispatch knows the session id it
+        // just opened, and writing it into the task's record is what saves the
+        // caller from searching for it by directory later.
+        if (opened.sessionId !== '') {
+          if (!(await recordTaskSession(taskPath, metadata, opened.sessionId, 'task'))) {
+            value.warnings.push(`the session id (${opened.sessionId}) could not be written into the task's record at `
+              + `${taskPath}; find it again with wts_session_tool_find, by the task space directory`)
+          }
+        }
         value.summary = summarize(action, value)
         return value
       }

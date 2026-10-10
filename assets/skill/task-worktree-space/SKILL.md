@@ -127,11 +127,13 @@ Follow this order. Never create a workspace with a guessed location.
    past a gate. `auto` is what the user says when they want a task that merges without
    them, not what the agent picks to avoid asking.
 9. **Report where it is, and say which entry opens the session.** When this call
-   opened one, name the session id it answered with; when it did not, a session is
-   opened by hand — the panel's **Create and open** in the Worktree Space dialog, or
-   picking the registered Workspace in the workspace list. Report the task directory
-   path and the branch name, then name that entry rather than leaving the user to
-   find it.
+   opened one, name the session id it answered with — the same id is now written into
+   the task's record, and `action: "list"` reports it — and use it to watch or correct
+   that session (see "Watching a session you dispatched" below). When it did not, a
+   session is opened by hand — the panel's **Create and open** in the Worktree Space
+   dialog, or picking the registered Workspace in the workspace list. Report the task
+   directory path and the branch name, then name that entry rather than leaving the
+   user to find it.
    A create that answers with a warning that the Workspace was **not** registered
    means one of three things, and the warning names which: the call asked for a task
    space that stays out of the list (`registerWorkspace: false`), the deployment
@@ -169,6 +171,47 @@ open, and the work is the user's to start.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
+
+### Watching a session you dispatched (and correcting it)
+
+A dispatched session is **not your child**: it has its own context and its own approval
+gate, and `send_message` refuses it outright (`belongs to another parent session`).
+Reach it with the session-control tools instead. The id you need is already in hand —
+`create` and `dispatch` write it into the task's record, and `action: "list"` reports
+it — so `wts_session_tool_find` is the fallback for when it is not.
+
+- **`wts_session_tool_status` is how "stuck" is told from "busy".** `lastActivity` is
+  the only reliable signal: during a build, file times, mtimes and log tails all sit
+  still, while the session's own clock keeps running. Pass `stalledMsThreshold` and a
+  **running** session is marked `stalled` past it; an idle one never is, because a
+  finished session being quiet is not stuck. `lastReply` and the reasoning tail say
+  what it currently believes it is doing. `lastTurnEnd` names a turn that did not end
+  `completed` (`error` / `interrupted` / `blocked` / `max-tokens`) — the one way to
+  tell "the task finished" from "an error killed it into silence", since both look
+  like idle with nothing queued.
+- **A correction that matters now must be a `steer`, never a `queue`.** `queue` is
+  read at the session's next **turn boundary**, and a long task is often one long
+  turn — so the message sits unread in the inbox while the session looks exactly like
+  one ignoring you. Use `wts_session_tool_send` with `mode: "steer"` for anything
+  time-sensitive ("stop, there are 23 uncommitted files and the finish needs it
+  clean"); reserve `queue` for what can genuinely wait for a boundary.
+- **To tell "never arrived" from "did not do it", read the log.**
+  `wts_session_tool_read` returns the messages with their `seq`; a message you sent
+  that is not there was not delivered, which is a different problem from one that
+  arrived and was ignored.
+- **A timeout is not an empty answer.** `wts_session_tool_wait` returns the output
+  that already existed, marked `stale`, when its budget runs out — so you always
+  learn what the session last said.
+- **The recovery chain, in order.** `status` first, to tell "running but stuck" from
+  "offline" → `wts_session_tool_resume` for the offline one (a host restart puts
+  every session offline), or `wts_session_tool_create` in **the same task space** for
+  one that is lost → and **read its last state before deciding what to send**.
+  `wts_session_tool_cancel` is the brake: it aborts the active turn, and `keepInbox`
+  decides whether the queued work survives.
+
+Do not poll in a loop, and do not steer or cancel on a timer: look at the real state
+when something suggests you should, then decide. That judgement is yours, not a
+watchdog's.
 
 ## Adding a repository to a task already under way
 

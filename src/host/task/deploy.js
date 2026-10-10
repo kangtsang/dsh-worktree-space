@@ -305,6 +305,37 @@ export async function ackAcceptance(taskPath) {
 }
 
 /**
+ * The two facts a caller wants from a task's delivery state without a second round
+ * trip: the acceptance URL and the last smoke.
+ *
+ * Read through the same reader the panel uses ({@link readDeliveryState}), so the
+ * tool and the card can never disagree about what a deploy recorded. Nothing is
+ * derived here: the fallback that asks a deploy root's own `status` command is the
+ * panel's explicit press, and running it from a `list` would make a read of many
+ * tasks run many scripts.
+ *
+ * Every absence is answered as absence rather than as an error: a task that was
+ * never deployed has no state file, and that is a fact about the task, not a
+ * failure of the caller's request.
+ * @param taskPath - the task space directory.
+ * @returns the URL and smoke as recorded, both null when nothing was.
+ */
+export async function deliveryStateSummary(taskPath) {
+  const found = await readDeliveryState(taskPath)
+  const smoke = found?.state?.lastSmoke
+  return {
+    url: typeof found?.state?.url === 'string' && found.state.url !== '' ? found.state.url : null,
+    lastSmoke: smoke === null || smoke === undefined || typeof smoke !== 'object'
+      ? null
+      : {
+        result: typeof smoke.result === 'string' ? smoke.result : 'unknown',
+        ...(typeof smoke.at === 'string' && smoke.at !== '' ? { at: smoke.at } : {}),
+      },
+    statePath: found?.path ?? null,
+  }
+}
+
+/**
  * The gate a merge has to pass when the policy ties it to a deployment.
  *
  * Three refusals, in the order they bite: the policy expects a deployment and none
