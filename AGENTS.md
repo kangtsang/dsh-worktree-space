@@ -25,6 +25,19 @@
 
 没明说时，默认停在本地。
 
+### 打完包要给出绝对路径
+
+`pnpm pack` 产出的 tarball 落在仓库根目录（本仓库是 `dsh-worktree-space-<version>.tgz`），
+而维护者取用它的地方**不在这个目录里** —— 报告里只写文件名，等于要对方先猜仓库根在哪。
+所以每次打包后，交付说明里**必须**给出：
+
+- **绝对路径**（例：`D:\code\public\dsh-worktree-space\dsh-worktree-space-1.2.2.tgz`），
+  不是相对路径、不是只有文件名；
+- 大小与 sha256（同一版本反复打包会得到不同 sha，**旧 sha 一律作废**，交付时说明以哪一份为准）。
+
+配套的既有要求：打包**之前**必须走完整的 `pnpm test`（见 §6 的「要打包或要验收之前」），
+因为 `check:tracked-bundle` 只挂在它上面，而那正是唯一能发现「源码改了、bundle 没重建」的检查。
+
 ## 2. 验收脚本
 
 `package.json` 里有四条 `acceptance:*` 脚本，入口在 `scripts/acceptance/`。它们会在受控沙箱里安装、启动并回滚多个 DSH 版本，涉及大量递归删除操作。
