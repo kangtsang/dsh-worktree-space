@@ -68,7 +68,7 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
   "verification": "agent-then-human",                       // agent | agent-then-human | human
   "merge":        { "mode": "auto", "target": null, "deleteBranch": true },  // mode: auto|ask|never
   "conflicts":    "ask",                                    // agent-auto | ask | stop
-  "strays":       "archive"                                 // archive | keep | discard
+  "strays":       "archive"                                 // archive | keep
 }
 ```
 
@@ -84,9 +84,9 @@ agent 的工作流指引见捆绑 skill（`task-worktree-space`）。
   仓库当前检出分支）；`ask`：等确认；`never`。合并只落本地，**永不 push**。
 - **conflicts** — `ask`（默认）：冲突停下等人；`agent-auto`：agent 自动解决
   conflictedFiles、提交合并、重试 done（提权公开请求，不在场即停）；`stop`。
-- **strays** — 未进 git 的生成物收尾方式：`archive`（自动归档到
-  `archived-docs\<项目>\<任务>-<时间戳>` 并清理产物）、`keep`（默认，列出让
-  你挑）、`discard`（仅放弃任务路径允许）。含链接（符号链接/交接点）的内容在
+- **strays** — 未进 git 的生成物收尾方式：`archive`（默认，自动归档到
+  `archived-docs\<项目>\<任务>-<时间戳>` 并清理产物）、`keep`（留在原地，收尾停下
+  并列出条目待处理）。含链接（符号链接/交接点）的内容在
   本机不能创建链接时不归档——留在原地并在 warning 里点名，移走那几个条目即可继续。
 
 项目默认存插件配置 **`deliveryDefaultsJson`**（Plugins 页，JSON 文本）：
@@ -153,7 +153,7 @@ targets:
 
 ## 5. 状态文件契约
 
-`<deploy 根>/.state.json`（或环境变量 `DSH_STATE_FILE` 指定）。**所有权**：
+`<deploy 根>/.state.json`。**所有权**：
 部署脚本写/改（up、smoke、destroy），面板只追加 `humanAck`（经确认验收端点），
 插件收尾销毁只改写 URL/销毁时间戳。字段：
 
@@ -196,5 +196,5 @@ targets:
 **多环境并存**：环境 id `dsh-<项目>-<任务>` 天然隔离——两个任务的容器、镜像、
 端口互不相干，面板各自显示各自的卡片。
 
-**放弃任务**：结束任务勾 force（面板）——不合并、强删分支；strays: discard
-策略此时才允许全部丢弃。
+**放弃任务**：结束任务勾 force（面板）——不合并、强删分支；未进 git 的生成物
+仍按 `strays` 策略处理（见上文「字段语义速查」，只有 `archive` / `keep` 两个取值）。
