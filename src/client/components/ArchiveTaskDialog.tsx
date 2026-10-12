@@ -315,7 +315,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     void loadPlan(next)
   }
 
-  const running = (workspace?.sessionIds ?? []).some((sessionId) => sessions.list.getSnapshot().byId[sessionId]?.running === true)
+  /**
+   * The sessions still working here, as the Host computed them.
+   *
+   * Read from the plan rather than from the session list, because the list can only answer
+   * `running` - a narrower question than the Host's rule, which also counts an open turn and
+   * queued work. Asking a different question is how this dialog came to allow a finish that the
+   * endpoint then refused, with a different sentence on each side.
+   */
+  const activeSessions = plan?.activeSessions ?? []
+  const running = activeSessions.length > 0
   /** Strays carrying writing, which the warning names one by one. */
   const documentStrays = (plan?.strays ?? []).filter((stray) => stray.documents > 0)
   // Build output and editor state are expected in a working directory; anything
@@ -492,19 +501,19 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // the pair the other way round.
         deleteBranch: options.deleteBranch && (options.merge || options.force),
         force: options.force,
-        // The container is cleared either way: archiving finishes a task, and a
-        // task that is finished leaves nothing of its own behind. What is left to
-        // decide is whether the user's writing is kept, and where.
-        cleanStray: true,
         // The user's "finish anyway" from the finish press, when the delivery
         // policy was not satisfied; the Host records the overrule as a warning.
         ...(acknowledgeDelivery ? { acknowledgeDelivery: true } : {}),
-        // The container's own content always leaves it: filed out of the way when
-        // the box is ticked (its default), discarded when it is not. Sent only
-        // when there is content, so the common case carries no extra arguments.
-        ...(contentStrays.length === 0 ? {} : options.archiveDocuments
-          ? { documentsDirectory }
-          : { discardDocuments: true }),
+        // What happens to the files git never tracked, as one choice rather than the
+        // three flags this used to send. The dialog's box is the whole decision: ticked
+        // (its default) files the content away and clears the build output, so this
+        // finish can remove the space; unticked deletes the content outright. With no
+        // content at all there is nothing to decide and `archive` is the answer that
+        // cannot lose anything - which is also what the Host does when `strays` is
+        // omitted, so the common case carries no extra arguments.
+        ...(contentStrays.length === 0
+          ? {}
+          : options.archiveDocuments ? { strays: "archive", documentsDirectory } : { strays: "discard" }),
       })
       // A registration is dropped only once the directory behind it is really gone:
       // a finish that failed keeps the container - with the worktree whose conflict
@@ -1150,7 +1159,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         {/* Same as the create dialog: outside the scrolling body, so an error
             cannot be scrolled away from - or hidden under the heading by - the
             button that answers it. */}
-        {running ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{t("archiveRunning")}</span></div> : null}
+        {running ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{format(t(activeSessions.length === 1 ? "hostE5012" : "hostE5012Many"), { count: String(activeSessions.length) })}</span></div> : null}
         {error ? <div className="dws-error dws-error-above-footer" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
         <div className="dws-dialog-footer">
           {result

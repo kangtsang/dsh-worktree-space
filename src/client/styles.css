@@ -129,6 +129,9 @@
   .dws-input::placeholder { color: var(--wt-muted); }
   .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
   .dws-input:disabled, .dws-select:disabled { opacity: .5; }
+  /* A field whose value cannot be used says so in its own colour, not only in the sentence
+     beside it: the sentence explains, the border points at which control it is about. */
+  .dws-input[aria-invalid="true"], .dws-select[aria-invalid="true"] { border-color: var(--wt-danger); }
   .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
   /* One path and one button, so the field takes the room the row has rather than a
      fixed width: the thing being typed is a path, and paths are all lengths. It
@@ -497,11 +500,18 @@
   .dws-delivery-label { color: var(--wt-secondary); font-size: 12px; }
   .dws-details .dws-input { background: var(--wt-surface); }
   .dws-field-label { display: block; margin: 0; padding: 0; color: var(--wt-text); font-size: 13px; font-weight: 400; line-height: 20px; }
-  /* A field's explanation sits on the label's own line, right-aligned against it, so
-     the control below starts the block and nothing follows it but the next field. */
+  /* A field's explanation shares the name's line, right-aligned against it: the control
+     below starts the block, and nothing follows it but the next field. An explanation too
+     long for that slot does not live here at all - it goes behind the `?` beside the name,
+     so the same field is never laid out two ways depending on how long its sentence
+     happens to be. */
   .dws-field-label:has(> .dws-field-note) { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
   .dws-field-label > span:first-child { white-space: nowrap; }
   .dws-field-label > .dws-field-note { text-align: right; }
+  /* The `?` rides at the end of the name, before the explanation: it is part of the
+     words, not a separate control, so it must not be pushed to the far edge by the
+     label's own `space-between`. */
+  .dws-field-label > .dws-field-name { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   /* An option's explanation sits beside its name rather than under the control. */
   .dws-field-heading, .dws-field-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; padding: 0; }
   /* A hint glyph beside a label. `align-self`, not the legend's own `baseline`: a
@@ -538,7 +548,13 @@
      of view nor under the heading. It is capped and scrolls itself, because a long
      message - a rollback that could not finish names several paths - must not
      push the buttons off the bottom of a short dialog. */
-  .dws-error-above-footer { flex: 0 1 auto; max-height: 22vh; overflow-y: auto; margin: 0; padding: 14px 24px 14px; }
+  /* `flex: none`, not `flex: 0 1 auto`. This banner sits in the dialog's flex column and
+     must never be squeezed: a shrinkable item in a height-bounded column gets compressed
+     below its own content, and with `overflow-y: auto` that compression shows up as a
+     scrollbar on a message that fits perfectly well on its own. It is bounded instead by
+     the max-height below, which only bites on a genuinely long message (a rollback that
+     could not finish names several paths). */
+  .dws-error-above-footer { flex: none; max-height: 22vh; overflow-y: auto; margin: 0; padding: 14px 24px 14px; }
   .dws-dialog-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; color: var(--wt-muted); font-size: 13px; }
   .dws-dialog-loading > div { display: flex; align-items: center; gap: 8px; }
   .dws-dialog-loading > span[aria-hidden] { display: block; flex-basis: 100%; height: 30px; margin-top: 6px; border-radius: 8px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
@@ -593,6 +609,19 @@
   .dws-check-option:has(.dws-checkbox:checked) { border-color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
   .dws-check-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-check-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }
+  /* The delivery tick: one decision rather than a list of them, so it is a plain row
+     instead of the repository picker's bordered card. It deliberately does NOT share
+     `dws-check-option` - that class is what the selection count and the bulk actions
+     select on, and a tick wearing it would be counted as a repository. */
+  .dws-deploy-option { display: inline-flex; align-items: flex-start; gap: 9px; min-width: 0; cursor: pointer; }
+  .dws-deploy-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 6px; }
+  .dws-deploy-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }
+  .dws-deploy-option .dws-check-copy { flex-direction: row; align-items: center; gap: 6px; }
+  /* The tick and its explanation on one line: the tick on the left, the note pushed to the
+     right edge, which is exactly how a named field's note sits beside its name. There is no
+     name above the tick - the tick's label IS the name - so the line is the label line. */
+  .dws-deploy-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+  .dws-deploy-line > .dws-field-note { text-align: right; }
   /* The checkbox is a filled, rounded tile with a tick drawn in it: two borders of one
      rotated box, which is one less thing to load than a mask and keeps its weight at any
      size. */

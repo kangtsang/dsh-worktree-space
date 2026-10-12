@@ -218,6 +218,15 @@ export interface FinishTaskRepository {
   mergeSite?: string
   /** The files the merge could not reconcile, relative to `mergeSite`. */
   conflictedFiles?: string[]
+  /** Work in the task space nobody has committed, so the finish stopped for it. */
+  needsCommit?: boolean
+  /**
+   * Work in the user's own checkout that a merge would overwrite.
+   *
+   * Not a conflict: no merge was started and there are no markers to reconcile. It is
+   * the user's own work and not this flow's to commit.
+   */
+  dirtyCheckout?: boolean
 }
 
 /** Answer of `task.inspect`: whether a directory is a task container. */
@@ -278,7 +287,7 @@ export interface TaskPlanRepository {
   error?: string
 }
 
-/** One entry in a container that is not a worktree; `cleanStray` removes these. */
+/** One entry in a container that is not a worktree; a `strays` choice of `archive` or `discard` removes these. */
 export interface TaskPlanStray {
   name: string
   directory: boolean
@@ -286,6 +295,17 @@ export interface TaskPlanStray {
   documents: number
   /** Build output and editor state are expected; anything else is the user's. */
   kind: "build" | "editor" | "content"
+}
+
+/** One session the Host found still working in a task space. */
+export interface TaskPlanActiveSession {
+  sessionId: string
+  /** The registry says it is running. */
+  running: boolean
+  /** Its log holds a turn that started and never ended. */
+  openTurn: boolean
+  /** Its inbox has work waiting to be taken. */
+  queued: boolean
 }
 
 /** Answer of `task.plan`: what archiving would do, before anything is done. */
@@ -303,6 +323,15 @@ export interface TaskPlan {
   repositories: TaskPlanRepository[]
   /** What the container holds besides its worktrees. */
   strays: TaskPlanStray[]
+  /**
+   * The sessions still working in this task space, as the Host computed them.
+   *
+   * Carried on the plan so the dialog does not have to ask a second question: its own pre-check
+   * used to read the session list for `running` alone, which disagreed with the Host's rule and
+   * let a finish look allowed that the endpoint then refused. The plan already goes out when the
+   * dialog opens, so this costs no extra call.
+   */
+  activeSessions?: TaskPlanActiveSession[]
 }
 
 /** Answer of `task.done`. */
@@ -394,11 +423,14 @@ export interface DeploymentContainer {
 export interface DeploymentStatus {
   envId: string
   target: string
-  /** The policy's verification mode, so the finish press knows whether an ack is owed. */
-  verification: string
   url: string | null
+  /**
+   * Where the URL came from. Only `state` is reachable now - the one-off read of a
+   * deploy root's own `status` command went with the manifest that declared it - but
+   * `derived` stays in the union so a Host running an older version still parses.
+   */
+  urlSource: "state" | "derived" | "none"
   lastSmoke: { at: string; result: string } | null
-  humanAck: { at: string; by?: string } | null
   destroyedAt: string | null
   stateFound: boolean
   statePath: string | null
@@ -412,11 +444,25 @@ export interface DeployDestroyResult {
   warning?: HostWarning
 }
 
+/**
+ * What a finish would still be waiting for, reported by a deploy or a smoke.
+ *
+ * `missing` carries keys rather than phrases - the same keys the gate's own
+ * refusals use - so the card can say them in the reader's language.
+ */
+export interface DeliveryGatePreview {
+  /** Whether the policy gates a merge at all. A `deploy.target` of `none` does not. */
+  applies: boolean
+  missing: string[]
+  target: string
+}
+
 /** What re-running the smoke through the deploy script answered. A failed smoke is a result, not an error. */
 export interface DeploySmokeResult {
   output: string
   exitCode: number | null
   status: DeploymentStatus
+  gate?: DeliveryGatePreview
 }
 
 /** What rebuilding the environment through the deploy script answered. */
@@ -424,10 +470,5 @@ export interface DeployUpResult {
   /** The tail of the deploy script's output, for a failure to name itself. */
   output: string
   status: DeploymentStatus
-}
-
-/** What recording a human acceptance answered. */
-export interface DeployAcceptResult {
-  statePath: string
-  humanAck: { at: string; by?: string }
+  gate?: DeliveryGatePreview
 }

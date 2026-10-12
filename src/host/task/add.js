@@ -28,7 +28,7 @@ import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName } from './naming.js'
 import { isInside, refuseDelete, samePathLocation } from './paths.js'
 
-import { TASK_METADATA, TASK_README, listTaskWorktrees, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { TASK_METADATA, TASK_README, listTaskWorktrees, pluginRootPath, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /**
  * The branch every repository of a task shares, read from the container itself.
@@ -171,9 +171,9 @@ async function restoreMetadata(taskPath, previousJson, previousReadme) {
         // `force`, not `recursive`: what came out of here is a file this plugin
         // wrote, and a directory sitting where it belongs is that path's own
         // problem to have, not this rollback's to clear by force.
-        await rm(join(taskPath, name), { force: true })
+        await rm(join(pluginRootPath(taskPath), name), { force: true })
       } else {
-        await writeFile(join(taskPath, name), before, 'utf8')
+        await writeFile(join(pluginRootPath(taskPath), name), before, 'utf8')
       }
     } catch {
       // Reported by the caller's own outcome, not here: the worktrees are already
@@ -272,8 +272,8 @@ export async function addTaskRepositories(subprocess, options) {
   // rather than as it would have been written. The note is read beside it because
   // the two are written one after the other, so a container that held only one of
   // them is a real state and each has to be put back on its own account.
-  const previousJson = await readFile(join(taskPath, TASK_METADATA), 'utf8').catch(() => undefined)
-  const previousReadme = await readFile(join(taskPath, TASK_README), 'utf8').catch(() => undefined)
+  const previousJson = await readFile(join(pluginRootPath(taskPath), TASK_METADATA), 'utf8').catch(() => undefined)
+  const previousReadme = await readFile(join(pluginRootPath(taskPath), TASK_README), 'utf8').catch(() => undefined)
 
   const created = []
   try {

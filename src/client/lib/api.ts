@@ -3,7 +3,6 @@ import type {
   AddRepositoriesResult,
   ConnectionService,
   CreateTaskResult,
-  DeployAcceptResult,
   DeployDestroyResult,
   DeploySmokeResult,
   DeployUpResult,
@@ -140,7 +139,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
-    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string; delivery?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
+    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string; deployTarget?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
     /**
      * Add repositories to a task that already exists.
      *
@@ -162,7 +161,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     planTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string> }, signal?: AbortSignal) => read<TaskPlan>("task.plan", payload, signal),
     /** Finish a task: remove its worktrees, keeping the branches unless asked otherwise. */
-    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; cleanStray?: boolean; keep?: string[]; documentsDirectory?: string; discardDocuments?: boolean; cause?: string; acknowledgeDelivery?: boolean }) => call<FinishTaskResult>("task.done", payload),
+    doneTask: (payload: { task: string; project: string; tasksRoot: string; targets?: Record<string, string>; merge?: boolean; target?: string; deleteBranch?: boolean; force?: boolean; strays?: string; keepEntries?: string[]; documentsDirectory?: string; cause?: string; acknowledgeDelivery?: boolean }) => call<FinishTaskResult>("task.done", payload),
     /**
      * Widen a session this dialog has just opened, so the commit it is there to make can
      * write a source repository's git metadata without asking.
@@ -178,8 +177,16 @@ export function createWorktreeApi(connection: ConnectionService) {
      * A task's deployment, read live: docker by the `dsh.env-id` label for what runs
      * right now, the deploy's state file for the URL, the smoke and the human ack.
      * A dynamic port changes with every deploy, so this is asked, never remembered.
+     *
+     * `derive` asks for the bounded fallback as well: when no state file exists, the
+     * deploy root's own `status` command is read once for a URL. It is off unless
+     * asked, because it runs a command of the task space's own.
      */
-    deployStatus: (path: string, signal?: AbortSignal) => read<DeploymentStatus>("task.deploy-status", { path }, signal),
+    deployStatus: (path: string, options?: { signal?: AbortSignal; derive?: boolean }) => read<DeploymentStatus>(
+      "task.deploy-status",
+      options?.derive === true ? { path, derive: true } : { path },
+      options?.signal,
+    ),
     /**
      * Tear the task's environment down, best effort by the same label: compose first
      * (the containers carry the file and directory to use), then whatever is still
@@ -198,10 +205,5 @@ export function createWorktreeApi(connection: ConnectionService) {
      * as a result (the red badge), not as a thrown error.
      */
     deploySmoke: (path: string) => call<DeploySmokeResult>("task.deploy-smoke", { path }),
-    /**
-     * Record the user's acceptance on the deployment state — the one act that turns
-     * a green smoke into a deliverable task under the agent-then-human policy.
-     */
-    acceptDeployment: (path: string) => call<DeployAcceptResult>("task.deploy-accept", { path }),
   }
 }

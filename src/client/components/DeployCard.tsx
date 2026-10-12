@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Check, RefreshCw, X } from "./icons"
+import { RefreshCw, X } from "./icons"
 import { format, useT } from "../lib/i18n"
 import { Button } from "./ui"
-import type { DeploymentStatus } from "../lib/types"
+import type { DeliveryGatePreview, DeploymentStatus } from "../lib/types"
 
 interface Props {
   api: any
@@ -20,8 +20,25 @@ function stamp(iso: string | null | undefined) {
 }
 
 /**
+ * The gate's missing keys, said in the reader's language.
+ *
+ * Mapped explicitly rather than looked up by a built key, because a key the Host
+ * adds later would then be printed raw: a name nobody translated is worse than the
+ * Host's own English sentence, and this list is the one place that can notice.
+ * An unrecognised key falls back to the Host's sentence through `t`'s own default
+ * path - it is shown, not swallowed.
+ */
+function gateMissingText(t: (key: any) => string, missing: string[]) {
+  const labels: Record<string, string> = {
+    deployment: t("deployGateMissingDeployment"),
+    smoke: t("deployGateMissingSmoke"),
+  }
+  return missing.map((key) => labels[key] ?? key).join(t("deployGateAnd"))
+}
+
+/**
  * The deployment card a task row carries: the acceptance URL on its own line, the
- * smoke the deploy last ran, the human acceptance ack, and the actions under them.
+ * smoke the deploy last ran, and the actions under them.
  *
  * It reads the deployment live on mount and on demand — a dynamic port changes with
  * every deploy, so nothing here is remembered. It renders nothing at all for a task
@@ -36,6 +53,10 @@ function stamp(iso: string | null | undefined) {
 export function DeployCard({ api, path }: Props) {
   const t = useT()
   const [status, setStatus] = useState<DeploymentStatus | null>(null)
+  // What the last deploy or smoke said a finish would still be waiting for. Held
+  // beside the status rather than folded into it: it is an answer about the
+  // *policy*, produced by an action, and a plain status read cannot produce it.
+  const [gate, setGate] = useState<DeliveryGatePreview | null>(null)
   const [error, setError] = useState("")
   const [working, setWorking] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -44,7 +65,7 @@ export function DeployCard({ api, path }: Props) {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const next: DeploymentStatus = await api.deployStatus(path, signal)
+      const next: DeploymentStatus = await api.deployStatus(path, { signal })
       setStatus(next)
       setFailed(false)
       setError("")
@@ -70,9 +91,14 @@ export function DeployCard({ api, path }: Props) {
       // Operations that ran a script answer with the live status already in hand
       // (the smoke's own verdict is in it, red included) - paint that, and only
       // fall back to a fresh read when the action returned nothing to paint.
-      const result = await action() as { status?: DeploymentStatus } | undefined
+      const result = await action() as { status?: DeploymentStatus; gate?: DeliveryGatePreview } | undefined
       if (result?.status) setStatus(result.status)
       else await load()
+      // An action that answered with the gate has just changed what the finish
+      // waits for, so its answer replaces the last one; an action that did not
+      // (a destroy, a plain refresh) leaves the previous answer standing rather
+      // than blanking a fact that is still true.
+      if (result && "gate" in result) setGate(result.gate ?? null)
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : String(runError))
     } finally {
@@ -94,6 +120,10 @@ export function DeployCard({ api, path }: Props) {
   if (failed || status === null) return null
   const containers = status.containers.length > 0
   if (status.target === "none" && !status.stateFound && !containers) return null
+  // A policy that deploys nothing offers no deployment to start or smoke - the Host refuses
+  // both - but the space can still hold containers from a deploy made outside this flow, so the
+  // card keeps showing them and keeps the one action that stays meaningful: tearing them down.
+  const deploys = status.target !== "none"
 
   const smoke = status.lastSmoke
   const smokeBadge = smoke?.result === "pass"
@@ -109,32 +139,44 @@ export function DeployCard({ api, path }: Props) {
       {containers ? <span className="dws-deploy-containers">{format(t("deployContainers"), { count: String(status.containers.length) })}</span> : null}
       <Button className="dws-button-ghost dws-deploy-refresh" disabled={working} aria-label={t("deployRefresh")} title={t("deployRefresh")} onClick={() => run(() => Promise.resolve())}><RefreshCw size={13} /></Button>
     </div>
+    {/* The smoke is the whole of the acceptance record now: it is what the finish
+        gate reads, and a green one is the verdict. There used to be a second badge
+        here for a human acceptance ack the policy could wait for; that gate is gone,
+        so the row says one thing rather than two that disagreed. */}
     <div className="dws-deploy-badges">
       <span className={`dws-status ${smokeBadge.cls}`} title={stamp(smoke?.at) || undefined}><span className="dws-status-dot" />{smokeBadge.label}{smoke?.at ? ` ${stamp(smoke.at)}` : ""}</span>
-      {status.humanAck
-        ? <span className="dws-status dws-status-clean" title={stamp(status.humanAck.at) || undefined}><span className="dws-status-dot" />{t("deployAcked")} {stamp(status.humanAck.at)}</span>
-        : <span className="dws-status dws-status-checking"><span className="dws-status-dot" />{t("deployAckMissing")}</span>}
     </div>
+    {/* What a finish would still refuse over, said here rather than at the finish.
+        Only shown when the last deploy or smoke answered it and something is in
+        fact missing: a policy with no gate, or one already satisfied, has nothing
+        to say and gets no line. */}
+    {gate !== null && gate.applies && gate.missing.length > 0
+      ? <div className="dws-deploy-gate">
+        <span className="dws-deploy-muted">{format(t("deployGateWaiting"), { missing: gateMissingText(t, gate.missing) })}</span>
+      </div>
+      : null}
     <div className="dws-deploy-row">
       <span className="dws-deploy-label">{t("deployUrlLabel")}</span>
       {status.url
         ? <a className="dws-deploy-url" href={status.url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{status.url}</a>
         : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
       <div className="dws-deploy-actions">
-        {containers
+        {deploys && containers
           ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
           : null}
-        {containers
-          ? null
-          : <Button className="dws-button-ghost dws-deploy-up" disabled={working} title={t("deployUp")} onClick={() => run(() => api.deployUp(path))}><RefreshCw size={14} /><span>{t("deployUp")}</span></Button>}
-        {status.stateFound && status.humanAck === null && status.url
-          ? <Button className="dws-button-ghost dws-deploy-accept" disabled={working} title={t("deployAccept")} onClick={() => run(() => api.acceptDeployment(path))}><Check size={14} /><span>{t("deployAccept")}</span></Button>
+        {deploys && !containers
+          ? <Button className="dws-button-ghost dws-deploy-up" disabled={working} title={t("deployUp")} onClick={() => run(() => api.deployUp(path))}><RefreshCw size={14} /><span>{t("deployUp")}</span></Button>
           : null}
         {containers
           ? <Button className={`dws-button-ghost dws-deploy-destroy${armingDestroy ? " dws-deploy-destroy-armed" : ""}`} disabled={working} title={t("deployDestroy")} onClick={onDestroyPress}><X size={14} /><span>{armingDestroy ? t("deployDestroyAgain") : t("deployDestroy")}</span></Button>
           : null}
       </div>
     </div>
+    {/* Containers with nothing recorded is the shape that reads as "the panel is broken": name
+        what is missing, who was supposed to write it, and what it costs. */}
+    {containers && !status.stateFound
+      ? <span className="dws-deploy-error">{t("deployStateMissing")}</span>
+      : null}
     {error !== "" ? <span className="dws-deploy-error">{error}</span> : null}
   </div>
 }

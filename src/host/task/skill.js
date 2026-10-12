@@ -3,7 +3,7 @@
  *
  * The workflow guidance ships inside this package so it stays in step with the
  * operations it describes. The body is guidance only — the work itself happens
- * through the `task_worktree_space` tool — so the skill directory carries no scripts,
+ * through the `wts_worktree_space` tool — so the skill directory carries no scripts,
  * which also keeps it usable on a platform where the plugin's shell seam is not.
  */
 import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs'

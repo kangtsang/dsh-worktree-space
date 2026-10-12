@@ -139,6 +139,18 @@ describe("the code table and the public filter are one list", () => {
     // E and four digits: the first digit is the category, the last three the
     // position within it. A gap means a number was retired and the table has not
     // been renumbered - which is deliberate, but only if it was on purpose.
+    //
+    // Retired here on purpose, and never reused. A number that changes meaning is
+    // worse than a gap: a log line or a transcript from an older version would be
+    // read as something it never said, and nothing in the file would contradict
+    // that reading.
+    const RETIRED = new Set([
+      "E4013", // the task's record could refuse a merge this flow was told not to make
+      "E5005", // the gate had a separate code for "no state file at all", folded into E5006
+      "E5007", // the gate waited for a human acceptance ack as well as a smoke
+      "E5009", // the deploy manifest did not offer the policy's target
+      "E5010", // the deploy manifest existed but could not be parsed
+    ])
     const { ERROR_CODES } = await import("../src/host/task/codes.js")
     const byCategory = new Map()
 
@@ -149,10 +161,17 @@ describe("the code table and the public filter are one list", () => {
       byCategory.get(category).push(Number(code.slice(2)))
     }
 
-    for (const positions of byCategory.values()) {
+    for (const [category, positions] of byCategory.entries()) {
       const sorted = [...positions].sort((a, b) => a - b)
-      // Sequential from 1: a code in a category is found by counting down it.
-      expect(sorted).toEqual(Array.from({ length: sorted.length }, (_, index) => index + 1))
+      // Sequential from 1 once the deliberately retired numbers are put back: a code
+      // in a category is found by counting down it, and a gap is only a gap because
+      // something was taken out of the middle rather than never written.
+      const gone = [...RETIRED]
+        .filter((code) => code[1] === category)
+        .map((code) => Number(code.slice(2)))
+      const expected = Array.from({ length: sorted.length + gone.length }, (_, index) => index + 1)
+        .filter((position) => !gone.includes(position))
+      expect(sorted).toEqual(expected)
     }
   })
 
@@ -196,10 +215,14 @@ describe("the code table and the public filter are one list", () => {
     for (const rel of await readdir(dir, { recursive: true })) {
       if (!rel.endsWith(".js")) continue
       const source = await readFile(`${dir}${rel}`, "utf8")
-      for (const match of source.matchAll(/\bE\d{4}\b/g)) {
-        const code = match[0]
-        if (code === UNKNOWN) continue          // the catch-all, deliberately outside the table
-        if (!raised.has(code)) raised.set(code, rel)
+      // Comments are stripped first, because a code NAMED in prose is not a code raised.
+      // A comment saying "this used to be E5005" would otherwise read as a live throw and
+      // demand a table entry for a code that is deliberately retired.
+      const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1")
+      for (const match of code.matchAll(/\bE\d{4}\b/g)) {
+        const found = match[0]
+        if (found === UNKNOWN) continue          // the catch-all, deliberately outside the table
+        if (!raised.has(found)) raised.set(found, rel)
       }
     }
 

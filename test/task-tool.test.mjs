@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { rmSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { existsSync, rmSync } from "node:fs"
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { registerTaskTool } from "../src/host/task/tool.js"
+import { PLUGIN_ROOT } from "../src/host/task/shared.js"
+
+/**
+ * The record, from the task space directory: the plugin keeps it in its own directory, so
+ * every fixture that hand-builds a task space has to put it there too.
+ * @param taskPath - the task space directory.
+ * @returns the record's absolute path.
+ */
+const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.json")
 
 /** Minimal subprocess double replying empty output to every git call. */
 const quietSubprocess = {
@@ -48,9 +57,15 @@ const creatingSubprocess = {
 }
 
 /** A source root holding one repository. */
-async function sourceFixture() {
+async function sourceFixture({ deployScript = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), "multi-worktree-tool-"))
   await mkdir(join(root, "alpha", ".git"), { recursive: true })
+  // A create that says it deploys needs something to deploy with (E4015), so a test whose
+  // subject is the deploying shape has to give the source root an entry to find.
+  if (deployScript) {
+    await mkdir(join(root, PLUGIN_ROOT, "deploy"), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, "deploy", "deploy.sh"), "#!/bin/sh\necho up\n", "utf8")
+  }
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
 }
 
@@ -68,8 +83,8 @@ async function sourceFixture() {
  *   test that has to read what the create recorded before it goes.
  * @returns the action's value, the captured definition, the container, and a cleanup.
  */
-async function createOnce(services = {}, extra = {}, exec = {}, { keep = false } = {}) {
-  const source = await sourceFixture()
+async function createOnce(services = {}, extra = {}, exec = {}, { keep = false, deployScript = false } = {}) {
+  const source = await sourceFixture({ deployScript })
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
   const cleanup = async () => {
     await source.cleanup()
@@ -94,50 +109,86 @@ async function createOnce(services = {}, extra = {}, exec = {}, { keep = false }
 const PROJECT = "kratos-admin"
 
 /**
+ * A container root for the tests that only need a path.
+ *
+ * The active-session guard compares paths and never touches the filesystem, so a fixed absolute
+ * root answers for it; tests that need real directories build their own fixture.
+ */
+const CONTAINER = join(tmpdir(), "wts-tool-container")
+
+/**
  * A task space with one worktree on disk and the record a create leaves, plus the
  * subprocess double that answers for its git reads.
  *
  * `keepWorktree` leaves the worktree where it is, which is what a finish that
  * cannot empty the container looks like from the outside: the removal was asked
  * for and the directory is still there.
- * @param options - whether the mocked removal should leave the worktree alone.
- * @returns the container root, the task space, the double and a cleanup.
+ *
+ * `conflict`, `uncommitted` and `dirtyCheckout` each make the double answer the way a
+ * real repository does at that stop, so the flags the tool reports are produced by the
+ * same code an agent would meet - not hand-built rows. `session` seeds the task record
+ * with the session that was working in it, which is what the summary names.
+ * @param options - the shape to mock, and whether the removal should leave the worktree.
+ * @returns the container root, the task space, the double, the calls made and a cleanup.
  */
-async function taskSpaceFixture({ keepWorktree = false, delivery } = {}) {
+async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = false, uncommitted = false, dirtyCheckout = false, session = "sess-task" } = {}) {
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-done-"))
   const taskPath = join(container, PROJECT, "login")
   const worktree = join(taskPath, "alpha")
   await mkdir(worktree, { recursive: true })
   await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
-  // The record a create leaves behind, and the only thing that says which branch
-  // this task made.
-  await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+  // The record a create leaves behind, in the plugin's own directory, and the only
+  // thing that says which branch this task made.
+  await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+  await writeFile(recordAt(taskPath), JSON.stringify({
     task: "login", project: PROJECT, branch: "task/login",
+    ...(session === "" ? {} : { sessions: [{ sessionId: session, role: "work", at: "2026-01-01T00:00:00Z" }] }),
     ...(delivery === undefined ? {} : { delivery }),
   }, null, 2) + "\n")
   const mainRepo = join(tmpdir(), "multi-worktree-tool-done-main-alpha")
   const porcelain = `worktree ${mainRepo}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${worktree}\nHEAD bbb\nbranch refs/heads/task/login\n`
+  const calls = []
   const subprocess = {
     spawn: ({ argv }) => {
       const key = argv.slice(3).join(" ")
+      calls.push(key)
       let exitCode = 0
       let stdout = ""
-      if (key.startsWith("rev-parse --verify --quiet MERGE_HEAD")) exitCode = 1
-      else if (key.startsWith("rev-parse --abbrev-ref HEAD")) stdout = argv[2] === worktree ? "task/login" : "main"
+      if (key.startsWith("rev-parse --verify --quiet MERGE_HEAD")) {
+        // A merge is standing only in the conflict shape.
+        exitCode = conflict ? 0 : 1
+      } else if (key.startsWith("rev-parse --abbrev-ref HEAD")) stdout = argv[2] === worktree ? "task/login" : "main"
       else if (key.startsWith("worktree list --porcelain")) stdout = porcelain
+      else if (key.startsWith("status --short")) {
+        if (uncommitted) stdout = " M a.ts\n"
+      } else if (key.startsWith("diff --name-only --diff-filter=U")) {
+        if (conflict) stdout = "src/a.ts\n"
+      } else if (key.startsWith("merge --no-ff --no-edit")) {
+        // The rehearsal the finish runs before touching the target branch. A conflict
+        // stops it with the merge standing; the dirty-checkout shape is refused by git
+        // in its own words, which is what the tool has to tell apart from a conflict.
+        if (dirtyCheckout) {
+          exitCode = 1
+        } else if (conflict) {
+          exitCode = 1
+        }
+      }
       // The mocked removal has to change the filesystem: the container only becomes
       // removable once the directory it held is really gone.
       else if (key.startsWith("worktree remove") && !keepWorktree) rmSync(argv[5], { recursive: true, force: true })
+      const stderr = dirtyCheckout && key.startsWith("merge --no-ff --no-edit")
+        ? "error: Your local changes to the following files would be overwritten by merge:\n\ta.ts\n"
+        : ""
       return {
         done: Promise.resolve({ exitCode, signal: null }),
         collected: {
           stdout: { readFrom: () => ({ text: stdout }) },
-          stderr: { readFrom: () => ({ text: "" }) },
+          stderr: { readFrom: () => ({ text: stderr }) },
         },
       }
     },
   }
-  return { container, taskPath, subprocess, cleanup: () => rm(container, { recursive: true, force: true }) }
+  return { container, taskPath, subprocess, calls, cleanup: () => rm(container, { recursive: true, force: true }) }
 }
 
 /**
@@ -165,11 +216,11 @@ function expectEnvelopeShape(schema, value) {
 }
 
 describe("registerTaskTool", () => {
-  it("registers exactly one task_worktree_space tool and returns its disposer", () => {
+  it("registers exactly one wts_worktree_space tool and returns its disposer", () => {
     const { ctx, captured } = toolContext()
     const dispose = registerTaskTool(ctx)
     expect(captured).toHaveLength(1)
-    expect(captured[0].name).toBe("task_worktree_space")
+    expect(captured[0].name).toBe("wts_worktree_space")
     expect(captured[0].parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "dispatch", "done"])
     expect(typeof captured[0].execute).toBe("function")
     expect(typeof dispose).toBe("function")
@@ -181,7 +232,8 @@ describe("registerTaskTool", () => {
       registerTaskTool(ctx)
       // Force is irreversible twice over - it discards uncommitted work and swaps
       // `branch -d` for `branch -D` - so it is not gated on a flag the model also
-      // holds. It is refused outright, before the container root is even resolved.
+      // holds. It is refused outright, before the container root is even resolved,
+      // and before the `done` branch ever asks whether this call said `merge`.
       await expect(captured[0].execute({ action: "done", task: "login", force: true }, {}))
         .rejects.toMatchObject({ code: "E7007" })
       await expect(captured[0].execute({ action: "done", task: "login", force: true }, {}))
@@ -197,13 +249,197 @@ describe("registerTaskTool", () => {
     } finally { /* nothing was written: the refusal comes first */ }
   })
 
+  it("refuses strays discard, which deletes the user's own files", async () => {
+    const { ctx, captured } = toolContext()
+    try {
+      registerTaskTool(ctx)
+      // The other irreversible request, and refused for the same reason as force:
+      // deleting files git never tracked has no reflog behind it and no branch to
+      // recover from, so it is the user's own decision and not the model's. A
+      // description that says "ask first" would be guidance rather than a gate,
+      // which is why this is refused rather than discouraged.
+      await expect(captured[0].execute({ action: "done", task: "login", strays: "discard", merge: false }, {}))
+        .rejects.toMatchObject({ code: "E7007" })
+      await expect(captured[0].execute({ action: "done", task: "login", strays: "discard", merge: false }, {}))
+        .rejects.toThrow(/Worktree Space panel/)
+      // The refusal is checked before `merge` is, so it bites even on a call that
+      // left the required argument out - the model is told the real reason.
+      await expect(captured[0].execute({ action: "done", task: "login", strays: "discard" }, {}))
+        .rejects.toMatchObject({ code: "E7007" })
+      // The two choices that lose nothing still go through to the host's own rules.
+      for (const strays of ["archive", "keep"]) {
+        await expect(captured[0].execute({ action: "done", task: "login", strays, merge: false }, {}))
+          .rejects.not.toMatchObject({ code: "E7007" })
+      }
+    } finally { /* nothing was written: the refusal comes first */ }
+  })
+
+  it("refuses a finish that does not say whether to merge", async () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    // `merge` is required, and it is required by the `done` branch rather than by
+    // the parameter schema, because that schema is flat and shared by every action:
+    // marking it required there would demand it of `create`, `list` and the rest.
+    // So a call that leaves it out is refused by the hand-written check, with E7006.
+    await expect(captured[0].execute({ action: "done", task: "login" }, {}))
+      .rejects.toMatchObject({ code: "E7006" })
+    await expect(captured[0].execute({ action: "done", task: "login" }, {}))
+      .rejects.toThrow(/merge is required for done/)
+    // A value that is not a boolean at all is refused a step earlier, by the schema's
+    // own type check - which is the same answer by the other route: no finish ever
+    // reads a `merge` that is not true or false.
+    await expect(captured[0].execute({ action: "done", task: "login", merge: "true" }, {}))
+      .rejects.toThrow(/merge/)
+  })
+
+  it("refuses a finish while a session is still working in the task space", async () => {
+    // A finish removes the worktrees and the task space, so a session whose cwd is in there
+    // loses the ground under it mid-turn. Refused before anything is removed, with the sessions
+    // named and both honest ways forward.
+    const taskPath = join(CONTAINER, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: taskPath }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+    }
+    const { ctx, captured } = toolContext(quietSubprocess, services)
+    registerTaskTool(ctx)
+
+    await expect(captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      {},
+    )).rejects.toMatchObject({ code: "E5012" })
+    await expect(captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      {},
+    )).rejects.toThrow(/session-worker/)
+  })
+
+  it("lets a session finish its own work, and still refuses while another one is in there", async () => {
+    // The session-finishes-its-own-work flow: the caller is running, with a turn open, inside the
+    // very task space it is asking to remove. Counting the caller would refuse it with itself as
+    // the blocker, and the only escape (cancel yourself first) ends the turn and the report with
+    // it - so the caller is excluded and every other session still counts.
+    const taskPath = join(CONTAINER, "public", "login")
+    const caller = {
+      id: "session-caller", status: "running", inbox: {},
+      session: { header: { id: "session-caller", cwd: taskPath }, snapshotEvents: () => [{ type: "turn/start", data: { turn: 1 } }] },
+    }
+    const other = {
+      id: "session-other", status: "running", inbox: {},
+      session: { header: { id: "session-other", cwd: taskPath }, snapshotEvents: () => [{ type: "turn/start", data: { turn: 1 } }] },
+    }
+    const exec = { agent: { session: { id: "session-caller" } } }
+
+    // Alone in the space: the caller is not its own blocker.
+    const alone = toolContext(quietSubprocess, { agents: { list: () => [caller] } })
+    registerTaskTool(alone.ctx)
+    await expect(alone.captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      exec,
+    )).rejects.not.toMatchObject({ code: "E5012" })
+
+    // With another session in there: refused, and the other one is the session named.
+    const together = toolContext(quietSubprocess, { agents: { list: () => [caller, other] } })
+    registerTaskTool(together.ctx)
+    await expect(together.captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      exec,
+    )).rejects.toMatchObject({ code: "E5012" })
+    await expect(together.captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      exec,
+    )).rejects.toThrow(/session-other/)
+  })
+
+  it("counts a session that is mid-turn, or holding queued work, as still working", async () => {
+    // Three signals, because each alone misses a case: `running` misses a turn that has ended
+    // with work queued, the open turn misses a session the registry reports idle, and the inbox
+    // misses a turn running with nothing queued. A finish has to see all three.
+    const taskPath = join(CONTAINER, "public", "login")
+    const cases = {
+      "mid-turn": {
+        id: "s-midturn", status: "idle", inbox: {},
+        session: { header: { id: "s-midturn", cwd: taskPath }, snapshotEvents: () => [{ type: "turn/start", data: { turn: 1 } }] },
+      },
+      "queued work": {
+        id: "s-queued", status: "idle",
+        session: { header: { id: "s-queued", cwd: taskPath }, snapshotEvents: () => [] },
+        inbox: { nextTurn: [{ id: "m1" }], nextStep: [] },
+      },
+    }
+    for (const [label, agent] of Object.entries(cases)) {
+      const { ctx, captured } = toolContext(quietSubprocess, { agents: { list: () => [agent] } })
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+        {},
+      ), label).rejects.toMatchObject({ code: "E5012" })
+    }
+  })
+
+  it("lets a finish through when the session in that space has stopped", async () => {
+    // The negative control: a session whose turn ended and whose inbox is empty is not working,
+    // so the guard must not fire. Without this, a guard that always refused would pass the two
+    // tests above.
+    const taskPath = join(CONTAINER, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-done",
+          status: "idle",
+          session: {
+            header: { id: "session-done", cwd: taskPath },
+            snapshotEvents: () => [{ type: "turn/start", data: { turn: 1 } }, { type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } }],
+          },
+          inbox: { nextTurn: [], nextStep: [] },
+        }],
+      },
+    }
+    const { ctx, captured } = toolContext(quietSubprocess, services)
+    registerTaskTool(ctx)
+
+    // It still fails - there is no task space on this fake filesystem - but NOT with E5012.
+    await expect(captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      {},
+    )).rejects.not.toMatchObject({ code: "E5012" })
+  })
+
+  it("ignores a session working outside the task space", async () => {
+    // A finish is about one task space. A busy session elsewhere - another task, or the
+    // dispatcher itself - must not block it, or no finish could ever run while the caller works.
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-elsewhere",
+          status: "running",
+          session: { header: { id: "session-elsewhere", cwd: join(CONTAINER, "public", "other-task") }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+    }
+    const { ctx, captured } = toolContext(quietSubprocess, services)
+    registerTaskTool(ctx)
+
+    await expect(captured[0].execute(
+      { action: "done", task: "login", project: "public", tasksRoot: CONTAINER, merge: false },
+      {},
+    )).rejects.not.toMatchObject({ code: "E5012" })
+  })
+
   it("leaves the recoverable parts of finishing alone", async () => {
     const { ctx, captured } = toolContext()
     registerTaskTool(ctx)
     // Merging, and removing a branch once it has landed, are both available here:
     // `git branch -d` refuses an unmerged branch on its own, so neither loses a
     // commit. This asserts the refusal is scoped to `force` and nothing else.
-    await expect(captured[0].execute({ action: "done", task: "login", merge: true, deleteBranch: true, cleanStray: true }, {}))
+    await expect(captured[0].execute({ action: "done", task: "login", merge: true, deleteBranch: true, strays: "archive" }, {}))
       .rejects.not.toMatchObject({ code: "E7007" })
   })
 
@@ -212,6 +448,51 @@ describe("registerTaskTool", () => {
     registerTaskTool(ctx)
     expect(captured[0].parameters.properties.force.description).toMatch(/Refused here/)
     expect(captured[0].description).toMatch(/cannot do `force`/)
+  })
+
+  it("declares the delivery decisions where they are now taken, and nowhere else", () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    const properties = captured[0].parameters.properties
+    // The create states one flat target; the JSON policy blob it used to take is gone,
+    // so a caller cannot hand over a field this flow no longer reads.
+    expect(properties.deployTarget.enum).toEqual(["docker", "none"])
+    expect(properties).not.toHaveProperty("delivery")
+    // The finish states its own decisions, in the shape the action reads them.
+    // `discard` stays declared and is refused by the guard, which is exactly how
+    // `force` is treated: the parameter exists so the refusal can be explained in
+    // full, and the description says which value this side will not carry out.
+    expect(properties.strays.enum).toEqual(["archive", "keep", "discard"])
+    expect(properties.strays.description).toMatch(/REFUSED here/)
+    expect(properties.strays.description).toMatch(/E7007/)
+    expect(properties.keepEntries.type).toBe("array")
+    expect(properties).toHaveProperty("documentsDirectory")
+    // `merge` is still a plain optional boolean in the schema - it is the `done`
+    // branch, not the declaration, that makes it required - so the model is told so
+    // in the description instead.
+    expect(properties.merge.type).toBe("boolean")
+    expect(properties.merge.description).toMatch(/REQUIRED for done/)
+    expect(properties.merge.description).toMatch(/E7006/)
+    // And the three names they replaced are not offered under their old spellings.
+    expect(properties).not.toHaveProperty("cleanStray")
+    expect(properties).not.toHaveProperty("keep")
+    expect(properties).not.toHaveProperty("discardDocuments")
+  })
+
+  it("asks for the acceptance fence before anything is created, and says where it belongs", () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    const properties = captured[0].parameters.properties
+    // The decision is create-time only, so the parameter's own default is otherwise an
+    // answer nobody gave; the description has to say where the question belongs.
+    expect(properties.deployTarget.description).toMatch(/before anything is created or dispatched/)
+    expect(properties.deployTarget.description).toMatch(/cannot be added or changed afterwards/)
+    // And the tool's own description carries the rule too, because `dispatch` takes no
+    // delivery argument at all - this is the only place a fence can be asked about when
+    // the space already exists.
+    expect(captured[0].description).toMatch(/Ask about the acceptance fence/)
+    expect(captured[0].description).toMatch(/never answer it for the user/)
+    expect(captured[0].description).toMatch(/the smoke is the finish line/)
   })
 
   it("stays out of the way when the deployment serves no tool runtime", () => {
@@ -300,7 +581,8 @@ describe("registerTaskTool", () => {
     const worktree = join(taskPath, "alpha")
     await mkdir(worktree, { recursive: true })
     await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
-    await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+    await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+    await writeFile(recordAt(taskPath), JSON.stringify({
       version: 1, task: "login", project: "kratos-admin", tasksRoot: container,
       sourceRoot: "E:/source", branch: "task/login", baseRef: null,
       createdAt: "2026-10-01T00:00:00.000Z",
@@ -339,30 +621,51 @@ describe("registerTaskTool", () => {
     }
   })
 
-  it("records the delivery policy the create stated, rather than the project default", async () => {
-    // The delivery bar is the user's to set, and a create is where they can state it: what the
-    // call carries is what the task's own record keeps, so one task can merge by itself without
-    // changing the project's stored answer.
-    const { value, cleanup } = await createOnce({}, {
-      delivery: JSON.stringify({ deploy: { target: "none" }, verification: "agent", merge: { mode: "auto", deleteBranch: false } }),
-    }, {}, { keep: true })
+  it("records the delivery target the create stated, and nothing else", async () => {
+    // The delivery bar is the user's to set, and a create is where they state it: the flat
+    // `deployTarget` the call carries is wrapped as the policy the record keeps. The policy
+    // is one field now, and the per-project stored default it used to fall back on is gone,
+    // so what this call says is the whole of what the task's own record knows.
+    const { value, cleanup } = await createOnce({}, { deployTarget: "docker" }, {}, { keep: true, deployScript: true })
     try {
-      const record = JSON.parse(await readFile(join(value.container, "worktree-space.json"), "utf8"))
-      expect(record.delivery.merge.mode).toBe("auto")
-      expect(record.delivery.verification).toBe("agent")
-      expect(record.delivery.merge.deleteBranch).toBe(false)
+      const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
+      expect(record.delivery).toEqual({ version: 1, deploy: { target: "docker" } })
     } finally {
       await cleanup()
     }
   })
 
-  it("refuses a delivery policy the flow cannot honour, before anything is made", async () => {
-    // `auto` merges by itself and has no one to wait for, so pairing it with a verification
-    // that waits for a person is refused where the policy is recorded - the call sees E4010
-    // rather than a task that quietly ignores half of what it was told.
-    await expect(createOnce({}, {
-      delivery: JSON.stringify({ merge: { mode: "auto" }, verification: "agent-then-human" }),
-    })).rejects.toMatchObject({ code: "E4010" })
+  it("records the built-in default when the create states no delivery target", async () => {
+    // Nothing stated, nothing deployed and no gate: a task nobody configured has to stay
+    // exactly as finishable as it was before delivery policies existed.
+    const { value, cleanup } = await createOnce({}, {}, {}, { keep: true })
+    try {
+      const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
+      expect(record.delivery).toEqual({ version: 1, deploy: { target: "none" } })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("refuses a deploy target the declared enum does not offer, before anything is made", async () => {
+    // The target is a flat string with a closed list, so the runtime's own validation is
+    // what refuses a name outside it - ahead of the action, and therefore before a single
+    // directory is made. `create.js` would answer E4010 for the same value; it never sees
+    // this one.
+    const source = await sourceFixture()
+    const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
+    const { ctx, captured } = toolContext(creatingSubprocess)
+    try {
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, deployTarget: "kubernetes" },
+        {},
+      )).rejects.toThrow(/must be one of/)
+      expect(await readdir(container)).toEqual([])
+    } finally {
+      await source.cleanup()
+      await rm(container, { recursive: true, force: true })
+    }
   })
 
   it("registers the task space it made as a DSH Workspace", async () => {
@@ -464,7 +767,7 @@ describe("registerTaskTool", () => {
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
         {},
       )
       // The container really went, so the registration goes with it: a finished
@@ -492,7 +795,7 @@ describe("registerTaskTool", () => {
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, unregisterWorkspace: false },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, unregisterWorkspace: false, merge: false },
         {},
       )
       expect(value.container).toBe("")
@@ -528,7 +831,7 @@ describe("registerTaskTool", () => {
       try {
         registerTaskTool(ctx)
         const value = await captured[0].execute(
-          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
           {},
         )
         expect(value.container, each.name).toBe("")
@@ -550,7 +853,7 @@ describe("registerTaskTool", () => {
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
         {},
       )
       // The worktree could not be taken down, so the container is still there - and
@@ -578,7 +881,7 @@ describe("registerTaskTool", () => {
       try {
         registerTaskTool(ctx)
         const value = await captured[0].execute(
-          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+          { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
           {},
         )
         expect(value.container).toBe("")
@@ -597,7 +900,7 @@ describe("registerTaskTool", () => {
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
         {},
       )
       // Nothing was ever registered through this deployment, so there is nothing to
@@ -669,8 +972,9 @@ describe("registerTaskTool", () => {
     await expect(definition.execute({ action: "add" }, {})).rejects.toThrow(/task is required/)
     await expect(definition.execute({ action: "list" }, {})).rejects.toThrow(/tasksRoot is required/)
     // The project layer is the caller's to name, or theirs to leave to `sourceRoot`,
-    // whose own directory name it is.
-    await expect(definition.execute({ action: "done", task: "x", tasksRoot: "/tmp" }, {}))
+    // whose own directory name it is. `merge` is said here because `done` refuses a
+    // call that leaves it out before it ever reaches the project layer.
+    await expect(definition.execute({ action: "done", task: "x", tasksRoot: "/tmp", merge: false }, {}))
       .rejects.toThrow(/project is required \(or sourceRoot, whose directory name it is\)/)
   })
 
@@ -722,7 +1026,17 @@ describe("registerTaskTool", () => {
       expect(prompts[0].requestId).not.toBe("")
       expect(prompts[0].mode).toBe("queue")
       expect(prompts[0].sessionId).toBe("session-1")
-      expect(prompts[0].content).toEqual([{ type: "text", text: "build it, then smoke it" }])
+      expect(prompts[0].content).toEqual([{ type: "text", text: expect.stringContaining("build it, then smoke it") }])
+      // The standing section travels in front of the caller's own words, because a
+      // dispatched session cannot be reached by `send_message` afterwards - a brief
+      // that forgot the reporting channel could not be corrected. The caller's text
+      // is still there, verbatim, after it.
+      const brief = prompts[0].content[0].text
+      expect(brief.indexOf("build it, then smoke it")).toBeGreaterThan(0)
+      expect(brief).toContain("session-caller")
+      expect(brief).toContain("task/login")
+      expect(brief).toContain("wts_session_tool_send")
+      expect(brief).toContain("steer")
       expect(typeof prompts[0].clientTimeZone).toBe("string")
       // The signal the contract names as well: declared required and dereferenced unguarded, so a
       // handoff that omitted it crashed before the request was ever read. This is that regression.
@@ -738,10 +1052,150 @@ describe("registerTaskTool", () => {
         { type: "approval/policy", data: { policy: "never", source: "delegation" } },
       ])
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "build it, then smoke it" }] })
+      expect(prompts[0]).toMatchObject({ sessionId: "session-1" })
+      expect(prompts[0].content[0].text).toContain("build it, then smoke it")
       expect(value.warnings).toEqual([])
       expect(value.summary).toContain("session-1")
       expectEnvelopeShape(captured[0].output.schema, value)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("hands a deploying task's session the completion line, and only a deploying one", async () => {
+    // The fence is settled at create, and this brief is the last moment its completion line
+    // can be stated: a session that was never told is free to report written code as a
+    // finished task, and the finish gate would then refuse a merge nobody was warned about.
+    const deploys = await taskSpaceFixture({ delivery: { deploy: { target: 'docker' } } })
+    const plain = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
+    try {
+      const briefFor = async (fixture) => {
+        const prompts = []
+        const { ctx, captured } = toolContext(fixture.subprocess, {
+          sessionController: {
+            create: async () => ({ sessionId: "session-1" }),
+            prompt: async (request) => { prompts.push(request); return { accepted: true } },
+          },
+          workspaceRegistry: {
+            create: async () => ({}),
+            resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin/login" }),
+            list: () => [{ id: "ws-login", path: fixture.taskPath }],
+          },
+        })
+        registerTaskTool(ctx)
+        await captured[0].execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+          { agent: { session: { id: "session-caller" } } },
+        )
+        return prompts[0].content[0].text
+      }
+      const told = await briefFor(deploys)
+      expect(told).toContain("its smoke is the finish line")
+      expect(told).toContain("has run `smoke`")
+      // The control, and the reason it is here: the same line for a task with nothing to
+      // deploy would be noise every session learns to read past.
+      expect(await briefFor(plain)).not.toContain("smoke is the finish line")
+    } finally {
+      await deploys.cleanup()
+      await plain.cleanup()
+    }
+  })
+
+  it("starts watching the dispatched session, so an abnormal turn reaches the dispatcher", async () => {
+    // The whole point of the watch: the dispatcher asked once and was told "started". Without
+    // this, a session whose model call fails is a task that dies silently in a session nobody
+    // has a reason to poll.
+    const fixture = await taskSpaceFixture()
+    const watched = []
+    const services = {
+      sessionController: {
+        create: async () => ({ sessionId: "session-1" }),
+        prompt: async () => ({ accepted: true }),
+      },
+      workspaceRegistry: {
+        create: async () => ({}),
+        resolveByPath: async () => ({ id: "ws-login" }),
+        list: () => [],
+      },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx, {
+        sessionWatch: { watch: (sessionId, task, sender) => watched.push({ sessionId, task, sender }) },
+      })
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+
+      expect(value.sessionId).toBe("session-1")
+      // Watched by the session that was opened, named by the task, addressed to the caller -
+      // and armed only after the work was actually handed over. Watching is the default.
+      expect(watched).toEqual([{ sessionId: "session-1", task: "login", sender: "session-caller" }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves the session unwatched when the call passes watchSession false", async () => {
+    // The switch is per call, not a plugin setting: one dispatch may want the notices and the
+    // next may not, and a task whose failures nobody needs to hear about should not produce them.
+    const fixture = await taskSpaceFixture()
+    const watched = []
+    const services = {
+      sessionController: {
+        create: async () => ({ sessionId: "session-1" }),
+        prompt: async () => ({ accepted: true }),
+      },
+      workspaceRegistry: { create: async () => ({}), resolveByPath: async () => ({ id: "ws-login" }), list: () => [] },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx, {
+        sessionWatch: { watch: (sessionId, task, sender) => watched.push({ sessionId, task, sender }) },
+      })
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", watchSession: false },
+        { agent: { session: { id: "session-caller" } } },
+      )
+
+      // The dispatch itself still happened; only the watch is gone.
+      expect(value.sessionId).toBe("session-1")
+      expect(watched).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("declares watchSession among the parameters, defaulting to on", () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    const properties = captured[0].parameters.properties
+    expect(properties.watchSession.type).toBe("boolean")
+    // Documented as on-by-default in the description, since the parameter carries no default
+    // value of its own - absence has to read as "watch".
+    expect(properties.watchSession.description).toMatch(/True by default/)
+  })
+
+  it("still dispatches when no watcher was handed in", async () => {
+    // A deployment whose entry made no watcher must lose only the notices, never the dispatch.
+    const fixture = await taskSpaceFixture()
+    const services = {
+      sessionController: {
+        create: async () => ({ sessionId: "session-1" }),
+        prompt: async () => ({ accepted: true }),
+      },
+      workspaceRegistry: { create: async () => ({}), resolveByPath: async () => ({ id: "ws-login" }), list: () => [] },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.sessionId).toBe("session-1")
+      expect(value.warnings).toEqual([])
     } finally {
       await fixture.cleanup()
     }
@@ -852,7 +1306,12 @@ describe("registerTaskTool", () => {
     // user made - the same event DSH seeds into a child agent.
     expect(appended).toEqual([{ type: "sandbox/mode", data: { mode: "workspace-write", source: "delegation" } }])
     expect(prompts).toHaveLength(1)
-    expect(prompts[0]).toMatchObject({ sessionId: "session-1", content: [{ type: "text", text: "add the feature, then run the tests" }] })
+    // The same standing section a dispatch carries, with the create's own facts in
+    // it - and the caller's text still intact after it.
+    expect(prompts[0].sessionId).toBe("session-1")
+    expect(prompts[0].content[0].text).toContain("add the feature, then run the tests")
+    expect(prompts[0].content[0].text).toContain("task/login")
+    expect(prompts[0].content[0].text).toContain("session-caller")
     expect(value.warnings).toEqual([])
     expect(value.summary).toMatch(/is on the work/)
     expectEnvelopeShape(captured[0].output.schema, value)
@@ -868,24 +1327,23 @@ describe("registerTaskTool", () => {
     expect(value.summary).not.toMatch(/is on the work/)
   })
 
-  it("merges by itself when the task's own record says so, and not when the call said no", async () => {
-    // `merge.mode: auto` is the user's standing answer that this merge happens on its own, so
-    // the call does not have to ask for it. An explicit `merge: false` - an agent that was told
-    // not to merge - stays a no: the hand that said it outranks the record.
-    const auto = { merge: { mode: 'auto' } }
-    const fixture = await taskSpaceFixture({ delivery: auto })
+  it("merges exactly when the call asks for it, with nothing left for the record to decide", async () => {
+    // `merge` is the caller's own answer and there is no policy fallback behind it any
+    // more: the same record finishes one way or the other depending on what this call
+    // says, and no field of it is read for a standing answer.
+    const asked = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
     try {
-      const { ctx, captured } = toolContext(fixture.subprocess)
+      const { ctx, captured } = toolContext(asked.subprocess)
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: asked.container, merge: true },
         {},
       )
       expect(value.repositories[0].merged).toBe(true)
     } finally {
-      await fixture.cleanup()
+      await asked.cleanup()
     }
-    const saidNo = await taskSpaceFixture({ delivery: auto })
+    const saidNo = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
     try {
       const { ctx, captured } = toolContext(saidNo.subprocess)
       registerTaskTool(ctx)
@@ -899,24 +1357,105 @@ describe("registerTaskTool", () => {
     }
   })
 
-  it("refuses to merge a task whose own record says this flow does not merge it", async () => {
-    const fixture = await taskSpaceFixture({ delivery: { merge: { mode: 'never' } } })
+  it("refuses a merge the record's own deployment policy gates, and only the merge", async () => {
+    // The one thing the record still decides: a task whose target is docker may not land
+    // until a smoke has passed. The refusal is the gate's own (E5006, the single code for
+    // both "no state file" and "smoke not green"), it applies to the merge alone, and a
+    // finish that leaves the work on its branch goes through.
+    const fixture = await taskSpaceFixture({ delivery: { deploy: { target: 'docker' } } })
     try {
       const { ctx, captured } = toolContext(fixture.subprocess)
       registerTaskTool(ctx)
       await expect(captured[0].execute(
         { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
         {},
-      )).rejects.toMatchObject({ code: "E4013" })
-      // And a finish that does not ask for a merge is not refused: the record forbids the
+      )).rejects.toMatchObject({ code: "E5006" })
+      // And a finish that does not ask for a merge is not refused: the policy gates the
       // merge, not the finish.
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false },
         {},
       )
       expect(value.repositories[0].merged).toBe(false)
     } finally {
       await fixture.cleanup()
+    }
+  })
+
+  it("passes the finish's own strays choice through, keep list and all", async () => {
+    // The strays decision is the call's now, not a policy recorded at create time. `keep`
+    // touches nothing at all, so the untracked entry survives - and so does the whole task
+    // space, because a directory with something in it is one this finish cannot remove.
+    const fixture = await taskSpaceFixture()
+    await writeFile(join(fixture.taskPath, "notes.md"), "what I was in the middle of\n")
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false, strays: "keep" },
+        {},
+      )
+      expect(value.repositories[0].removed).toBe(true)
+      expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(true)
+      // Nothing was disposed of, so the container is still there - which is exactly
+      // what `keep` asks for, and why the Workspace registration stays with it.
+      expect(value.container).not.toBe("")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves a named entry alone even when the choice was to file everything away", async () => {
+    // `keepEntries` is the exception that outranks whatever `strays` says, entry by entry:
+    // a caller archiving the leftovers can still name the one file it wants left where it
+    // is. What it named is still there, and the space it is in is therefore still there too.
+    //
+    // `archive` rather than `discard` because the tool refuses `discard` (E7007); the
+    // exception itself behaves the same either way, and the panel's own path - which can
+    // discard - is covered in task-operations.
+    const fixture = await taskSpaceFixture()
+    await writeFile(join(fixture.taskPath, "notes.md"), "the one thing worth keeping\n")
+    await writeFile(join(fixture.taskPath, "scratch.txt"), "not worth keeping\n")
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false, strays: "archive", keepEntries: ["notes.md"] },
+        {},
+      )
+      expect(value.repositories[0].removed).toBe(true)
+      expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(true)
+      // The entry that was not named leaves the space either way: filed away under
+      // `archive`, deleted under `discard`.
+      expect(existsSync(join(fixture.taskPath, "scratch.txt"))).toBe(false)
+      expect(value.container).not.toBe("")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("files strays into the documents directory the call names, and clears the space", async () => {
+    // `archive`, the default when the call says nothing, is the one answer that neither
+    // loses the caller's content nor leaves the task space standing. A named directory
+    // wins over the plugin's own root, and the content arrives there.
+    const fixture = await taskSpaceFixture()
+    await writeFile(join(fixture.taskPath, "notes.md"), "kept for the record\n")
+    const documents = await mkdtemp(join(tmpdir(), "multi-worktree-tool-documents-"))
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false, documentsDirectory: documents },
+        {},
+      )
+      expect(value.repositories[0].removed).toBe(true)
+      expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(false)
+      expect(existsSync(join(documents, "notes.md"))).toBe(true)
+      // Everything left the space, so the container went with it.
+      expect(value.container).toBe("")
+    } finally {
+      await fixture.cleanup()
+      await rm(documents, { recursive: true, force: true })
     }
   })
 
@@ -938,6 +1477,91 @@ describe("registerTaskTool", () => {
         { action: "dispatch", task: "nope", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
         {},
       )).rejects.toThrow(/no task space/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("flags a conflict and names the session to hand it to, without matching English", async () => {
+    // The row a caller has to route rather than retry. It reaches the model as a FLAG
+    // plus the checkout and files - never as a sentence to be pattern-matched - and the
+    // summary says who to talk to, because a stop with no route is a finish that ends
+    // with nothing but the panel.
+    const fixture = await taskSpaceFixture({ conflict: true })
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )
+      const row = value.repositories[0]
+      expect(row.conflict).toBe(true)
+      expect(row.mergeInProgress).toBe(true)
+      expect(row.mergeSite).toBe(join(fixture.taskPath, "alpha"))
+      expect(row.conflictedFiles).toEqual(["src/a.ts"])
+      // Not either of the other two stops.
+      expect(row.needsCommit).toBe(false)
+      expect(row.dirtyCheckout).toBe(false)
+      // The summary routes it, and it names the session the task space was worked in.
+      expect(value.summary).toContain("a merge is waiting to be resolved")
+      expect(value.summary).toContain("src/a.ts")
+      expect(value.summary).toContain("wts_session_tool_send")
+      expect(value.summary).toContain("sess-task")
+      expect(value.summary).toContain("call done again")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("flags work nobody committed and routes it, and does not invent the commit itself", async () => {
+    const fixture = await taskSpaceFixture({ uncommitted: true })
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )
+      const row = value.repositories[0]
+      // Flagged as work-to-commit, and told apart from a conflict: no merge was started.
+      expect(row.needsCommit).toBe(true)
+      expect(row.conflict).toBe(false)
+      expect(row.mergeInProgress).toBe(false)
+      expect(row.dirtyCheckout).toBe(false)
+      // The summary hands it on rather than describing it as a failure to retry.
+      expect(value.summary).toContain("Uncommitted work is waiting")
+      expect(value.summary).toContain("wts_session_tool_send")
+      expect(value.summary).toContain("call done again")
+      // The tool did not commit anything on its own: the message has to come from whoever
+      // read the changes.
+      expect(fixture.calls.some((call) => call.startsWith("add "))).toBe(false)
+      expect(fixture.calls.some((call) => call.startsWith("commit "))).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("flags the user's own checkout as not this flow's to touch", async () => {
+    // The third stop. It reads like a conflict in git's wording but is not one: nothing
+    // was merged, so a caller sent after conflict markers would waste the trip - and
+    // committing or stashing the user's work for them is worse than that.
+    const fixture = await taskSpaceFixture({ dirtyCheckout: true })
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )
+      const row = value.repositories[0]
+      expect(row.dirtyCheckout).toBe(true)
+      expect(row.conflict).toBe(false)
+      expect(row.needsCommit).toBe(false)
+      expect(row.mergeInProgress).toBe(false)
+      // The summary says whose work it is and refuses to touch it.
+      expect(value.summary).toContain("has uncommitted work this merge would overwrite")
+      expect(value.summary).toContain("do not commit it for them")
     } finally {
       await fixture.cleanup()
     }

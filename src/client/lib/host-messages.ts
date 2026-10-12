@@ -42,7 +42,7 @@ const strings = (value: unknown): string[] => (Array.isArray(value) ? value.map(
  */
 function missingText(t: Translate, keys: string[]): string {
   return keys
-    .map((key) => (key === "smoke" ? t("gateMissingSmoke") : key === "human-ack" ? t("gateMissingHumanAck") : key))
+    .map((key) => (key === "smoke" ? t("gateMissingSmoke") : key === "deployment" ? t("gateMissingDeployment") : key))
     .join(t("gateMissingJoin"))
 }
 
@@ -75,26 +75,30 @@ export function hostFailureText(t: Translate, code: string, values: HostValues):
       return t("hostE4011")
     case "E4012":
       return t("hostE4012")
-    case "E4013":
-      return t("hostE4013")
     case "E4014":
       return t("hostE4014")
-    case "E5005": {
-      const envId = text(values.envId)
-      return format(t("hostE5005"), {
-        target: text(values.target),
-        env: envId === "" ? "" : format(t("hostE5005Env"), { envId }),
-      })
-    }
+    case "E4015":
+      return t("hostE4015")
+    // E5006 covers both shapes of "no passing smoke" - no state file at all, or one whose
+    // smoke is missing or red. E5005 used to be the first of those and is retired; a Host
+    // old enough to send it falls through to its own English sentence, which is what an
+    // unknown code has always done.
     case "E5006":
       return t("hostE5006")
-    case "E5007":
-      return format(t("hostE5007"), { missing: missingText(t, strings(values.missing)) })
     case "E5011": {
       const held = (Array.isArray(values.held) ? values.held : []) as HostValues[]
       return format(t(held.length === 1 ? "hostE5011" : "hostE5011Many"), {
         count: String(held.length),
         held: held.map((entry) => `  ${text(entry.path)}\n    ${text(entry.reason)}`).join("\n"),
+      })
+    }
+    case "E5012": {
+      // The count is all the sentence needs: the Host's own English copy (and the tool result a
+      // model reads) names each session and what it is doing, but the panel's sentence does not,
+      // so the per-session detail is not computed here.
+      const sessions = (Array.isArray(values.sessions) ? values.sessions : []) as HostValues[]
+      return format(t(sessions.length === 1 ? "hostE5012" : "hostE5012Many"), {
+        count: String(sessions.length),
       })
     }
     default:
@@ -123,8 +127,6 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
         ? format(t("warnDeliveryGateBypassedMissing"), { missing: missingText(t, missing) })
         : format(t("warnDeliveryGateBypassedWithoutDeployment"), { target: text(values.target) })
     }
-    case "human-ack-waived":
-      return t("warnHumanAckWaived")
     case "branch-left-alone":
       return text(values.branch) === ""
         ? format(t("warnBranchLeftAloneNone"), { name: text(values.name), mainRepo: text(values.mainRepo) })
@@ -154,10 +156,30 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
     }
     case "leftover-copy-failed":
       return format(t("warnLeftoverCopyFailed"), { name: text(values.name), destination: text(values.destination), reason: text(values.reason) })
+    case "workspace-holds-links": {
+      const links = strings(values.links)
+      const shown = typeof values.shown === "number" && values.shown > 0 ? values.shown : links.length
+      const listed = links.slice(0, shown).join(", ")
+        + (links.length > shown ? format(t("warnWorkspaceHoldsLinksMore"), { more: String(links.length - shown) }) : "")
+      return format(t("warnWorkspaceHoldsLinks"), { count: String(links.length), links: listed })
+    }
+    case "workspace-e2e-points-elsewhere": {
+      const configs = Array.isArray(values.configs) ? values.configs : []
+      const shown = typeof values.shown === "number" && values.shown > 0 ? values.shown : configs.length
+      const listed = configs
+        .slice(0, shown)
+        .map((one) => {
+          const row = (one ?? {}) as Record<string, unknown>
+          return `${text(row.repo)}: ${text(row.path)}`
+        })
+        .join(", ")
+        + (configs.length > shown ? format(t("warnWorkspaceE2eMore"), { more: String(configs.length - shown) }) : "")
+      return values.reused === true
+        ? format(t("warnWorkspaceE2eReuses"), { configs: listed })
+        : format(t("warnWorkspaceE2eFixed"), { configs: listed })
+    }
     case "no-deployment-recorded":
       return t("warnNoDeploymentRecorded")
-    case "deploy-destroy-failed":
-      return format(t("warnDeployDestroyFailed"), { output: text(values.output) })
     case "deploy-containers-left":
       return format(t("warnDeployContainersLeft"), { count: text(values.count), envId: text(values.envId), reason: text(values.reason) })
     case "deploy-cleanup-failed":

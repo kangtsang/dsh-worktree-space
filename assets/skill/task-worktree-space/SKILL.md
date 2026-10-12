@@ -11,7 +11,7 @@ a worktree of every selected repository, all on the same branch, so a single
 session can edit across repositories while other sessions and the source
 repositories stay untouched.
 
-Drive the whole workflow through the `task_worktree_space` tool. Do not run
+Drive the whole workflow through the `wts_worktree_space` tool. Do not run
 `git worktree` commands by hand for it.
 
 > **Beta (experimental)**: handing a merge conflict to an agent is the part of this plugin
@@ -99,7 +99,19 @@ Follow this order. Never create a workspace with a guessed location.
 7. **Branch prefix** — `task/` unless the user asks for another one; pass the
    choice as `branchPrefix` and expect the branch to be that prefix plus the task
    name (`hotfix/<task>`, `release-<task>`, …).
-8. **Run `action: "create"`.** It does both halves: it makes the task directory,
+8. **Ask about the acceptance fence — before the create, and before any session is
+   opened in it.** The one delivery decision a create makes is `deployTarget`, it is
+   settled there, and nothing can add or change it afterwards. Put the question plainly:
+   is this task deployed for acceptance — the task space brings its own environment up
+   and a smoke has to pass before the work may land (`deployTarget: "docker"`) — or is
+   there nothing to deploy (`deployTarget: "none"`, the built-in default)?
+   **Do not answer it for the user, and do not create the space, or open a session in
+   one, with the question still open.** A fence nobody chose cannot be fitted afterwards,
+   and no record says one was ever wanted, so the task goes on with no acceptance check
+   at all and nothing in the interface says so. `none` is a good answer for work that
+   carries no runtime behaviour to accept; state which answer is being passed and why.
+   *Deploying for acceptance* below says what a deploying space owes.
+9. **Run `action: "create"`.** It does both halves: it makes the task directory,
    the branch and one worktree per repository **and registers the result as a DSH
    Workspace**, which is what puts the task space in the workspace list under
    `<source workspace title>/<task>`. Pass `registerWorkspace: false` only when the
@@ -110,28 +122,31 @@ Follow this order. Never create a workspace with a guessed location.
    **Create and open** does in one press, except that the session there starts empty
    and this one is already working. Do that when the user wants the work started, not
    merely a place to work in; see *Putting a session on the work* below.
-   **The delivery policy may be stated here too, as `delivery`**, when the user has
-   said how this task should be delivered: an explicit policy beats the project's
-   stored default for that one task, and either way the policy is recorded in the
-   task's metadata at create time. Say which fields you set and why. A task that is
-   meant to merge back by itself is `merge.mode: "auto"`, and that cannot be combined
-   with a verification that waits for a person (`agent-then-human` or `human`) — the
-   pair is refused when the task is created, and the refusal names the fix. Whether a
-   merge waits for a deployment and a passing smoke is a separate question: `auto`
-   answers who presses the merge, not whether the work was checked.
-   **The gate's human half is not something this tool can sign off.** `done` takes no
-   acknowledgement argument, and `force` is refused outright (E7007); acceptance is
-   recorded only from the Worktree Space panel. When `done` answers with E5007, the
-   user is the one who confirms acceptance there (or finishes anyway there) — report
-   that and stop, and never choose `merge.mode: "auto"` on the user's behalf to get
-   past a gate. `auto` is what the user says when they want a task that merges without
-   them, not what the agent picks to avoid asking.
-9. **Report where it is, and say which entry opens the session.** When this call
-   opened one, name the session id it answered with; when it did not, a session is
-   opened by hand — the panel's **Create and open** in the Worktree Space dialog, or
-   picking the registered Workspace in the workspace list. Report the task directory
-   path and the branch name, then name that entry rather than leaving the user to
-   find it.
+   **The delivery answer is step 8's `deployTarget`, and it is settled here.** `docker`
+   means the task expects a deployment, and its finish gate is live: `done` with
+   `merge: true` is refused until `.worktree-space/deploy/.state.json` records a passing
+   smoke — and that smoke is the finish line rather than a formality: `up` writes the
+   acceptance URL, `smoke` records the pass, and those two are what a completion report
+   carries. `none` means no deployment and no gate. A create that passes `docker` with
+   nothing to deploy with is refused (E4015). Everything else a finish
+   decides (whether to merge, which branch, whether to delete it, what happens to
+   untracked files) is passed on the `done` call instead, where you can see the work
+   it applies to. See *Finishing* below.
+   **The gate is not something this tool can sign off.** `done` takes no
+   acknowledgement argument, and `force` is refused outright (E7007); the user's own
+   overrule exists only on the Worktree Space panel. When `done` answers with E5006,
+   the way past is to deploy and run the smoke through the task space's own deploy entry
+   — report what is missing and do that, or tell the user they can
+   finish anyway from the panel. Never retry the same call expecting a different
+   answer, and never reach for a flag this tool does not have.
+10. **Report where it is, and say which entry opens the session.** When this call
+   opened one, name the session id it answered with — the same id is now written into
+   the task's record, and `action: "list"` reports it — and use it to watch or correct
+   that session (see "Watching a session you dispatched" below). When it did not, a
+   session is opened by hand — the panel's **Create and open** in the Worktree Space
+   dialog, or picking the registered Workspace in the workspace list. Report the task
+   directory path and the branch name, then name that entry rather than leaving the
+   user to find it.
    A create that answers with a warning that the Workspace was **not** registered
    means one of three things, and the warning names which: the call asked for a task
    space that stays out of the list (`registerWorkspace: false`), the deployment
@@ -139,7 +154,7 @@ Follow this order. Never create a workspace with a guessed location.
    directory before anything is opened in it — **Create and open**, or **Register
    again** when a create is refused — and do not report the task as under way until
    that is done, because until then nothing in the interface shows the task space.
-10. **Work in the task directory**: it is where the task's session belongs.
+11. **Work in the task directory**: it is where the task's session belongs.
 
 ### Putting a session on the work
 
@@ -169,6 +184,61 @@ open, and the work is the user's to start.
 
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
+
+### Watching a session you dispatched (and correcting it)
+
+A dispatched session is **not your child**: it has its own context and its own approval
+gate, and `send_message` refuses it outright (`belongs to another parent session`).
+Reach it with the session-control tools instead. The id you need is already in hand —
+`create` and `dispatch` write it into the task's record, and `action: "list"` reports
+it — so `wts_session_tool_find` is the fallback for when it is not.
+
+- **`wts_session_tool_status` is how "stuck" is told from "busy".** `lastActivity` is
+  the only reliable signal: during a build, file times, mtimes and log tails all sit
+  still, while the session's own clock keeps running. Pass `stalledMsThreshold` and a
+  **running** session is marked `stalled` past it; an idle one never is, because a
+  finished session being quiet is not stuck. `lastReply` and the reasoning tail say
+  what it currently believes it is doing. `lastTurnEnd` names a turn that did not end
+  `completed` (`error` / `interrupted` / `blocked` / `max-tokens`) — the one way to
+  tell "the task finished" from "an error killed it into silence", since both look
+  like idle with nothing queued.
+- **A correction that matters now must be a `steer`, never a `queue`.** `queue` is
+  read at the session's next **turn boundary**, and a long task is often one long
+  turn — so the message sits unread in the inbox while the session looks exactly like
+  one ignoring you. Use `wts_session_tool_send` with `mode: "steer"` for anything
+  time-sensitive ("stop, there are 23 uncommitted files and the finish needs it
+  clean"); reserve `queue` for what can genuinely wait for a boundary.
+- **To tell "never arrived" from "did not do it", read the log.**
+  `wts_session_tool_read` returns the messages with their `seq`; a message you sent
+  that is not there was not delivered, which is a different problem from one that
+  arrived and was ignored.
+- **A report you send is attributed to you and shown as an agent's report.** The
+  message carries your session as its sender, so the receiving interface gives it its
+  own row ("Task message received", "from session X") instead of presenting it as
+  something the user typed. **The tool adds a header for you** — the task, the
+  workspace, the task-space path, the branch and your session id — so write the body
+  only: what you did, what you verified, and what you did not. Do not repeat the
+  header's facts in the body.
+- **You will be told if the session dies mid-turn, even though it cannot reach you
+  itself.** A turn that ends `error`, `interrupted`, `blocked` or `max-tokens` sends
+  you a notice naming the task and the **session id**. It says the work is not
+  finished — do not treat that task as done. `completed` and `aborted` send nothing:
+  the second is the user stopping it on purpose. When a notice arrives, use
+  `wts_session_tool_status` to see where it stopped and `wts_session_tool_send` to put
+  it back to work.
+- **A timeout is not an empty answer.** `wts_session_tool_wait` returns the output
+  that already existed, marked `stale`, when its budget runs out — so you always
+  learn what the session last said.
+- **The recovery chain, in order.** `status` first, to tell "running but stuck" from
+  "offline" → `wts_session_tool_resume` for the offline one (a host restart puts
+  every session offline), or `wts_session_tool_create` in **the same task space** for
+  one that is lost → and **read its last state before deciding what to send**.
+  `wts_session_tool_cancel` is the brake: it aborts the active turn, and `keepInbox`
+  decides whether the queued work survives.
+
+Do not poll in a loop, and do not steer or cancel on a timer: look at the real state
+when something suggests you should, then decide. That judgement is yours, not a
+watchdog's.
 
 ## Adding a repository to a task already under way
 
@@ -208,14 +278,32 @@ worktrees of different repositories:
   each repository subdirectory.
 - Commit in **each repository separately**; there is no cross-repo commit. The
   branch name is the same everywhere.
-- **Never edit, commit or merge in the source repositories** — for the session
-  they are read-only references.
-- **Never merge by hand** from a session: not the task branch, and not into any
-  branch of the source repositories. Finishing a task is the user's action, and it
-  merges into whichever branch each source repository has checked out.
-- Read the task's `worktree-space.md` for its branch, base and repositories rather
-  than guessing (the same facts as data live in `worktree-space.json`); if another
-  session created the workspace, follow that file.
+- **Never edit or commit in the source repositories, and never hand-merge there** —
+  for the session they are read-only references. A `git merge` you run yourself in a
+  source checkout is not the same thing as finishing the task, which the plugin does
+  for you and which the next point covers.
+- **Who finishes is the user's decision, and both flows work.** Either the session
+  working in the task space calls `done` itself once the work is complete, or it
+  reports back and whoever dispatched it — or the user — calls it. The authorisation
+  runs down the chain: the user authorised the dispatching agent, which instructed the
+  session, so a session finishing the work it was told to do is that authorisation
+  carried out, not a decision of its own. **Ask which flow is wanted when it is not
+  stated**, because the two differ in one way that matters: `done` is atomic.
+  - A session that finishes its own work is **not** its own blocker: the E5012 guard
+    below leaves the caller out of the sessions it counts, so the flow is reachable
+    from inside a running turn. Every *other* session in the task space still blocks it.
+  - `merge: true` lands the task branch on the target, removes the worktrees and
+    clears the task space in one call. This is the step a finish cannot take back, so
+    it is the user's authorisation and not a formality — merge only when the work was
+    asked to land.
+  - `merge: false` leaves the branch where it is. The commits are kept, but the
+    worktree is still removed, so a conflict left over would have to be resolved in
+    the source repository rather than in the isolated checkout. That is worth avoiding,
+    but it is not a loss: **the commits are on the task branch**, and whether and when
+    to merge them afterwards is the user's call — the plugin does not interfere.
+- Read the task's `.worktree-space/worktree-space.md` for its branch, base and repositories
+  rather than guessing (the same facts as data live in `.worktree-space/worktree-space.json`);
+  if another session created the workspace, follow that file.
 
 ## Deploying for acceptance
 
@@ -226,30 +314,55 @@ runs, the services reach each other over their own network, and tearing the
 whole environment down afterwards is one command.
 
 A task space is deployable when one of its repositories carries a
-`deploy/deploy.sh` of its own, or when the space holds a `deploy/` orchestration
-root beside the worktrees — a `docker-compose.yml` whose build contexts name the
-sibling worktrees. A source root that keeps its own `deploy/` — a `deploy.yaml`
-manifest plus the scripts it names — has that directory copied into every task
-space made from it, so look before scaffolding one. A create may instead name one
-script with the `deployScript` argument, a file path relative to the source root;
-it is copied in as the fixed `deploy/deploy.sh`, so the manifest stays the same
-while the script behind it differs per task, and a path that leaves the source
-root or names no file is refused (E4014) before anything is made. A `deploy.yaml`
-declares which targets exist and what each one runs; without one the space is
-docker-only through `deploy.sh`. When none of that exists and the user asks to
-deploy, scaffolding that root from the repositories' own run commands is ordinary
-session work; what must not happen is starting the services on the host instead.
+`deploy/deploy.sh` of its own, or when the space holds the plugin's own deploy root,
+`.worktree-space/deploy/` — a `docker-compose.yml` whose build contexts name the sibling
+worktrees, copied in from the source root or scaffolded by the create. A source root that
+keeps its own deploy root, `.worktree-space/deploy/`, has that directory copied **whole to the
+same relative place** in every task space made from it — so look before scaffolding one. That
+root sits one directory deeper than a top-level `deploy/` did: a compose file's build contexts
+that were `../<repo>` become `../../<repo>`, and the same shift applies to the workspace's copy
+and to the task space's alike. A create
+may instead name one script with the `deployScript` argument, a path relative to the
+source root that has to sit **under its `.worktree-space/deploy/` directory** (any depth); it travels
+into the task space under its own name, at the same relative place, and the task's record
+remembers it as the
+entry to run, so nothing is renamed and no file is overwritten. Anything outside that
+directory, or naming no file, is refused (E4014) before anything is made.
+There is no manifest to declare targets in: the entry script is the whole contract,
+and docker is the only target.
 
-**The deploy root writes its own delivery state, and the gate reads that file.** A deploy
-root's scripts own one file beside them — `<deploy root>/.state.json`, or the path
-`DSH_STATE_FILE` names — and it is what the panel and the merge gate read:
+**A task created with `deployTarget: docker` needs something to deploy with**, and a
+create that has none is refused (E4015) rather than made undeployable. Any one of the
+three counts: a `.worktree-space/deploy/deploy.sh` at the source root, a script named by `deployScript`,
+or a selected repository carrying its own `deploy/deploy.sh`. So before creating a
+deploying task, check that one of those exists — and if the user wants a deployment and
+none does, building that `.worktree-space/deploy/` root from the repositories' own run
+commands is ordinary session work; what must not happen is starting the services on the
+host instead.
 
-- `./deploy.sh up` writes `url` (and whatever `services` it likes) once the environment is
-  up;
-- `./deploy.sh smoke` merges `lastSmoke: { result, at }` into it **without dropping the
-  fields already there** — a pretty rewrite that loses `humanAck` loses the user's
-  acceptance with it;
-- `humanAck` and `destroyedAt` belong to the plugin; they are never the script's to write.
+**The deploy root writes its own delivery state, and the gate reads that file.** The file is
+`<task space>/.worktree-space/deploy/.state.json` — fixed, whatever the entry script is
+called and wherever under the deploy root it sits. The plugin passes that absolute path to
+every script it runs as
+`DEPLOY_STATE_FILE`, so a script writes `${DEPLOY_STATE_FILE}` and never has to work out
+where the deploy root is. It is what the panel and the merge gate read:
+
+- `<entry> up` writes `url` (and whatever `services` it likes) once the environment is up;
+- `<entry> smoke` merges `lastSmoke: { result, at }` into it **without dropping the fields
+  already there** — a pretty rewrite that loses `destroyedAt` forgets that the environment is
+  down;
+- **`up` and `smoke` must never write `destroyedAt`.** They run while the environment is up,
+  and a stale-down stamp left behind by a previous teardown is the plugin's to clear, not
+  theirs to guess at.
+
+**A `destroy` subcommand is optional, and the plugin never calls one.** The panel's destroy
+button finds this task's containers by their `dsh.env-id` label and takes them down itself, so
+an entry that implements only `up` and `smoke` is complete. Implement `destroy` only as a
+convenience for a person or a session working by hand — and if you do, **it must leave the
+state file exactly as the plugin's own teardown would**: set `url` to `null` (its dynamic port
+is dead) and stamp `destroyedAt` with the current UTC time, keeping `lastSmoke` and every other
+field. A `destroy` that only runs `docker compose down` leaves a live-looking acceptance URL
+behind, and the panel then shows a dead address as if it worked.
 
 **Nothing else may write that file**: not a hand edit, and not a transcript of a run that
 happened somewhere else. The gate reads it as the evidence that the step happened, so
@@ -257,7 +370,7 @@ writing it from outside turns the gate into a formality — if the state is miss
 script that should have written it, or tell the user; the human's own way past the gate is
 the panel's "finish anyway". A missing file, or a `lastSmoke.result` that is not `pass`, is
 exactly why the panel shows no acceptance URL and why `done` refuses the merge
-(E5005/E5006).
+(E5006 — the same code for both, because the next step is the same).
 
 **Scaffolding writes logs so that the host can still read and archive them.** When a
 service's log directory is bind-mounted out of the container, the service must not be
@@ -274,33 +387,101 @@ container actually reads**. For a service whose appender is built from
 config the process may never read (a gateway whose appender comes from
 `FileLogConfig::from_env` ignores the same key in its own config file, and the task then
 looks solved while the link keeps appearing). Leaving the logs inside the container and
-reading them with `docker logs` works too, and is what `./deploy.sh logs <service>` does
+reading them with `docker logs` works too, and is what `<entry> logs <service>` does
 anyway.
 
 Retrofitting it into a running stack means the log directory gains a reparse point; if one
 is already there, the user removes that single file and finishes the task again.
 
-- Take the environment id from `worktree-space.md` (`DSH_ENV_ID=...`) and pass it
+- Take the environment id from `.worktree-space/worktree-space.md` (`DEPLOY_ENV_ID=...`) and pass it
   to **every** deploy command. It is what keeps this task's containers, images and
   acceptance URL apart from every other task's — never guess one, and never reuse
   another task's.
-- `./deploy.sh up` builds and starts the environment and prints the acceptance
-  URL. Run `./deploy.sh smoke` and let it pass **before** reporting the URL: an
-  address that answers 500 is not a deliverable. When it fails, the reason is
-  usually in `./deploy.sh logs <service>`.
+- Run the task's own deploy entry — `<entry>` below is the path the note names, run from
+  `.worktree-space/`, and `.worktree-space/deploy/deploy.sh` when it names none. `<entry> up`
+  builds and starts the environment
+  and prints the acceptance URL. Run `<entry> smoke` and let it pass **before** reporting
+  the URL: an address that answers 500 is not a deliverable. When it fails, the reason is
+  usually in `<entry> logs <service>`.
 - Report the URL together with what to click to see the change, and say that the
   environment keeps running until it is destroyed.
-- Leave the environment to the user. `./deploy.sh destroy` tears it down when they
-  are done with it; every deployed container carries a `dsh.env-id` label, so an
-  environment can also be found and cleaned up after the fact.
+- Leave the environment to the user. The panel's destroy button takes it down, and every
+  deployed container carries a `dsh.env-id` label, so an environment can also be found and
+  cleaned up after the fact. Use `<entry> destroy` only when the entry provides one and you are
+  working by hand — the plugin's own button does not need it.
 
 ## Finishing a task
 
-Run `action: "done"`. By default it **removes the worktrees and keeps every branch**; everything
-else follows the task's delivery policy, and a task nobody configured gets no deployment gate, no
-merge (that waits to be asked for) and stray files **archived** rather than deleted — filing them
-into the archive directory is the safe half, since the archive is a copy and the task space can then
-be removed in one press.
+Run `action: "done"`. It **removes the worktrees** and, by default, **keeps every branch**.
+Two arguments are the whole of the decision, and one of them is required.
+
+**A deploying task is not finished until its fence has passed.** With `deployTarget: docker`
+the finish is not merely gated by the smoke, it is defined by it: the work is done when the
+task space's own smoke has run and recorded `pass`, and the acceptance URL that `up` wrote
+is what the user is handed. Never report such a task complete on the grounds that the code
+is written, and never treat the gate as a formality to clear — `done` refuses the merge
+while it is unsatisfied (E5006), this tool has no override to send, and the user's own
+"finish anyway" lives on the panel.
+
+**Who calls it is the user's decision, and both flows are supported.**
+
+| Flow | How it goes | What it costs |
+| --- | --- | --- |
+| **The session finishes its own work** | the session in the task space calls `done` when the work is complete, resolving any conflict itself | nothing — and it is the one that can resolve a conflict in the isolated checkout, where the merge is rehearsed |
+| **The dispatcher finishes** | the session reports back; the agent that dispatched it, or the user, calls `done` | one more round trip, and whoever calls it is not looking at the work |
+
+The plugin does not prefer either and does not restrict either. **The authorisation runs down
+the chain**: the user authorised the dispatching agent, which instructed the session, so a
+session finishing the work it was told to do is that authorisation carried out. What it must
+not do is invent one — merge only where the work was asked to land, and ask when the brief
+does not say which flow is wanted.
+
+Both flows are reachable: the E5012 guard counts the sessions working in the task space
+**except the caller**, so a session that calls `done` mid-turn is not refused with itself as
+the blocker. Other sessions in there still are.
+
+**`merge` is required — `done` refuses a call that omits it (E7006).** Pass `merge: true`
+to land the task branches on their targets, or `merge: false` to leave the work where it
+is. There is no default because this is the one step a finish cannot take back: a merge
+that landed has to be reverted by hand, and a branch that was not merged keeps its
+commits where they are. Decide it from what the user asked for — do not guess, and do not
+call `done` without it. Nothing about the merge is recorded in the task any more, so
+there is no standing answer to fall back on: the call says what happens.
+
+**`done` is refused while a session is still working in the task space (E5012).** A finish
+removes the worktrees and the task space, so a session whose working directory is inside it
+would lose the ground under it mid-turn — it keeps running, its next write lands on a path that
+is gone, and the work it had not committed is unrecoverable. The refusal names the sessions and
+what each is doing (running, mid-turn, or holding queued work). **Stop them first**, with
+`wts_session_tool_cancel`, and call `done` again; `wts_session_tool_status` says what each is
+doing before you stop it. If the work is not meant to stop, leave the task space standing —
+nothing has been removed, and it is still there.
+
+**The caller is not one of those sessions.** A session finishing its own work is running, with a
+turn open, inside the task space it is asking to remove — so it is left out of the count, and
+`done` from inside the working turn is not refused with the caller as its own blocker. (That is
+what makes the session-finishes-its-own-work flow reachable at all; cancelling yourself first
+would end the turn and the report with it.) Every *other* session in the task space still
+counts.
+
+**`strays` says what happens to the files git never tracked**, and omitting it means
+`archive`:
+
+| `strays` | The user's untracked files | Build output | The task space |
+| --- | --- | --- | --- |
+| `archive` (default) | copied into the archive directory, then removed | cleared | removed and unregistered |
+| `keep` | left exactly where they are | left | kept (it is not empty) |
+| `discard` | **deleted** | cleared | removed and unregistered |
+
+**`discard` is refused here (E7007) and you must not reach for it.** It is the only
+choice that loses anything, and deleting the user's own writing is theirs to decide -
+there is no reflog behind those files and no branch to recover them from. Only the
+Worktree Space panel can do it, where the box says what it costs. When the user asks
+for the leftovers to be thrown away, tell them to finish from the panel; do not
+substitute `archive` silently either, because that is a different outcome than the one
+they asked for. `keepEntries` names individual entries to leave alone whatever
+`strays` says, and `documentsDirectory` says where `archive` files them (the panel
+passes the whole path it showed the user).
 
 Name the task's own layer as well as the container: pass `tasksRoot` (the container
 root), `task`, and `project` — the source root's directory name. Passing `sourceRoot`
@@ -310,15 +491,11 @@ was meant.
 
 Confirm each destructive step with the user before passing it:
 
-1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. Unless
-   the task's own record already answers: `merge.mode: auto` is the user's standing
-   answer that this task merges back **by itself**, and then `done` merges without the
-   argument — the call does not have to ask for what the record already decided. The
-   opposite value, `merge.mode: never`, is the record saying this flow does not merge
-   the task at all: an ask is refused (`E4013`), and the way past it is the panel, which
-   is the user's own hand. `auto` is never a way round the rest of the gate — a policy
-   that expects a deployment still needs that deployment and its passing smoke, because
-   those are checks on the work rather than answers from a person. The
+1. **Merge?** Only when the user explicitly says to merge. Pass `merge: true`. There is
+   no longer any record that can answer this for you, so the call always says it — and
+   an unsatisfied deployment gate still refuses it. A policy with `deployTarget: docker`
+   needs that deployment and its passing smoke before the merge, because those are
+   checks on the work rather than answers from a person. The
    merge puts the **task branch into the target branch** and it lands in the source
    repository; by default the target is the branch each source repository has checked
    out — the task's own starting point. Ask which branch to merge into when the user
@@ -335,20 +512,23 @@ Confirm each destructive step with the user before passing it:
    task branch (`git merge-base --is-ancestor <target> <branch>`).
 2. **Work nobody committed?** Nothing to decide and nothing to pass: `done` reports
    every repository the plan showed uncommitted changes for, keeps its worktree, and
-   names the checkout in the row's `error` — `uncommitted work is waiting in
-   <path>`. Nothing is committed until the user presses **Hand the commits to the
-   agent** in the panel, and that button opens **one** session shared by every
-   affected repository, working in the common ancestor of their worktrees (or of
-   each worktree and its source repository, when the Host named it), so commit in
+   flags the row **`needsCommit: true`** with the checkout named in `error` —
+   `uncommitted work is waiting in <path>`. **Read the flag, not the sentence.**
+   Nothing is committed until someone who has read the changes writes the message, and
+   that is the job of the session working in the task space. In the panel it is the
+   user pressing **Hand the commits to the agent**; from a `done` you dispatched, it is
+   yours to route: `wts_session_tool_send` with `mode: "steer"` to the session id the
+   finish answers with (or `wts_session_tool_find` by the checkout's directory; open one
+   with `wts_session_tool_create` when the record names none), asking it to commit in
    **each** of those repositories, on the task branch, with a
    message that says what the changes were for and why; read them first and never
    commit over the user's work blind, and never push. Committing changes the source
    repository's `.git` directory and may need elevated permission, which is granted in
    the session itself — the plugin never asks for it. Where those repositories share
-   nothing but the volume root it is still that **one** session: it works in the task
-   space, which reaches every one of their worktrees but need not reach the index
-   inside the source repositories' `.git`, so ask the user to approve the elevation in
-   that session instead of assuming the git commands will go through. The wait is skipped for a
+   nothing but the volume root, one session working in the task space reaches every one
+   of their worktrees but need not reach the index inside the source repositories'
+   `.git`, so tell it to ask the user to approve the elevation there rather than
+   assuming the git commands will go through. The wait is skipped for a
    branch being deleted unmerged (a commit would be deleted with it), for a worktree
    in the middle of an unfinished merge (step 3 takes it), and for `force: true`,
    which discards uncommitted work along with the worktree. A commit that fails keeps
@@ -356,7 +536,9 @@ Confirm each destructive step with the user before passing it:
    The commits do not carry the finish on by themselves either: once that session
    stops the plugin reads the plan again, and where the worktrees have all come back
    clean the panel says the commits are done under a green light and waits for the
-   user's own **Finish task** press — the step after it is the merge.
+   user's own **Finish task** press — the step after it is the merge. From a `done` you
+   dispatched, call `done` again once the session reports the commits are in — or let
+   that session call it, if it was told to finish its own work.
 
    **Where the setting is on, both of these sessions are opened differently.** The
    profile setting **Full access for the sessions handed to the agent for conflicts and
@@ -369,10 +551,12 @@ Confirm each destructive step with the user before passing it:
    says about the working directory instead of assuming either arrangement: it names
    the directory and says which access the session was given. Off — the default, and
    what a Host that does not have the setting does — everything above holds.
-3. **A conflict?** The answer for a repository left on a conflict reports
-   `mergeInProgress`, `mergeSite` — the checkout the conflict stands in, inside the
-   task space — and `conflictedFiles`. Nothing is opened by itself here either: the
-   user presses **Hand the conflict to the agent** in the panel, and that session is
+3. **A conflict?** The answer for a repository left on a conflict is flagged
+   **`mergeInProgress: true`**, and reports `mergeSite` — the checkout the conflict
+   stands in, inside the task space — and `conflictedFiles`. The panel opens it with
+   **Hand the conflict to the agent**; from a `done` you dispatched, route it the same
+   way as step 2 (`wts_session_tool_send`, `mode: "steer"`, to the session the finish
+   named). That session is
    shared by every conflicting repository and works in the common ancestor of their
    sites (or of each site and its source repository, when the Host named it), and in the
    task space where those sites share nothing but the volume root; a
@@ -390,34 +574,43 @@ Confirm each destructive step with the user before passing it:
    rehearsal runs once more, and a fresh conflict is left standing the same way. That next
    `done` does not start by itself: once the session stops, the panel reads the plan again and,
    where the merge has been committed and nothing is left uncommitted, its headline turns into a
-   green light and **The conflict is resolved: carry on and finish the task.** — asking for the next
-   `done` is the user's move, with the panel's **Continue finishing** button: what it does is merge
-   the branch into their own checkout, so it waits for them. Resolving a conflict yourself does not
-   end the task, and only that second `done` finishes it.
-   **One exception, by the task's own policy:** when the task's `worktree-space.md`
-   records `Conflicts: agent-auto`, the user has already delegated the whole loop -
-   do not wait for the panel button or report and stop. Resolve the conflicted files
-   in the checkout, commit the merge there, and call `done` again with the same
-   request, in this session. Committing a merge may need elevated permission in the
-   session; ask for it openly rather than retrying around it, and if the user is not
-   there to grant it, stop and report - the delegation covers the decision, never a
-   silent permission.
+   green light and **The conflict is resolved: carry on and finish the task.** — the panel's
+   **Continue finishing** button is one way to ask for that next `done`: what it does is merge
+   the branch into the user's own checkout, so it waits for them. A session that was told to
+   finish can also call that `done` itself, the same as any other finish. Either way, resolving a
+   conflict does not end the task, and only that second `done` finishes it.
+   **There is no policy field that pre-delegates this.** A conflict is resolved when
+   the user hands it over — by the panel's button, or by telling you to resolve it.
+   Nothing in the task's record can have decided that in advance, so do not wait for
+   the panel button when the user has already asked you to resolve it: fix the
+   conflicted files in the checkout, commit the merge there, and call `done` again
+   with the same request, in this session. Committing a merge may need elevated
+   permission in the session; ask for it openly rather than retrying around it, and if
+   the user is not there to grant it, stop and report.
+   **Not the same as `dirtyCheckout`.** A row flagged **`dirtyCheckout: true`** is the
+   user's own working checkout, which a merge would overwrite. No merge was started and
+   there are no markers to reconcile, so sending anyone after conflict files wastes the
+   trip. That work is the user's and may have nothing to do with this task: do **not**
+   commit or stash it on their behalf. Say what is in the way, name the checkout, and
+   let them deal with it — then call `done` again.
 4. **Delete the branch?** After a merge, and only when the user asks for it: the
-   branch is **kept** unless something explicitly says to delete it — pass
+   branch is **kept** unless the call says otherwise — pass
    `deleteBranch: true` together with `merge: true`, or leave it out and the branch
    stays. That default is the reversible one: once the task space is gone, the branch is
    the only record left of how the work was made, and a delete cannot be walked back.
-   A task's own record can say `deleteBranch: true` as a standing answer, and then a
-   merge under `merge.mode: auto` deletes it without the argument — the record is as
-   explicit as the call. When the user wants the task
+   Nothing in the task's record can say to delete it for you. When the user wants the task
    space gone without merging anything, that is the abandon path: pass
    `deleteBranch: true` with `force: true` and `merge: false`, which removes the
    worktrees and force-deletes the branches with the commits on them.
-5. **Stray files?** The task's policy decides by default, and the shipped default **archives**
-   them — a copy into the archive directory, which lets the task space be removed in the same
-   finish. Show what the outcome lists, and pass `keep: [...]` to name entries that must stay
-   exactly where they are - the user's own documents, say; `cleanStray: true` only when the user
-   wants the build output cleared as well.
+5. **Stray files?** Pass `strays` — `archive` (the default when omitted) files them into
+   the archive directory and clears build output, so the task space can be removed in the
+   same finish; `keep` leaves everything exactly as it stands and the space stays.
+   `discard` deletes the user's untracked files outright and **this tool refuses it
+   (E7007)** — it is irreversible and the user's own decision, so only the panel can do
+   it. When they want that, say so and let them finish from the panel; do not quietly
+   archive instead, because that is not what they asked for. Show what the outcome lists,
+   and pass `keepEntries: [...]` to name entries that must stay exactly where they are
+   whatever the choice says — the user's own documents, say.
 
 The Workspace registration follows the directory. When the finish removes the task space
 itself, `done` drops the registration too, so the task space leaves the workspace list and

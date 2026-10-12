@@ -44,12 +44,11 @@ describe("a Host failure said here", () => {
       .toBe(format(t("hostE2004NoWorktrees"), { path: "/w/login" }))
   })
 
-  it("names what a delivery gate is waiting for in this language", () => {
-    // The Host names each one by key: a phrase translated word by word is not a phrase.
-    expect(hostFailureText(t, "E5007", { missing: ["smoke"] }))
-      .toBe(format(t("hostE5007"), { missing: t("gateMissingSmoke") }))
-    expect(hostFailureText(t, "E5007", { missing: ["smoke", "human-ack"] }))
-      .toBe(format(t("hostE5007"), { missing: `${t("gateMissingSmoke")}${t("gateMissingJoin")}${t("gateMissingHumanAck")}` }))
+  it("has nothing to say for a code it no longer serves", () => {
+    // E5005 was retired when the gate folded "no state file at all" into E5006. A Host old
+    // enough to still send it gets its own English sentence, which is what an unknown code
+    // has always done - the sentence is shown, not swallowed.
+    expect(hostFailureText(t, "E5005", { target: "docker", envId: "demo" })).toBeUndefined()
   })
 
   it("lists the worktrees a finish could not remove, and says how many", () => {
@@ -83,8 +82,8 @@ describe("a Host warning said here", () => {
   it("says which way a gate was bypassed", () => {
     expect(hostWarningText(t, { code: "delivery-gate-bypassed", message: "…", values: { target: "docker" } }))
       .toBe(format(t("warnDeliveryGateBypassedWithoutDeployment"), { target: "docker" }))
-    expect(hostWarningText(t, { code: "delivery-gate-bypassed", message: "…", values: { missing: ["human-ack"] } }))
-      .toBe(format(t("warnDeliveryGateBypassedMissing"), { missing: t("gateMissingHumanAck") }))
+    expect(hostWarningText(t, { code: "delivery-gate-bypassed", message: "…", values: { missing: ["smoke"] } }))
+      .toBe(format(t("warnDeliveryGateBypassedMissing"), { missing: t("gateMissingSmoke") }))
   })
 
   it("falls back to the Host's sentence rather than losing the warning", () => {
@@ -111,15 +110,12 @@ describe("every sentence the Host's codes are said with", () => {
     ["E2004", { path: "/w/login", reason: "none" }, "/w/login"],
     ["E2004", { path: "/w/login", reason: "no-worktrees-to-extend" }, "/w/login"],
     ["E2004", { path: "/w/login", reason: "branches-disagree" }, "/w/login"],
-    ["E2005", { path: "/w/login", missing: "/w/login/worktree-space.json" }, "worktree-space.json"],
+    ["E2005", { path: "/w/login", missing: "/w/login/.worktree-space/worktree-space.json" }, "worktree-space.json"],
     ["E4011", {}, ""],
     ["E4012", {}, ""],
-    ["E4013", {}, ""],
-    ["E5005", { target: "docker", envId: "demo" }, "docker"],
-    // The environment is named only when there is one.
-    ["E5005", { target: "docker", envId: "" }, "docker"],
-    ["E5006", { missing: ["smoke"] }, ""],
-    ["E5007", { missing: ["smoke", "human-ack"] }, ""],
+    ["E4014", {}, ""],
+    ["E4015", {}, ""],
+    ["E5006", {}, ""],
     ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }] }, "/w/a"],
     ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }, { path: "/w/b", reason: "EPERM" }] }, "/w/b"],
   ]
@@ -127,8 +123,7 @@ describe("every sentence the Host's codes are said with", () => {
   const warnings: [string, HostValues, string][] = [
     ["no-task-branch", { path: "/w/login" }, "/w/login"],
     ["delivery-gate-bypassed", { target: "docker" }, "docker"],
-    ["delivery-gate-bypassed", { missing: ["human-ack"] }, ""],
-    ["human-ack-waived", {}, ""],
+    ["delivery-gate-bypassed", { missing: ["smoke"] }, ""],
     ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "", taskBranch: "task/x" }, "alpha"],
     ["branch-left-alone", { name: "alpha", mainRepo: "/s/alpha", branch: "other", taskBranch: "task/x" }, "other"],
     ["branch-not-deleted", { branch: "task/x", name: "alpha" }, "task/x"],
@@ -138,7 +133,6 @@ describe("every sentence the Host's codes are said with", () => {
     ["leftover-holds-links", { name: "deploy", destination: "/a/deploy", links: ["a", "b", "c", "d"], shown: 2 }, "2"],
     ["leftover-copy-failed", { name: "docs", destination: "/a/docs", reason: "EPERM" }, "EPERM"],
     ["no-deployment-recorded", {}, ""],
-    ["deploy-destroy-failed", { output: "docker: not found" }, "docker: not found"],
     ["deploy-containers-left", { count: 2, envId: "demo", reason: "docker failed" }, "demo"],
     ["deploy-cleanup-failed", { envId: "demo", reason: "docker failed" }, "demo"],
   ]

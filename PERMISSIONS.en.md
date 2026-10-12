@@ -20,7 +20,9 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     directories at a time per level. `node_modules`, `Library`, `dist`, `build`, `vendor` and hidden
     directories are skipped (except `.worktrees`). The scan only decides *which directory is a Git
     repository* — it **does not read file contents**.
-  - The task space's two metadata files `worktree-space.json` and `worktree-space.md`, plus each repository
+  - The two records in the task space's own directory: `.worktree-space/worktree-space.json` and
+    `.worktree-space/worktree-space.md`, plus the files under the deploy root inside it (scripts, manifest,
+    `.state.json`); and each repository
     worktree's `<worktree>/.git` marker file (used to tell whether that worktree has gone stale).
   - The container root's `<container root>/.git` and `<container root>/README.md`: the first, if present,
     means the container root is itself a Git repository and creation is refused; the second, if present, is
@@ -42,7 +44,9 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   - Create: `mkdir` the container root, the project directory beneath it and the task space directory; write
     one `README.md` at the container root the first time it is used (declaring it the worktree-only area;
     an existing one is left alone); `git worktree add` creates each checkout (git writes it); write
-    `worktree-space.json` and the `worktree-space.md` rendered from it.
+    `.worktree-space/worktree-space.json` and the `.worktree-space/worktree-space.md` rendered from it, and
+    copy the source root's whole `.worktree-space/deploy/` to the same relative place in the task space
+    (scaffolding a state-writing script when the source root has none).
   - Archive: `cp` the task space's documents to `<project>/<task>-<YYYYMMDD-HHMMSS>/` under the **archive
     root** the configuration names; the default root is the task space's **own container root**
     (`<container root>/archived-docs`, the very directory chosen when the task space was created), and it
@@ -91,6 +95,16 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
     not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
     fails**: the tool answers that no session was opened, and says to open one from the panel.
+  - The session-control tools (`wts_session_tool_*`): **reading** any session's event log (a live one through the
+    host's session service, an offline one through session persistence — the same records the panel reads),
+    **sending** a message to a session (`steer` injects into the running turn, `queue` appends a turn),
+    **opening** and **resuming** sessions, and **aborting** a session's active turn. What is written is **DSH's
+    own session log**, not a file this plugin writes. All eight are the **caller's per-call decision**: the plugin
+    polls nothing on its own, never steers by itself, and never terminates a session by itself. Where the
+    deployment serves no such service it **does not fail** — each tool answers "this deployment does not offer X",
+    and the tool itself is registered all the same. The session id recorded when a task space is dispatched (the
+    `sessions` field of `.worktree-space/worktree-space.json`) goes into this plugin's own task record, which is the same
+    boundary as above.
 
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command,

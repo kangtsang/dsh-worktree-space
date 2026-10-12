@@ -11,8 +11,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  PLUGIN_ROOT,
   TASK_METADATA,
-  TASK_OWNED_FILES,
+  TASK_OWNED_ENTRIES,
   TASK_README,
   readTaskMetadata,
   renderTaskMetadata,
@@ -85,25 +86,30 @@ describe('task metadata', () => {
       })
       await writeTaskMetadata(root, metadata)
 
-      const written = JSON.parse(await readFile(join(root, TASK_METADATA), 'utf8'))
+      const written = JSON.parse(await readFile(join(root, PLUGIN_ROOT, TASK_METADATA), 'utf8'))
       expect(written).toEqual(metadata)
 
       // The note carries what a session needs, and says where the facts live.
-      const note = await readFile(join(root, TASK_README), 'utf8')
+      const note = await readFile(join(root, PLUGIN_ROOT, TASK_README), 'utf8')
       expect(note).toBe(renderTaskMetadata(metadata))
       expect(note).toContain('# Task: login')
       expect(note).toContain("- Branch: `task/login`")
       expect(note).toContain('- Base: `main`')
       expect(note).toContain(metadata.createdAt)
-      expect(note).toContain('worktree-space.json')
+      // Named with the directory it sits in: the record is no longer at the top of the
+      // task space, so the note has to say where a reader finds it.
+      expect(note).toContain(`${PLUGIN_ROOT}/${TASK_METADATA}`)
       expect(note).toContain('- `alpha`')
       // The deployment section states this task's own id, copied verbatim into
       // every deploy command; nothing else is what keeps environments apart. The
       // delivery policy renders beside it, so a session reads both from one note.
       expect(note).toContain('## Deployment')
-      expect(note).toContain('DSH_ENV_ID=dsh-public-login')
-      expect(note).toContain('## Delivery policy')
-      expect(note).toContain('- Deploy: target `none` (on-request).')
+      expect(note).toContain('DEPLOY_ENV_ID=dsh-public-login')
+      // The delivery section is one line now, because the policy behind it is one
+      // field: whether this task expects a deployment. Everything else a finish
+      // decides is passed on the `done` call, so the note does not record it.
+      expect(note).toContain('## Delivery')
+      expect(note).toContain('- Deployment target: `none`.')
 
       expect(await readTaskMetadata(root)).toEqual(metadata)
     } finally {
@@ -126,7 +132,7 @@ describe('task metadata', () => {
     expect(deploymentEnvId).toBeDefined()
     expect(delivery).toBeDefined()
     expect(renderTaskMetadata(legacy)).not.toContain('## Deployment')
-    expect(renderTaskMetadata(legacy)).not.toContain('## Delivery policy')
+    expect(renderTaskMetadata(legacy)).not.toContain('## Delivery')
   })
 
   it('keeps reading a container that only has the legacy note', async () => {
@@ -149,7 +155,8 @@ describe('task metadata', () => {
   it('falls back to the legacy note when the record is unreadable', async () => {
     const root = await legacyContainer()
     try {
-      await writeFile(join(root, TASK_METADATA), '{ this is not json')
+      await mkdir(join(root, PLUGIN_ROOT), { recursive: true })
+      await writeFile(join(root, PLUGIN_ROOT, TASK_METADATA), '{ this is not json')
       expect(await readTaskMetadata(root)).toEqual({
         version: 0,
         task: 'login',
@@ -158,7 +165,7 @@ describe('task metadata', () => {
       })
 
       // A record that parses but names no task is no identity either.
-      await writeFile(join(root, TASK_METADATA), JSON.stringify({ version: 1, branch: 'task/login' }))
+      await writeFile(join(root, PLUGIN_ROOT, TASK_METADATA), JSON.stringify({ version: 1, branch: 'task/login' }))
       expect((await readTaskMetadata(root)).task).toBe('login')
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -176,8 +183,14 @@ describe('task metadata', () => {
 
   // README.md is deliberately NOT owned: in a space old enough to hold one the
   // plugin wrote, the name is now as likely to be the user's own.
-  it('owns exactly the three files it writes, the legacy name included', () => {
-    expect(TASK_OWNED_FILES).toEqual(['worktree-space.json', 'worktree-space.md', 'README.en.md'])
-    expect(TASK_OWNED_FILES).not.toContain('README.md')
+  it('owns one directory at the top level, the legacy note name beside it', () => {
+    // One entry, because the record, the note and the deploy root are all inside it: a
+    // finish clears the plugin's bookkeeping by clearing the directory, and a copied
+    // `deploy/` tree is not something to file away as the user's documents either.
+    expect(TASK_OWNED_ENTRIES).toEqual([PLUGIN_ROOT, 'README.en.md'])
+    expect(TASK_OWNED_ENTRIES).not.toContain('README.md')
+    // The record's own names live inside the directory rather than at the top level.
+    expect(TASK_OWNED_ENTRIES).not.toContain(TASK_METADATA)
+    expect(TASK_OWNED_ENTRIES).not.toContain(TASK_README)
   })
 })

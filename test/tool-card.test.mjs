@@ -46,7 +46,7 @@ describe("the task tool's card contract", () => {
     expect(tool.presentCall(callArgs)).toEqual(tool.presentCall(callArgs))
     expect(tool.presentCall(callArgs)).toMatchObject({
       card: "generic",
-      title: "task_worktree_space: done",
+      title: "wts_worktree_space: done",
       kind: "other",
       rawInput: "demo",
     })
@@ -101,7 +101,7 @@ describe("the task tool's card contract", () => {
     const view = tool.presentResult(callArgs, { content: [{ type: "text", text: "plain summary" }], isError: false, meta: undefined })
     expect(textOf(view)).toBe("plain summary")
     expect(view.card).toBe("generic")
-    expect(view.title).toBe("task_worktree_space: done")
+    expect(view.title).toBe("wts_worktree_space: done")
   })
 
   it("survives a malformed projection and content that is not text", async () => {

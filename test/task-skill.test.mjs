@@ -62,11 +62,22 @@ describe("registerTaskSkill", () => {
     expect(loaded.name).toBe(SKILL_NAME)
     expect(loaded.content.startsWith("---")).toBe(false)
     expect(loaded.content).toContain("# Task Worktree Space")
-    expect(loaded.content).toContain("task_worktree_space")
+    expect(loaded.content).toContain("wts_worktree_space")
     // The workflow rules the model must apply live in the body.
     expect(loaded.content).toContain("Never create a workspace with a guessed location")
-    expect(loaded.content).toContain("Never merge by hand")
-    expect(loaded.content).toContain("DSH_ENV_ID")
+    // Hand-merging in a source checkout stays forbidden; finishing through `done` is the
+    // user's decision between two supported flows, and the body has to say both.
+    expect(loaded.content).toContain("never hand-merge there")
+    expect(loaded.content).toContain("Who finishes is the user's decision")
+    expect(loaded.content).toContain("both flows are supported")
+    expect(loaded.content).toContain("DEPLOY_ENV_ID")
+    // The acceptance fence is the one delivery decision a create makes, and it cannot be
+    // added afterwards - so the body has to make asking for it a step of its own rather
+    // than something to do when the user happens to volunteer the answer, and it has to
+    // say what a deploying task's finish line is.
+    expect(loaded.content).toContain("Ask about the acceptance fence")
+    expect(loaded.content).toContain("Do not answer it for the user")
+    expect(loaded.content).toContain("not finished until its fence has passed")
   })
 
   it("reads the file on every load, so an edited asset is served", async () => {

@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import {
   BREADCRUMB,
+  PLUGIN_ROOT,
+  TASK_METADATA,
+  TASK_README,
   classifySourceRoot,
   createTask,
   finishTask,
@@ -16,6 +19,18 @@ import {
   suggestTaskRoot,
 } from "../src/host/task/operations.js"
 import { readAudit } from "../src/host/task/audit-log.js"
+
+/** The record, inside the plugin's own directory in the task space. */
+const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, TASK_METADATA)
+
+/** The record's path relative to the task space, for a fixture that keys files by name. */
+const RECORD_PATH = `${PLUGIN_ROOT}/${TASK_METADATA}`
+
+/** The note rendered from the record, beside it. */
+const noteAt = (taskPath) => join(taskPath, PLUGIN_ROOT, TASK_README)
+
+/** The task space's own deploy root: the plugin's own directory, then `deploy`. */
+const deployAt = (taskPath, ...parts) => join(taskPath, PLUGIN_ROOT, "deploy", ...parts)
 
 /**
  * What a finish said, as one string.
@@ -52,10 +67,13 @@ const CAN_CREATE_SYMLINKS = (() => {
  * The metadata record a task space carries: the JSON `createTask` writes and
  * the note rendered from it. Fixtures use this so a hand-built container looks
  * like one the plugin made, rather than like one from before the JSON existed.
+ *
+ * Written through the same two paths the plugin writes, so a fixture cannot pass by
+ * leaving a record somewhere nothing reads it.
+ * @param taskPath - the task space directory.
  * @param task - the task's name.
- * @returns the two file contents, keyed by file name.
  */
-function metadataFiles(task) {
+async function writeMetadataFiles(taskPath, task) {
   const metadata = {
     version: 1,
     task,
@@ -66,10 +84,9 @@ function metadataFiles(task) {
     createdAt: "2026-09-28T04:00:00.000Z",
     repositories: [],
   }
-  return {
-    "worktree-space.json": JSON.stringify(metadata, null, 2) + "\n",
-    "worktree-space.md": "# Task: " + task + "\n",
-  }
+  await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+  await writeFile(recordAt(taskPath), JSON.stringify(metadata, null, 2) + "\n")
+  await writeFile(noteAt(taskPath), "# Task: " + task + "\n")
 }
 
 /**
@@ -328,7 +345,7 @@ describe("createTask", () => {
         `worktree add ${join(container.root, source.project, "fix-login", "beta")} -b task/fix-login`,
       ])
 
-      const metadata = JSON.parse(await readFile(join(result.path, "worktree-space.json"), "utf8"))
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
       expect(metadata.task).toBe("fix-login")
       expect(metadata.project).toBe(source.project)
       expect(metadata.branch).toBe("task/fix-login")
@@ -338,34 +355,43 @@ describe("createTask", () => {
       expect(typeof metadata.createdAt).toBe("string")
       // The note a session reads is generated from that record, so the two cannot
       // disagree; it says where its own facts come from.
-      const note = await readFile(join(result.path, "worktree-space.md"), "utf8")
+      const note = await readFile(noteAt(result.path), "utf8")
       expect(note).toContain("# Task: fix-login")
       expect(note).toContain(`- Project: \`${source.project}\``)
       expect(note).toContain("- Branch: `task/fix-login` (one branch per repository below)")
       expect(note).toContain("each repository's current HEAD")
       expect(note).toContain("- `alpha`")
       expect(note).toContain("Source repositories are read-only")
-      expect(note).toContain("worktree-space.json")
-      // A source root with no deploy root of its own is skipped rather than invented: the
-      // space then deploys only what its own repositories carry.
-      expect(existsSync(join(result.path, "deploy"))).toBe(false)
+      // Who finishes is stated as the user's decision rather than as a rule naming one side:
+      // both flows are supported, and the note has to say so or a session reading it would
+      // either strand a finished task or merge without the user having asked.
+      expect(note).toContain("Who finishes is the user's decision")
+      expect(note).toContain("both flows work")
+      // The one step that cannot be taken back is named as an authorisation.
+      expect(note).toContain("cannot take back")
+      expect(note).toContain(`${PLUGIN_ROOT}/${TASK_METADATA}`)
+      // A source root with no deploy root of its own gets the contract scaffold rather
+      // than an invented deploy script: the space then deploys only what its own
+      // repositories carry, and still has a way to write the state file.
+      expect(existsSync(deployAt(result.path, "deploy.sh"))).toBe(false)
+      expect(existsSync(deployAt(result.path, "write-state.sh"))).toBe(true)
     } finally {
       await source.cleanup()
       await container.cleanup()
     }
   })
 
-  it("carries the source root's deploy root into the task space", async () => {
+  it("carries the workspace's deploy root into the task space", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess } = subprocessMock(branchIsNew("task/ship"))
     try {
-      // The deploy root is a directory and a manifest's commands run from inside it, so the
-      // script the manifest names has to travel with the manifest: a manifest alone would be
-      // a deploy that never runs.
-      await mkdir(join(source.root, "deploy"), { recursive: true })
-      await writeFile(join(source.root, "deploy", "deploy.yaml"), "targets:\n  docker:\n    up: ./deploy.sh up\n", "utf8")
-      await writeFile(join(source.root, "deploy", "deploy.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+      // The deploy root is a directory, and the scripts in it run from that directory, so
+      // a script that names its siblings has to travel with them: the entry point alone
+      // would be a deploy that never runs.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "deploy.sh"), "#!/bin/sh\n. ./helpers.sh\nexit 0\n", "utf8")
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "helpers.sh"), "#!/bin/sh\nexit 0\n", "utf8")
 
       const result = await createTask(subprocess, {
         sourceRoot: source.root,
@@ -373,33 +399,305 @@ describe("createTask", () => {
         tasksRoot: container.root,
       })
 
-      expect(await readFile(join(result.path, "deploy", "deploy.yaml"), "utf8")).toContain("up: ./deploy.sh up")
-      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("exit 0")
+      expect(await readFile(deployAt(result.path, "deploy.sh"), "utf8")).toContain(". ./helpers.sh")
+      expect(await readFile(deployAt(result.path, "helpers.sh"), "utf8")).toContain("exit 0")
     } finally {
       await source.cleanup()
       await container.cleanup()
     }
   })
 
-  it("copies the deploy script the create names in under the fixed name", async () => {
+  it("scaffolds a deploy root that can write the delivery state when the source root has none", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/scaffold"))
+    try {
+      // The space carries no deploy script of its own, so nothing there would ever
+      // write `.state.json` - and `done` refuses the merge over exactly that file.
+      // The scaffold is the handshake in executable form.
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "scaffold",
+        tasksRoot: container.root,
+      })
+
+      const script = await readFile(deployAt(result.path, "write-state.sh"), "utf8")
+      expect(script).toContain(".state.json")
+      // It merges rather than rewrites: `destroyedAt` in the file is the plugin's own,
+      // so the script names it without ever writing it, and the field it does write is
+      // the smoke the finish gate reads back.
+      expect(script).toContain("destroyedAt")
+      expect(script).toContain("lastSmoke")
+      // The state file's location is the plugin's decision, handed over by name - so the
+      // script never derives it from where it happens to sit.
+      expect(script).toContain("DEPLOY_STATE_FILE")
+      // The human acceptance the flow used to wait for is gone, so the handshake no
+      // longer carries a field for it.
+      expect(script).not.toContain("humanAck")
+      const example = JSON.parse(await readFile(deployAt(result.path, ".state.json.example"), "utf8"))
+      expect(example.url).toBeTruthy()
+      expect(example.lastSmoke.result).toBe("pass")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("never overwrites a workspace's own deploy root with the scaffold", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/own"))
+    try {
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "deploy.sh"), "#!/bin/sh\necho own deploy\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "own",
+        tasksRoot: container.root,
+      })
+
+      expect(await readFile(deployAt(result.path, "deploy.sh"), "utf8")).toContain("echo own deploy")
+      // The directory was already somebody else's: not one scaffolded file lands in it.
+      expect(existsSync(deployAt(result.path, "write-state.sh"))).toBe(false)
+      expect(existsSync(deployAt(result.path, ".state.json.example"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploying create when nothing in the workspace or its repositories can deploy", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/nothing"))
+    try {
+      // The caller asked for a deployment and there is no script anywhere: no deploy root at
+      // the workspace, no named script, no repository carrying its own. The refusal is
+      // before anything is made - no project layer, no git call - rather than a task space
+      // whose card can only ever say "nothing to deploy".
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "nothing",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+      })).rejects.toMatchObject({ code: "E4015" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploying create when the deploy root holds no entry, not merely no directory", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/noentry"))
+    try {
+      // A deploy root that holds only OTHER scripts is still nothing to run. A test
+      // for the directory alone would pass here and leave the task undeployable - which is
+      // the silent failure this guard exists to prevent, so the entry file is what is checked.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "noentry",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+      })).rejects.toMatchObject({ code: "E4015" })
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("accepts a deploying create whose workspace carries .worktree-space/deploy/deploy.sh", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/hasentry"))
+    try {
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "deploy.sh"), "#!/bin/sh\necho up\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "hasentry",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+      })
+
+      expect(existsSync(deployAt(result.path, "deploy.sh"))).toBe(true)
+      // Nothing scaffolded: the workspace's own deploy root travelled over.
+      expect(existsSync(deployAt(result.path, "write-state.sh"))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("does not accept a deploy root left at the workspace's top level", async () => {
+    // The workspace side makes the same clean break the task space does: a `deploy/` at the
+    // workspace root is not read at all, so a workspace that still keeps its deploy root
+    // there has nothing to deploy as far as this version is concerned. Refusing is the point
+    // - accepting it would run a script this plugin no longer manages, and its state file
+    // would land somewhere the finish gate never looks.
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/oldplace"))
+    try {
+      await mkdir(join(source.root, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "deploy", "deploy.sh"), "#!/bin/sh\necho up\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "oldplace",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+      })).rejects.toMatchObject({ code: "E4015" })
+
+      // Nothing was made, and the old deploy root is still where the user left it.
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+      expect(existsSync(join(source.root, "deploy", "deploy.sh"))).toBe(true)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("accepts a deploying create that names an existing script, with no deploy root at the workspace", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/namedonly"))
+    try {
+      // The named script IS the entry, and it lives under the deploy root, so it satisfies
+      // the guard on its own - E4014 has already proven it exists and is a file.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "namedonly",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+        deployScript: `${PLUGIN_ROOT}/deploy/notify.sh`,
+      })
+
+      expect(existsSync(deployAt(result.path, "notify.sh"))).toBe(true)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("accepts a deploying create when a selected repository carries its own deploy/deploy.sh", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/repoentry"))
+    try {
+      // The single-repository shape: the workspace has no deploy root of its own, but the
+      // repository does, and the deploy side looks there too. Refusing this would break that
+      // shape. A repository's `deploy/` is the repository's own file and does not move.
+      // The entry travels inside the worktree, which the git mock does not materialise - so
+      // what is asserted here is that the guard accepted it and the create went through.
+      await mkdir(join(source.alpha, "deploy"), { recursive: true })
+      await writeFile(join(source.alpha, "deploy", "deploy.sh"), "#!/bin/sh\necho up\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "repoentry",
+        tasksRoot: container.root,
+        delivery: { deploy: { target: "docker" } },
+      })
+
+      expect(result.path).toBeTruthy()
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
+      expect(metadata.delivery.deploy.target).toBe("docker")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("does not require any deploy script when the task does not deploy", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/plain"))
+    try {
+      // The default: deployTarget none means no gate and no script. Requiring one here would
+      // make every ordinary task unmakeable.
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "plain",
+        tasksRoot: container.root,
+      })
+
+      expect(result.path).toBeTruthy()
+      expect(existsSync(deployAt(result.path, "deploy.sh"))).toBe(false)
+      // The scaffold still lands, so a session that later decides to deploy has the handshake.
+      expect(existsSync(deployAt(result.path, "write-state.sh"))).toBe(true)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("copies the deploy script the create names under its own name, and records it as the entry", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const { subprocess } = subprocessMock(branchIsNew("task/notify"))
     try {
-      // Both readers look for `deploy/deploy.sh`, so the caller names any file and the
-      // fixed name is what a manifest keeps pointing at - the script behind it is what
-      // changes from one task to the next.
-      await mkdir(join(source.root, "deploy"), { recursive: true })
-      await writeFile(join(source.root, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+      // Nothing is renamed: the script arrives with the rest of the deploy root, keeping the
+      // name the caller gave, and the record says which entry to run. So a task can deploy
+      // with a different script from the one beside it without either overwriting the other.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "notify.sh"), "#!/bin/sh\necho notify\n", "utf8")
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "deploy.sh"), "#!/bin/sh\necho default\n", "utf8")
 
       const result = await createTask(subprocess, {
         sourceRoot: source.root,
         task: "notify",
         tasksRoot: container.root,
-        deployScript: "deploy/notify.sh",
+        deployScript: `${PLUGIN_ROOT}/deploy/notify.sh`,
       })
 
-      expect(await readFile(join(result.path, "deploy", "deploy.sh"), "utf8")).toContain("echo notify")
+      // Its own name, byte for byte - and the file it would have overwritten is untouched.
+      expect(await readFile(deployAt(result.path, "notify.sh"), "utf8")).toContain("echo notify")
+      expect(await readFile(deployAt(result.path, "deploy.sh"), "utf8")).toContain("echo default")
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
+      // The record keeps the WORKSPACE-relative path, and that same string resolves in the
+      // task space: one spelling, because the deploy root sits at the same relative place on
+      // both sides.
+      expect(metadata.deployScript).toBe(`${PLUGIN_ROOT}/deploy/notify.sh`)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("records a deploy script that sits in a subdirectory of the deploy root", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // Any depth under the deploy root is allowed, because the state file's location does
+      // not depend on where the entry sits - the plugin hands that path over as
+      // DEPLOY_STATE_FILE rather than leaving the script to derive it.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy", "variants"), { recursive: true })
+      await writeFile(join(source.root, PLUGIN_ROOT, "deploy", "variants", "smoke-a.sh"), "#!/bin/sh\necho variant-a\n", "utf8")
+
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: `${PLUGIN_ROOT}/deploy/variants/smoke-a.sh`,
+      })
+
+      expect(await readFile(deployAt(result.path, "variants", "smoke-a.sh"), "utf8")).toContain("echo variant-a")
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
+      expect(metadata.deployScript).toBe(`${PLUGIN_ROOT}/deploy/variants/smoke-a.sh`)
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -417,7 +715,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "notify",
         tasksRoot: container.root,
-        deployScript: "deploy/missing.sh",
+        deployScript: `${PLUGIN_ROOT}/deploy/missing.sh`,
       })).rejects.toMatchObject({ code: "E4014" })
 
       expect(keys()).toEqual([])
@@ -446,6 +744,55 @@ describe("createTask", () => {
 
       expect(keys()).toEqual([])
       expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script inside the workspace but outside its .worktree-space/deploy/ directory", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // The deploy root is the one directory that travels into the task space, so a script
+      // from anywhere else would arrive without the siblings it names - and would be a second,
+      // invisible deploy contract. It exists, and it is inside the workspace: the refusal is
+      // about the directory, not about reachability.
+      await writeFile(join(source.root, "deploy-elsewhere.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: "deploy-elsewhere.sh",
+      })).rejects.toMatchObject({ code: "E4014" })
+
+      expect(keys()).toEqual([])
+      expect(existsSync(join(container.root, source.project))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a deploy script that climbs out of deploy/ with a relative segment", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock(branchIsNew("task/notify"))
+    try {
+      // `.worktree-space/deploy/../sneaky.sh` resolves inside the workspace, so only a check
+      // against the deploy directory itself catches it. The path is normalised before the
+      // comparison, which is what makes the `..` visible.
+      await mkdir(join(source.root, PLUGIN_ROOT, "deploy"), { recursive: true })
+      await writeFile(join(source.root, "sneaky.sh"), "#!/bin/sh\nexit 0\n", "utf8")
+
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "notify",
+        tasksRoot: container.root,
+        deployScript: `${PLUGIN_ROOT}/deploy/../sneaky.sh`,
+      })).rejects.toMatchObject({ code: "E4014" })
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -703,7 +1050,7 @@ describe("createTask", () => {
       // fails - the one failure in a create that carries no code of its own.
       "worktree add": async ({ args }) => {
         await mkdir(args[2], { recursive: true })
-        await mkdir(join(taskPath, "worktree-space.json"), { recursive: true })
+        await mkdir(recordAt(taskPath), { recursive: true })
         return ""
       },
     })
@@ -1003,7 +1350,8 @@ describe("finishTask", () => {
     // this task made. A finish deletes no branch without it: `git branch -D` runs
     // in the source repository, outside the container, so the name to delete comes
     // from here rather than from whatever a worktree has checked out now.
-    await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+    await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+    await writeFile(recordAt(taskPath), JSON.stringify({
       task: "login", project: PROJECT, branch: "task/login",
       // What a create records about the repositories it made worktrees of. A finish
       // reads it to recognise a repository whose directory git has stopped calling a
@@ -1175,6 +1523,13 @@ describe("finishTask", () => {
       const alpha = result.repositories.find((entry) => entry.name === "alpha")
       expect(alpha.error).toContain("uncommitted work is waiting")
       expect(alpha.error).toContain(join(fixture.taskPath, "alpha"))
+      // Flagged as work-to-commit rather than left to be read out of the sentence: this
+      // is the stop the panel answers with "hand the commits to the agent", and a caller
+      // has to reach the same answer. Not a conflict - no merge was started.
+      expect(alpha.needsCommit).toBe(true)
+      expect(alpha.conflict).toBe(false)
+      expect(alpha.mergeInProgress).toBe(false)
+      expect(alpha.dirtyCheckout).toBe(false)
       // The refusal says what clears it, not who does it: the commit may be the caller's own
       // or a session's they authorised, and the panel is where that is settled.
       expect(alpha.error).toContain("commit it before the task can be finished")
@@ -1185,8 +1540,10 @@ describe("finishTask", () => {
       // is the point, and a commit now would be swept away with the worktree.
       expect(keys()).not.toContain("add -A")
       expect(keys()).not.toContain("commit -m chore(task): commit work in progress before finishing the task space")
-      // beta held nothing back, so it went through in the same pass.
+      // beta held nothing back, so it went through in the same pass - and is not flagged
+      // with alpha's stop, because the flag is per repository.
       const beta = result.repositories.find((entry) => entry.name === "beta")
+      expect(beta.needsCommit).toBe(false)
       expect(beta.error ?? "").toBe("")
       expect(beta.merged).toBe(true)
       expect(keys().filter((key) => key === "merge --no-ff --no-edit task/login")).toHaveLength(1)
@@ -1231,6 +1588,12 @@ describe("finishTask", () => {
       expect(keys()).not.toContain("merge --no-ff --no-edit task/login")
       for (const entry of result.repositories) {
         expect(entry.mergeInProgress).toBe(true)
+        // Flagged as a conflict so a caller can route it without reading git's English:
+        // this is the row that means "hand it to a session", not "retry".
+        expect(entry.conflict).toBe(true)
+        // And not one of the two stops that are somebody else's work to write.
+        expect(entry.needsCommit).toBe(false)
+        expect(entry.dirtyCheckout).toBe(false)
         // The checkout this plugin owns - the worktree being finished - rather than the
         // user's own source checkout or a scratch one.
         expect(entry.mergeSite).toBe(join(fixture.taskPath, entry.name))
@@ -1387,12 +1750,12 @@ describe("finishTask", () => {
         expect(entry.error).toMatch(/detached HEAD/)
         // Not a conflict either: nothing was reconciled, so there are no markers to
         // go and settle and no merge to conclude.
-        expect(entry.conflict).toBeUndefined()
+        expect(entry.conflict).toBe(false)
         // The worktree and the record stay, so the task can be finished again once
         // somebody has put the work back on a branch.
         expect(existsSync(entry.path)).toBe(true)
       }
-      expect(existsSync(join(fixture.taskPath, "worktree-space.json"))).toBe(true)
+      expect(existsSync(recordAt(fixture.taskPath))).toBe(true)
       // No merge was attempted at all - not even the one that would have reported
       // itself as having succeeded.
       expect(keys().filter((key) => key.startsWith("merge "))).toEqual([])
@@ -1416,7 +1779,7 @@ describe("finishTask", () => {
 
       expect(result.failed).toBe(true)
       expect(result.repositories[0]).toMatchObject({ merged: false, removed: false })
-      expect(result.repositories[0].conflict).toBeUndefined()
+      expect(result.repositories[0].conflict).toBe(false)
       expect(result.repositories[0].error).toMatch(/reports no branch/)
     } finally {
       await fixture.cleanup()
@@ -1563,7 +1926,7 @@ describe("finishTask", () => {
     }
   })
 
-  it("keeps stray files unless asked to clean them, and honours the keep list", async () => {
+  it("archives stray files when asked, and honours the keep list", async () => {
     const fixture = await taskFixture()
     await writeFile(join(fixture.taskPath, "notes.md"), "agent notes")
     await writeFile(join(fixture.taskPath, "plan.md"), "keep me")
@@ -1577,13 +1940,44 @@ describe("finishTask", () => {
     try {
       const result = await fixture.finish(subprocess, {
         task: "login",
-        cleanStray: true,
-        keep: ["plan.md"],
+        strays: "archive",
+        keepEntries: ["plan.md"],
       })
-      expect(result.removedStrays).toEqual(["notes.md"])
+      // The one named entry is left exactly where it stands; everything else the
+      // caller's `archive` covers is filed away and comes out of the space.
+      expect(result.archivedStrays).toEqual(["notes.md"])
       expect(result.strays).toEqual(["plan.md"])
       expect(existsSync(join(fixture.taskPath, "plan.md"))).toBe(true)
       expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves the whole space as it stands when the caller keeps the strays", async () => {
+    const fixture = await taskFixture()
+    await writeFile(join(fixture.taskPath, "notes.md"), "agent notes")
+    await mkdir(join(fixture.taskPath, "dist"), { recursive: true })
+    await writeFile(join(fixture.taskPath, "dist", "bundle.js"), "built\n")
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", strays: "keep" })
+
+      // `keep` declines to speak: nothing is filed and nothing is deleted, not even the
+      // build output, so the space is still non-empty and the finish cannot remove it.
+      // The user comes back to exactly what they left.
+      expect(result.archivedStrays).toEqual([])
+      expect(result.removedStrays).toEqual([])
+      expect(result.strays.sort()).toEqual(["dist", "notes.md"])
+      expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(true)
+      expect(existsSync(join(fixture.taskPath, "dist", "bundle.js"))).toBe(true)
+      expect(result.containerRemoved).toBe(false)
     } finally {
       await fixture.cleanup()
     }
@@ -1646,9 +2040,11 @@ describe("finishTask", () => {
       // about a path the caller named, not a claim on it. The record is the claim,
       // and it lives in the directory, so it cannot be stale the way a registry
       // can. Removed here, the finish refuses and names what is missing.
-      await rm(join(fixture.taskPath, "worktree-space.json"), { force: true })
+      await rm(recordAt(fixture.taskPath), { force: true })
+      // The refusal names the record with the directory it lives in, because that is
+      // where the user has to put it back.
       await expect(fixture.finish(subprocess, { task: "login", merge: true, deleteBranch: true }))
-        .rejects.toThrow(/holds no worktree-space\.json/)
+        .rejects.toThrow(/holds no \.worktree-space\/worktree-space\.json/)
       // Named, because a user reading the refusal has to be able to tell which
       // file to put back.
       await expect(fixture.finish(subprocess, { task: "login", merge: true }))
@@ -1747,7 +2143,7 @@ describe("finishTask", () => {
       await rm(join(fixture.taskPath, "alpha", ".git"), { force: true })
       await writeFile(join(fixture.taskPath, "alpha", "notes.md"), "# left behind\n")
 
-      const result = await fixture.finish(subprocess, { task: "login", documentsDirectory: documents, cleanStray: true })
+      const result = await fixture.finish(subprocess, { task: "login", documentsDirectory: documents, strays: "archive" })
 
       const stranded = result.repositories.find((entry) => entry.name === "alpha")
       expect(stranded).toMatchObject({ removed: false })
@@ -1762,7 +2158,7 @@ describe("finishTask", () => {
       // The record stays with it. It is the only thing left that says this directory is
       // this task's repository rather than the user's own files, so a later finish can
       // still tell - and the note it renders is not outlived by the directory it names.
-      expect(existsSync(join(fixture.taskPath, "worktree-space.json"))).toBe(true)
+      expect(existsSync(recordAt(fixture.taskPath))).toBe(true)
       // The repository that could be removed went as usual, and the task space stays
       // because a repository of this task is still in it.
       expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ removed: true })
@@ -1792,7 +2188,7 @@ describe("finishTask documents", () => {
     await mkdir(join(taskPath, "alpha"), { recursive: true })
     await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
-    for (const [name, contents] of Object.entries(metadataFiles("login"))) await writeFile(join(taskPath, name), contents)
+    await writeMetadataFiles(taskPath, "login")
     await writeFile(join(taskPath, "notes.md"), "# notes\n")
     await mkdir(join(taskPath, "docs"), { recursive: true })
     await writeFile(join(taskPath, "docs", "one.md"), "# one\n")
@@ -1810,7 +2206,7 @@ describe("finishTask documents", () => {
     return { root, taskPath, handlers, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
 
-  it("files the user's content into the documents directory and leaves build output", async () => {
+  it("files the user's content into the documents directory and clears build output", async () => {
     const fixtureUnderTest = await fixture()
     const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
     const documents = join(fixtureUnderTest.root, "archived-docs", "login-2026-09-26-14-30-05")
@@ -1823,15 +2219,17 @@ describe("finishTask documents", () => {
       })
 
       expect(result.archivedStrays.sort()).toEqual(["docs", "notes.md"])
-      expect(result.removedStrays).toEqual([])
+      // `archive` is the answer when the caller said nothing, and it is the one that
+      // both files the content away and clears the build output - so this finish is
+      // the whole of the disposal and the space goes with it.
+      expect(result.removedStrays).toEqual(["dist"])
       expect(existsSync(join(documents, "notes.md"))).toBe(true)
       expect(existsSync(join(documents, "docs", "one.md"))).toBe(true)
-      // The content left the container; the build output did not, so it stays and
-      // is what the result still reports.
+      // The content left the container, and so did the build output it filed nothing of.
       expect(existsSync(join(fixtureUnderTest.taskPath, "notes.md"))).toBe(false)
-      expect(existsSync(join(fixtureUnderTest.taskPath, "dist"))).toBe(true)
-      expect(result.strays).toEqual(["dist"])
-      expect(result.containerRemoved).toBe(false)
+      expect(existsSync(join(fixtureUnderTest.taskPath, "dist"))).toBe(false)
+      expect(result.strays).toEqual([])
+      expect(result.containerRemoved).toBe(true)
       // The breadcrumb this plugin wrote is cleared either way.
       expect(existsSync(join(fixtureUnderTest.taskPath, "README.en.md"))).toBe(false)
     } finally {
@@ -1861,7 +2259,7 @@ describe("finishTask documents", () => {
         project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         documentsDirectory: documents,
-        cleanStray: true,
+        strays: "archive",
       })
 
       if (CAN_CREATE_SYMLINKS) {
@@ -1887,7 +2285,11 @@ describe("finishTask documents", () => {
     }
   })
 
-  it("discards the user's content when no documents directory is named", async () => {
+  it("discards the user's content when the caller asks for it", async () => {
+    // This is `finishTask`, which is the *panel's* path - the user's own hand, ticking a
+    // box that says what it costs. The model-facing tool refuses `strays: 'discard'`
+    // outright (E7007, see task-tool.test.mjs); nothing here should be changed to match,
+    // or the panel loses the one action only it is allowed to perform.
     const fixtureUnderTest = await fixture()
     const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
     try {
@@ -1895,14 +2297,16 @@ describe("finishTask documents", () => {
         task: "login",
         project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
-        discardDocuments: true,
+        strays: "discard",
       })
 
       expect(result.archivedStrays).toEqual([])
-      expect(result.removedStrays.sort()).toEqual(["docs", "notes.md"])
+      // Nothing is filed anywhere: `discard` deletes the content outright, and the
+      // build output goes with it, so this finish empties the space.
+      expect(result.removedStrays.sort()).toEqual(["dist", "docs", "notes.md"])
       expect(existsSync(join(fixtureUnderTest.taskPath, "notes.md"))).toBe(false)
       expect(existsSync(join(fixtureUnderTest.taskPath, "docs"))).toBe(false)
-      expect(existsSync(join(fixtureUnderTest.taskPath, "dist"))).toBe(true)
+      expect(existsSync(join(fixtureUnderTest.taskPath, "dist"))).toBe(false)
     } finally {
       await fixtureUnderTest.cleanup()
     }
@@ -1943,7 +2347,7 @@ describe("finishTask documents", () => {
         project: PROJECT,
         tasksRoot: fixtureUnderTest.root,
         documentsDirectory: documents,
-        cleanStray: true,
+        strays: "archive",
       })
 
       expect(result.archivedStrays).toEqual(["docs"])
@@ -2027,7 +2431,12 @@ describe("planTask", () => {
     // The leftovers a task directory collects: this plugin's own breadcrumb,
     // build output, editor state, and writing the user did themselves.
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
-    for (const [name, contents] of Object.entries(metadataFiles("login"))) await writeFile(join(taskPath, name), contents)
+    await writeMetadataFiles(taskPath, "login")
+    // The deploy root a create copies in, which lives inside the plugin's own directory:
+    // it is this plugin's own tree, not the user's writing to file away.
+    await mkdir(deployAt(taskPath), { recursive: true })
+    await writeFile(deployAt(taskPath, "deploy.sh"), "#!/bin/sh\n", "utf8")
+    await writeFile(deployAt(taskPath, ".state.json"), "{}\n", "utf8")
     await mkdir(join(taskPath, "dist"), { recursive: true })
     await writeFile(join(taskPath, "dist", "app.js"), "")
     await mkdir(join(taskPath, ".idea"), { recursive: true })
@@ -2124,9 +2533,11 @@ describe("planTask", () => {
       const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
       const byName = Object.fromEntries(plan.strays.map((stray) => [stray.name, stray]))
 
-      // The files this plugin writes are its own, always cleared, never a surprise.
-      expect(byName["worktree-space.md"]).toBeUndefined()
-      expect(byName["worktree-space.json"]).toBeUndefined()
+      // The plugin's own bookkeeping is one directory, and it is never a stray: the
+      // record, the note and the copied deploy root are all inside it, and a finish
+      // takes them with the container rather than filing a copied tree of the source
+      // root's scripts into the user's documents.
+      expect(byName[PLUGIN_ROOT]).toBeUndefined()
       expect(byName["README.en.md"]).toBeUndefined()
       // A README.md is not among them, even though an older version wrote one.
       expect(byName["README.md"]).toEqual({ name: "README.md", directory: false, documents: 1, kind: "content" })
@@ -2211,7 +2622,8 @@ describe("inspectTask", () => {
         "- `beta`",
         "",
       ].join("\n"))
-      await writeFile(join(taskPath, "worktree-space.json"), JSON.stringify({
+      await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+      await writeFile(recordAt(taskPath), JSON.stringify({
         version: 1,
         task: "login",
         tasksRoot: root,
@@ -2238,6 +2650,9 @@ describe("inspectTask", () => {
       const path = join(root, "task")
       await mkdir(path, { recursive: true })
       for (const [name, text] of Object.entries(files)) {
+        // Keys may name a path inside the container (`${PLUGIN_ROOT}/…`), because the
+        // record is written into the plugin's own directory and the note is not.
+        await mkdir(dirname(join(path, name)), { recursive: true })
         await writeFile(join(path, name), text)
       }
       return { path, cleanup: () => rm(root, { recursive: true, force: true }) }
@@ -2270,14 +2685,14 @@ describe("inspectTask", () => {
 
     // A half-written record falls through to the note rather than failing the read,
     // which is the case a crash mid-create leaves behind.
-    const half = await container({ "worktree-space.json": "{ \"version\": 1", [BREADCRUMB]: note })
+    const half = await container({ [RECORD_PATH]: "{ \"version\": 1", [BREADCRUMB]: note })
     try {
       expect((await readTaskMetadata(half.path))?.task).toBe("login")
     } finally { await half.cleanup() }
 
     // A real record wins over the note beside it.
     const both = await container({
-      "worktree-space.json": JSON.stringify({ version: 1, task: "from-json" }),
+      [RECORD_PATH]: JSON.stringify({ version: 1, task: "from-json" }),
       [BREADCRUMB]: "# Task: from-note\n",
     })
     try {

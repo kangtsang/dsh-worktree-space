@@ -32,6 +32,7 @@ choose; you can also hand the uncommitted commits and merge conflicts to an agen
 - [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
 - [🛠️ Usage](#-usage)　[⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🏁 Finish](#-finish-a-worktree-space)　[Each combination](#what-each-combination-does)
 - [🤖 Experimental: handing the commits and the conflicts to an agent](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)　[The two buttons](#the-two-buttons-and-what-they-do) · [The flow](#the-flow-and-its-steps)
+- [🎛️ The session-control tools](#️-the-session-control-tools)　[The eight tools](#the-eight-tools) · [Which one, when](#which-one-when) · [The session id is recorded](#the-session-id-is-recorded)
 - [📝 The operation log](#-the-operation-log)
 - [📄 Companion documents](#-companion-documents)
 
@@ -136,8 +137,10 @@ top right.
 └── worktree-space/                     the container root: the plugin's own zone
     ├── repo-x/                         the project layer, named after the source Workspace directory
     │   └── task-x/                     the task space — also the session's working directory
-    │       ├── worktree-space.json     the task's record: branch, base, project, repositories, created
-    │       ├── worktree-space.md       rendered from that record — branch, base and conventions
+    │       ├── .worktree-space/        the plugin's own directory: everything it writes lives here
+    │       │   ├── worktree-space.json   the task's record: branch, base, project, repositories, created
+    │       │   ├── worktree-space.md     rendered from that record — branch, base and conventions
+    │       │   └── deploy/               the deploy root: a copy of the source root's .worktree-space/deploy/, state file included
     │       └── repo-x/                 a worktree on <branch prefix>task-x
     ├── project1/
     │   ├── hotfix/
@@ -416,9 +419,11 @@ in step 1.
 
 Whichever combination is chosen, three things do not change:
 
-1. **The metadata is always cleared.** The two records the plugin itself generates in the task
-   space — `worktree-space.json` and the `worktree-space.md` rendered from it — go every time. An
-   older space may still hold a `README.en.md`, which is cleared too, or a `README.md` this plugin
+1. **The plugin's own directory goes with the container.** `.worktree-space/` in the task space — the
+   record `worktree-space.json`, the `worktree-space.md` rendered from it, and the `deploy/` root — is
+   the plugin's own bookkeeping: it is **not content to archive**, and it is deleted when the task space
+   is cleared. Choosing `keep` leaves it standing with the space. An older space may also hold a
+   `README.en.md` at the space's **top level**, which is cleared too, or a `README.md` this plugin
    wrote back then; that one is left alone rather than assumed to be ours.
 2. **Everything else follows the archive choice.** Unselected, it is discarded outright.
 3. **Repositories that did not finish are kept as they are.** **A repository whose work nobody
@@ -512,6 +517,61 @@ that offers the handoff in the finish dialog shows the state and can change it, 
 
 **Finish task** or **Continue finishing** at the foot of the panel only ever runs once the user has
 confirmed it.
+
+## 🎛️ The session-control tools
+
+A task space hands its work to a **session of its own**: its own context, its own approval gate, its own
+working directory. The session that dispatched it is **not** its parent, so the ordinary parent/child
+channel (`send_message`) refuses outright — `belongs to another parent session`. These eight tools are the
+dispatcher's only route to the answers it needs: is that work still moving, what is it doing, can a
+correction still reach it, and how is a lost one picked back up.
+
+### The eight tools
+
+| Tool | What it does |
+| --- | --- |
+| `wts_session_tool_find` | Locate a session by directory, title or id; answers `sessionId`, whether it is live, its working directory and its title |
+| `wts_session_tool_status` | Progress: `running`, `openTurn`, `lastActivity`, `pendingWork`, `lastReply`, reasoning tail; an offline session is answered from its persisted log |
+| `wts_session_tool_read` | Read messages (count, `role` filter, `sinceSeq` paging), live or offline |
+| `wts_session_tool_send` | Say something to a session, with `mode` `queue` or `steer` |
+| `wts_session_tool_create` | Open a new session in a named directory (a task space), optionally handing it one self-contained prompt |
+| `wts_session_tool_resume` | Bring an offline session back online, after which `send` / `read` / `wait` work on it |
+| `wts_session_tool_wait` | Wait for one output; a timeout returns the output that already existed, marked `stale`, never an empty answer |
+| `wts_session_tool_cancel` | Abort the active turn, choosing whether the queued work is kept |
+
+### Which one, when
+
+- **`lastActivity` is the only reliable answer to "stuck" or "busy with a long step".** File times, mtimes
+  and log tails all sit still during a build, while the session's own clock does not. With
+  `stalledMsThreshold`, `wts_session_tool_status` marks a session stalled **only while it is running** — an
+  idle session that has been quiet for a long time has finished, which is not stuck.
+- **Anything time-sensitive must be a `steer`; `queue` is for what can wait for a turn boundary.** A queued
+  message is read at the session's next turn boundary, and a dispatched long task is often **one long
+  turn** — so the message sits unread in the inbox while the session looks exactly like one ignoring it.
+  Reading its messages with `wts_session_tool_read` is what tells "never arrived" from "did not do it".
+- **The recovery chain**: a check finds something wrong → `status` first, to tell "running but stuck" from
+  "offline" → `resume` for the offline one, `create` in **the same task space** for the lost one → and
+  **read its last state before deciding what to send**, whichever route it was. Never send blind.
+- **`lastTurnEnd` is the only way to tell "the task finished" from "an error killed the turn and it went
+  quiet"**: both look like idle with nothing queued. When it is not `completed`,
+  `wts_session_tool_status` names `error` / `interrupted` / `blocked` / `max-tokens`.
+
+These tools do **only** the above: there is no polling watchdog, no automatic steer or cancel, no
+archiving, and no termination on reasoning content. The judgement stays with the session that dispatched
+the work — an automatic steer is worse at it than one look at the real state.
+
+### The session id is recorded
+
+A `create` or a `dispatch` through `wts_worktree_space` already knows the session id it opened, so it is
+written into the task's own record (the `sessions` array in `.worktree-space/worktree-space.json`, each
+entry `{ sessionId, at, role }`) and shown in:
+
+- the task space's own `.worktree-space/worktree-space.md` (a "Sessions" section, newest first);
+- the `list` action's output (`sessions`, and the summary line).
+
+`list` also echoes each task's `.worktree-space/deploy/.state.json` `url` and `lastSmoke` (the
+`deployment` field), which saves a file round trip. A record written before this field existed **still reads exactly as it did**:
+`sessionId`/`sessions` absent means nobody wrote one down, not that the task has no session.
 
 ## 📝 The operation log
 

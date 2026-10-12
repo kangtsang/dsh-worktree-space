@@ -16,7 +16,8 @@
     最多 `maxScanDirectories` 个目录（默认 2000），每层最多并发 8 个。跳过 `node_modules`、`Library`、
     `dist`、`build`、`vendor` 以及隐藏目录（`.worktrees` 除外）。扫描只为发现「哪个目录是 Git 仓库」，
     **不读取文件内容**。
-  - 任务空间里的两个插件元数据文件 `worktree-space.json`、`worktree-space.md`；以及每个仓库 worktree 的
+  - 任务空间里插件专属目录 `.worktree-space/` 下的两份记录 `worktree-space.json`、`worktree-space.md`，
+    以及它下面部署根里的文件（脚本、清单、`.state.json`）；以及每个仓库 worktree 的
     `<worktree>/.git` 标记文件（用于判断该 worktree 是否已经失效）。
   - 容器根的 `<容器根>/.git`（存在就说明容器根本身是 Git 仓库，创建会被拒绝）与 `<容器根>/README.md`
     （存在就不再写，绝不覆盖用户自己写的内容）。两者都只做存在性判断。
@@ -33,7 +34,8 @@
   或配置文件。
   - 创建：`mkdir` 容器根、其下的项目目录与任务空间目录；在容器根首次被使用时写一份 `README.md`
     （说明这里是 Worktree 专用区；已存在则不动）；`git worktree add` 生成各仓库检出（由 git 自己落盘）；
-    写 `worktree-space.json` 与由它渲染出的 `worktree-space.md`。
+    写 `.worktree-space/worktree-space.json` 与由它渲染出的 `.worktree-space/worktree-space.md`，
+    并把源码根 `.worktree-space/deploy/` 整个复制到任务空间里的同一相对位置（源码根没有就脚手架一份状态写入脚本）。
   - 归档：把任务空间里的文档 `cp` 到配置选定的**归档根目录**下的 `<项目名>/<任务名>-<YYYYMMDD-HHMMSS>/`；
     默认的归档根就是**任务空间的容器根自己**（`<容器根>/archived-docs`，与新建任务时选的那个目录同一处），
     也可在配置里指定任意目录。
@@ -65,7 +67,13 @@
     调用方没有覆盖时**不写**，新会话于是落在部署默认——不会比调用方更宽），随后把这一轮任务作为提示语投给它。
     两个动作都是**调用方按次**触发的；界面上的「创建并打开」与「交由 agent」走的是另一条路。写的同样是 DSH
     自己的存储与会话日志，不是插件去写任何文件。部署没有会话服务时**不建也不报错**：工具如实回答「没有开成
-    会话」，并指明去面板开。
+     会话」，并指明去面板开。
+  - 会话控制工具（`wts_session_tool_*`）：**读**任意会话的事件日志（在线的经宿主会话服务，离线的经会话
+    持久化层，与面板读的是同一份），**发**消息给会话（`steer` 注入当前回合，`queue` 追加一轮），**开/拉回**
+    会话，以及**中止**会话的当前回合。写的是 **DSH 自己的会话日志**，不是插件去写任何文件。这八个工具都是
+    **调用方按次**触发的：插件不做任何自动轮询、不会自己 steer、也不会自己终止会话。部署没有相应服务时
+    **不报错**：每个工具如实回答「this deployment does not offer X」，工具本身照常注册。任务空间被派活时
+    记下的会话 id（`.worktree-space/worktree-space.json` 的 `sessions`）只是写进插件自己那份任务记录，与上面同一条。
 
 - **命令执行**：通过宿主注入的 `subprocess` 服务以**固定 argv** 调用 `git`
   （`argv: ['git', '-C', <cwd>, ...args]`）：**不经过 shell**，没有字符串拼接，不接受用户提供的命令，

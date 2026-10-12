@@ -4,7 +4,7 @@
  * What more than one of those needs: the layout a task container follows, and the worktrees it holds.
  */
 
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tryRunGit } from './git.js'
 import { coerceDeliveryPolicy } from './delivery.js'
@@ -12,12 +12,46 @@ import { deploymentEnvIdFor, validateProjectName, validateTaskName } from './nam
 import { assertTaskSpaceShape } from './paths.js'
 import { recommendTasksRoot } from './paths.js'
 
+/**
+ * The one directory inside a task space this plugin owns.
+ *
+ * Everything this plugin writes into a task space used to sit at the top level,
+ * beside the worktrees: the record, the note rendered from it, and the deploy root
+ * it copied or scaffolded. That top level is also where the user's own files go and
+ * where every worktree's name is taken, so "which entries are the plugin's?" was a
+ * list of names to keep in step. One directory answers it once, and leaves the top
+ * level to the worktrees and the user.
+ *
+ * Nothing is read from the old locations. A task space made by an earlier version
+ * is not recognised as one of ours until the files below are moved into this
+ * directory by hand - the CHANGELOG's breaking-change note says which. A fallback
+ * would be worse than the refusal: it would let a space keep working while the
+ * scripts that write its delivery state went on writing to a file this plugin no
+ * longer reads, which is a finish gate answering about nothing.
+ *
+ * The name is dotted for the same reason a lock file is: it sorts away from the
+ * worktrees in a listing, and it is not a name a repository or a user's own folder
+ * is likely to take.
+ */
+export const PLUGIN_ROOT = '.worktree-space'
+
+/**
+ * The orchestration root's directory name.
+ *
+ * One name for the two places that must never drift apart: the directory a create
+ * copies out of the source root, and the directory it lands in inside the task
+ * space ({@link PLUGIN_ROOT}'s own `deploy`). The copy is what every deploy command
+ * runs from and where the state file lives; the source root's original is the source
+ * side's own and is never moved.
+ */
+export const DEPLOY_ROOT = 'deploy'
+
 /** File a task container carries so a session finds the task's own rules. */
 
 export const BREADCRUMB = 'README.en.md'
 
 /**
- * The task's metadata, as data.
+ * The task's metadata, as data, inside {@link PLUGIN_ROOT}.
  *
  * The container used to carry only {@link BREADCRUMB}, a Markdown note written
  * for a session to read. It is read back with a regular expression and, of the
@@ -37,9 +71,9 @@ export const TASK_METADATA = 'worktree-space.json'
  * two cannot disagree; this is the file a session finds when it opens the task
  * space, replacing the note the old extension used to hold.
  *
- * Named after the record it renders rather than `README.md`. A task space is a
- * directory the user opens and puts their own files in, and `README.md` is the
- * first name anyone reaches for: a space that once carried the plugin's note
+ * Named after the record it renders rather than `README.md`. {@link PLUGIN_ROOT}
+ * is a directory the user opens and puts their own files in, and `README.md` is the
+ * first name anyone reaches for: a directory that once carried the plugin's note
  * could not also hold the user's own without one overwriting the other. The
  * shared prefix makes the pair self-evident — the `.json` is the record, this
  * is the same record for a reader — and leaves every conventional name to the
@@ -48,16 +82,23 @@ export const TASK_METADATA = 'worktree-space.json'
 export const TASK_README = 'worktree-space.md'
 
 /**
- * Files this plugin writes into a container and therefore owns.
+ * Entries at a container's top level that this plugin writes and therefore owns.
  *
- * {@link BREADCRUMB} is here as a legacy name: versions before the JSON wrote
- * that note instead, and a space created then is still this plugin's to clear.
- * `README.md` is deliberately absent even though such a space may hold one the
- * plugin itself wrote — by the time a space is archived, a file with that name
- * is as likely to be the user's own, and deleting the user's notes is worse
- * than leaving one stale file behind.
+ * One entry, because the plugin's bookkeeping is one directory: the record, the note
+ * rendered from it and the deploy root are all inside {@link PLUGIN_ROOT}, so the
+ * container holds exactly one name that is this plugin's to clear. That is also what
+ * a finish needs to know to leave the space empty enough to remove - the deploy root
+ * is a whole copied tree of scripts, and one left behind would hold the task space
+ * open over a copy of files the source root still has.
+ *
+ * {@link BREADCRUMB} is the exception, and stays named: versions before the JSON
+ * wrote that note at the container's top level, and a space created then is still
+ * this plugin's to clear. `README.md` is deliberately absent even though such a
+ * space may hold one the plugin itself wrote — by the time a space is archived, a
+ * file with that name is as likely to be the user's own, and deleting the user's
+ * notes is worse than leaving one stale file behind.
  */
-export const TASK_OWNED_FILES = [TASK_METADATA, TASK_README, BREADCRUMB]
+export const TASK_OWNED_ENTRIES = [PLUGIN_ROOT, BREADCRUMB]
 
 
 /**
@@ -124,6 +165,81 @@ export function taskSpacePath(tasksRoot, project, task) {
 
 
 /**
+ * The plugin's own directory inside a task space.
+ * @param taskPath - the task space directory.
+ * @returns where every file this plugin writes into the space lives.
+ */
+export function pluginRootPath(taskPath) {
+  return join(taskPath, PLUGIN_ROOT)
+}
+
+
+/**
+ * The JSON record, inside the plugin's own directory.
+ *
+ * Every reader and writer of the record goes through this, so the one place that
+ * knows where the record sits is {@link PLUGIN_ROOT}'s declaration above.
+ * @param taskPath - the task space directory.
+ * @returns the absolute path of the record.
+ */
+export function taskMetadataPath(taskPath) {
+  return join(pluginRootPath(taskPath), TASK_METADATA)
+}
+
+
+/**
+ * The task space's own orchestration root, inside the plugin's own directory.
+ *
+ * The workspace's deploy root is copied here whole, so the entry a record names -
+ * a path relative to the WORKSPACE, which is the same relative path here - is found
+ * inside this directory, and the state file a deploy writes sits at this directory's top.
+ * @param taskPath - the task space directory.
+ * @returns the absolute path of the task space's deploy root.
+ */
+export function taskDeployRootPath(taskPath) {
+  return join(pluginRootPath(taskPath), DEPLOY_ROOT)
+}
+
+
+/**
+ * The plugin's deploy directory, relative to whichever root it sits in.
+ *
+ * One spelling for the two sides that must agree: the workspace's deploy root and the
+ * task space's are the same relative path, so a single record value resolves correctly
+ * in both. It is also what an error message and a note can name without repeating the
+ * two constants it is built from.
+ */
+export const DEPLOY_DIR = `${PLUGIN_ROOT}/${DEPLOY_ROOT}`
+
+
+/**
+ * The entry a deploy root runs when the task's record names none, relative to its own root.
+ *
+ * Relative, not absolute, and identical on both sides - which is the whole point of the
+ * layout: the workspace's `<root>/.worktree-space/deploy/deploy.sh` is copied to the same
+ * relative place in the task space, so `./.worktree-space/deploy/deploy.sh up` runs there.
+ */
+export const DEFAULT_DEPLOY_ENTRY = `${DEPLOY_DIR}/deploy.sh`
+
+
+/**
+ * The workspace's own deploy root, in the same plugin directory a task space uses.
+ *
+ * The plugin keeps its files in one dotted directory wherever it works, so the source side
+ * follows the same layout as the task space: `<workspace>/.worktree-space/deploy/`. That
+ * directory is what a create copies whole into the task space's own deploy root, and it is
+ * the only place a deploy contract is looked for on the source side - nothing is read from
+ * a `deploy/` at the workspace's top level any more, which is what stopped a deploy root
+ * from sitting among the user's own folders.
+ * @param sourceRoot - the workspace root holding the repositories.
+ * @returns the absolute path of the workspace's deploy root.
+ */
+export function sourceDeployRootPath(sourceRoot) {
+  return join(sourceRoot, PLUGIN_ROOT, DEPLOY_ROOT)
+}
+
+
+/**
  * Read the linked worktrees inside a task directory with their branch and dirty
  * state.
  * @param subprocess - the profile's subprocess service.
@@ -175,7 +291,8 @@ export async function listTaskWorktrees(subprocess, taskPath) {
  * note, the gate and the panel read one record instead of three opinions.
  */
 export function taskMetadata(details) {
-  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [], delivery } = details
+  const { task, project, tasksRoot, sourceRoot, branch, baseRef, repositories = [], delivery, sessions, deployScript } = details
+  const known = normalizeSessions(sessions)
   return {
     version: 1,
     task,
@@ -187,6 +304,15 @@ export function taskMetadata(details) {
     deploymentEnvId: deploymentEnvIdFor(project, task),
     delivery: coerceDeliveryPolicy(delivery),
     createdAt: new Date().toISOString(),
+    // Optional, and absent rather than empty on a record that has no session yet:
+    // every reader treats a missing key as "unknown", which is what a record made
+    // before this field existed says, and an empty array would claim the task has
+    // no session where the truth is that nobody wrote one down.
+    ...(known.length === 0 ? {} : { sessions: known }),
+    // Which script under `.worktree-space/deploy/` is this task's entry, when the create
+    // named one. Absent means `.worktree-space/deploy/deploy.sh`, which is what every record
+    // made before this field existed means too - so a reader falls back rather than refusing.
+    ...(typeof deployScript === 'string' && deployScript.trim() !== '' ? { deployScript: deployScript.trim() } : {}),
     repositories: repositories.map((entry) => ({
       name: entry.name,
       sourcePath: entry.sourcePath,
@@ -194,6 +320,97 @@ export function taskMetadata(details) {
       ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
       branch: entry.branch ?? branch,
     })),
+  }
+}
+
+/**
+ * The roles a recorded session can have in a task.
+ *
+ * `task` is the session the task was dispatched to — the one that does the work;
+ * `handoff` is a session this plugin opened for the user's own handoff (a commit,
+ * or a conflict to resolve). The distinction is what lets a reader tell the
+ * session that is running the task from one that was only ever asked a question
+ * about it.
+ */
+export const TASK_SESSION_ROLES = ['task', 'handoff']
+
+/**
+ * Normalize the sessions a record carries into the shape this plugin writes.
+ *
+ * Two shapes are read, because the field is optional and because a record may have
+ * been hand-edited: an array of `{ sessionId, at, role }` entries (what this
+ * version writes) and a bare `sessionId` string (the shorter spelling a reader
+ * might use). A malformed entry is dropped rather than throwing: a record whose
+ * session list is partly garbage still names the task, and refusing the whole
+ * record over one bad entry would turn a readable task into a stranger.
+ * @param value - whatever the record held under `sessions`, or `sessionId`.
+ * @returns the normalized entries, possibly empty, each with a non-empty id.
+ */
+export function normalizeSessions(value) {
+  const entries = Array.isArray(value) ? value : (value === undefined || value === null ? [] : [value])
+  const normalized = []
+  for (const raw of entries) {
+    const entry = typeof raw === 'string' ? { sessionId: raw } : raw
+    if (entry === null || typeof entry !== 'object') continue
+    const sessionId = typeof entry.sessionId === 'string' ? entry.sessionId.trim() : ''
+    if (sessionId === '') continue
+    const role = TASK_SESSION_ROLES.includes(entry.role) ? entry.role : 'task'
+    const at = typeof entry.at === 'string' && entry.at !== '' ? entry.at : undefined
+    normalized.push({ sessionId, ...(at === undefined ? {} : { at }), role })
+  }
+  return normalized
+}
+
+/**
+ * The sessions a task's record names.
+ *
+ * Backward compatible in both directions: a record written before this field
+ * existed answers an empty list — not an error, and not a claim that the task has
+ * no session, only that none was written down — and a record that carries the
+ * shorter `sessionId` spelling is read as one entry.
+ * @param metadata - a record from {@link readTaskMetadata}, or undefined.
+ * @returns the entries, possibly empty.
+ */
+export function taskSessionsOf(metadata) {
+  if (metadata === null || metadata === undefined || typeof metadata !== 'object') return []
+  if (Array.isArray(metadata.sessions)) return normalizeSessions(metadata.sessions)
+  return normalizeSessions(metadata.sessionId)
+}
+
+/**
+ * The record a create or a dispatch keeps, with one session added.
+ *
+ * Written back through {@link writeTaskMetadata}, so the JSON record and the note
+ * rendered from it stay one document. The session is appended rather than
+ * replaced: a task may have been dispatched to several sessions over its life
+ * (the first one lost, a second opened in the same task space), and which of them
+ * is current is a question the reader answers by timestamp, not by the record
+ * forgetting the earlier ones.
+ *
+ * Nothing here throws: a record that cannot be written leaves the session
+ * unrecorded, which the caller reports as a warning. The session itself is
+ * already running — failing the dispatch over a bookkeeping write would lose the
+ * work to save the note about it.
+ * @param taskPath - the task space directory.
+ * @param metadata - the record as it was read.
+ * @param sessionId - the session to record.
+ * @param role - what that session is doing here; `task` unless said otherwise.
+ * @returns whether the record was written.
+ */
+export async function recordTaskSession(taskPath, metadata, sessionId, role = 'task') {
+  const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (id === '' || metadata === null || metadata === undefined || typeof metadata !== 'object') return false
+  const known = taskSessionsOf(metadata)
+  if (known.some((entry) => entry.sessionId === id)) return true
+  const written = {
+    ...metadata,
+    sessions: [...known, { sessionId: id, at: new Date().toISOString(), role: TASK_SESSION_ROLES.includes(role) ? role : 'task' }],
+  }
+  try {
+    await writeTaskMetadata(taskPath, written)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -208,7 +425,7 @@ export function taskMetadata(details) {
  * @returns the metadata, or undefined when the directory is not one of ours.
  */
 export async function readTaskMetadata(taskPath) {
-  const text = await readFile(join(taskPath, TASK_METADATA), 'utf8').catch(() => '')
+  const text = await readFile(taskMetadataPath(taskPath), 'utf8').catch(() => '')
   if (text.trim() !== '') {
     try {
       const parsed = JSON.parse(text)
@@ -255,7 +472,18 @@ async function parseLegacyBreadcrumb(taskPath) {
  * @returns the Markdown contents.
  */
 export function renderTaskMetadata(metadata) {
-  const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [], deploymentEnvId, delivery } = metadata
+  const { task, project, branch, baseRef, createdAt, sourceRoot, repositories = [], deploymentEnvId, delivery, deployScript } = metadata
+  // The entry this task runs, as the path a session types from the task space's own root.
+  // The record holds a path relative to the WORKSPACE, and it resolves here unchanged: the
+  // workspace's `.worktree-space/deploy/` is copied to the same relative place in the task
+  // space, so one spelling is valid on both sides and the note cannot disagree with what
+  // the deploy code will actually run. A record that names no entry means the default entry,
+  // which is what a create produces whenever the caller names none.
+  const deployEntry = typeof deployScript === 'string' && deployScript.trim() !== '' ? deployScript.trim() : DEFAULT_DEPLOY_ENTRY
+  // The sessions this task was dispatched to, rendered so a reader of the note can
+  // name one without searching: `wts_session_tool_status` takes exactly this id.
+  // The newest is named first, because that is the one still working.
+  const sessions = [...taskSessionsOf(metadata)].reverse()
   const lines = [
     `# Task: ${task}`,
     '',
@@ -264,34 +492,50 @@ export function renderTaskMetadata(metadata) {
     `- Base: ${baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '' ? "each repository's current HEAD" : `\`${baseRef}\``}`,
     ...(typeof createdAt === 'string' && createdAt !== '' ? [`- Created: ${createdAt}`] : []),
     `- Source root: \`${sourceRoot}\``,
+    ...(sessions.length === 0 ? [] : [`- Sessions: ${sessions.map((entry) => `\`${entry.sessionId}\` (${entry.role})`).join(', ')}`]),
     '- This folder is the agent session working directory.',
-    '- The facts above are stored in `worktree-space.json`; this file is generated from it.',
+    `- The facts above are stored in \`${PLUGIN_ROOT}/${TASK_METADATA}\`; this file is generated from it.`,
     '',
+    ...(sessions.length === 0 ? [] : [
+      '## Sessions',
+      '- The sessions above were opened for this task; the newest is the one that was working most recently.',
+      '- Watch one with `wts_session_tool_status` (its `lastActivity` tells "stuck" from "busy with a long step"), read it with `wts_session_tool_read`, and correct it with `wts_session_tool_send` — pass `mode: "steer"` for anything time-sensitive, because `queue` is only read at a turn boundary.',
+      '',
+    ]),
     '## Repositories',
     ...repositories.map((entry) => `- \`${entry.name}\``),
     '',
     '## Conventions',
     '- Commit in each repository separately (the same branch name everywhere).',
-    '- Source repositories are read-only: never edit or commit there.',
-    '- Merging back to the main branch is the user\'s action, not the agent\'s.',
+    '- Source repositories are read-only for editing: do the work in this task space, not in the source checkouts.',
+    // Who finishes is the user's choice, so this states the two shapes and what each one
+    // costs rather than naming one. A note that picked a side would be the plugin deciding an
+    // authorisation question it has no standing on, and a session that read the wrong side of
+    // it would either strand a finished task or merge without the user having asked.
+    '- **Who finishes is the user\'s decision, and both flows work.** Either you call `done` yourself once the work is complete, or you report back and the session that dispatched you - or the user - calls it. Ask which is wanted when the task brief does not say.',
+    '- Finishing is atomic: `done` merges, removes the worktrees and clears the task space in one call. `merge: true` lands the task branch on the target; `merge: false` leaves the branch alone - the commits are kept, but the worktree is removed, so a conflict left over would have to be resolved in the source repository instead of here.',
+    '- A merge that lands is the one step a finish cannot take back, so `merge: true` is an authorisation rather than a formality: pass it when the user asked for the work to land, and not otherwise.',
     '',
     ...(typeof deploymentEnvId === 'string' && deploymentEnvId !== '' ? [
       '## Deployment',
-      '- If this space holds deployable services — a repository with its own `deploy/deploy.sh`, or a `deploy/` orchestration root beside the worktrees — deploy them to an isolated Docker environment rather than starting them on the host.',
-      `- Environment id for this task: \`DSH_ENV_ID=${deploymentEnvId}\`. Pass it to every deploy command: it is what keeps this task's containers, images and acceptance URL apart from every other task's.`,
-      '- `./deploy.sh up` builds and starts the environment and prints the acceptance URL; run `./deploy.sh smoke` and let it pass before handing the URL to the user.',
-      '- `./deploy.sh status --json` is the machine-readable view; `./deploy.sh destroy` tears the environment down when acceptance is over.',
-      '- **The deploy root owns its own delivery state.** `./deploy.sh up` must write `<deploy root>/.state.json` (one line; `url`, and `services` if it likes) once the environment is up, and `./deploy.sh smoke` must merge `lastSmoke: {result, at}` into that same file **without dropping what is already in it**. `humanAck` and `destroyedAt` are the plugin\'s and are never the script\'s to write. Without the file the panel can show neither the acceptance URL nor the smoke state, and `done` refuses to merge (E5005).',
+      `- If this space holds deployable services — a repository with its own \`deploy/deploy.sh\`, or the \`${PLUGIN_ROOT}/${DEPLOY_ROOT}/\` orchestration root this space was created with — deploy them to an isolated Docker environment rather than starting them on the host.`,
+      `- Environment id for this task: \`DEPLOY_ENV_ID=${deploymentEnvId}\`. Pass it to every deploy command: it is what keeps this task's containers, images and acceptance URL apart from every other task's.`,
+      // The entry this task actually runs, as the command this task space runs it with.
+      // A create that named one says so in the record, and the note has to repeat it:
+      // the agent's commands are `./<entry> up`, and a `./deploy.sh up` would run a
+      // different script when the two disagree.
+      `- This task's deploy entry is \`./${deployEntry}\`. Run \`./${deployEntry} up\` to build and start the environment; it prints the acceptance URL. Run \`./${deployEntry} smoke\` and let it pass before handing the URL to the user.`,
+      `- \`./${deployEntry} status --json\` is the machine-readable view. The panel's destroy button finds this task's containers by their \`dsh.env-id\` label and takes them down without the script, so a \`destroy\` subcommand is optional - and if the entry has one, it must set \`url\` to null and stamp \`destroyedAt\`, or the panel will show a dead acceptance URL as if it worked.`,
+      `- **The deploy root owns its own delivery state, at a path the plugin names.** The file is \`<task space>/${PLUGIN_ROOT}/${DEPLOY_ROOT}/.state.json\` — fixed, whatever the entry is called and wherever under \`${DEPLOY_ROOT}/\` it sits. Every script this plugin runs is handed that absolute path as \`DEPLOY_STATE_FILE\`, so write \`\${DEPLOY_STATE_FILE}\` and never work out the deploy root yourself. \`./${deployEntry} up\` must write \`url\` (one line, plus \`services\` if it likes) once the environment is up, and \`./${deployEntry} smoke\` must merge \`lastSmoke: {result, at}\` into that same file **without dropping what is already in it**. Neither \`up\` nor \`smoke\` may write \`destroyedAt\` - that stamp is the plugin\'s to clear, and only the entry\'s own optional \`destroy\` writes it. Without the file the panel can show neither the acceptance URL nor the smoke state, and \`done\` refuses to merge (E5006).`,
       '- Write that state from the script that ran the step and from nothing else: not by hand, not from a transcript of a run that happened elsewhere. The merge gate reads the file as the evidence that the step happened.',
+      `- A space this plugin scaffolded (no \`${DEPLOY_ROOT}/\` of its own was copied in) carries \`${PLUGIN_ROOT}/${DEPLOY_ROOT}/write-state.sh\`, run from that directory: \`./write-state.sh url <url>\`, \`./write-state.sh smoke pass|fail\` and \`./write-state.sh services <json>\` each merge one field into \`$DEPLOY_STATE_FILE\`.`,
       '',
     ] : []),
     ...(delivery === undefined ? [] : [
-      '## Delivery policy',
-      `- Deploy: target \`${delivery.deploy.target}\` (${delivery.deploy.mode}).`,
-      `- Verification: \`${delivery.verification}\`.`,
-      `- Merge: \`${delivery.merge.mode}\` into ${delivery.merge.target === null ? 'the branch each source repository has checked out' : `\`${delivery.merge.target}\``}, then ${delivery.merge.deleteBranch ? 'delete' : 'keep'} the task branch.`,
-      `- Conflicts: \`${delivery.conflicts}\`. Strays: \`${delivery.strays}\`.`,
-      '- `done` enforces this policy: a merge is refused while the deployment state has no passing smoke and, under agent-then-human, while the human acceptance ack is missing.',
+      '## Delivery',
+      `- Deployment target: \`${delivery.deploy.target}\`.`,
+      '- `done` enforces this: with a target of `docker`, a merge is refused while the deployment state records no passing smoke (E5006 - either no state file at all, or one whose smoke is missing or red). With `none` there is no gate.',
+      '- Everything else a finish decides — whether to merge, which branch, whether to delete it, and what happens to untracked files — is passed on the `done` call, not recorded here. `merge` is required; `strays` defaults to `archive`.',
       '',
     ]),
   ]
@@ -304,6 +548,11 @@ export function renderTaskMetadata(metadata) {
  * @param metadata - the document {@link taskMetadata} built.
  */
 export async function writeTaskMetadata(taskPath, metadata) {
-  await writeFile(join(taskPath, TASK_METADATA), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
-  await writeFile(join(taskPath, TASK_README), renderTaskMetadata(metadata), 'utf8')
+  // The directory is made here rather than left to the caller, because every writer
+  // of the record is writing into a space that may have had no plugin directory yet -
+  // a create makes one for the deploy copy or not at all - and a record that cannot
+  // be written because a directory is missing would fail a dispatch over bookkeeping.
+  await mkdir(pluginRootPath(taskPath), { recursive: true })
+  await writeFile(taskMetadataPath(taskPath), `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
+  await writeFile(join(pluginRootPath(taskPath), TASK_README), renderTaskMetadata(metadata), 'utf8')
 }

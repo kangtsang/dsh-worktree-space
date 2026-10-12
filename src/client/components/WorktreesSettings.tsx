@@ -225,8 +225,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   const finishClick = useCallback(async (task: TaskGroup) => {
     try {
       const status = await api.deployStatus(task.path)
-      const unmet = status.target !== "none" && status.stateFound
-        && (status.lastSmoke?.result !== "pass" || (status.verification !== "agent" && !status.humanAck))
+      // The smoke is the whole of the gate. There used to be a second condition here
+      // for a human acceptance ack the policy could wait for; that gate is gone, and
+      // with it the last reason a status read had to carry a policy field.
+      const unmet = status.target !== "none" && status.stateFound && status.lastSmoke?.result !== "pass"
       if (unmet) { setGateConfirm(task.path); return }
     } catch { /* unreadable is not blocking */ }
     setGateAcknowledged(false)

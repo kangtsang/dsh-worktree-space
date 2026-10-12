@@ -1,15 +1,15 @@
 /**
  * The delivery policy and the deployment side of it.
  *
- * The policy is three answers - does this task deploy, who verifies, how it merges -
- * recorded once and read everywhere, so the tests here are mostly about the two
- * moods: a policy stated at create time refuses to be ambiguous, and the same policy
- * read back from an old record substitutes defaults instead. The gate is tested
- * against a real state file on a real temporary task space, because its whole job is
- * reading exactly that file.
+ * The policy is one answer - does this task expect a deployment whose smoke has to
+ * pass before the work may land - recorded once and read everywhere, so the tests
+ * here are mostly about the two moods: a policy stated at create time refuses to be
+ * ambiguous, and the same policy read back from an old record substitutes the
+ * default instead. The gate is tested against a real state file on a real temporary
+ * task space, because its whole job is reading exactly that file.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -20,14 +20,13 @@ import {
   normalizeDeliveryPolicy,
   resolveDeliveryPolicy,
 } from '../src/host/task/delivery.js'
-import { ackAcceptance, deployEnvironment, deploymentStatus, destroyDeployment, parseManifestTargets, readDeployManifest, assertDeliveryGate } from '../src/host/task/deploy.js'
-import { taskMetadata } from '../src/host/task/shared.js'
+import { deployEnvironment, deploymentStatus, destroyDeployment, assertDeliveryGate } from '../src/host/task/deploy.js'
+import { PLUGIN_ROOT, taskMetadata } from '../src/host/task/shared.js'
 
 const STATE = {
   envId: 'dsh-public-login',
   url: 'http://localhost:51555',
   lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' },
-  humanAck: null,
   services: [],
 }
 
@@ -43,67 +42,68 @@ async function taskFixture({ state, metadataDelivery } = {}) {
     ...(metadataDelivery === undefined ? {} : { delivery: metadataDelivery }),
     repositories: [],
   }
-  await writeFile(join(root, 'worktree-space.json'), JSON.stringify(metadata), 'utf8')
+  // The record and the deploy root both live in the plugin's own directory, which is the
+  // layout every reader and writer here agrees on.
+  await mkdir(join(root, PLUGIN_ROOT), { recursive: true })
+  await writeFile(join(root, PLUGIN_ROOT, 'worktree-space.json'), JSON.stringify(metadata), 'utf8')
   if (state !== undefined) {
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', '.state.json'), JSON.stringify(state, null, 2), 'utf8')
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', '.state.json'), JSON.stringify(state, null, 2), 'utf8')
   }
-  return { root, metadata, statePath: join(root, 'deploy', '.state.json') }
+  return { root, metadata, statePath: join(root, PLUGIN_ROOT, 'deploy', '.state.json') }
 }
 
 describe('delivery policy', () => {
   it('defaults to a delivery that turns nothing on', () => {
     expect(DEFAULT_DELIVERY_POLICY.deploy.target).toBe('none')
     expect(normalizeDeliveryPolicy(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
-    // A partial policy is completed per field, not rejected: the caller says only
-    // what it cares about, the rest is the standing default.
+    // One field, and a partial policy is completed rather than rejected: the caller
+    // says only what it cares about, and there is nothing else left to say.
     expect(normalizeDeliveryPolicy({ deploy: { target: 'docker' } })).toEqual({
-      ...DEFAULT_DELIVERY_POLICY,
-      deploy: { target: 'docker', mode: 'on-request' },
+      version: 1,
+      deploy: { target: 'docker' },
     })
   })
 
-  it('refuses a value that is not one of the allowed ones, at create time', () => {
+  it('refuses a target that is not one of the allowed ones, at create time', () => {
     expect(() => normalizeDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(/deploy\.target/)
-    expect(() => normalizeDeliveryPolicy({ verification: 'vibes' })).toThrow(/verification/)
+    expect(() => normalizeDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(expect.objectContaining({ code: 'E4010' }))
+    // `host` was a target once. It is refused here rather than quietly read back,
+    // because a create that names a target this plugin cannot observe is a create
+    // whose deployment could never be diagnosed; the lenient read below is where a
+    // record that already says `host` gets its fallback.
+    expect(() => normalizeDeliveryPolicy({ deploy: { target: 'host' } })).toThrow(/deploy\.target/)
+    expect(normalizeDeliveryPolicy({ deploy: { target: 'none' } }).deploy.target).toBe('none')
+    // A field the schema no longer has is not a value to validate: the request is
+    // read as the one answer it does carry, and everything else is dropped.
+    expect(normalizeDeliveryPolicy({ verification: 'vibes', deploy: { target: 'docker' } })).toEqual({
+      version: 1,
+      deploy: { target: 'docker' },
+    })
   })
 
-  it('refuses a policy that merges by itself while also waiting for a person', () => {
-    // The two fields would state a requirement nothing can satisfy: `auto` has no one to ask,
-    // so the human half of a verification mode could never be given. Refused where a policy is
-    // recorded; reading one back never refuses, because a record from an older version - or one
-    // edited by hand - is no reason to stop a finish, and `auto` then means what it says.
-    expect(() => normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'agent-then-human' })).toThrow(/merge\.mode 'auto'/)
-    expect(() => normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'human' })).toThrow(/set verification to agent/)
-    expect(normalizeDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'agent' }).merge.mode).toBe('auto')
-    expect(coerceDeliveryPolicy({ merge: { mode: 'auto' }, verification: 'human' }).merge.mode).toBe('auto')
-  })
-
-  it('substitutes defaults per field when the record is read back', () => {
-    const policy = coerceDeliveryPolicy({ deploy: { target: 'docker', mode: 'sometimes' }, merge: { mode: 'auto' } })
-    expect(policy.deploy).toEqual({ target: 'docker', mode: 'on-request' })
-    // A record that says nothing about the branch keeps it: the field's default is the
-    // reversible answer, and a task branch is the only record of how the work was made.
-    expect(policy.merge).toEqual({ mode: 'auto', target: null, deleteBranch: false })
-    expect(policy.verification).toBe(DEFAULT_DELIVERY_POLICY.verification)
+  it('substitutes the default when the record is read back', () => {
+    // A record from before the schema shrank still reads: every field that no longer
+    // exists is dropped, and a value this side can no longer serve falls back to the
+    // default. For the removed `host` target that means the gate is dropped rather
+    // than invented, which is the safe direction for a target nothing can serve.
+    const old = coerceDeliveryPolicy({ deploy: { target: 'host', mode: 'auto' }, verification: 'agent', merge: { mode: 'auto' } })
+    expect(old).toEqual(DEFAULT_DELIVERY_POLICY)
+    expect(coerceDeliveryPolicy({ deploy: { target: 'docker' } })).toEqual({ version: 1, deploy: { target: 'docker' } })
     // And a policy read off the record is what the gate reads, whatever the record's age.
-    expect(deliveryPolicyOf({ delivery: policy })).toEqual(policy)
+    expect(deliveryPolicyOf({ delivery: { deploy: { target: 'docker' } } }).deploy.target).toBe('docker')
     expect(deliveryPolicyOf(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
   })
 
-  it('resolves from the request first, then the project default, then none', () => {
-    const defaults = { public: { deploy: { target: 'docker', mode: 'auto' }, verification: 'agent', merge: { mode: 'auto' } } }
-    const explicit = { verification: 'agent' }
-    // The request's own policy wins whole; it is not merged with the stored one.
-    expect(resolveDeliveryPolicy('public', explicit, defaults).verification).toBe('agent')
-    expect(resolveDeliveryPolicy('public', explicit, defaults).deploy.target).toBe('none')
-    // The project default is the standing answer, completed to the defaults.
-    expect(resolveDeliveryPolicy('public', undefined, defaults).deploy.target).toBe('docker')
-    expect(resolveDeliveryPolicy('public', undefined, defaults).merge.mode).toBe('auto')
-    // Another project, and an unknown one, stay on the built-in default.
-    expect(resolveDeliveryPolicy('other', undefined, defaults).deploy.target).toBe('none')
-    // A stored default that is wrong refuses the create exactly as an explicit one would.
-    expect(() => resolveDeliveryPolicy('broken', undefined, { broken: { deploy: { target: 'kubernetes' } } })).toThrow(/deploy\.target/)
+  it('resolves from the request alone, then the built-in default', () => {
+    // The request's own policy is taken whole. There is no stored per-project layer
+    // between it and the default any more, so nothing else can complete it or
+    // contradict it - what a create states is what the finish later reads.
+    expect(resolveDeliveryPolicy({ deploy: { target: 'docker' } }).deploy.target).toBe('docker')
+    expect(resolveDeliveryPolicy(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
+    expect(resolveDeliveryPolicy(null)).toEqual(DEFAULT_DELIVERY_POLICY)
+    // A request that cannot be stated unambiguously still refuses the create.
+    expect(() => resolveDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(/deploy\.target/)
   })
 })
 
@@ -113,65 +113,31 @@ describe('the delivery gate', () => {
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'none' } } }, root, { merge: true })).resolves.toBeUndefined()
   })
 
-  it('refuses a merge with no deployment recorded when the policy expects one', async () => {
+  it('refuses a merge with no deployment recorded, under the same code as a failed smoke', async () => {
+    // One code for both shapes of "no passing smoke": the state file was never written, or
+    // it was and the smoke is missing or red. They used to be E5005 and E5006, which read as
+    // two different problems - they are not, because the next step is the same either way.
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
-      .rejects.toMatchObject({ code: 'E5005' })
-  })
-
-  it('refuses a merge whose smoke is not green', async () => {
-    // An agent-only policy owes nothing to a human, so a failed smoke is the one
-    // refusal: E5006 names the smoke alone. (Under agent-then-human both debts
-    // are named together, as E5007 - the test below covers that.)
-    const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' }, verification: 'agent' },
-      state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'fail' } },
-    })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' }, verification: 'agent' } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
   })
 
-  it('names every unmet obligation together under agent-then-human', async () => {
+  it('refuses a merge whose smoke is not green', async () => {
+    // The smoke is the whole of the gate now, so E5006 names it and nothing else:
+    // there is no second debt a policy can record, and no third refusal left for a
+    // request to fail on.
     const { root } = await taskFixture({
       metadataDelivery: { deploy: { target: 'docker' } },
       state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'fail' } },
     })
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
-      .rejects.toMatchObject({ code: 'E5007' })
+      .rejects.toMatchObject({ code: 'E5006' })
   })
 
-  it('waits for the human ack under agent-then-human, and passes once it is given', async () => {
+  it('lets a deploying task merge on a green smoke alone, and skips the gate without a merge', async () => {
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
-      .rejects.toMatchObject({ code: 'E5007' })
-
-    const acked = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
-      state: { ...STATE, humanAck: { at: '2026-10-05T01:00:00Z', by: 'user' } },
-    })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, acked.root, { merge: true })).resolves.toBeUndefined()
-  })
-
-  it('lets an agent-only policy merge on a green smoke alone, and skips the gate without a merge', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, verification: 'agent' }, state: STATE })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' }, verification: 'agent' } }, root, { merge: true })).resolves.toBeUndefined()
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: false })).resolves.toBeUndefined()
-  })
-
-  it('merges by itself when the record says so, and says the ack it asked for was not waited for', async () => {
-    // `auto` is the task's own answer that the merge happens on its own. Create time refuses it
-    // together with a verification that waits for a person, so what is read here is a record
-    // that predates that rule or was edited by hand: the merge is taken at its word, with a
-    // warning rather than a silent drop.
-    const auto = { delivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } } }
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } }, state: STATE })
-    const warning = await assertDeliveryGate(auto, root, { merge: true })
-    expect(warning.code).toBe('human-ack-waived')
-    expect(warning.values).toEqual({})
-    // What stays is what is mechanical: a policy that expects a deployment and has none is
-    // still refused, because that is work that was not done, not a person who was not asked.
-    const bare = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' }, merge: { mode: 'auto' } } })
-    await expect(assertDeliveryGate(auto, bare.root, { merge: true })).rejects.toMatchObject({ code: 'E5005' })
   })
 
   it('yields to the user\'s own overrule, as a warning rather than a refusal', async () => {
@@ -179,15 +145,26 @@ describe('the delivery gate', () => {
     // and what it hands back is the warning the finish records, never silence. It
     // carries the sentence the Host writes for its log and the keys a screen needs to
     // say the same thing in the reader's own language.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    const { root } = await taskFixture({
+      metadataDelivery: { deploy: { target: 'docker' } },
+      state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'fail' } },
+    })
     const warning = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true, bypass: true })
     expect(warning.code).toBe('delivery-gate-bypassed')
-    expect(warning.message).toContain('human acceptance ack')
-    expect(warning.values).toEqual({ missing: ['human-ack'] })
+    expect(warning.message).toContain('passing smoke')
+    expect(warning.values).toEqual({ missing: ['smoke'] })
     // Without the overrule the same request is still refused - the bypass is the
     // user's say-so, not a hole the gate forgot it had.
     await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
-      .rejects.toMatchObject({ code: 'E5007' })
+      .rejects.toMatchObject({ code: 'E5006' })
+
+    // The other shape of the same refusal - no state file at all - is overruled the same
+    // way, and its warning names both facts a missing file leaves unrecorded: there was no
+    // deployment and therefore no smoke.
+    const bare = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
+    const none = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, bare.root, { merge: true, bypass: true })
+    expect(none.code).toBe('delivery-gate-bypassed')
+    expect(none.values).toEqual({ missing: ['deployment', 'smoke'] })
   })
 })
 
@@ -208,17 +185,14 @@ describe('deployment state reads and writes', () => {
     expect(status.lastSmoke).toEqual(STATE.lastSmoke)
     expect(status.containers).toEqual([{ name: 'gw-1', state: 'running' }, { name: 'web-1', state: 'running' }])
     expect(calls[0].join(' ')).toContain('dsh.env-id=dsh-public-login')
-  })
-
-  it('writes the human ack onto the state file the deploy owns', async () => {
-    const { root, statePath } = await taskFixture({ state: STATE })
-    const result = await ackAcceptance(root)
-    expect(result.humanAck.by).toBe('user')
-    const written = JSON.parse(await readFile(statePath, 'utf8'))
-    expect(written.humanAck.at).toBe(result.humanAck.at)
-    // Everything the deploy wrote stays: the ack is appended to the same record.
-    expect(written.lastSmoke).toEqual(STATE.lastSmoke)
-    await expect(ackAcceptance(await mkdtemp(join(tmpdir(), 'dsh-empty-')))).rejects.toMatchObject({ code: 'E5005' })
+    // What the record's policy says is the one manifest-like fact left; the
+    // manifest's own answers - a target list, an autoAllowed flag, a verification
+    // mode and a human ack - are gone from this shape entirely.
+    expect(status.target).toBe('docker')
+    expect(status.targets).toBeUndefined()
+    expect(status.autoAllowed).toBeUndefined()
+    expect(status.verification).toBeUndefined()
+    expect(status.humanAck).toBeUndefined()
   })
 
   it('tears the environment down through compose, keeping the acceptance facts', async () => {
@@ -239,8 +213,8 @@ describe('deployment state reads and writes', () => {
     const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
     expect(outcome.removed).toBe(true)
     expect(calls.some((line) => line.includes('compose') && line.includes('down'))).toBe(true)
-    // The facts outlive the containers: the smoke and the ack stay, only the URL
-    // dies with the dynamic port, and the down-stamp says the environment is gone.
+    // The facts outlive the containers: the smoke stays, only the URL dies with the
+    // dynamic port, and the down-stamp says the environment is gone.
     const kept = JSON.parse(await readFile(statePath, 'utf8'))
     expect(kept.lastSmoke).toEqual(STATE.lastSmoke)
     expect(kept.url).toBeNull()
@@ -249,8 +223,8 @@ describe('deployment state reads and writes', () => {
 
   it('rebuilds the environment through the task space\'s own deploy script', async () => {
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url: null, destroyedAt: '2026-10-06T00:00:00Z' } })
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.sh'), 'echo up "$@"\n', 'utf8')
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up "$@"\n', 'utf8')
     const calls = []
     const subprocess = { spawn({ argv }) {
       calls.push(argv.join(' '))
@@ -298,6 +272,29 @@ describe('deployment state reads and writes', () => {
     expect(outcome.removed).toBe(true)
   })
 
+  it('tears down containers a nothing-policy space still carries, through the label path', async () => {
+    // `target: none` says no deployment was wanted, but a space can hold containers from a deploy
+    // made outside this flow, and refusing to take those down is the one answer that leaves the
+    // user stuck with them. Teardown is docker-only now - there is no per-target branch left that
+    // could be reached instead - so it goes through the label path, which finds them.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'none' } } })
+    const calls = []
+    const subprocess = { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      let text = ''
+      if (argv.includes('-q')) text = 'abc123'
+      else if (argv.includes('inspect')) text = 'E:\\space\\deploy\\docker-compose.yml\tE:\\space\\deploy'
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+    const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
+    expect(calls.some((line) => line.includes('compose'))).toBe(true)
+    expect(calls.every((line) => !line.includes('deploy.sh'))).toBe(true)
+    expect(outcome.removed).toBe(true)
+  })
+
   it('answers quietly when there is nothing to tear down', async () => {
     const { root } = await taskFixture({})
     const subprocess = { spawn: vi.fn(() => { throw new Error('docker not found') }) }
@@ -318,8 +315,9 @@ describe('task metadata carries the policy', () => {
       delivery: { deploy: { target: 'docker', mode: 'auto' } },
     })
     expect(metadata.deploymentEnvId).toBe('dsh-public-login')
-    expect(metadata.delivery.deploy).toEqual({ target: 'docker', mode: 'auto' })
-    expect(metadata.delivery.verification).toBe(DEFAULT_DELIVERY_POLICY.verification)
+    // One field, and the record says exactly that: `mode` is not carried over from
+    // the request, because there is no longer a field for it to land in.
+    expect(metadata.delivery).toEqual({ version: 1, deploy: { target: 'docker' } })
   })
 })
 
@@ -329,8 +327,8 @@ describe('applyStraysPolicy', () => {
   // the value readable - the production paths arrive with backslashes, same shape.
   const TASK = 'D:/space/worktree-space/proj/login'
 
-  it('archive files content away and clears output when the caller said nothing', () => {
-    const r = applyStraysPolicy({ strays: 'archive' }, {}, ARCHIVE, TASK)
+  it('archives content away and clears output when the caller said nothing', () => {
+    const r = applyStraysPolicy({}, ARCHIVE, TASK)
     expect(r.cleanStray).toBe(true)
     expect(r.discardDocuments).toBe(false)
     expect(r.documentsDirectory).toContain('archived-docs')
@@ -338,127 +336,47 @@ describe('applyStraysPolicy', () => {
     expect(r.documentsDirectory).toContain('login-')
     // The stamp is the audit-log clock with a dash between date and time.
     expect(r.documentsDirectory).toMatch(/login-\d{8}-\d{6}$/)
+    // The keep-list is always an array, so a caller never has to test for one.
+    expect(r.keep).toEqual([])
   })
 
-  it('honours a caller that decided anything itself, verbatim', () => {
-    const r = applyStraysPolicy({ strays: 'archive' }, { cleanStray: true }, ARCHIVE, TASK)
+  it('keeps the entries the caller named, whatever the choice says', () => {
+    const r = applyStraysPolicy({ strays: 'archive', keepEntries: ['notes.md', 'scratch/'] }, ARCHIVE, TASK)
+    expect(r.keep).toEqual(['notes.md', 'scratch/'])
+    // Naming entries to keep does not turn the archive off: the choice is still the
+    // caller's `archive`, and the entries are an exception carved out of it.
     expect(r.cleanStray).toBe(true)
-    expect(r.documentsDirectory).toBe('')
-    // keep-list counts as a decision too
-    const kept = applyStraysPolicy({ strays: 'archive' }, { keep: ['notes.md'] }, ARCHIVE, TASK)
-    expect(kept.cleanStray).toBe(false)
+    expect(r.documentsDirectory).toContain('archived-docs')
   })
 
-  it('keeps the shipped behaviour under keep: the policy declines to speak', () => {
-    const r = applyStraysPolicy({ strays: 'keep' }, {}, ARCHIVE, TASK)
+  it('keeps the shipped behaviour under keep: the choice declines to speak', () => {
+    const r = applyStraysPolicy({ strays: 'keep' }, ARCHIVE, TASK)
     expect(r.cleanStray).toBe(false)
     expect(r.discardDocuments).toBe(false)
     expect(r.documentsDirectory).toBe('')
   })
 
-  it('never deletes from a policy: the discard flag is the caller\'s own', () => {
-    // The abandon path passes both flags; the policy only ever carries them through.
-    const r = applyStraysPolicy({ strays: 'archive' }, { force: true, discardDocuments: true }, ARCHIVE, TASK)
+  it('deletes only when the caller itself asked for discard', () => {
+    // Deleting is reachable from here now, which it deliberately was not while this
+    // was a policy recorded at create time: a standing answer that deletes the user's
+    // files is one nobody can take back, whereas this call is made with the content
+    // in front of the caller. An omitted or unknown choice never reaches it.
+    const r = applyStraysPolicy({ strays: 'discard' }, ARCHIVE, TASK)
+    expect(r.cleanStray).toBe(true)
     expect(r.discardDocuments).toBe(true)
-    expect(r.cleanStray).toBe(false)
     expect(r.documentsDirectory).toBe('')
+    // A value the flow does not have falls back to archive - the answer that loses
+    // nothing - rather than being obeyed or refused.
+    const unknown = applyStraysPolicy({ strays: 'obliterate' }, ARCHIVE, TASK)
+    expect(unknown.discardDocuments).toBe(false)
+    expect(unknown.cleanStray).toBe(true)
+    expect(unknown.documentsDirectory).toContain('archived-docs')
   })
 
-  it('refuses a policy that names a strays mode the flow does not have', () => {
-    // `discard` was a mode once. A policy naming it is a mistake the create has to hear about,
-    // not one applied quietly behind the user's back.
-    expect(() => normalizeDeliveryPolicy({ strays: 'discard' })).toThrow()
-    expect(normalizeDeliveryPolicy({ strays: 'keep' }).strays).toBe('keep')
-    expect(normalizeDeliveryPolicy({ strays: 'archive' }).strays).toBe('archive')
-  })
-
-  it('roots the archive under a custom directory when the configuration names one', () => {
-    const r = applyStraysPolicy({ strays: 'archive' }, {}, { strategy: 'custom', directory: 'D:\docs' }, TASK)
-    expect(r.documentsDirectory.startsWith('D:\docs')).toBe(true)
-  })
-})
-
-describe('the deploy manifest', () => {
-  const DOC = [
-    'targets:',
-    '  docker:',
-    '    up: ./deploy.sh up',
-    '    smoke: ./deploy.sh smoke',
-    '    destroy: ./deploy.sh destroy',
-    '  host:',
-    '    up: make run',
-    '    smoke: make check',
-    '    destroy: make stop',
-    '    autoAllowed: true',
-  ].join('\n')
-
-  it('parses the documented two-level structure with scalars and booleans', () => {
-    const t = parseManifestTargets(DOC)
-    expect(t.docker.up).toBe('./deploy.sh up')
-    expect(t.docker.destroy).toBe('./deploy.sh destroy')
-    expect(t.host.autoAllowed).toBe(true)
-    expect(t.host.up).toBe('make run')
-  })
-
-  it('answers a document outside the contract as untrusted, never half-interpreted', () => {
-    expect(parseManifestTargets('version: 2\ntargets:')).toBeUndefined()
-    expect(parseManifestTargets('targets: {}')).toBeUndefined()
-    expect(parseManifestTargets('')).toBeUndefined()
-  })
-
-  it('finds the manifest by the same two shapes the state files use', async () => {
-    const { root } = await taskFixture({})
-    expect(await readDeployManifest(root)).toBeUndefined()
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.yaml'), DOC, 'utf8')
-    const m = await readDeployManifest(root)
-    expect(m.broken).toBe(false)
-    expect(Object.keys(m.targets).sort()).toEqual(['docker', 'host'])
-  })
-
-  it('refuses to deploy through a target the manifest does not offer', async () => {
-    // The manifest offers docker only; a policy pointing at host must be refused,
-    // never silently swapped to the target the manifest does have.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host' } } })
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  docker:\n    up: x\n', 'utf8')
-    await expect(deployEnvironment({ spawn: vi.fn() }, root)).rejects.toMatchObject({ code: 'E5009' })
-  })
-
-  it('marks a broken manifest as untrusted rather than half-interpreted', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  [broken', 'utf8')
-    await expect(deployEnvironment({ spawn: vi.fn() }, root)).rejects.toMatchObject({ code: 'E5010' })
-  })
-
-  it('runs the manifest up command with the environment id passed by variable', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host', mode: 'auto' }, verification: 'agent' } })
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  host:\n    up: make run\n    smoke: make check\n    destroy: make stop\n    autoAllowed: true\n', 'utf8')
-    const calls = []
-    const subprocess = { spawn({ argv }) {
-      calls.push(argv.join(' '))
-      const text = argv[1] === 'ps' ? 'host-proc\trunning' : (argv[0] === 'bash' && argv[1] === '-c') ? 'ran make run' : ''
-      return {
-        done: Promise.resolve({ exitCode: 0, signal: null }),
-        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
-      }
-    } }
-    const out = await deployEnvironment(subprocess, root)
-    expect(calls.some((c) => c.includes("DSH_ENV_ID='dsh-public-login'") && c.includes('make run'))).toBe(true)
-    expect(out.status.targets).toEqual(['host'])
-    expect(out.status.autoAllowed).toBe(true)
-  })
-
-  it('reports the targets and the autoAllowed flag in the status', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'host', mode: 'auto' } } })
-    await mkdir(join(root, 'deploy'), { recursive: true })
-    await writeFile(join(root, 'deploy', 'deploy.yaml'), 'targets:\n  host:\n    up: make run\n    smoke: make check\n    destroy: make stop\n', 'utf8')
-    const subprocess = { spawn() { return { done: Promise.resolve({ exitCode: 0, signal: null }), collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } } } } }
-    const status = await deploymentStatus(subprocess, root)
-    expect(status.targets).toEqual(['host'])
-    // No autoAllowed in the entry: host stays man-driven by default (D8).
-    expect(status.autoAllowed).toBe(false)
+  it('takes the caller\'s own directory over the archive root, and the custom root otherwise', () => {
+    const named = applyStraysPolicy({ strays: 'archive', documentsDirectory: 'E:\\docs' }, ARCHIVE, TASK)
+    expect(named.documentsDirectory.startsWith('E:\\docs')).toBe(true)
+    const custom = applyStraysPolicy({ strays: 'archive' }, { strategy: 'custom', directory: 'D:\\docs' }, TASK)
+    expect(custom.documentsDirectory.startsWith('D:\\docs')).toBe(true)
   })
 })

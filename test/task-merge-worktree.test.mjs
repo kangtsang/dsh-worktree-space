@@ -14,7 +14,15 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { finishTask, planTask } from "../src/host/task/operations.js"
-import { taskMetadata, writeTaskMetadata } from "../src/host/task/shared.js"
+import { PLUGIN_ROOT, taskMetadata, writeTaskMetadata } from "../src/host/task/shared.js"
+
+/**
+ * Where the record sits inside a task space: the plugin's own directory. These tests drive
+ * real git, so the record they assert about is the one `writeTaskMetadata` wrote.
+ * @param taskPath - the task space directory.
+ * @returns the record's absolute path.
+ */
+const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.json")
 
 const gitAvailable = (() => {
   try {
@@ -177,8 +185,11 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
 
       expect(result.failed).toBe(false)
       expect(result.mergeTarget).toBe("main")
-      // A repository that merged is not a conflicted one.
-      expect(result.repositories[0].conflict).toBeUndefined()
+      // A repository that merged is not a conflicted one - and none of the three stops
+      // is set, so a caller reading the flags sees a clean row.
+      expect(result.repositories[0].conflict).toBe(false)
+      expect(result.repositories[0].needsCommit).toBe(false)
+      expect(result.repositories[0].dirtyCheckout).toBe(false)
       // The named branch took the merge…
       expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "main"])).toBe(true)
       // …the checkout was never switched to it…
@@ -374,7 +385,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       expect(existsSync(secondTaskRepo)).toBe(false)
       // The one that stopped keeps its worktree, so the record must stay with it.
       expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
-      expect(existsSync(join(taskPath, "worktree-space.json"))).toBe(true)
+      expect(existsSync(recordAt(taskPath))).toBe(true)
 
       // And a second attempt starts, rather than refusing for want of a record. It
       // still fails, because the conflict is still standing - what it must not do is
@@ -413,9 +424,10 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       })
 
       expect(result.failed).toBe(true)
-      expect(existsSync(join(taskPath, "worktree-space.json"))).toBe(true)
-      // And it was not filed into the documents directory on its way out.
-      expect(existsSync(join(destination, "worktree-space.json"))).toBe(false)
+      expect(existsSync(recordAt(taskPath))).toBe(true)
+      // And it was not filed into the documents directory on its way out: the plugin's
+      // whole directory is its own bookkeeping, so nothing of it goes to the archive.
+      expect(existsSync(join(destination, PLUGIN_ROOT))).toBe(false)
     } finally {
       await fixtureUnderTest.cleanup()
     }
@@ -454,7 +466,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       // beside it, so the task can be finished again once a branch is checked out.
       expect(git(source, ["rev-parse", "develop"])).toBe(before)
       expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
-      expect(existsSync(join(fixtureUnderTest.taskPath, "worktree-space.json"))).toBe(true)
+      expect(existsSync(recordAt(fixtureUnderTest.taskPath))).toBe(true)
       // And the commits are still there, reachable from the worktree.
       expect(git(fixtureUnderTest.taskRepo, ["rev-parse", "HEAD"])).toBe(work)
     } finally {
@@ -487,6 +499,10 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       // Nothing was reconciled, so it is not a conflict and no merge is standing.
       expect(result.repositories[0].conflict).toBeFalsy()
       expect(result.repositories[0].mergeInProgress).toBeFalsy()
+      // Flagged as the user's own checkout rather than as work-to-commit: a caller that
+      // acted on either would be committing or stashing the user's file on their behalf.
+      expect(result.repositories[0].dirtyCheckout).toBe(true)
+      expect(result.repositories[0].needsCommit).toBeFalsy()
       expect(result.repositories[0].merged).toBe(false)
       // Git's own message, which names the file - and the file is still there, which
       // is the whole point of refusing.
@@ -548,7 +564,7 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
 
       expect(result.failed).toBe(false)
-      expect(existsSync(join(taskPath, "worktree-space.json"))).toBe(false)
+      expect(existsSync(recordAt(taskPath))).toBe(false)
       expect(existsSync(taskPath)).toBe(false)
     } finally {
       await fixtureUnderTest.cleanup()

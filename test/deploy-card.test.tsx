@@ -14,10 +14,11 @@ const status = (over = {}) => ({
   envId: "dsh-public-login",
   target: "docker",
   url: "http://localhost:51555",
+  urlSource: "state",
   lastSmoke: { at: "2026-10-05T00:00:00Z", result: "pass" },
-  humanAck: null,
+  destroyedAt: null,
   stateFound: true,
-  statePath: "E:\\space\\deploy\\.state.json",
+  statePath: "E:\\space\\.worktree-space\\deploy\\.state.json",
   containers: [{ name: "gw-1", state: "running" }, { name: "web-1", state: "running" }],
   ...over,
 })
@@ -41,12 +42,26 @@ describe("the deployment card", () => {
     expect(container.firstElementChild).toBeNull()
   })
 
-  it("records the human acceptance through the api", async () => {
-    const api = { deployStatus: vi.fn().mockResolvedValue(status()), acceptDeployment: vi.fn().mockResolvedValue({ statePath: "x", humanAck: { at: "2026-10-05T01:00:00Z" } }) }
+  it("offers no deploy or smoke action for a policy that deploys nothing, but still tears down", async () => {
+    // Containers can stand in a space whose policy deploys nothing: someone deployed it outside
+    // this flow. The Host refuses to start or smoke such a space, so the card must not offer
+    // those two; teardown is what stays meaningful, because nobody else can remove them.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ target: "none" })) }
     render(<DeployCard api={api} path="/task" />)
     await settle()
-    fireEvent.click(screen.getByRole("button", { name: t("deployAccept") }))
-    await waitFor(() => expect(api.acceptDeployment).toHaveBeenCalledWith("/task"))
+    expect(screen.queryByRole("button", { name: t("deploySmoke") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("deployUp") })).toBeNull()
+    expect(screen.getByRole("button", { name: t("deployDestroy") })).toBeTruthy()
+  })
+
+  it("names what is missing when containers stand with nothing recorded", async () => {
+    // The shape that reads as "the panel is broken": running containers, no URL, no smoke, and no
+    // reason given. The card says who was supposed to write the state and what it costs.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ stateFound: false, url: null, lastSmoke: null })) }
+    const { container } = render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(container.textContent).toContain(t("deployStateMissing"))
+    expect(container.textContent).toContain(t("deployNoUrl"))
   })
 
   it("offers the one-click rebuild once the environment is gone", async () => {

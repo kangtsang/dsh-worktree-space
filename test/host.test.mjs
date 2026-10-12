@@ -311,7 +311,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-accept", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access",
+      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -1046,5 +1046,79 @@ describe("the request that widens a handed-on session", () => {
     const handler = handleFor({}, { handoffFullAccess: "on" })
     expect(await handler("task.handoff-access", {}))
       .toMatchObject({ ok: false, error: { code: "E4011" } })
+  })
+
+  it("refuses task.done while a session works in that task space, and carries the sessions", async () => {
+    // The panel is the other door to `finishTask`, and the guard has to hold here too: a guard
+    // on the tool alone would let the person-driven path do what the model is refused, which is
+    // the wrong way round. The details ride the error so the panel can say it in the reader's
+    // language, the way it already does for E5011.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const taskPath = join(tasksRoot, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: taskPath }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", { task: "login", project: "public", tasksRoot, merge: false })
+    expect(reply).toMatchObject({ ok: false, error: { code: "E5012" } })
+    expect(reply.error.details.sessions).toEqual([
+      { sessionId: "session-worker", running: true, openTurn: false, queued: false },
+    ])
+  })
+
+  it("lets task.done through when nothing is working in that task space", async () => {
+    // The negative control for the panel door: a session elsewhere must not block it, or no
+    // finish could ever run while the caller is working.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-elsewhere",
+          status: "running",
+          session: { header: { id: "session-elsewhere", cwd: join(tasksRoot, "public", "other") }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", { task: "login", project: "public", tasksRoot, merge: false })
+    // It fails for its own reason - there is no task space on this fake filesystem - but not
+    // with the guard's code.
+    expect(reply.ok).toBe(false)
+    expect(reply.error.code).not.toBe("E5012")
+  })
+
+  it("does not block a rollback, which removes a half-made create", async () => {
+    // The create dialog rolls a failed create back through this same endpoint with a `cause`.
+    // Refusing that would leave the half-made task space the rollback exists to remove, so the
+    // guard is skipped for it - and only for it.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: join(tasksRoot, "public", "login") }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", {
+      task: "login", project: "public", tasksRoot, merge: false, deleteBranch: true, force: true,
+      cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+    })
+    expect(reply.ok).toBe(false)
+    expect(reply.error.code).not.toBe("E5012")
   })
 })

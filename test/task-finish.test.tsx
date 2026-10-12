@@ -250,6 +250,42 @@ describe("task view", () => {
 })
 
 describe("finishing a task", () => {
+  it("refuses to finish while a session is still working, using the Host's own answer", async () => {
+    // The dialog reads the sessions from the plan rather than asking the session list a narrower
+    // question. That is the point: the list can only answer `running`, while the Host also counts
+    // an open turn and queued work, and asking a different question is how this dialog came to
+    // allow a finish the endpoint then refused - with a different sentence on each side.
+    const user = userEvent.setup()
+    const next = setup({
+      plan: (built) => ({
+        ...built,
+        activeSessions: [
+          { sessionId: "session-9a03b769", running: true, openTurn: true, queued: false },
+        ],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    // The refusal is shown before anything is asked for, and the confirm button is off.
+    expect(screen.getByRole("alert").textContent).toContain("当前任务空间工作区有 1 个会话在活动")
+    expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(true)
+    // Nothing was sent: the dialog answered from the plan it already had.
+    expect(next.api.doneTask).not.toHaveBeenCalled()
+  })
+
+  it("finishes normally when the plan reports no session working", async () => {
+    // The negative control: a plan with no active sessions must not show the refusal, or a guard
+    // that always fired would pass the test above.
+    const user = userEvent.setup()
+    const next = setup({ plan: (built) => ({ ...built, activeSessions: [] }) })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    expect(screen.queryByText(/当前任务空间工作区有/)).toBeNull()
+    expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it("merges and deletes branches only as chosen, then reports every repository", async () => {
     const user = userEvent.setup()
     const next = setup()
@@ -267,7 +303,7 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", project, tasksRoot: root, merge: true, deleteBranch: true, force: false, cleanStray: true })
+    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", project, tasksRoot: root, merge: true, deleteBranch: true, force: false })
     await waitFor(() => expect(screen.getByText(t("finishDone"))).toBeTruthy())
     expect(screen.getAllByText(new RegExp(t("finishMerged").replace("{target}", "main")))).toHaveLength(2)
     expect(screen.getAllByText(new RegExp(t("finishRemoved"))).length).toBeGreaterThan(0)
@@ -992,11 +1028,11 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; discardDocuments?: boolean }
+    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; strays?: string }
     // The folder is named after the project and the task with the moment: the exact
     // second is the dialog's, so it is matched by shape rather than recomputed here.
     expect(payload.documentsDirectory).toMatch(new RegExp(`^${root.replace(/\\/g, "\\\\")}\\\\archived-docs\\\\${project}\\\\antest-\\d{8}-\\d{6}$`))
-    expect(payload.discardDocuments).toBeUndefined()
+    expect(payload.strays).toBe("archive")
   })
 
   it("deletes the documents outright when the box is unticked", async () => {
@@ -1015,8 +1051,12 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; discardDocuments?: boolean }
-    expect(payload.discardDocuments).toBe(true)
+    const payload = next.api.doneTask.mock.calls[0]![0] as { documentsDirectory?: string; strays?: string }
+    // The panel is the one caller allowed to ask for this: the user ticked the box, and
+    // the dialog's own danger notice names what will go. The model-facing tool refuses
+    // `discard` outright (E7007) - see task-tool.test.mjs - so do not "align" this
+    // assertion with that refusal.
+    expect(payload.strays).toBe("discard")
     expect(payload.documentsDirectory).toBeUndefined()
   })
 

@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabledReader } from './task/audit-log.js'
 import { coded, UNKNOWN } from './task/codes.js'
-import { ackAcceptance, deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
+import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
 import { resolveDeliveryPolicy } from './task/delivery.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { mapWithLimit } from './task/concurrency.js'
@@ -12,7 +12,10 @@ import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
-import { registerTaskTool, setSessionPermission } from './task/tool.js'
+import { taskSpacePath } from './task/shared.js'
+import { registerTaskTool, refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from './task/tool.js'
+import { registerSessionTools } from './session-tools.js'
+import { SessionWatch } from './session-watch.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -20,7 +23,7 @@ export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-accept', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -57,8 +60,8 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4013', 'E4014',
-  'E5001', 'E5002', 'E5003', 'E5004', 'E5005', 'E5006', 'E5007', 'E5008', 'E5009', 'E5010', 'E5011',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015',
+  'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
   'E9001',
@@ -424,28 +427,6 @@ export function configuredTasksRoot() {
   if (tasksRootStrategyReference?.get() !== 'custom') return ''
   const value = tasksRootDirectoryReference?.get()
   return typeof value === 'string' ? value.trim() : ''
-}
-
-let deliveryDefaultsReference
-
-/**
- * The delivery policies projects default to, as the object the JSON text holds.
- *
- * Read per call, like the container root: the Plugins page can rewrite it while a
- * session runs, and the next create should follow the newer answer. Anything the
- * text does not deliver - empty, unreadable, not an object - is an empty map, which
- * leaves every project on the built-in default rather than on an error.
- * @returns the map of project name to policy, possibly empty.
- */
-export function configuredDeliveryDefaults() {
-  const raw = settingValue(deliveryDefaultsReference)
-  if (typeof raw !== 'string' || raw.trim() === '') return {}
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
 }
 
 /**
@@ -853,22 +834,6 @@ export const Config = z.object({
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
     .description('Where archived documents go under the custom strategy. Empty files them under the container root instead.'),
-  /**
-   * The delivery policies projects default to, as JSON text: one object keyed by
-   * project name, each value a policy the schema in `task/delivery.js` validates.
-   *
-   * A JSON string rather than a structured form field because the Plugins page has
-   * no map editor yet; a user who wants a project's tasks to deploy and gate their
-   * merges writes the object here once, and every create under that project reads
-   * it. Invalid JSON, or a value that is not an object, is answered with an empty
-   * map rather than raised: a broken default must not become a plugin that cannot
-   * create anything.
-   *
-   * Volatile like the rest of this schema: a write lands on the running entry and
-   * the next create follows it.
-   */
-  deliveryDefaultsJson: z.string().default('').volatile()
-    .description('Per-project default delivery policies as JSON, e.g. {"my-project":{"deploy":{"target":"docker","mode":"auto"}}}. Invalid JSON is ignored.'),
 })
 
 /**
@@ -918,9 +883,6 @@ export function apply(ctx, config = {}) {
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
   tasksRootDirectoryReference = config.tasksRootDirectory
-  // And for how a task is delivered: the settings card holds the JSON text, and
-  // every create resolves the policy a project defaults to through this.
-  deliveryDefaultsReference = config.deliveryDefaultsJson
   // The audit log, unlike the others, is not read at use time: it is pushed into
   // the module that writes, because the writers are the many call sites and a
   // read there would mean asking every one of them for the setting.
@@ -938,15 +900,54 @@ export function apply(ctx, config = {}) {
   // only the reference shape fails quietly: `'off'.get` is undefined, so a plain
   // 'off' reads as unset and the switch stays on - the opposite of the ask.
   setAuditEnabledReader(() => settingValue(config.auditLog) !== 'off')
+
+  // Watching the sessions this plugin dispatches work to, so a turn that ends badly reaches
+  // the agent that asked for the work instead of dying silently in a session nobody is
+  // polling. Built here rather than looked up as a service: it needs only the plugin context
+  // and a log sink, and a service registration would make a profile that lacks it mount no
+  // dispatch watch at all - silent, and indistinguishable from the plugin not being installed.
+  //
+  // It is installed eagerly, because a `session/event` listener has to be in place before the
+  // first dispatch. A host that serves no event feed says so once and keeps working: the tools
+  // and the panel are unaffected, and only the notices are missing.
+  const sessionWatcher = new SessionWatch({ ctx, log: (message) => {
+    // The host logger, not the task audit log: this runs in the background with no request
+    // in scope, and the audit log is a per-request record. Guarded because a deployment that
+    // serves no logger must still get a working watch.
+    try {
+      if (typeof ctx.logger?.warn === 'function') ctx.logger.warn(`dsh-worktree-space: ${message}`)
+    } catch { /* a log that fails must not become the failure */ }
+  } })
+  sessionWatcher.install()
+  if (typeof ctx.effect === 'function') ctx.effect(() => () => sessionWatcher.dispose(), 'dsh-worktree-space session watch')
   // The tool is how the multi-repository workflow is driven while the Web UI is
   // still the upstream single-repository surface. A deployment that serves no
   // tool runtime keeps working: the /api endpoints remain the seam. The injected
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) }))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }))
   } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredDeliveryDefaults, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }) })
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher })
+  }
+
+  // The session-control tools: finding, watching, reading, messaging, resuming
+  // and stopping the sessions a task space is worked in. A dispatched session is
+  // not this session's child, so the ordinary parent/child channel refuses to
+  // reach it, and these are the only way to ask whether that work is still moving.
+  //
+  // Only `tools` is injected. The session services the tools use - `agents`,
+  // `sessions`, `sessionController`, `sessionPersistence`, `workspaceRegistry`,
+  // `agentPresets`, `sessionTitle` - are probed per call instead, because
+  // injecting them would make a profile that serves any one of them differently
+  // mount **no session tools at all**: silent, and indistinguishable from the
+  // plugin not being installed. Probing answers "this deployment does not offer
+  // X", which a caller can act on, and it is the same rule the rest of this
+  // plugin follows for a peer service a deployment need not serve.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['tools'], (toolsCtx) => registerSessionTools(toolsCtx))
+  } else {
+    registerSessionTools(ctx)
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on
@@ -1264,11 +1265,12 @@ export function apply(ctx, config = {}) {
         // A request that names no container root takes the configured one, which is
         // the same answer `task.suggest-root` just gave the dialog.
         configuredRoot: configuredTasksRoot(),
-        // The delivery policy: an explicit one in the request wins, then the
-        // project's stored default, then the built-in one. Resolved inside the
-        // create, so an invalid policy refuses it before anything is made.
-        delivery: payload.delivery,
-        deliveryDefaults: configuredDeliveryDefaults(),
+        // The one delivery decision: whether this task expects a deployment. The
+        // dialog sends a target name; an invalid one is refused inside the create,
+        // before anything is made.
+        delivery: typeof payload.deployTarget === 'string' && payload.deployTarget.trim() !== ''
+          ? { deploy: { target: payload.deployTarget.trim() } }
+          : undefined,
         // And the same walk that dialog previewed and the Workspace card counted,
         // with the same bounds: `scanDepth` decides what "the repositories under
         // this root" means, and one meaning has to hold across all three.
@@ -1317,39 +1319,75 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.plan') return recover(async () => {
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
       if (!task) throw coded('E4003', 'A task name is required.')
-      return planTask(ctx.subprocess, {
+      const tasksRoot = typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : ''
+      const project = typeof payload.project === 'string' ? payload.project : ''
+      const plan = await planTask(ctx.subprocess, {
         task,
-        project: typeof payload.project === 'string' ? payload.project : '',
-        tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
+        project,
+        tasksRoot,
         targets: branchTargets(payload.targets),
       })
+      // The sessions still working in this task space, computed here so the dialog can show the
+      // answer without computing it a second way. The dialog's own pre-check used to ask the
+      // session list a narrower question - `running` alone - which is how the panel and the
+      // endpoint came to disagree about whether a finish was allowed. One computation, two
+      // readers, and the plan already goes out on this call.
+      return {
+        ...plan,
+        activeSessions: sessionsWorkingIn(ctx, taskSpacePath(tasksRoot, project, task)),
+      }
     })
 
     if (endpoint === 'task.done') return recover(async () => {
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
       if (!task) throw coded('E4003', 'A task name is required.')
+      // The same guard the tool applies, through the same function: a finish removes the
+      // worktrees and the task space, so a session working in there loses the ground under it.
+      // Checked here as well as in the tool because the panel is the other door to `finishTask`,
+      // and a guard on one door only would let the person-driven path do what the model is
+      // refused - which is the wrong way round.
+      //
+      // Skipped for a rollback (`cause`), and that exception is the point rather than a hole:
+      // a rollback is undoing a create whose Workspace would not register, so there is no
+      // finished work to protect and no session on it - and refusing it would leave the
+      // half-made task space the rollback exists to remove. Nothing else may skip it.
+      const rollback = typeof payload.cause === 'string' && payload.cause.trim() !== ''
+      if (!rollback) {
+        refuseWhileSessionsWork(ctx, taskSpacePath(
+          typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
+          typeof payload.project === 'string' ? payload.project : '',
+          task,
+        ))
+      }
       return finishTask(ctx.subprocess, {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
         tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
-        // Absent, not false, when the caller said nothing: the task's own record answers
-        // `merge.mode: auto` with a merge, and the panel always says what it wants, so an
-        // explicit `false` - the unticked box - stays a no.
-        merge: typeof payload.merge === 'boolean' ? payload.merge : undefined,
+        // The panel always says whether to merge, so this is a plain boolean: there is
+        // no record left to answer for it, and no default to fall back on.
+        merge: payload.merge === true,
         target: typeof payload.target === 'string' ? payload.target : undefined,
         targets: branchTargets(payload.targets),
-        deleteBranch: typeof payload.deleteBranch === 'boolean' ? payload.deleteBranch : undefined,
+        deleteBranch: payload.deleteBranch === true,
         force: payload.force === true,
-        cleanStray: payload.cleanStray === true,
-        keep: Array.isArray(payload.keep) ? payload.keep.filter((name) => typeof name === 'string') : [],
+        // What happens to the files git never tracked. Omitted, the finish archives
+        // them - the answer that neither loses the user's writing nor leaves the
+        // space standing.
+        //
+        // `discard` is allowed here and refused by the model-facing tool (E7007). That
+        // asymmetry is the point, not an oversight: this endpoint is the panel, where a
+        // person ticked a box the dialog warns about, and the tool is the path a model
+        // can be talked down. Both reach the same `finishTask`; only one is trusted with
+        // deleting the user's own files.
+        strays: typeof payload.strays === 'string' ? payload.strays : undefined,
+        keepEntries: Array.isArray(payload.keepEntries) ? payload.keepEntries.filter((name) => typeof name === 'string') : [],
         documentsDirectory: typeof payload.documentsDirectory === 'string' ? payload.documentsDirectory : undefined,
-        discardDocuments: payload.discardDocuments === true,
         // The user's own overrule of the delivery gate, from the panel's
         // "finish anyway?" confirmation. The tool never sends it: the model's way
-        // past the gate is deploying, smoking and being accepted, never a flag.
+        // past the gate is deploying and smoking, never a flag.
         acknowledgeDelivery: payload.acknowledgeDelivery === true,
-        // The strays policy may file content away; the archive preference is
-        // the configuration's standing answer for where.
+        // Archiving files content away; the archive preference is the
+        // configuration's standing answer for where.
         deliveryArchive: { strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() },
         // Why the dialog is finishing a task it never told the user existed. The
         // rollback after a create whose Workspace would not register goes through
@@ -1365,7 +1403,9 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.deploy-status') return recover(async () => {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
       if (!path) throw coded('E4005', 'A task path is required.')
-      return deploymentStatus(ctx.subprocess, path)
+      // The fallback is the caller's to ask for: reading it runs the deploy root's
+      // own `status` command, which the panel pays for only on an explicit press.
+      return deploymentStatus(ctx.subprocess, path, { derive: payload.derive === true })
     })
 
     // Tear the task's environment down, best effort by label. The endpoint answers
@@ -1377,16 +1417,6 @@ export function apply(ctx, config = {}) {
       const path = typeof payload.path === 'string' ? payload.path.trim() : ''
       if (!path) throw coded('E4005', 'A task path is required.')
       return destroyDeployment(ctx.subprocess, path)
-    })
-
-    // The human acceptance the agent-then-human policy waits for. Writing it is
-    // deliberately the user's own act through a real endpoint, not a field the
-    // caller may fill: the ack is the one thing that turns a green smoke into a
-    // deliverable task, and it means a person looked.
-    if (endpoint === 'task.deploy-accept') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
-      if (!path) throw coded('E4005', 'A task path is required.')
-      return ackAcceptance(path)
     })
 
     // The one-click rebuild behind a destroyed (or never-deployed) card: the

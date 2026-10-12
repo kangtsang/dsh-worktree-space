@@ -4,18 +4,199 @@
  * Creating a task: the container, the branch, one worktree per repository, and the file that tells a session what the task is.
  */
 import { existsSync, statSync } from 'node:fs'
-import { cp, mkdir, readdir, rm } from 'node:fs/promises'
+import { cp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { auditEnter, recordError, recordEvent } from './audit-log.js'
-import { ERROR_CODES, coded } from './codes.js'
+import { ERROR_CODES, coded, warned } from './codes.js'
 import { prepareContainerRoot } from './container.js'
 import { resolveDeliveryPolicy } from './delivery.js'
 import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
+import { E2E_NAMES_SHOWN, inspectE2eConfigs } from './e2e.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
+import { findLinks, symlinksRefused } from './links.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
 import { assertIsolated, isInside, refuseDelete } from './paths.js'
 
-import { TASK_OWNED_FILES, readTaskMetadata, resolveTasksRoot, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { DEPLOY_DIR, DEPLOY_ROOT, TASK_OWNED_ENTRIES, readTaskMetadata, resolveTasksRoot, sourceDeployRootPath, taskDeployRootPath, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+
+/** How many links a create-time warning names before it says how many more there are. */
+const LINK_NAMES_SHOWN = 3
+
+/**
+ * The state script a scaffolded deploy root carries.
+ *
+ * Why it exists: a task space with no `deploy/` has no state file and nothing
+ * that could write one, so `done` refuses its merge (E5006) over a handshake no
+ * session there can carry out. Shipping the handshake in executable form is the
+ * difference between a refusal that names the file and a space that can produce
+ * it. It is deliberately self-contained - `sh`, `awk`, `sed` and `date`, no
+ * `jq`, because there is none - and it merges rather than rewrites, because
+ * `destroyedAt` in the file is the plugin's own and a deploy that dropped it
+ * would forget that the environment is down.
+ *
+ * Exported so the step that proves the script really runs can execute the very
+ * bytes a create writes, rather than a copy of them that may have drifted.
+ */
+export const WRITE_STATE_SCRIPT = String.raw`#!/bin/sh
+# Merge one deployment fact into this deploy root's .state.json.
+#
+# Why a script: that file is the handshake with the Worktree Space plugin, and
+# every writer of it has to keep the fields it does not own. destroyedAt is
+# written by the plugin when the environment is destroyed; a deploy that rewrote
+# the file from scratch would forget that it is down. So this merges: it reads
+# whatever is there, replaces only the one top-level field it was asked for, and
+# writes the whole object back as one line - the shape every reader of it expects.
+#
+# There is no jq on this machine, so the merge is done with awk, which is.
+#
+#   ./write-state.sh url <url>          after up, the acceptance URL
+#   ./write-state.sh smoke pass|fail    after smoke, stamped with the UTC now
+#   ./write-state.sh services <json>    optional service list, as raw JSON
+#
+# The file it writes is the one the plugin names in DEPLOY_STATE_FILE, so a script
+# in a subdirectory writes the same file as one at the top: nothing here has to know
+# where the deploy root is. Without that variable it falls back to the file beside
+# this script, which is where a deploy root at the top puts it.
+#
+# It never writes destroyedAt: that is the plugin's own.
+set -eu
+
+state="${'${'}DEPLOY_STATE_FILE:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/.state.json}"
+
+usage() {
+  echo "usage: write-state.sh url <url> | smoke pass|fail | services <json>" >&2
+  exit 2
+}
+
+# A value is data, not JSON: quote and escape it so it can sit in the object.
+json_string() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$/"/'
+}
+
+# Rewrite the object with top-level key replaced, or added when it was absent.
+# value is raw JSON. It travels by environment rather than awk -v, because -v
+# would eat the backslashes inside it.
+merge() {
+  key="$1"
+  value="$2"
+  [ -f "$state" ] || printf '{}\n' > "$state"
+  # A file that is not an object cannot be merged into. Refusing leaves the
+  # bytes alone, which is the one outcome that cannot lose somebody's ack.
+  if [ "$(sed -e 's/^[[:space:]]*//' "$state" | cut -c1)" != "{" ]; then
+    echo "write-state.sh: $state is not a JSON object; left untouched" >&2
+    exit 1
+  fi
+  tmp="$state.$$.tmp"
+  VALUE="$value" awk -v want="$key" '
+    { text = text $0 }
+    END {
+      n = length(text)
+      i = index(text, "{") + 1
+      out = ""
+      found = 0
+      while (i <= n) {
+        while (i <= n) {
+          c = substr(text, i, 1)
+          if (c == "," || c == " " || c == "\t" || c == "\r") i++; else break
+        }
+        if (i > n) break
+        if (substr(text, i, 1) != "\"") break
+        ks = i
+        i++
+        while (i <= n) {
+          c = substr(text, i, 1)
+          if (c == "\\") { i += 2; continue }
+          if (c == "\"") { i++; break }
+          i++
+        }
+        kraw = substr(text, ks, i - ks)
+        while (i <= n && substr(text, i, 1) ~ /[ \t\r\n]/) i++
+        if (substr(text, i, 1) != ":") break
+        i++
+        while (i <= n && substr(text, i, 1) ~ /[ \t\r\n]/) i++
+        vs = i
+        c = substr(text, i, 1)
+        if (c == "\"") {
+          i++
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (c == "\\") { i += 2; continue }
+            if (c == "\"") { i++; break }
+            i++
+          }
+        } else if (c == "{" || c == "[") {
+          opener = c
+          closer = (c == "{") ? "}" : "]"
+          d = 0
+          instr = 0
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (instr) {
+              if (c == "\\") { i += 2; continue }
+              if (c == "\"") instr = 0
+              i++
+              continue
+            }
+            if (c == "\"") { instr = 1; i++; continue }
+            if (c == opener) d++
+            else if (c == closer) { d--; if (d == 0) { i++; break } }
+            i++
+          }
+        } else {
+          while (i <= n) {
+            c = substr(text, i, 1)
+            if (c == "," || c == "}") break
+            i++
+          }
+        }
+        vraw = substr(text, vs, i - vs)
+        sub(/[ \t\r\n]+$/, "", vraw)
+        if (substr(kraw, 2, length(kraw) - 2) == want) { vraw = ENVIRON["VALUE"]; found = 1 }
+        if (out != "") out = out ","
+        out = out kraw ":" vraw
+      }
+      if (!found) {
+        if (out != "") out = out ","
+        out = out "\"" want "\":" ENVIRON["VALUE"]
+      }
+      printf "{%s}\n", out
+    }
+  ' "$state" > "$tmp" || { rm -f "$tmp"; exit 1; }
+  mv "$tmp" "$state"
+}
+
+[ "$#" -ge 1 ] || usage
+
+case "$1" in
+  url)
+    [ "$#" -ge 2 ] || usage
+    merge url "$(json_string "$2")"
+    ;;
+  smoke)
+    [ "$#" -ge 2 ] || usage
+    case "$2" in
+      pass|fail) ;;
+      *) usage ;;
+    esac
+    merge lastSmoke "{\"result\":\"$2\",\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+  services)
+    [ "$#" -ge 2 ] || usage
+    merge services "$2"
+    ;;
+  *)
+    usage
+    ;;
+esac
+`
+
+/**
+ * The shape of the state file, one line of valid JSON.
+ *
+ * JSON has no comments, so this carries the shape and nothing else; why each
+ * field exists is in {@link WRITE_STATE_SCRIPT} beside it.
+ */
+export const STATE_EXAMPLE = '{"url":"http://localhost:5173","services":["web","api"],"lastSmoke":{"result":"pass","at":"2026-01-01T00:00:00Z"}}\n'
 
 /**
  * The facts only the source repository can answer, read before a worktree is
@@ -45,13 +226,19 @@ export async function sourceFacts(subprocess, repoPath) {
  * Whether a container holds nothing but what this plugin put there.
  * @param leftovers - the container's entries.
  * @param created - the worktrees this call created.
+ * @param owned - the top-level entry names this call may remove. That is the
+ *   plugin's own directory (plus the legacy note), one entry whatever it holds:
+ *   the record, the note and the deploy copy - scaffolded or copied from the
+ *   source root - all live inside it. The source root's own `deploy/` is not
+ *   touched by any of this; what sits in the task space is this call's copy.
  * @returns whether a failed create may remove the container.
  */
-function holdsOnlyOurs(leftovers, created) {
-  return leftovers.every((name) => TASK_OWNED_FILES.includes(name) || created.some((entry) => basename(entry.path) === name))
+function holdsOnlyOurs(leftovers, created, owned) {
+  return leftovers.every((name) => owned.includes(name) || created.some((entry) => basename(entry.path) === name))
 }
 
 async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
+  const owned = TASK_OWNED_ENTRIES
   const stranded = []
   for (const entry of created) {
     // The worktree was created by this call and never handed to a caller, so a
@@ -95,7 +282,7 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
     if (error?.code !== 'ENOENT') stranded.push(container)
     return stranded
   }
-  if (!holdsOnlyOurs(leftovers, created)) {
+  if (!holdsOnlyOurs(leftovers, created, owned)) {
     stranded.push(container)
     return stranded
   }
@@ -113,14 +300,21 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
  *
  * The value is judged where the other request-shape guards are, before anything is
  * made: a path that escapes the source root, or names nothing, has to refuse the
- * request rather than surface once a task space exists to clean up. What it resolves
- * to is copied in under the fixed name `deploy/deploy.sh`, which is the name both
- * readers look for, so a manifest that says `./deploy.sh` keeps working while the
- * script behind it changes per task.
+ * request rather than surface once a task space exists to clean up.
+ *
+ * The path is confined to the workspace's own `.worktree-space/deploy/` directory. That is
+ * where the deploy contract lives, so a script named from anywhere else would be a second,
+ * invisible contract - and that directory is what gets copied, so a script from outside it
+ * would arrive without the siblings it names.
+ *
+ * What comes back is the WORKSPACE-RELATIVE path, and that is what the record keeps: the
+ * deploy root is copied into the task space at the same relative place, so the caller's
+ * spelling is the one to remember - and the one that resolves on either side - rather than
+ * a fixed file name that overwrote something.
  * @param sourceRoot - the directory the path is relative to.
  * @param requested - the caller's value; empty means no script was named.
- * @returns the absolute path of the script, or '' when none was named.
- * @throws when the value is not a file inside the source root.
+ * @returns the workspace-relative path, or '' when none was named.
+ * @throws when the value is not a file under the workspace's `.worktree-space/deploy/`.
  */
 function resolveDeployScript(sourceRoot, requested) {
   const value = String(requested ?? '').trim()
@@ -132,12 +326,23 @@ function resolveDeployScript(sourceRoot, requested) {
   if (!isInside(sourceRoot, resolved)) {
     throw coded('E4014', `the deploy script must name a file inside the source root, not one outside it: ${value}`)
   }
-  // A directory carrying that name is not a script either, and copying it would fail at
-  // the fixed file name the readers use - after the worktrees were already cut.
+  // Confined to the deploy root: the one directory that travels into the task space, and
+  // the one place a deploy contract can live. Compared canonically, so
+  // `./.worktree-space/deploy/x.sh` and `.worktree-space/deploy/x.sh` are the same answer and
+  // a `..` that walks back out is caught here.
+  const deployRoot = sourceDeployRootPath(sourceRoot)
+  if (!isInside(deployRoot, resolved)) {
+    throw coded('E4014', `the deploy script must live under the workspace's \`${DEPLOY_DIR}/\` directory: ${value}`)
+  }
+  // A directory carrying that name is not a script either, and copying it would fail once
+  // the worktrees were already cut.
   if (!existsSync(resolved) || !statSync(resolved).isFile()) {
     throw coded('E4014', `the deploy script must name a file that exists inside the source root: ${value}`)
   }
-  return resolved
+  // Normalised to forward slashes so the record reads the same on every platform. It stays
+  // relative to the workspace, and because the deploy root sits at the same relative place
+  // inside the task space, this one string is the script's path on either side.
+  return value.replace(/^\.\//, '').replace(/\\/g, '/')
 }
 
 export async function createTask(subprocess, options) {
@@ -148,9 +353,10 @@ export async function createTask(subprocess, options) {
     repos,
     baseRef,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
-    // A file path relative to the source root, copied into the task space as
-    // `deploy/deploy.sh`. Empty means the create copies only what the source root
-    // already carries there.
+    // A file path relative to the workspace, naming the entry under its
+    // `.worktree-space/deploy/` directory. It travels into the task space under its own
+    // name and the record remembers it as this task's entry. Empty means the entry is
+    // `.worktree-space/deploy/deploy.sh`, which is what the create would produce anyway.
     deployScript = '',
     configuredRoot = '',
     // How far to look for the repositories a task covers. The same bounds the
@@ -158,10 +364,9 @@ export async function createTask(subprocess, options) {
     // the list in the create dialog, and what this actually takes are one number
     // rather than three that happen to disagree.
     scanBounds = {},
-    // The delivery policy as this request stated it, and the per-project defaults
-    // the configuration holds. Resolved below, once, before anything is made.
+    // The delivery policy as this request stated it. One field now: whether this
+    // task expects a deployment. Resolved below, once, before anything is made.
     delivery,
-    deliveryDefaults = {},
   } = options
 
   const name = validateTaskName(task)
@@ -177,7 +382,7 @@ export async function createTask(subprocess, options) {
   const project = projectNameFor(sourceRoot)
   // The delivery policy is resolved once, before anything is created: an invalid
   // one must fail the request, not surface halfway through a rollback.
-  const policy = resolveDeliveryPolicy(project, delivery, deliveryDefaults)
+  const policy = resolveDeliveryPolicy(delivery)
 
   // An absent list means "every discovered repository"; an explicitly empty one
   // is a caller that selected nothing, which must not silently become all.
@@ -202,6 +407,42 @@ export async function createTask(subprocess, options) {
   // Resolved with the other guards rather than at the copy: a deploy script that cannot
   // be used is a request that does not add up, and it must fail before the worktrees exist.
   const deployScriptPath = resolveDeployScript(sourceRoot, deployScript)
+
+  // A task that says it deploys has to have something to deploy with, and this is checked
+  // before anything is made rather than discovered at the finish gate. Ticking the box and
+  // getting a task space whose card can only ever answer "nothing to deploy" is the silent
+  // failure this refuses: the request promised a deployment, and there is no script to run.
+  //
+  // The three sources are the same three, in the same order, that the deploy side looks in -
+  // so this accepts exactly what a deploy would later find, and refuses exactly what it would
+  // not. Any one of them is enough:
+  //
+  //   1. a script the caller named, which E4014 above has already proven exists and is a file;
+  //   2. the workspace's own `.worktree-space/deploy/deploy.sh`, which travels over whole;
+  //   3. a repository carrying its own `deploy/deploy.sh` (the single-repository shape).
+  //
+  // The check is for the ENTRY FILE, not for a `deploy/` directory. A directory holding only
+  // other scripts would pass a directory test and still leave nothing to run, which is the
+  // very outcome this guard exists to prevent.
+  if (policy.deploy.target !== 'none') {
+    // A named script needs no re-check here: `resolveDeployScript` above already refused the
+    // request (E4014) unless it exists, is a file, and sits under the workspace's
+    // `.worktree-space/deploy/`. Re-testing it would be a second, weaker copy of a check
+    // that has already passed.
+    const named = deployScriptPath !== ''
+    const sourceEntry = existsSync(join(sourceDeployRootPath(sourceRoot), 'deploy.sh'))
+    const repoEntry = selected.some((repoPath) => existsSync(join(repoPath, DEPLOY_ROOT, 'deploy.sh')))
+    if (!named && !sourceEntry && !repoEntry) {
+      throw coded(
+        'E4015',
+        `the task is set to deploy (deployTarget docker), but nothing can deploy it: no deploy script was named, `
+          + `${sourceRoot} carries no \`${DEPLOY_DIR}/deploy.sh\`, and none of the selected repositories carries its own. `
+          + `Add that file, name an existing one under \`${DEPLOY_DIR}/\` with deployScript, or create the task with `
+          + `deployTarget none and deploy it by hand.`,
+        { sourceRoot },
+      )
+    }
+  }
 
   const branch = branchNameFor(name, prefix)
   const taskPath = taskSpacePath(tasksRoot, project, name)
@@ -259,23 +500,39 @@ export async function createTask(subprocess, options) {
   await mkdir(taskPath)
 
   const created = []
+  // What this create wants the caller to know without the create having failed.
+  // Declared before the try below, so a create that rolls back still reports what
+  // it found before it gave up rather than losing the finding with the worktrees.
+  const warnings = []
   try {
-    // The source root's own deploy root travels with the task space. Both readers look in
-    // `<task space>/deploy` first and a manifest's commands run from that directory, so the
-    // whole directory comes over - a manifest without the script it names is a deploy that
-    // never runs. A source root that carries none is skipped: the space then deploys whatever
-    // its own repositories carry, if anything.
-    const sourceDeploy = join(sourceRoot, 'deploy')
+    // The workspace's own deploy root travels with the task space, whole, into the plugin's
+    // own directory on both sides: `<workspace>/.worktree-space/deploy/` is copied to
+    // `<task space>/.worktree-space/deploy/`, which is the only place this plugin writes.
+    // The scripts beside the entry run from that directory, so a script that names its
+    // siblings is a deploy that never runs if only part of it travels. A workspace that
+    // carries none is skipped: the space then deploys whatever its own repositories carry,
+    // if anything.
+    //
+    // The same relative layout on both sides is what lets one path serve both: the record
+    // keeps the workspace-relative entry, and it resolves unchanged in the task space. A
+    // named deploy script needs nothing more - it lives under this directory (E4014 keeps it
+    // there), so it is already in the copy, under its own name, and the record says which
+    // entry to run.
+    const sourceDeploy = sourceDeployRootPath(sourceRoot)
     if (existsSync(sourceDeploy)) {
-      await cp(sourceDeploy, join(taskPath, 'deploy'), { recursive: true, force: true })
+      await cp(sourceDeploy, taskDeployRootPath(taskPath), { recursive: true, force: true })
     }
 
-    // The script a create named, under the one name both readers look for. It is copied
-    // after the directory above on purpose: naming a script is how a task says it deploys
-    // differently from the source root's own `deploy.sh`, and this is what overrides it.
-    if (deployScriptPath !== '') {
-      await mkdir(join(taskPath, 'deploy'), { recursive: true })
-      await cp(deployScriptPath, join(taskPath, 'deploy', 'deploy.sh'), { force: true })
+    // Nothing copied a deploy root and no script was named, so the space would
+    // otherwise have neither a state file nor a way to write one - and `done`
+    // then refuses its merge over a handshake no session there can carry out.
+    // The scaffold is that handshake in executable form. It is written only when
+    // the directory is still absent, so a create never overwrites a repository's
+    // own deploy root.
+    if (!existsSync(taskDeployRootPath(taskPath))) {
+      await mkdir(taskDeployRootPath(taskPath), { recursive: true })
+      await writeFile(join(taskDeployRootPath(taskPath), 'write-state.sh'), WRITE_STATE_SCRIPT, { mode: 0o755 })
+      await writeFile(join(taskDeployRootPath(taskPath), '.state.json.example'), STATE_EXAMPLE)
     }
 
     for (const repoPath of selected) {
@@ -298,6 +555,10 @@ export async function createTask(subprocess, options) {
       branch,
       baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
       delivery: policy,
+      // Which entry under `.worktree-space/deploy/` this task runs, when the create named
+      // one. Absent means `.worktree-space/deploy/deploy.sh`, so a record made before this
+      // field existed reads the same way it always did.
+      deployScript: deployScriptPath === '' ? undefined : deployScriptPath,
       repositories: created.map((entry) => ({
         name: entry.name,
         sourcePath: entry.repoPath,
@@ -352,6 +613,63 @@ export async function createTask(subprocess, options) {
     { phase: 'create', branch, path: taskPath, worktrees: created.map((entry) => entry.name) },
   )
 
+  // Links are looked for HERE, at the start, rather than only when the finish tries to
+  // file a stray. The finish cannot file a stray holding a link on a machine that
+  // refuses to recreate one (`fs.cp` recreates links, it does not copy through them),
+  // and discovering that at the finish means the task space cannot be cleared until a
+  // person moves the link out by hand - a problem that existed from the first minute
+  // of the task and was invisible until the last.
+  //
+  // Both halves are asked, because they mean different things to the reader: whether
+  // this machine would refuse to recreate a link at all (a fact about the machine,
+  // which no amount of work in the task space changes), and whether the worktrees this
+  // call just cut actually hold any (a fact about this task space). Reported as
+  // warnings and never thrown: the task space exists and the work is not wrong, so
+  // refusing the create would be reporting a delivery-time hazard as a failure.
+  const links = []
+  if (await symlinksRefused()) {
+    for (const entry of created) links.push(...await findLinks(entry.path))
+  }
+  if (links.length > 0) {
+    const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
+    const more = links.length > LINK_NAMES_SHOWN ? ` (and ${links.length - LINK_NAMES_SHOWN} more)` : ''
+    warnings.push(warned(
+      'workspace-holds-links',
+      `this machine will not recreate a symbolic link, and the worktrees hold ${links.length} of them: ${named}${more}. They cannot be filed when this task is finished; move or delete them before then, or the finish will leave them in place and stop.`,
+      { count: links.length, links: links.slice(0, LINK_NAMES_SHOWN), shown: LINK_NAMES_SHOWN },
+    ))
+  }
+
+  // A repository's own e2e configuration is read here for the same reason the links
+  // are: it is a hazard that exists from the first minute of the task and is only
+  // discovered when someone trusts its result. A suite pointed at the host's stack
+  // reports green for code this task never built, and that report is indistinguishable
+  // from a real one - which makes it worse than a suite that fails.
+  //
+  // Reported, never refused. A fixed port can be deliberate, and a create is not the
+  // place to overrule a repository's own configuration; what the reader needs is to
+  // know before they read a result as a regression.
+  const stacks = []
+  for (const entry of created) {
+    for (const finding of await inspectE2eConfigs(entry.path)) {
+      stacks.push({ repo: entry.name, ...finding })
+    }
+  }
+  if (stacks.length > 0) {
+    const named = stacks.slice(0, E2E_NAMES_SHOWN).map((one) => `${one.repo}: ${one.path}`).join(', ')
+    const more = stacks.length > E2E_NAMES_SHOWN ? ` (and ${stacks.length - E2E_NAMES_SHOWN} more)` : ''
+    const reused = stacks.some((one) => one.reusesExistingServer)
+    warnings.push(warned(
+      'workspace-e2e-points-elsewhere',
+      `the repositories' own end-to-end configuration names the stack it runs against: ${named}${more}. `
+      + (reused ? 'At least one of them reuses a server that is already running' : 'They name fixed local addresses')
+      + ', so a suite run from this task space may verify whatever is already listening rather than this task\'s own '
+      + 'instance. Point it at this task\'s acceptance address, or bring a configuration that does, before reading '
+      + 'its result as a regression.',
+      { configs: stacks.slice(0, E2E_NAMES_SHOWN), count: stacks.length, shown: E2E_NAMES_SHOWN, reused },
+    ))
+  }
+
   return {
     task: name,
     project,
@@ -360,6 +678,7 @@ export async function createTask(subprocess, options) {
     tasksRoot,
     baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
     repositories: created.map((entry) => ({ name: entry.name, path: entry.path })),
+    warnings,
   }
 }
 

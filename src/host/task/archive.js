@@ -4,7 +4,7 @@
  * Finishing a task: what merging would do, which files are the user's own, and the merge, removal, and filing that follow.
  */
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, open, readdir, rename, rmdir, rm, symlink } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, open, readdir, rename, rmdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
@@ -12,10 +12,11 @@ import { coded, warned } from './codes.js'
 import { assertDeliveryGate, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { findLinks, symlinksRefused } from './links.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, refuseDelete, samePathLocation } from './paths.js'
 
-import { TASK_METADATA, TASK_OWNED_FILES, isLinkedWorktree, readTaskMetadata, taskSpacePath } from './shared.js'
+import { BREADCRUMB, PLUGIN_ROOT, TASK_METADATA, TASK_OWNED_ENTRIES, isLinkedWorktree, pluginRootPath, readTaskMetadata, taskMetadataPath, taskSpacePath } from './shared.js'
 
 /**
  * Whether a merge is waiting to be concluded in a checkout.
@@ -433,9 +434,9 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
   // What the container holds besides its worktrees. `finishTask` always clears
-  // the breadcrumb this plugin wrote and keeps the rest unless `cleanStray` is
-  // asked for, so this is exactly what that option would remove — minus the
-  // breadcrumb, which is never a surprise.
+  // the plugin's own directory and keeps the rest unless the caller's `strays`
+  // choice clears them, so this is exactly what `archive`/`discard` would remove —
+  // minus that directory, which is never a surprise.
   const strays = []
   for (const entry of entries) {
     const entryPath = join(taskPath, entry.name)
@@ -443,7 +444,7 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       worktrees.push(entryPath)
       continue
     }
-    if (TASK_OWNED_FILES.includes(entry.name)) continue
+    if (TASK_OWNED_ENTRIES.includes(entry.name)) continue
     const kind = strayKind(entry.name, entry.isDirectory())
     strays.push({
       name: entry.name,
@@ -549,35 +550,6 @@ function isDocument(name) {
 }
 
 /**
- * Whether this process is refused the right to create a symbolic link.
- *
- * Windows needs `SeCreateSymbolicLinkPrivilege` for that: Developer Mode grants it to
- * an ordinary user, an ordinary installation does not. The answer decides whether a
- * stray holding a link can be filed at all, because `fs.cp` recreates links rather
- * than copying what they point at - on a machine that refuses, the copy stops part-way
- * with an `EPERM` about the link and leaves half an archive behind. Probed rather than
- * assumed, and asked once: nothing about the process's token changes while it runs.
- * @returns whether a link could not be created here.
- */
-function symlinksRefused() {
-  linkProbe ??= (async () => {
-    const probe = await mkdtemp(join(tmpdir(), 'dsh-worktree-link-'))
-    try {
-      await symlink(join(probe, 'target'), join(probe, 'link'))
-      return false
-    } catch {
-      return true
-    } finally {
-      await rm(probe, { recursive: true, force: true }).catch(() => {})
-    }
-  })()
-  return linkProbe
-}
-
-/** The one probe {@link symlinksRefused} keeps, so the question is asked once. */
-let linkProbe
-
-/**
  * Remove what an archive has just copied, leaving every link where it stands.
  *
  * A link inside a stray is the one thing this machine may refuse to recreate, and it is a
@@ -608,46 +580,6 @@ async function removeCopiedLeavingLinks(directory) {
     await rm(path, { force: true }).catch(() => {})
   }
   return kept
-}
-
-/**
- * Every link below a directory, as paths relative to it.
- *
- * The listing is what the reader is given when a stray cannot be filed whole, so it names
- * entries the way the task space shows them rather than as absolute paths. Links are not
- * descended into: a link is a name for somewhere else, and walking one would both leave
- * the directory being filed and, where links point back into their own tree -
- * `node_modules/.pnpm` is full of them - never come back. A junction is a link here as
- * much as a symbolic link is: `readdir` reports one as a directory, and
- * `Dirent.isSymbolicLink` is what tells the two apart.
- * @param directory - the stray to look through.
- * @param options - `maxEntries` bounds the walk.
- * @returns the relative paths, in the order they were found.
- */
-async function findLinks(directory, { maxEntries = 2000 } = {}) {
-  const found = []
-  const queue = [directory]
-  let seen = 0
-  while (queue.length > 0 && seen < maxEntries) {
-    const current = queue.shift()
-    let children
-    try {
-      children = await readdir(current, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const child of children) {
-      seen += 1
-      if (seen > maxEntries) break
-      const path = join(current, child.name)
-      if (child.isSymbolicLink()) {
-        found.push(relative(directory, path))
-        continue
-      }
-      if (child.isDirectory()) queue.push(path)
-    }
-  }
-  return found
 }
 
 /**
@@ -770,10 +702,14 @@ export async function finishTask(subprocess, options) {
     targets,
     deleteBranch: askedDeleteBranch,
     force = false,
-    cleanStray = false,
-    keep = [],
+    // The caller's choice for what happens to untracked files. Bound to a distinct
+    // name here because `strays` below is the list of entries themselves, and a
+    // parameter and a local of one name in one scope is a collision the parser
+    // refuses - which is the language catching what would otherwise read as one
+    // variable doing two jobs.
+    strays: strayChoice,
+    keepEntries = [],
     documentsDirectory,
-    discardDocuments = false,
     cause,
     acknowledgeDelivery = false,
     deliveryArchive,
@@ -799,13 +735,13 @@ export async function finishTask(subprocess, options) {
   // Presence is the question, not parseability: `readTaskMetadata` below still
   // reports a half-written or hand-edited file as no branch recorded, and that
   // narrows the finish to the merges and the removals a merge already justified.
-  if (!existsSync(join(taskPath, TASK_METADATA))) {
+  if (!existsSync(taskMetadataPath(taskPath))) {
     throw coded(
       'E2005',
-      `${taskPath} holds no ${TASK_METADATA}, so this plugin has no record of creating it and nothing in it will be deleted.\n`
-      + `  What is missing: ${join(taskPath, TASK_METADATA)}\n`
+      `${taskPath} holds no ${PLUGIN_ROOT}/${TASK_METADATA}, so this plugin has no record of creating it and nothing in it will be deleted.\n`
+      + `  What is missing: ${taskMetadataPath(taskPath)}\n`
       + '  If this really is a task space this plugin made and its record was removed by hand, restore the file from a backup before finishing it.',
-      { path: taskPath, missing: join(taskPath, TASK_METADATA) },
+      { path: taskPath, missing: taskMetadataPath(taskPath) },
     )
   }
 
@@ -816,17 +752,13 @@ export async function finishTask(subprocess, options) {
   // container with no readable record deletes no branch at all, and says so.
   const warnings = []
   const recorded = await readTaskMetadata(taskPath)
-  // What the caller said, and then what the task's own record says. `auto` is the record
-  // answering "this merge happens by itself", and an absent request is a caller that said
-  // nothing about it - which is what lets the policy fill either one in. An explicit `false`
-  // - the panel's unticked box, an agent that was told not to merge - stays a no: the hand
-  // that said it outranks the record. `deleteBranch` follows the same rule, and defaults to
-  // keeping the branch, because that is the reversible half.
-  const policyMerge = deliveryPolicyOf(recorded).merge
-  const merge = askedMerge === undefined ? policyMerge.mode === 'auto' : askedMerge === true
-  const deleteBranch = askedDeleteBranch === undefined
-    ? merge && policyMerge.deleteBranch === true
-    : askedDeleteBranch === true
+  // The caller's own answer, and nothing else. There is no policy to fall back on
+  // any more: the tool refuses a `done` that does not say (E7006), and the panel
+  // always says, so a merge happens exactly when the hand that called this asked
+  // for one. `deleteBranch` keeps its conservative default - not deleting is the
+  // half that can be walked back - so only an explicit true deletes.
+  const merge = askedMerge === true
+  const deleteBranch = askedDeleteBranch === true
   // Deleting a branch that was merged is routine; deleting one that was not throws
   // its commits away, so it has to be asked for twice - with `deleteBranch` and with
   // `force`, which is also what makes git delete it without complaint.
@@ -838,21 +770,23 @@ export async function finishTask(subprocess, options) {
     warnings.push(warned('no-task-branch', `no task branch is recorded in ${taskPath}; no branch was deleted in any repository`, { path: taskPath }))
   }
 
-  // The strays policy fills the gaps a caller left: a finish that named no
-  // cleanStray, no directory and no discard takes its handling from the task's
-  // own delivery policy. A caller that decided anything is honoured verbatim, and
-  // the policy itself never deletes - see applyStraysPolicy. Everything it decides
-  // still passes the isolation check a caller-named directory would.
-  const strayed = applyStraysPolicy(deliveryPolicyOf(recorded), {
-    cleanStray,
-    discardDocuments,
+  // What happens to the files git never tracked. The choice is this call's, and an
+  // absent one is archive: the answer that neither loses the user's writing nor
+  // leaves the task space standing. Everything it decides still passes the
+  // isolation check a caller-named directory would.
+  const strayed = applyStraysPolicy({
+    strays: strayChoice,
     documentsDirectory,
-    keep,
-    force,
+    keepEntries,
   }, deliveryArchive, taskPath)
   const strayCleanStray = strayed.cleanStray
   const strayDiscardDocuments = strayed.discardDocuments
   const strayDestination = strayed.documentsDirectory
+  // The entries this finish must leave where they are, whether the caller named
+  // them or the removal fence refused them. `keep` is the name the loops below
+  // have always used for it; the request parameter is `keepEntries` so that it
+  // cannot be confused with `strays: 'keep'`, which is a different decision.
+  const keep = strayed.keep
   if (strayDestination !== '') assertIsolated(taskPath, strayDestination)
 
   // The delivery gate is the one check here that reads the task's policy rather
@@ -926,7 +860,12 @@ export async function finishTask(subprocess, options) {
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     // `git worktree list` always prints the main working tree first.
     const mainRepo = parseWorktrees(porcelain).find((row) => row.isMain)?.path ?? ''
-    const outcome = { name, path: worktreePath, mainRepo, branch, merged: false, removed: false, branchDeleted: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [] }
+    // `needsCommit` and `dirtyCheckout` are the two ways a finish stops on work that is
+    // not this side's to write, told apart from every other failure as a flag rather than
+    // left to be recovered from the sentence. A caller that means to act on the stop - by
+    // handing the work to a session - has to tell them from a conflict and from a plain
+    // failure, and matching English is not a contract.
+    const outcome = { name, path: worktreePath, mainRepo, branch, merged: false, removed: false, branchDeleted: false, conflict: false, mergeInProgress: false, mergeSite: '', conflictedFiles: [], needsCommit: false, dirtyCheckout: false }
     if (mainRepo === '') {
       outcome.error = 'cannot locate the source repository'
       repositories.push(outcome)
@@ -945,6 +884,9 @@ export async function finishTask(subprocess, options) {
     // the next step's business.
     const midMerge = await mergeInProgress(subprocess, worktreePath)
     if ((merge || !deleteBranch) && !force && !midMerge && await uncommittedCount(subprocess, worktreePath) > 0) {
+      // Flagged, not just described: this is the stop the panel answers with "hand the
+      // commits to the agent", and a tool caller has to reach the same answer.
+      outcome.needsCommit = true
       outcome.error = `uncommitted work is waiting in ${worktreePath}; commit it before the task can be finished`
       repositories.push(outcome)
       failed = true
@@ -1059,6 +1001,11 @@ export async function finishTask(subprocess, options) {
         // reconcile it.
         const dirtyCheckout = error?.code === 'E5004' || /would be overwritten by merge/i.test(String(error?.message ?? ''))
         outcome.conflict = !dirtyCheckout
+        // The other stop that is not this side's to write: the user's own checkout has
+        // work a merge would overwrite. Flagged so a caller can tell it from a conflict -
+        // there are no markers to reconcile here, and sending someone after them wastes
+        // the trip.
+        outcome.dirtyCheckout = dirtyCheckout
         await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
         outcome.error = error.message
         repositories.push(outcome)
@@ -1175,11 +1122,22 @@ export async function finishTask(subprocess, options) {
 
   const leftovers = await readdir(taskPath, { withFileTypes: true })
 
-  // The files this plugin wrote into the container - the JSON record, the note
-  // rendered from it, and the note older containers still carry - go once nothing
-  // this plugin opened is still open. The JSON describes a task space that is being
-  // taken down, and the Markdown is generated from it, so neither outlives the last
-  // worktree it accounts for.
+  // The plugin's own directory - the JSON record, the note rendered from it, and the deploy
+  // root the source root's scripts were copied into - goes once nothing this plugin opened is
+  // still open. It goes whole and in one step: the record describes a task space that is being
+  // taken down, the Markdown is generated from it, and the deploy root is a copied tree the
+  // source root still has, so none of it outlives the last worktree it accounts for.
+  //
+  // Walking away from it is what leaves it out of the strays below: it is this plugin's own
+  // bookkeeping rather than the user's writing, and filing a copy of the source root's scripts
+  // into their documents directory would file something they already have. It is also the one
+  // entry a finish must not leave standing by accident - a copied `deploy/` tree would hold the
+  // task space open over nothing of the user's at all.
+  //
+  // `strays: 'keep'` is the one choice that leaves it, and it is deliberate: that caller asked
+  // for the space exactly as it stands, and this directory is part of what stands there - so
+  // the container stays with it, exactly as the caller asked. The legacy breadcrumb is a file
+  // at the top level and goes on its own account.
   //
   // A repository that stopped keeps its worktree, and that worktree is what the
   // reader comes back to. Clearing the record while it is still there strands the
@@ -1197,8 +1155,9 @@ export async function finishTask(subprocess, options) {
     // and therefore the only thing a later finish could recognise them by.
     if (strandedByRemoval.has(entry.name) || await isLinkedWorktree(join(taskPath, entry.name))) { stillOpen = true; break }
   }
-  if (!stillOpen) {
-    for (const name of TASK_OWNED_FILES) await rm(join(taskPath, name), { force: true })
+  if (!stillOpen && strayCleanStray) {
+    await rm(pluginRootPath(taskPath), { recursive: true, force: true })
+    await rm(join(taskPath, BREADCRUMB), { force: true })
   }
   // Re-read either way, so the cleanup below reasons about what is actually left
   // rather than about files that may have just gone.
@@ -1217,13 +1176,12 @@ export async function finishTask(subprocess, options) {
     // deleting it as build output - would be this side's own decision to make about
     // work that is not its. It stays until the user removes it.
     if (entry.isDirectory() && strandedByRemoval.has(entry.name)) continue
-    // The plugin's own files are not leftovers of anything. The record is kept on
-    // purpose - a repository that stopped still needs it to be finished a second
-    // time - and `strayKind` files it as content, so without this it would be
-    // swept into the disposal below: filed into the documents directory or
-    // discarded, either of which ends the task the same way clearing it does.
-    // `planTask` skips them for the same reason and has always had to.
-    if (TASK_OWNED_FILES.includes(entry.name)) continue
+    // The plugin's own entries are not leftovers of anything - the record and the deploy
+    // root alike. The record is kept on purpose when a repository stopped (a second
+    // finish needs it), and the deploy root is a copied tree the source root still has,
+    // so neither is the user's writing to file away or to discard. `planTask` skips them
+    // for the same reason and has always had to.
+    if (TASK_OWNED_ENTRIES.includes(entry.name)) continue
     strays.push(entry.name)
     if (strayKind(entry.name, entry.isDirectory()) === 'content') content.add(entry.name)
     // Fence. A leftover is named, not vetted: it is whatever happens to sit in
@@ -1247,9 +1205,9 @@ export async function finishTask(subprocess, options) {
   }
 
   // The user's own content always leaves the container: filed into the documents
-  // directory when one was named, discarded outright when it was not but the
-  // caller said to discard. Build output and editor state are neither, and stay
-  // unless `cleanStray` asks for them.
+  // directory when one was named, discarded outright when the caller chose
+  // `discard`. Build output and editor state are neither, and stay unless the
+  // choice clears them - which `archive` and `discard` both do, and `keep` does not.
   const removedStrays = []
   const archivedStrays = []
   const keptByFailure = []
@@ -1306,8 +1264,9 @@ export async function finishTask(subprocess, options) {
           { name, destination: strayDestination, links, shown: LINK_NAMES_SHOWN },
         ))
         // What was filed comes out of the task space; what was not stays, links and the
-        // directories holding them. It is also in `keptByFailure`, so `cleanStray` will not
-        // delete it either: the entry was not filed, and removing it is the user's to do.
+        // directories holding them. It is also in `keptByFailure`, so the clearing pass
+        // will not delete it either: the entry was not filed, and removing it is the
+        // user's to do.
         await removeCopiedLeavingLinks(source)
         keptByFailure.push(name)
         archivedStrays.push(name)

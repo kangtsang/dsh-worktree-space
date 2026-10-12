@@ -63,21 +63,18 @@ export const ERROR_CODES = {
   E4010: 'delivery.js - a delivery policy value is not one of the allowed ones',
   E4011: 'index.js - a handoff access request named no session',
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
-  E4013: 'tool.js - the task records that this flow does not merge it',
   E4014: 'create.js - the requested deploy script is not a file inside the source root',
+  E4015: 'create.js - the task is set to deploy but nothing in the source root or its repositories can deploy it',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',
   E5002: 'archive.js - finishing did not complete for every repository',
   E5003: 'archive.js - one repository could not be finished and needs another attempt',
   E5004: 'archive.js - the source checkout has uncommitted work the merge would overwrite',
-  E5005: 'deploy.js - the delivery policy requires a deployment before a merge, and none was recorded',
   E5006: 'deploy.js - the last deployment smoke did not pass, so the merge is refused',
-  E5007: 'deploy.js - the delivery policy waits for a human acceptance ack, so the merge is refused',
   E5008: 'deploy.js - the deploy script is missing, or it failed while rebuilding the environment',
-  E5009: 'deploy.js - the delivery policy names a deploy target the manifest does not offer',
-  E5010: 'deploy.js - the deploy manifest exists but cannot be parsed, so no target can be trusted',
   E5011: 'archive.js - a worktree is held by something outside this process, so removing it would fail',
+  E5012: 'tool.js - a session is still working in the task space, so the finish is refused',
 
   // --- E6xxx scanning and discovery ---------------------------------------
   E6001: 'discover.js, add.js - a candidate directory is not a source repository',
@@ -108,16 +105,16 @@ export const UNKNOWN = 'E9001'
 export const WARNING_CODES = {
   'no-task-branch': 'archive.js - the record names no branch, so no branch was deleted',
   'delivery-gate-bypassed': 'deploy.js - the delivery gate was overruled and the finish carried on',
-  'human-ack-waived': 'deploy.js - the policy merges by itself, so the human acceptance it also asked for was not waited for',
   'branch-left-alone': 'archive.js - the worktree is not on the task branch, so no branch was deleted',
   'branch-not-deleted': 'archive.js - git did not delete the branch',
   'leftover-refused': 'archive.js - a leftover is a link, or outside the container, and is left alone',
   'leftover-holds-links': 'archive.js - a leftover holds links this machine will not recreate, so it was not filed',
   'leftover-copy-failed': 'archive.js - filing a leftover into the documents directory failed',
   'no-deployment-recorded': 'deploy.js - no deployment environment is recorded for this task space',
-  'deploy-destroy-failed': 'deploy.js - the destroy command the manifest names failed',
   'deploy-containers-left': 'deploy.js - containers of the environment could not be removed',
   'deploy-cleanup-failed': 'archive.js - tearing the deployment down while finishing failed',
+  'workspace-holds-links': 'create.js - a worktree holds links this machine will not recreate, so the finish will not be able to file them',
+  'workspace-e2e-points-elsewhere': 'create.js - a repository\'s own e2e configuration names the host stack rather than this task\'s instance',
 }
 
 /**

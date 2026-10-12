@@ -148,7 +148,7 @@ export function branchNameFor(task, prefix = DEFAULT_BRANCH_PREFIX) {
  *
  * A deployed task is one compose project — one network, one teardown — so it needs
  * an id unique to the task that every side spells the same way: the note prints it
- * for the session, the deploy script takes it as `DSH_ENV_ID`, and a cleanup that
+ * for the session, the deploy script takes it as `DEPLOY_ENV_ID`, and a cleanup that
  * runs after the fact matches containers by the `dsh.env-id` label carrying it.
  * Deriving it here, from the two names the task already has, is what keeps those
  * sides agreeing without a fourth name to ask for or to mistype.

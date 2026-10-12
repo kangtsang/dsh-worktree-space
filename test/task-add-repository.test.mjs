@@ -5,6 +5,17 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { addTaskRepositories } from "../src/host/task/add.js"
 import { readAudit } from "../src/host/task/audit-log.js"
+import { PLUGIN_ROOT } from "../src/host/task/shared.js"
+
+/**
+ * The record, from the task space directory: the plugin keeps it in its own directory.
+ * @param taskPath - the task space directory.
+ * @returns the record's absolute path.
+ */
+const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.json")
+
+/** The note rendered from the record, beside it. */
+const noteAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.md")
 
 /**
  * Adding a repository to a task that already exists.
@@ -110,8 +121,9 @@ async function taskFixture(names = ["gamma"]) {
     createdAt: "2026-10-01T04:00:00.000Z",
     repositories: [{ name: "alpha", sourcePath: join(sources, "alpha"), sourceBranch: "main", startCommit: "a1", branch: BRANCH }],
   }
-  await writeFile(join(taskPath, "worktree-space.json"), `${JSON.stringify(metadata, null, 2)}\n`, "utf8")
-  await writeFile(join(taskPath, "worktree-space.md"), `# Task: ${TASK}\n`, "utf8")
+  await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+  await writeFile(recordAt(taskPath), `${JSON.stringify(metadata, null, 2)}\n`, "utf8")
+  await writeFile(noteAt(taskPath), `# Task: ${TASK}\n`, "utf8")
 
   const repo = {}
   for (const name of names) {
@@ -125,8 +137,8 @@ async function taskFixture(names = ["gamma"]) {
     sources,
     repo,
     alpha: metadata.repositories[0].sourcePath,
-    metadataPath: join(taskPath, "worktree-space.json"),
-    readMetadata: async () => JSON.parse(await readFile(join(taskPath, "worktree-space.json"), "utf8")),
+    metadataPath: recordAt(taskPath),
+    readMetadata: async () => JSON.parse(await readFile(recordAt(taskPath), "utf8")),
     /** The arguments of every `worktree add` this mock saw. */
     adds: (calls) => calls.filter((call) => call.args[0] === "worktree" && call.args[1] === "add").map((call) => call.args),
     cleanup: () => rm(base, { recursive: true, force: true }),
@@ -212,7 +224,7 @@ describe("addTaskRepositories", () => {
       expect(after.repositories[0]).toEqual(before.repositories[0])
       expect(after.repositories[1]).toMatchObject({ name: "gamma", sourcePath: fixture.repo.gamma, branch: BRANCH, sourceBranch: "main" })
       // The note a session reads is rendered from that record, so it lists it too.
-      expect(await readFile(join(fixture.taskPath, "worktree-space.md"), "utf8")).toContain("gamma")
+      expect(await readFile(noteAt(fixture.taskPath), "utf8")).toContain("gamma")
     } finally {
       await fixture.cleanup()
     }
@@ -448,8 +460,8 @@ describe("addTaskRepositories", () => {
       // state - a record on disk naming a repository whose worktree is about to go.
       "worktree add": async ({ args }) => {
         await mkdir(args[2], { recursive: true })
-        await rm(join(fixture.taskPath, "worktree-space.md"), { force: true })
-        await mkdir(join(fixture.taskPath, "worktree-space.md"))
+        await rm(noteAt(fixture.taskPath), { force: true })
+        await mkdir(noteAt(fixture.taskPath))
         return ""
       },
       "worktree remove": async ({ args }) => {
@@ -467,7 +479,7 @@ describe("addTaskRepositories", () => {
 
       // Left behind, that record is the only thing naming 'gamma', so the next
       // request to add it is refused as a name this task already holds.
-      expect(existsSync(join(fixture.taskPath, "worktree-space.json"))).toBe(false)
+      expect(existsSync(recordAt(fixture.taskPath))).toBe(false)
       const retry = subprocessMock({
         "show-ref --verify --quiet refs/heads/task/login": { exitCode: 1 },
         "rev-parse --abbrev-ref HEAD": ({ cwd }) => (cwd.startsWith(fixture.taskPath) ? BRANCH : "main"),

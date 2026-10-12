@@ -4,11 +4,29 @@
  *
  * Everything here speaks the one handshake the deploy scripts and this plugin
  * share, and nothing else: the environment id (`deploymentEnvId` in the record,
- * `DSH_ENV_ID` for the scripts, the `dsh.env-id` label on the containers), and the
- * `.state.json` a deploy writes where its `deploy/` root sits. The scripts own that
- * file while the task runs - it is rewritten on every deploy - so this side reads
- * it, appends a human acceptance ack to it, and deletes it on teardown, but never
- * establishes it.
+ * `DEPLOY_ENV_ID` for the scripts, the `dsh.env-id` label on the containers), the
+ * state file's path (`DEPLOY_STATE_FILE` for the scripts, the deploy root's own
+ * `.state.json` for this side), and the `.state.json` a deploy writes there. The
+ * scripts own that file while the task runs - it is rewritten on every deploy - so
+ * this side reads it and deletes it on teardown, but never establishes it.
+ *
+ * The deploy root is a single script, called as `<entry> up|smoke <envId>`. A `destroy`
+ * subcommand is optional and this side never calls one: teardown finds the containers by
+ * their `dsh.env-id` label and takes them down itself, so an entry that implements only
+ * `up` and `smoke` is complete. The entry is `.worktree-space/deploy/deploy.sh` unless the
+ * task's record names another file under that deploy root - a create may, because two tasks
+ * in one project can hold different repositories and so need different deploy and smoke
+ * scripts. Both the entry and the state file live inside the plugin's own directory
+ * (`{@link PLUGIN_ROOT}/deploy/`), on the workspace side and in the task space alike: the
+ * workspace's deploy root is copied to the same relative place here, so the one relative
+ * path a record keeps resolves on either side. There used to be a `deploy.yaml` manifest
+ * that declared several
+ * targets and the command for each; it is gone, along with the `host` target it
+ * existed for. A manifest's only capability was running an arbitrary command,
+ * and a target the plugin cannot see - no container, no label, no log - is a
+ * deployment whose failures cannot be diagnosed from here. Docker is what is
+ * left, and docker needs no manifest: the plugin finds the containers by the
+ * environment label itself.
  *
  * Every docker call is best effort: a machine without docker in the host's PATH has
  * tasks that simply have no deployment to read or tear down, which is a fact to
@@ -17,10 +35,10 @@
 
 import { existsSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { coded, warned } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
-import { readTaskMetadata } from './shared.js'
+import { DEPLOY_ROOT, PLUGIN_ROOT, readTaskMetadata, taskDeployRootPath } from './shared.js'
 
 /** The state file a deploy root carries, per the handshake. */
 const STATE_NAME = '.state.json'
@@ -33,24 +51,44 @@ const DOCKER_MAX_BYTES = 512 * 1024
  *
  * Its own module rather than a sibling in `git.js`, for the same reason that file
  * gives: it is the one spawn point for git, and this is not git.
+ *
+ * A deadline, when one is given, is this side's own: the subprocess seam ships no
+ * timer, only the abort it reacts to and the tree-scoped stop behind it (its own
+ * words), so the clock is one `AbortController` fired here. "It ran out of time"
+ * is then read off that same signal rather than off `exitCode`, which cannot tell
+ * a stop this call asked for from one somebody else sent.
  * @param subprocess - the profile's subprocess service.
  * @param argv - the whole command line, program included.
- * @param options - `cwd` to run in, and `maxBytes` per stream.
- * @returns the exit code with the collected streams.
+ * @param options - `cwd` to run in, `maxBytes` per stream, `timeoutMs` for a
+ *   deadline (absent or non-positive: no deadline at all), and `env` for entries
+ *   the child has to see (merged onto the harness's scrubbed parent base).
+ * @returns the exit code with the collected streams, plus whether the deadline
+ *   stopped it.
  */
-async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES } = {}) {
-  const handle = subprocess.spawn({
-    argv,
-    cwd,
-    stdio: { stdin: 'ignore', stdout: { maxBytes }, stderr: { maxBytes } },
-    graceMs: 1000,
-  })
-  const outcome = await handle.done
-  return {
-    ok: outcome.exitCode === 0,
-    exitCode: outcome.exitCode,
-    stdout: handle.collected.stdout?.readFrom(0).text ?? '',
-    stderr: handle.collected.stderr?.readFrom(0).text ?? '',
+async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, timeoutMs, env } = {}) {
+  const deadlineMs = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : undefined
+  const controller = deadlineMs === undefined ? undefined : new AbortController()
+  const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), deadlineMs)
+  try {
+    const handle = subprocess.spawn({
+      argv,
+      cwd,
+      stdio: { stdin: 'ignore', stdout: { maxBytes }, stderr: { maxBytes } },
+      graceMs: 1000,
+      ...(env === undefined ? {} : { env }),
+      ...(controller === undefined ? {} : { signal: controller.signal }),
+    })
+    const outcome = await handle.done
+    const timedOut = controller !== undefined && controller.signal.aborted
+    return {
+      ok: !timedOut && outcome.exitCode === 0,
+      exitCode: outcome.exitCode,
+      timedOut,
+      stdout: handle.collected.stdout?.readFrom(0).text ?? '',
+      stderr: handle.collected.stderr?.readFrom(0).text ?? '',
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -89,24 +127,66 @@ async function requireRecorded(taskPath) {
 /**
  * Every `.state.json` a deploy could have left in or under this task space.
  *
- * Two shapes exist: a `deploy/` root beside the worktrees (the multi-repository
- * orchestration the bundled skill describes), and a repository that carries its own
- * deploy root (the single-repository shape). The task space's own root is searched
- * first - it speaks for the whole task - then each repository's, in directory order.
+ * The task space's own deploy root is the one this plugin names for every script it runs
+ * (`DEPLOY_STATE_FILE`), so it is searched first and it is where a script should write.
+ * The repository shape is still read: a single-repository space may carry its own deploy
+ * root instead, inside the repository's own worktree, which is that repository's file and
+ * not this plugin's.
+ *
+ * The plugin's own directory is skipped in the walk below: the state file it holds is
+ * already the first candidate, and reading it twice would let {@link preserveStates}
+ * rewrite it twice.
  * @param taskPath - the task space directory.
  * @returns the state files that exist, preferred first.
  */
 async function deliveryStateFiles(taskPath) {
   const files = []
   const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
-  const candidates = [join(taskPath, 'deploy', STATE_NAME)]
+  const candidates = [join(taskDeployRootPath(taskPath), STATE_NAME)]
   for (const entry of entries) {
-    if (entry.isDirectory()) candidates.push(join(taskPath, entry.name, 'deploy', STATE_NAME))
+    if (entry.isDirectory() && entry.name !== PLUGIN_ROOT) candidates.push(join(taskPath, entry.name, DEPLOY_ROOT, STATE_NAME))
   }
   for (const path of candidates) {
     if (existsSync(path)) files.push(path)
   }
   return files
+}
+
+/**
+ * The one path this task's deploy scripts are told to write their state to.
+ *
+ * Fixed, and independent of where the entry script sits: the deploy root is the task's
+ * orchestration root, so its state lives at its top. That is the whole point - a script in a
+ * subdirectory writes the same file as one at the top, without computing a relative path
+ * and without knowing the layout. The path is handed over as `DEPLOY_STATE_FILE`, and it is
+ * also the first place {@link deliveryStateFiles} looks.
+ * @param taskPath - the task space directory.
+ * @returns the absolute path of the state file.
+ */
+function stateFilePath(taskPath) {
+  return join(taskDeployRootPath(taskPath), STATE_NAME)
+}
+
+/**
+ * The environment a deploy script is run with.
+ *
+ * Two facts, both of which the script would otherwise have to derive: which environment it
+ * is (so its containers, images and URL stay apart from every other task's) and where to
+ * write the state the plugin reads back. `DEPLOY_STATE_FILE` is what makes the state file's
+ * location a plugin decision rather than a script convention.
+ *
+ * The name is this plugin's own rather than `DSH_`-prefixed on purpose: `DSH_` is the
+ * harness's reserved namespace for facts IT manages, and a plugin putting its own variable
+ * there claims a name that is not its to claim.
+ * @param taskPath - the task space directory.
+ * @param envId - the environment id for this task.
+ * @returns the entries to merge onto the child's environment.
+ */
+function deployEnvironmentFor(taskPath, envId) {
+  return {
+    ...(envId === '' ? {} : { DEPLOY_ENV_ID: envId }),
+    DEPLOY_STATE_FILE: stateFilePath(taskPath),
+  }
 }
 
 /**
@@ -154,7 +234,13 @@ async function containerIds(subprocess, envId) {
  *
  * Read live on every call: a dynamic port changes with every deploy, so the panel
  * asks rather than remembers, and the state file only answers for what a deploy
- * wrote down (the url it handed out, the smoke it ran, the ack a user gave).
+ * wrote down (the url it handed out, the smoke it ran).
+ *
+ * `derive` is accepted and ignored: it used to ask a manifest's own `status`
+ * command when no state file existed, and the manifest is gone. It stays in the
+ * signature because the panel's endpoint still passes it, and a parameter that
+ * silently does nothing is better than one that fails - but the state file is now
+ * the only place a URL can come from, and `urlSource` says so.
  * @param subprocess - the profile's subprocess service.
  * @param taskPath - the task space directory.
  * @returns the status the panel renders.
@@ -164,20 +250,13 @@ export async function deploymentStatus(subprocess, taskPath) {
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const policy = deliveryPolicyOf(recorded)
   const found = await readDeliveryState(taskPath)
-  const manifest = await readDeployManifest(taskPath)
-  const targets = manifest === undefined ? ['docker'] : manifest.broken ? [] : Object.keys(manifest.targets)
+  const stateUrl = found?.state?.url ?? null
   return {
     envId,
     target: policy.deploy.target,
-    verification: policy.verification,
-    // The targets the manifest offers, and whether the policy's own target
-    // allows unattended deploys - the D8 exemption a host target states in its
-    // manifest entry. A space without a manifest offers docker the L0 way.
-    targets,
-    autoAllowed: manifest !== undefined && !manifest.broken && manifest.targets[policy.deploy.target]?.autoAllowed === true,
-    url: found?.state?.url ?? null,
+    url: stateUrl,
+    urlSource: stateUrl !== null ? 'state' : 'none',
     lastSmoke: found?.state?.lastSmoke ?? null,
-    humanAck: found?.state?.humanAck ?? null,
     destroyedAt: found?.state?.destroyedAt ?? null,
     stateFound: found !== undefined,
     statePath: found?.path ?? null,
@@ -186,49 +265,63 @@ export async function deploymentStatus(subprocess, taskPath) {
 }
 
 /**
- * Record the user's acceptance on the deployment state.
+ * The two facts a caller wants from a task's delivery state without a second round
+ * trip: the acceptance URL and the last smoke.
  *
- * The ack lives in the state file, beside the smoke it confirms, because both
- * belong to one deployment: a new deploy rewrites the file and the ack is gone,
- * which is the rule - a change shipped again is a change to accept again. The
- * scripts preserve the ack across a re-run smoke for the same reason.
+ * Read through the same reader the panel uses ({@link readDeliveryState}), so the
+ * tool and the card can never disagree about what a deploy recorded. Nothing is
+ * derived here: the fallback that asks a deploy root's own `status` command is the
+ * panel's explicit press, and running it from a `list` would make a read of many
+ * tasks run many scripts.
+ *
+ * Every absence is answered as absence rather than as an error: a task that was
+ * never deployed has no state file, and that is a fact about the task, not a
+ * failure of the caller's request.
  * @param taskPath - the task space directory.
- * @returns where the ack was written and what it says.
+ * @returns the URL and smoke as recorded, both null when nothing was.
  */
-export async function ackAcceptance(taskPath) {
+export async function deliveryStateSummary(taskPath) {
   const found = await readDeliveryState(taskPath)
-  if (found === undefined) {
-    throw coded('E5005', 'there is no deployment state to accept: deploy the task space and let the smoke pass first')
+  const smoke = found?.state?.lastSmoke
+  return {
+    url: typeof found?.state?.url === 'string' && found.state.url !== '' ? found.state.url : null,
+    lastSmoke: smoke === null || smoke === undefined || typeof smoke !== 'object'
+      ? null
+      : {
+        result: typeof smoke.result === 'string' ? smoke.result : 'unknown',
+        ...(typeof smoke.at === 'string' && smoke.at !== '' ? { at: smoke.at } : {}),
+      },
+    statePath: found?.path ?? null,
   }
-  const next = { ...found.state, humanAck: { at: new Date().toISOString(), by: 'user' } }
-  // Single line, like every other writer of this file: the deploy script reads
-  // these fields back per line, so a pretty-printed ack would break that read.
-  await writeFile(found.path, `${JSON.stringify(next)}\n`, 'utf8')
-  return { statePath: found.path, humanAck: next.humanAck }
 }
 
 /**
  * The gate a merge has to pass when the policy ties it to a deployment.
  *
- * Three refusals, in the order they bite: the policy expects a deployment and none
- * was ever recorded; one was, but its smoke is not green; the smoke is green but
- * the policy waits for a human ack that has not been given. A policy with no
- * deployment target has no gate at all - it is how a task nobody configured stays
- * exactly as finishable as it was before delivery policies existed.
+ * One refusal: the deployment records no passing smoke. That covers both shapes of "no
+ * green smoke" - the state file was never written, or it was and its smoke is missing or
+ * red - because the action they ask for is the same one either way: deploy, run the smoke,
+ * and let that script write the result down.
+ *
+ * They used to be two codes (E5005 for no state at all, E5006 for a smoke that did not
+ * pass). The split read as two different problems and was not: a task whose script never
+ * wrote the file and a task whose smoke failed are both "the environment has not been shown
+ * to work", and the person reading it does the same next thing. The missing-file message
+ * also carried the whole delivery-policy explanation, which no longer described anything -
+ * there is no policy field left for it to name. So the two became one.
  *
  * `bypass` is the user's own overrule, and it exists because the user's
- * instruction outranks the policy: the panel asks ("the smoke has not passed / the
- * human ack is missing - finish anyway?") and, on their yes, finishes with this
- * flag set. What arrives through the model-facing tool never carries it - the gate
- * the model meets is the hard one, and its way past is deploying, smoking, and
- * being accepted, never retrying.
+ * instruction outranks the policy: the panel asks ("the smoke has not passed -
+ * finish anyway?") and, on their yes, finishes with this flag set. What arrives
+ * through the model-facing tool never carries it - the gate the model meets is the
+ * hard one, and its way past is deploying and smoking, never retrying.
  * @param recorded - the task's own record.
  * @param taskPath - the task space directory, where the state is looked up.
  * @param options - `merge` is the request under judgement; `bypass` overrules on
  *   the user's explicit say-so.
  * @returns a warning sentence when the gate was bypassed, or undefined when it
  *   either passed cleanly or does not apply.
- * @throws Error carrying E5005, E5006 or E5007 when the merge may not proceed.
+ * @throws Error carrying E5006 when the merge may not proceed.
  */
 export async function assertDeliveryGate(recorded, taskPath, { merge = false, bypass = false } = {}) {
   if (merge !== true) return undefined
@@ -236,56 +329,57 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
   if (policy.deploy.target === 'none') return undefined
   const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const found = await readDeliveryState(taskPath)
-  // What is missing is named by key rather than by phrase, so a screen can say it in the
-  // reader's language: the phrase below is for this sentence and the log, and nothing
-  // else can rebuild it from a translation.
-  const missing = []
-  if (found === undefined) {
-    if (bypass) {
-      return warned(
-        'delivery-gate-bypassed',
-        `the user acknowledged finishing without any recorded ${policy.deploy.target} deployment`,
-        { target: policy.deploy.target },
-      )
-    }
-    throw coded(
-      'E5005',
-      `the delivery policy requires a ${policy.deploy.target} deployment before merging, and no deployment state was recorded`
-        + `${envId === '' ? '' : ` (environment ${envId})`}. Deploy the task space and run its smoke first.`,
-      { target: policy.deploy.target, envId },
-    )
-  }
-  const smoke = found.state?.lastSmoke
-  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('smoke')
-  // A merge nobody has to confirm cannot be waiting for a confirmation. `auto` is the task's
-  // own record saying the merge happens by itself, and create time refuses it together with a
-  // verification that waits for a person - so this only bites a record that predates that
-  // rule or was edited by hand, and then the merge is taken at its word, with a warning
-  // rather than a silent drop.
-  const waitsForAPerson = policy.verification === 'agent-then-human' || policy.verification === 'human'
-  const ackWaived = waitsForAPerson && policy.merge.mode === 'auto' && found.state?.humanAck?.at === undefined
-  if (waitsForAPerson && !ackWaived && found.state?.humanAck?.at === undefined) {
-    missing.push('human-ack')
-  }
-  if (missing.length === 0) {
-    return ackWaived && !bypass
-      ? warned('human-ack-waived', 'the task merges by itself, so its human acceptance was not waited for', {})
-      : undefined
-  }
-  const named = missing.map((key) => MISSING_LABELS[key]).join(' and ')
+  // No state file is the same answer as a state file with no green smoke: the deployment
+  // has not been shown to work. `missing` still says which of the two it is, so a screen
+  // can name the step rather than the code.
+  const smoke = found?.state?.lastSmoke
+  const passing = smoke !== null && typeof smoke === 'object' && smoke.result === 'pass'
+  if (passing) return undefined
+  const missing = found === undefined ? ['deployment', 'smoke'] : ['smoke']
   if (bypass) {
-    return warned('delivery-gate-bypassed', `the user acknowledged finishing without ${named}`, { missing })
+    return warned('delivery-gate-bypassed', 'the user acknowledged finishing without a passing smoke', { missing })
   }
-  if (missing.length === 1 && missing[0] === 'smoke') {
-    throw coded('E5006', 'the last deployment smoke did not pass, or never ran; run it again and only then merge', { missing })
-  }
-  throw coded('E5007', `the delivery policy waits for ${named} before merging; confirm the acceptance in the Worktree Space panel, or finish anyway from there`, { missing })
+  throw coded(
+    'E5006',
+    'the deployment records no passing smoke, so the merge is refused: `<deploy root>/.state.json` is either absent or '
+      + `carries no \`lastSmoke\` with \`result: "pass"\`${envId === '' ? '' : ` (environment ${envId})`}. `
+      + 'Deploy the task space and run its smoke, having that script merge `lastSmoke: { result, at }` into the state file, '
+      + 'then merge.',
+    { target: policy.deploy.target, envId, missing },
+  )
 }
 
-/** How this module's own sentences name what a gate is waiting for. */
-const MISSING_LABELS = {
-  smoke: 'a passing smoke',
-  'human-ack': 'the human acceptance ack',
+/**
+ * What a finish would still be waiting for, asked without refusing anything.
+ *
+ * The gate above answers the same question, but only when a merge is actually
+ * attempted - which is the last minute of a task's life, and the worst moment to
+ * learn that a state file was never written. This is that same judgement made
+ * available earlier: a deploy and a smoke report it as they finish, so the reader
+ * sees "still waiting for a passing smoke" while the smoke can still be run,
+ * rather than as a refusal they have to reverse-engineer.
+ *
+ * Deliberately NOT the gate itself: nothing here throws, and `merge` is not
+ * required, because this is a report about the policy rather than a decision about
+ * a request. The keys are the same ones the gate names, so a screen can say both
+ * in the same words.
+ * @param recorded - the task's own record.
+ * @param taskPath - the task space directory, where the state is looked up.
+ * @returns the missing keys, and whether the policy gates a merge at all.
+ */
+export async function deliveryGatePreview(recorded, taskPath) {
+  const policy = deliveryPolicyOf(recorded)
+  // A policy that deploys nothing has no gate to preview, and saying otherwise would
+  // invent a requirement the finish will not enforce.
+  if (policy.deploy.target === 'none') return { applies: false, missing: [], target: 'none' }
+  const found = await readDeliveryState(taskPath)
+  // The same two keys the gate reports for the same two shapes: no state file means the
+  // deployment is missing and so is its smoke; a state file means only the smoke is.
+  if (found === undefined) return { applies: true, missing: ['deployment', 'smoke'], target: policy.deploy.target }
+  const missing = []
+  const smoke = found.state?.lastSmoke
+  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('smoke')
+  return { applies: true, missing, target: policy.deploy.target }
 }
 
 /**
@@ -325,18 +419,14 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
   if (id === '') {
     return { removed: false, containers: 0, warning: warned('no-deployment-recorded', 'no deployment environment is recorded for this task space, so there is nothing named to remove') }
   }
-  // A non-docker target has no containers to find by label: its teardown is
-  // whatever the manifest's destroy command says, run with the same env id.
-  const target = (recordedForTarget !== undefined ? recordedForTarget : await readTaskMetadata(taskPath).catch(() => undefined))
-  const policyTarget = typeof target?.delivery === 'object' && target.delivery !== null
-    ? String(target.delivery?.deploy?.target ?? 'docker')
-    : 'docker'
-  if (policyTarget !== 'docker') {
-    const manifest = await readDeployManifest(taskPath)
-    const entry = manifestEntryFor(manifest, policyTarget, 'destroy')
-    const out = await runManifestCommand(subprocess, entry.destroy, manifest.dir, id)
-    return { removed: out.ok, containers: 0, ...(out.ok ? {} : { warning: warned('deploy-destroy-failed', outputTail(out.stderr, out.stdout), { output: outputTail(out.stderr, out.stdout) }) }) }
-  }
+  // Everything left is docker: containers are found by the environment label, and
+  // the compose project they belong to is asked of the containers themselves. There
+  // used to be a branch here for a manifest target's own `destroy` command; with
+  // `host` gone there is no such target, and `none` never had containers of its own
+  // to tear down. A `none` task can still carry containers from a deploy made
+  // outside this flow, and teardown must never be the thing that gets refused:
+  // containers nobody can take down from here are a worse end state than the
+  // policy's own surprise. It falls through to the label path below, which finds them.
   const ids = await containerIds(subprocess, id)
   if (ids.length === 0) {
     // Nothing standing: nothing was destroyed, so no acceptance fact loses its
@@ -411,132 +501,42 @@ function outputTail(...streams) {
 }
 
 /**
- * The deploy root that can rebuild the environment: a `deploy/deploy.sh` in the
- * task space's own orchestration root first, then one inside a repository, in
- * directory order - the same two shapes the state files are found by.
+ * The deploy root that can rebuild the environment: the entry the task's own record names
+ * under `.worktree-space/deploy/`, else a `deploy.sh` at the top of the task space's own
+ * orchestration root, then one inside a repository, in directory order - the same two
+ * shapes the state files are found by.
+ *
+ * A named entry is asked for first and alone: the record is the task's own answer to "which
+ * script runs here", so a missing one is reported as missing rather than quietly replaced by
+ * whatever `deploy.sh` happens to sit beside it. The entry may sit anywhere under the deploy
+ * root, including a subdirectory - nothing about the state file depends on that, because the
+ * plugin names its path.
  * @param taskPath - the task space directory.
+ * @param recorded - the task's own record, whose `deployScript` names the entry when a
+ *   create chose one.
  * @returns the script and its directory, or undefined when the space deploys nothing.
  */
-async function findDeployScript(taskPath) {
+async function findDeployScript(taskPath, recorded) {
+  const named = typeof recorded?.deployScript === 'string' ? recorded.deployScript.trim() : ''
+  if (named !== '') {
+    // The record's value is relative to the task space's own root - the same relative path
+    // the workspace uses, because the deploy root is copied to the same place on both sides
+    // (`.worktree-space/deploy/`). So it is joined here and nowhere else, and the workspace's
+    // spelling and this one cannot drift. The script's own directory is where it runs from,
+    // so its siblings are reachable.
+    const script = join(taskPath, ...named.split('/').filter((part) => part !== ''))
+    return existsSync(script) ? { script, dir: dirname(script) } : undefined
+  }
   const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
-  const candidates = [join(taskPath, 'deploy')]
+  const candidates = [taskDeployRootPath(taskPath)]
   for (const entry of entries) {
-    if (entry.isDirectory()) candidates.push(join(taskPath, entry.name, 'deploy'))
+    if (entry.isDirectory() && entry.name !== PLUGIN_ROOT) candidates.push(join(taskPath, entry.name, DEPLOY_ROOT))
   }
   for (const dir of candidates) {
     const script = join(dir, 'deploy.sh')
     if (existsSync(script)) return { script, dir }
   }
   return undefined
-}
-
-/** The manifest file a deploy root may carry, per the D12 decision. */
-const MANIFEST_NAME = 'deploy.yaml'
-
-/**
- * Parse the manifest's documented structure and nothing beyond it.
- *
- * The contract is two levels: `targets:` at the top, one target name per line
- * under it, and per target the scalar fields the handshake knows - `up`, `smoke`,
- * `status`, `destroy`, `autoAllowed`. Anchors, block scalars, nested maps beyond
- * that shape are outside the contract and are answered as a broken manifest
- * rather than half-interpreted: a command quietly dropped is a deploy that never
- * runs, which is worse than one that refuses to start.
- * @param text - the manifest file's contents.
- * @returns the targets map, or undefined when the text is outside the contract.
- */
-export function parseManifestTargets(text) {
-  if (typeof text !== 'string' || text.trim() === '') return undefined
-  const targets = Object.create(null)
-  let current = null
-  let sawTargets = false
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/#.*$/, '').trimEnd()
-    if (line.trim() === '') continue
-    const indent = line.length - line.trimStart().length
-    const body = line.trim()
-    const field = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s+(.*))?$/.exec(body)
-    if (field === null) return undefined
-    const [, key, inline] = field
-    if (indent === 0) {
-      if (key === 'targets' && inline === undefined) { sawTargets = true; current = null; continue }
-      return undefined
-    }
-    if (!sawTargets) return undefined
-    if (inline === undefined || inline === '') {
-      // A target name opens a fresh entry, whichever one was being filled before.
-      current = targets[key] = {}
-      continue
-    }
-    if (current === null) return undefined
-    const scalar = inline.replace(/^['"]|['"]$/g, '')
-    current[key] = scalar === 'true' ? true : scalar === 'false' ? false : scalar
-  }
-  return sawTargets && Object.keys(targets).length > 0 ? targets : undefined
-}
-
-/**
- * The deploy manifest a task space declares, preferred root first - the same
- * two shapes the state files are found by.
- * @param taskPath - the task space directory.
- * @returns the manifest with its directory and targets, undefined when none exists,
- *   or a broken-marker when one exists but cannot be trusted.
- */
-export async function readDeployManifest(taskPath) {
-  const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
-  const candidates = [join(taskPath, 'deploy')]
-  for (const entry of entries) {
-    if (entry.isDirectory()) candidates.push(join(taskPath, entry.name, 'deploy'))
-  }
-  for (const dir of candidates) {
-    const file = join(dir, MANIFEST_NAME)
-    if (!existsSync(file)) continue
-    const text = await readFile(file, 'utf8').catch(() => undefined)
-    if (text === undefined) return { broken: true, dir, targets: undefined }
-    const targets = parseManifestTargets(text)
-    if (targets === undefined) return { broken: true, dir, targets: undefined }
-    return { broken: false, dir, targets }
-  }
-  return undefined
-}
-
-/**
- * Resolve the manifest entry a policy target deploys through.
- *
- * No manifest at all means the space predates manifests and deploys docker the
- * L0 way - answered as `null`, which callers translate into the deploy-script
- * path. A manifest that exists but lacks the policy's target is the refusal the
- * policy promised: a target it does not offer is never silently swapped for
- * another one.
- * @param manifest - what {@link readDeployManifest} found.
- * @param target - the delivery policy's deploy target.
- * @param field - which command is being asked for (`up`, `smoke`, `destroy`).
- * @returns the target's entry, `null` for the no-manifest docker default.
- * @throws Error carrying E5009 or E5010 when the target is not offered or the
- *   manifest cannot be trusted.
- */
-function manifestEntryFor(manifest, target, field) {
-  if (target === 'none') {
-    throw coded('E5009', 'the delivery policy deploys nothing (target none), so there is no manifest entry to serve; this action should not have been reachable')
-  }
-  if (manifest === undefined) return target === 'docker' ? null : undefined
-  if (manifest.broken) throw coded('E5010', `the deploy manifest exists but cannot be parsed, so no target can be trusted; fix or remove ${MANIFEST_NAME}`)
-  const entry = manifest.targets[target]
-  if (entry === undefined || entry === null || typeof entry !== 'object') {
-    throw coded('E5009', `the manifest offers no '${target}' target (its targets: ${Object.keys(manifest.targets).join(', ') || 'none'}); the delivery policy cannot be served by swapping in another`)
-  }
-  if (field !== undefined && typeof entry[field] !== 'string' || field !== undefined && entry[field] === '') {
-    throw coded('E5009', `the manifest's '${target}' target names no '${field}' command`)
-  }
-  return entry
-}
-
-/** Run one manifest command, with the environment id the handshake passes by variable. */
-async function runManifestCommand(subprocess, command, dir, envId) {
-  return runProcess(subprocess, ['bash', '-c', `DSH_ENV_ID='${envId}' ${command}`], {
-    cwd: dir,
-    maxBytes: 2 * 1024 * 1024,
-  })
 }
 
 /**
@@ -556,31 +556,30 @@ async function runManifestCommand(subprocess, command, dir, envId) {
 export async function smokeEnvironment(subprocess, taskPath) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const policy = deliveryPolicyOf(recorded)
-  const manifest = await readDeployManifest(taskPath)
-  const entry = manifestEntryFor(manifest, policy.deploy.target, 'smoke')
+  const found = await findDeployScript(taskPath, recorded)
+  if (found === undefined) {
+    throw coded('E5008', `no deploy script exists in this task space, so there is nothing to smoke: ${taskPath}`)
+  }
   let out
-  if (entry === null) {
-    // No manifest: docker deploys the L0 way, through the script's own subcommand.
-    const found = await findDeployScript(taskPath)
-    if (found === undefined) {
-      throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to smoke: ${taskPath}`)
-    }
-    try {
-      out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
-        cwd: found.dir,
-        maxBytes: 2 * 1024 * 1024,
-      })
-    } catch (error) {
-      throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
-    }
-  } else {
-    out = await runManifestCommand(subprocess, entry.smoke, manifest.dir, envId)
+  try {
+    out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
+      cwd: found.dir,
+      maxBytes: 2 * 1024 * 1024,
+      // Where the script must merge `lastSmoke`. Handed over rather than left to a
+      // convention, so a script in a subdirectory writes the same file as one at the top.
+      env: deployEnvironmentFor(taskPath, envId),
+    })
+  } catch (error) {
+    throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
   }
   return {
     output: outputTail(out.stderr, out.stdout),
     exitCode: out.exitCode,
     status: await deploymentStatus(subprocess, taskPath),
+    // The smoke is what the gate waits for, so this is the moment its answer is
+    // most useful: a red one says so here, while the user is still on the card,
+    // rather than as an E5006 refusal at the finish.
+    gate: await deliveryGatePreview(recorded, taskPath),
   }
 }
 
@@ -600,35 +599,31 @@ export async function smokeEnvironment(subprocess, taskPath) {
 export async function deployEnvironment(subprocess, taskPath) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const policy = deliveryPolicyOf(recorded)
-  const manifest = await readDeployManifest(taskPath)
-  const entry = manifestEntryFor(manifest, policy.deploy.target, 'up')
+  const found = await findDeployScript(taskPath, recorded)
+  if (found === undefined) {
+    throw coded('E5008', `no deploy script exists in this task space, so there is nothing to deploy: ${taskPath}`)
+  }
   let out
-  if (entry === null) {
-    // No manifest: docker deploys the L0 way, through the script's own subcommand.
-    const found = await findDeployScript(taskPath)
-    if (found === undefined) {
-      throw coded('E5008', `no deploy/deploy.sh exists in this task space, so there is nothing to deploy: ${taskPath}`)
-    }
-    try {
-      out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
-        cwd: found.dir,
-        maxBytes: 2 * 1024 * 1024,
-      })
-    } catch (error) {
-      throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
-    }
-    if (!out.ok) {
-      throw coded('E5008', `the deploy script failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
-    }
-  } else {
-    out = await runManifestCommand(subprocess, entry.up, manifest.dir, envId)
-    if (!out.ok) {
-      throw coded('E5008', `the manifest's up command failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
-    }
+  try {
+    out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
+      cwd: found.dir,
+      maxBytes: 2 * 1024 * 1024,
+      // Where the script must write `url`. Handed over rather than left to a convention, so
+      // a script in a subdirectory writes the same file as one at the top.
+      env: deployEnvironmentFor(taskPath, envId),
+    })
+  } catch (error) {
+    throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
+  }
+  if (!out.ok) {
+    throw coded('E5008', `the deploy script failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
   }
   return {
     output: outputTail(out.stdout),
     status: await deploymentStatus(subprocess, taskPath),
+    // What a finish would still be waiting for, read now rather than discovered as
+    // an E5006 refusal at the very end. The deploy has just run, so this is
+    // the first moment the question can be answered at all.
+    gate: await deliveryGatePreview(recorded, taskPath),
   }
 }

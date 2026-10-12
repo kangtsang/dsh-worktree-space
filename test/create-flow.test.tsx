@@ -75,17 +75,47 @@ describe("native task create flow", () => {
     next.mount()
     await ready()
 
-    // The name's explanation sits with the name, not under the input.
-    for (const [label, note] of [[t("taskName"), t("taskNameHint")], [t("containerLocation"), t("containerHint")]] as const) {
+    // Every field carries a short explanation on its own name's line, right-aligned against
+    // it, and the control below starts the block. The rule is the same for all of them, so
+    // the same field never lays out two ways depending on how long its wording happens to
+    // be - the long version, where there is one, goes behind the `?` beside the name.
+    for (const [label, note] of [
+      [t("taskName"), t("taskNameHint")],
+      [t("branchPrefix"), format(t("branchPrefixHint"), { prefix: "task/" })],
+      [t("containerLocation"), t("containerLocationHint")],
+    ] as const) {
       const heading = screen.getByText(label).closest(".dws-field-row")
       expect(heading).not.toBeNull()
-      expect(heading?.querySelector(".dws-field-note")?.textContent).toBe(note)
+      expect(heading?.querySelector("label.dws-field-label > .dws-field-note")?.textContent).toBe(note)
       // The control the explanation is about is in the same row, under the label.
       expect(heading?.querySelector("input.dws-input")).not.toBeNull()
       // The label line names the field and then explains it; its first span is the name,
       // so the control's accessible name comes from that and not from the explanation.
       expect(heading?.querySelector("label.dws-field-label > span:first-child")?.textContent).toBe(label)
     }
+
+    // The container root's full sentence is too long for that slot, so it is behind the `?`
+    // beside the name - while the short one stays on the line. Both, not either.
+    const containerRow = screen.getByText(t("containerLocation")).closest(".dws-field-row")
+    expect(containerRow?.querySelector(".dws-field-hint")).not.toBeNull()
+    expect(containerRow?.querySelector("label.dws-field-label > .dws-field-note")?.textContent).toBe(t("containerLocationHint"))
+
+    // The delivery tick carries no separate field name - the tick's label IS the name - so
+    // its explanation shares the tick's own line, pushed right, the same way every named
+    // field's note sits beside its name. It is NOT under the tick, where it read as a
+    // caption for the checkbox rather than as the field's own note. Ticked or not, it is
+    // there: someone deciding whether to tick it is exactly who needs it.
+    const deployBox0 = screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") })
+    const deployRow = deployBox0.closest(".dws-field-row")
+    expect(deployRow?.querySelector(".dws-field-label")).toBeNull()
+    const deployLine = deployRow?.querySelector(".dws-deploy-line")
+    expect(deployLine).not.toBeNull()
+    // The note is a sibling of the tick's label, on that one line…
+    expect(deployLine?.querySelector(":scope > label.dws-deploy-option")).not.toBeNull()
+    const deployNote = deployLine?.querySelector(":scope > .dws-field-note")
+    expect(deployNote?.textContent).toBe(t("deliveryDeployCheckboxHint"))
+    // …and nothing repeats it below.
+    expect([...(deployRow?.querySelectorAll("p.dws-field-note") ?? [])]).toHaveLength(0)
 
     // The group is named by the field alone; its count is a live region beside the bulk
     // actions, because a count inside the label would be re-announced on every click.
@@ -141,61 +171,54 @@ describe("native task create flow", () => {
     await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ repos: ["/repo/alpha", "/repo/beta"] })))
   })
 
-  it("sends the delivery policy the dialog shows, at its defaults until one is changed", async () => {
+  it("offers the one delivery decision, and sends it flat at its default", async () => {
     const next = setup()
     next.mount()
     const user = userEvent.setup()
     await ready()
 
-    // Four of the eight are the flow's own decisions; the other four appear only once "merge
-    // by itself" is picked, and the line under the grid says where they went.
-    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
-    expect(screen.queryByText(t("deliveryStrays"))).toBeNull()
+    // A tick, not a dropdown: there are only two answers and one of them is "no", so the
+    // question reads as one the user either opts into or does not. No other delivery
+    // control stands here - the seven that used to were defaults recorded for decisions a
+    // finish takes. What it does not show, it does not send.
+    expect(document.querySelectorAll("select.dws-select").length).toBe(0)
+    const deployBox = screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }) as HTMLInputElement
+    expect(deployBox.checked).toBe(false)
+    // The tick is NOT one of the repository cards. It wore `dws-check-option` at first,
+    // which is the class the selection count and the bulk actions select on - so the
+    // count read one too many and "select all" would have swept the deployment tick up
+    // with the repositories. Asserted through the same selector those use.
+    expect(offered()).toHaveLength(suggestion.repositories.length)
+    expect(offered()).not.toContain(deployBox)
 
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
-      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
-      // The untouched defaults, as the policy record's own shape: everything a finish decides at
-      // its own moment is absent - `merge.target`, `deleteBranch`, `conflicts` and `strays` -
-      // because the finish that presses them is the user's, not this flow's.
-      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
-        deploy: { target: "none", mode: "on-request" },
-        verification: "agent-then-human",
-        merge: { mode: "ask" },
-      })
+      const payload = calls[calls.length - 1]?.[0] as { deployTarget?: string; delivery?: string }
+      // Sent flat rather than as a policy blob, and sent even at the default, so what the
+      // user chose is what the Host records.
+      expect(payload.deployTarget).toBe("none")
+      expect(payload.delivery).toBeUndefined()
     })
   })
 
-  it("shows the four finish-decided choices once the merge is the flow's own", async () => {
+  it("sends the deployment target the dialog shows once it is changed", async () => {
     const next = setup()
     next.mount()
     const user = userEvent.setup()
     await ready()
 
-    expect(document.querySelectorAll("select.dws-select").length).toBe(4)
-    // "Merge by itself" is what makes a finish the flow's own, and that is what those four
-    // decisions belong to - so they are on screen from that moment on.
-    await user.selectOptions(screen.getByLabelText(t("deliveryMergeMode")), "auto")
-    await user.selectOptions(screen.getByLabelText(t("deliveryVerification")), "agent")
-    expect(document.querySelectorAll("select.dws-select").length).toBe(8)
-    expect(screen.getByText(t("deliveryStrays"))).toBeTruthy()
-
+    // The one choice this dialog records, so it travels alone: no merge mode, no
+    // verification, no conflict or stray policy alongside it any more.
+    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
-      const payload = calls[calls.length - 1]?.[0] as { delivery?: string }
-      // Settled by this flow, so they are written down: the branch, the deletion, the conflict
-      // mode and the leftovers all travel with the record now.
-      expect(JSON.parse(payload.delivery ?? "{}")).toEqual({
-        deploy: { target: "none", mode: "on-request" },
-        verification: "agent",
-        merge: { mode: "auto", deleteBranch: false },
-        conflicts: "ask",
-        strays: "archive",
-      })
+      const payload = calls[calls.length - 1]?.[0] as { deployTarget?: string; delivery?: string }
+      expect(payload.deployTarget).toBe("docker")
+      expect(payload.delivery).toBeUndefined()
     })
   })
 
@@ -208,14 +231,14 @@ describe("native task create flow", () => {
     // The field belongs to the deployment decision: naming a script for a task that
     // deploys nowhere would say nothing, so it appears only once a target is chosen.
     expect(screen.queryByRole("textbox", { name: t("deployScript") })).toBeNull()
-    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
     const script = screen.getByRole("textbox", { name: t("deployScript") })
     expect(script).toHaveProperty("placeholder", t("deployScriptPlaceholder"))
-    await user.type(script, "deploy/notify.sh")
+    await user.type(script, ".worktree-space/deploy/notify.sh")
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
 
-    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ deployScript: "deploy/notify.sh" })))
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ deployScript: ".worktree-space/deploy/notify.sh" })))
   })
 
   it("leaves deployScript out of the request when the field is empty", async () => {
@@ -224,7 +247,7 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
-    await user.selectOptions(screen.getByLabelText(t("deliveryDeployTarget")), "docker")
+    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
     expect(screen.getByRole("textbox", { name: t("deployScript") })).toHaveProperty("value", "")
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
@@ -259,9 +282,9 @@ describe("native task create flow", () => {
     // the source root, and what identifies them is where they are. The Host cannot
     // rebuild a repository from a directory name when discovery reached it through
     // a level in between.
-    // `delivery` rides along on every create; what is inside it is asserted field by field
-    // in the test above, so here it only has to be the string the Host parses.
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", delivery: expect.any(String) })
+    // `deployTarget` rides along on every create; what it means is asserted in the
+    // delivery tests above, so here it only has to be the flat field the Host reads.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", deployTarget: "none" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)
