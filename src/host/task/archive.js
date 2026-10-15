@@ -9,12 +9,14 @@ import { tmpdir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
 import { coded, warned } from './codes.js'
-import { assertDeliveryGate, destroyDeployment } from './deploy.js'
+import { assertDeliveryGate, deliveryGatePreview, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { findLinks, symlinksRefused } from './links.js'
 import { validateProjectName } from './naming.js'
-import { assertIsolated, refuseDelete, samePathLocation } from './paths.js'
+import { assertIsolated, isInside, refuseDelete, samePathLocation } from './paths.js'
+import { refuseWhileSessionsWork } from './session-guard.js'
+import { withTaskLock } from './task-lock.js'
 
 import { BREADCRUMB, PLUGIN_ROOT, TASK_METADATA, TASK_OWNED_ENTRIES, isLinkedWorktree, pluginRootPath, readTaskMetadata, taskMetadataPath, taskSpacePath } from './shared.js'
 
@@ -34,13 +36,20 @@ async function mergeInProgress(subprocess, site) {
 
 /**
  * The files a merge could not reconcile.
+ *
+ * `-z`, for the reason {@link dirtyPaths} gives at length: without it git C-quotes a
+ * path holding a non-ASCII byte, so `文.txt` arrives as `"\346\226\207.txt"` - a name
+ * that does not exist on disk. The caller reads these paths off the checkout to look
+ * for conflict markers, so a quoted one is a file that cannot be opened, silently
+ * skipped, and the merge is then reported as resolved while its markers are still
+ * there.
  * @param subprocess - the profile's subprocess service.
  * @param site - the checkout the merge is standing in.
  * @returns their paths, relative to that checkout.
  */
 async function conflictedFiles(subprocess, site) {
-  const output = await tryRunGit(subprocess, site, ['diff', '--name-only', '--diff-filter=U'])
-  return output.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '')
+  const output = await tryRunGit(subprocess, site, ['diff', '--name-only', '-z', '--diff-filter=U'])
+  return output.split('\0').filter((line) => line !== '')
 }
 
 /**
@@ -86,14 +95,22 @@ async function readHead(path) {
  * since a resolution may have been staged already - and a line beginning `<<<<<<<`,
  * `=======` or `>>>>>>>` marks the merge as unfinished. Nothing else about the file's
  * contents is judged here, and each read stops at {@link MARKER_SCAN_MAX_BYTES}.
+ *
+ * Both listings are read with `-z`, and that is what makes this answer trustworthy
+ * rather than merely usually right. The default quoting C-quotes a path with a
+ * non-ASCII byte (`文.txt` becomes `"\346\226\207.txt"`), and every such path then
+ * fails `readHead` - landing in the `catch` below, which exists for submodules and
+ * directories. The failure mode is the dangerous direction: a file whose markers are
+ * still in it is skipped, the merge is reported as resolved, and the finish goes on to
+ * a commit that contains `<<<<<<<`. `-z` writes each path verbatim and separates
+ * records with NUL, so nothing in a path can be altered or end a record early.
  * @param subprocess - the profile's subprocess service.
  * @param site - the checkout the merge is standing in.
  * @returns the paths that still carry markers, relative to that checkout.
  */
 async function conflictMarkers(subprocess, site) {
-  const changed = await tryRunGit(subprocess, site, ['diff', '--name-only', 'HEAD'])
-  const listed = [...new Set([...changed.split(/\r?\n/), ...await conflictedFiles(subprocess, site)])]
-    .map((line) => line.trim())
+  const changed = await tryRunGit(subprocess, site, ['diff', '--name-only', '-z', 'HEAD'])
+  const listed = [...new Set([...changed.split('\0'), ...await conflictedFiles(subprocess, site)])]
     .filter((line) => line !== '')
   const marked = []
   for (const file of listed) {
@@ -102,7 +119,8 @@ async function conflictMarkers(subprocess, site) {
       text = await readHead(join(site, file))
     } catch {
       // A path git lists that cannot be read - a submodule, a directory - carries no
-      // markers this could find, and is not a reason to refuse the finish.
+      // markers this could find, and is not a reason to refuse the finish. With `-z`
+      // this cannot also be swallowing a path that was merely quoted.
       continue
     }
     if (/^(<{7}|={7}|>{7})(\s|$)/m.test(text)) marked.push(file)
@@ -206,10 +224,14 @@ async function dirtyPathsInTheWay(subprocess, site, branch, target) {
   if (dirty.length === 0) return []
   const base = await tryRunGit(subprocess, site, ['merge-base', target, branch])
   if (base === '') return []
+  // `-z` here is not tidiness: this set is compared against `dirtyPaths`, which already
+  // reads its paths verbatim. A quoted path on this side would simply never match the
+  // unquoted one on that side, so a non-ASCII file the merge is about to overwrite would
+  // not be seen - and this is the check that stops the merge before it clobbers the
+  // user's uncommitted work in their own checkout.
   const written = new Set(
-    (await tryRunGit(subprocess, site, ['diff', '--name-only', base, branch]))
-      .split(/\r?\n/)
-      .map((path) => path.trim())
+    (await tryRunGit(subprocess, site, ['diff', '--name-only', '-z', base, branch]))
+      .split('\0')
       .filter((path) => path !== ''),
   )
   return dirty.filter((path) => written.has(path))
@@ -303,6 +325,24 @@ async function mergeCandidates(subprocess, mainRepo, listed, taskBranch, checked
 async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
   const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (target === checkedOut) {
+    // A merge of the user's own that has been started and not concluded. This is
+    // checked before anything else, and before the dirty-path guard below, because
+    // that guard cannot see it in general: it only refuses over paths this merge
+    // writes, while an unfinished merge holds MERGE_HEAD whatever its files are.
+    //
+    // Left alone, git refuses the merge below with "You have not concluded your
+    // merge (MERGE_HEAD exists)" - and the catch that follows aborts, which throws
+    // away a resolution the user may have already written and staged by hand. That
+    // work has no reflog entry and no stash behind it, so aborting is the one thing
+    // here that cannot be undone. Named as the user's own checkout standing in the
+    // way (E5004) rather than as a conflict: there is nothing this side can
+    // reconcile, and the merge to conclude is theirs.
+    if (await mergeInProgress(subprocess, mainRepo)) {
+      throw coded(
+        'E5004',
+        `the checkout at ${mainRepo} has a merge of its own in progress, so this merge was not started and nothing there was aborted: ${mainRepo}. Conclude or abort that merge yourself, then finish the task.`,
+      )
+    }
     // Git refuses this merge when the checkout holds changes the merge would
     // overwrite, and refuses it in words that name a conflict nobody created. Left
     // to itself that refusal reaches the caller as a conflict: a file to resolve, a
@@ -431,6 +471,39 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   if (!existsSync(taskPath)) throw coded('E2003', `no such task space: ${taskPath}`, { path: taskPath })
   auditEnter({ task, project: projectName, tasksRoot })
 
+  // Where this task's repositories came from, as the record says. A plan follows
+  // `git worktree list` out of the container and runs the next git call in whatever
+  // `mainRepo` it names - so without this, a task space whose record was edited (or a
+  // worktree whose `.git` file was) sends the plugin into any repository on the machine,
+  // and every question after that is asked of a repository this task has nothing to do
+  // with. The record is the same proof `finishTask` asks for before it removes anything;
+  // a plan removes nothing, so it is only the one fact that keeps the walk inside the
+  // trees this task was made from.
+  //
+  // Two ways a repository is this task's own, and BOTH are needed. A `sourceRoot` that
+  // contains it is the ordinary create. A `sourcePath` the record names explicitly is
+  // the `add-repositories` case, which may deliberately take a repository from anywhere -
+  // anywhere at all, including another volume - so a rule that only knew about
+  // `sourceRoot` would refuse exactly the feature the review says not to restrict. The
+  // recorded paths are what the create and the add both wrote, so they are the task's own
+  // answer to which repositories it holds.
+  //
+  // Absent rather than wrong is not a mismatch: a container made before the JSON existed
+  // has no `sourceRoot` at all, and a space is never demoted for being old.
+  const recorded = await readTaskMetadata(taskPath)
+  const recordedSourceRoot = typeof recorded?.sourceRoot === 'string' ? recorded.sourceRoot.trim() : ''
+  const recordedRepos = (Array.isArray(recorded?.repositories) ? recorded.repositories : [])
+    .map((entry) => (typeof entry?.sourcePath === 'string' ? entry.sourcePath.trim() : ''))
+    .filter((path) => path !== '')
+  // Whether the plan may leave the container for this repository. Only asked when the
+  // record names a source root or repositories at all: a record with neither is an old
+  // container, and refusing it would demote a space for being old.
+  const ownsRepo = (mainRepo) => {
+    if (recordedRepos.some((path) => samePathLocation(path, mainRepo))) return true
+    if (recordedSourceRoot === '') return recordedRepos.length === 0
+    return samePathLocation(recordedSourceRoot, mainRepo) || isInside(recordedSourceRoot, mainRepo)
+  }
+
   const entries = await readdir(taskPath, { withFileTypes: true })
   const worktrees = []
   // What the container holds besides its worktrees. `finishTask` always clears
@@ -474,7 +547,19 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
     const mainRepo = listed.find((row) => row.isMain)?.path ?? ''
     plan.mainRepo = mainRepo
     if (mainRepo === '') plan.error = 'cannot locate the source repository'
-    else {
+    else if (!ownsRepo(mainRepo)) {
+      // Refused rather than reported as an error row: this is not a repository that
+      // could not be asked, it is a repository this task does not own. Answering with a
+      // row would let the dialog offer it as a merge target and let `finishTask` act on
+      // it; the plan is the read that has to stop first.
+      throw coded(
+        'E1006',
+        `${worktreePath} is a worktree of ${mainRepo}, which is not one of the repositories this task recorded`
+        + `${recordedSourceRoot === '' ? '' : ` (source root ${recordedSourceRoot})`}\n`
+        + '  a task may only merge and delete inside the repositories it was created from or added',
+        { path: worktreePath, mainRepo, sourceRoot: recordedSourceRoot, repositories: recordedRepos },
+      )
+    } else {
       const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
       if (checkedOut !== '' && checkedOut !== 'HEAD') plan.checkedOut = checkedOut
       // Offered even when no target resolves on its own: a repository sitting on a
@@ -504,7 +589,14 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   }
 
   await auditOutcome(repositories, [], 'plan')
-  return { task, project: projectName, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays }
+  // What the delivery gate would say about a merge of this task, computed here rather than
+  // by the panel. The panel used to derive it from a deployment status read, and derived it
+  // differently from the gate - it asked whether a state file *existed* and whether its
+  // smoke was green, so a task whose deploy script never wrote one was reported as fine and
+  // then refused at the finish with no way for the user to answer. One judgement, one place:
+  // the same function the refusal itself uses.
+  const gate = await deliveryGatePreview(await readTaskMetadata(taskPath), taskPath)
+  return { task, project: projectName, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays, gate }
 }
 
 
@@ -605,6 +697,46 @@ async function worktreeRegistered(subprocess, mainRepo, worktreePath) {
 const REMOVAL_PROBE_SUFFIX = '.dsh-removal-probe'
 
 /**
+ * Put back any directory an earlier probe left under the probe name.
+ *
+ * The probe renames a worktree and renames it straight back, and a process killed
+ * between those two steps leaves the checkout under `<name>.dsh-removal-probe`. That is
+ * not a cosmetic leftover. A linked worktree is recognised by the `.git` inside it, and
+ * the rename carries that file along, so the next finish finds a repository named
+ * `<name>.dsh-removal-probe` - a name git has never heard of, whose removal it refuses
+ * and whose branch it cannot attribute. The task's own repository would finish under a
+ * name nobody chose, and the name it was filed under would never come back.
+ *
+ * So the names are put back before anything is read, which is the only point at which
+ * that is still possible: once the directory scan has run, the leftover has already been
+ * taken for a worktree of its own.
+ *
+ * Best effort, one directory at a time. A name already occupied by something else is
+ * left exactly as it stands rather than guessed at, and the probe below still reports
+ * what it could not put back.
+ * @param taskPath - the task space whose entries are checked.
+ */
+async function recoverRemovalProbes(taskPath) {
+  let entries
+  try {
+    entries = await readdir(taskPath, { withFileTypes: true })
+  } catch {
+    // Unreadable is the caller's own problem to report, and it is about to: the scan
+    // that follows reads the same directory and answers an empty task space.
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!entry.name.endsWith(REMOVAL_PROBE_SUFFIX)) continue
+    const name = entry.name.slice(0, -REMOVAL_PROBE_SUFFIX.length)
+    // The suffix is the plugin's own marker and carries the whole name it belongs to, so
+    // an entry that is nothing but the suffix names nothing and is left alone.
+    if (name === '') continue
+    await rename(join(taskPath, entry.name), join(taskPath, name)).catch(() => {})
+  }
+}
+
+/**
  * Whether this directory can be removed right now, asked without removing anything.
  *
  * The question is answered by renaming the directory and renaming it straight back,
@@ -618,7 +750,10 @@ const REMOVAL_PROBE_SUFFIX = '.dsh-removal-probe'
  * This is a probe and nothing else: it writes no file, deletes nothing, and puts the
  * name back before it answers. The one state it can leave behind is a directory still
  * under the probe name, which it reports instead of hiding - that is a directory the
- * caller has to rename back by hand, and saying so is the only honest answer.
+ * caller has to rename back by hand, and saying so is the only honest answer. A run that
+ * dies at that exact moment is recovered by {@link recoverRemovalProbes} on the next
+ * finish, so the state this reports is one a live caller can still clear by hand rather
+ * than the permanent rename it used to be.
  * @param directory - the directory that would be removed.
  * @returns an empty string when it can be removed, else why it cannot.
  */
@@ -629,12 +764,23 @@ async function removableNow(directory) {
   } catch (error) {
     return `${error?.code ?? 'unremovable'}: ${error?.message ?? error}`
   }
+  // The name goes back from a `finally`, and the shape is the point rather than a
+  // detail: whatever the probe comes to do between taking the name and giving it back,
+  // the restore runs. A throw in the middle would otherwise leave the directory under
+  // the probe name - the one outcome this function must not produce.
+  let putBack = ''
   try {
-    await rename(probe, directory)
-  } catch (error) {
-    return `the check renamed it and could not put it back: it is now at ${probe} (${error?.message ?? error})`
+    // The probe itself: nothing beyond the rename above today, which is the whole of the
+    // question - a directory Windows will not rename is one it will not delete either.
+    // Written as its own step so that anything added here later is covered by the restore.
+  } finally {
+    try {
+      await rename(probe, directory)
+    } catch (error) {
+      putBack = `the check renamed it and could not put it back: it is now at ${probe} (${error?.message ?? error})`
+    }
   }
-  return ''
+  return putBack
 }
 
 
@@ -688,11 +834,55 @@ async function countDocuments(directory, { maxEntries = 200 } = {}) {
  * @param options - the task, its project, its root, and what to do with branches, documents and worktrees.
  *   `cause` is a sentence saying why the dialog is finishing a task the user never
  *   saw - "its Workspace registration failed" - so the log can say that instead of
- *   only showing a task space disappearing.
+ *   only showing a task space disappearing. `ctx` and `callerSessionId`, when given,
+ *   are what let the finish ask again - inside its own lock - whether a session is
+ *   still working in the space it is about to remove.
  * @returns what each repository's worktree, branch and merge ended up as.
  * @throws Error when the task space is missing or the request contradicts itself.
  */
 export async function finishTask(subprocess, options) {
+  const { ctx, callerSessionId = '', ...rest } = options ?? {}
+
+  if (typeof rest.tasksRoot !== 'string' || rest.tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
+  const projectName = validateProjectName(rest.project)
+  const taskPath = taskSpacePath(rest.tasksRoot, projectName, rest.task)
+
+  // The cheap early refusal, before the queue: a caller that can be told "no" without
+  // waiting behind another finish is told immediately, and a finish that will be
+  // refused never occupies the lock. It is not the real check - the answer can change
+  // while this call waits its turn, which is exactly what the one inside the lock is
+  // for - but it is the one that answers in the common case, and it costs a registry
+  // read rather than a wait.
+  if (ctx !== undefined) refuseWhileSessionsWork(ctx, taskPath, callerSessionId)
+
+  // One finish at a time, per task space. Everything below reads the directory, merges,
+  // removes and deletes, and two of those interleaved is how a panel double-press ends up
+  // with two runs each merging and each deleting what the other is holding. A second
+  // caller waits for the first and then runs; by then the space is usually gone, which is
+  // the correct outcome and is reported by the E2003 below like any other missing space.
+  return withTaskLock(taskPath, async () => {
+    // The real guard, and it is inside the lock on purpose. The one above ran before this
+    // call was queued, so a session that started working while it waited would not be in
+    // its answer; here nothing can start between the question and the removal, because
+    // every other finish of this space is behind the same lock. Still best effort - a
+    // deployment with no agent registry answers "nothing found" - but no longer a
+    // check-then-act with an unbounded gap in the middle.
+    if (ctx !== undefined) refuseWhileSessionsWork(ctx, taskPath, callerSessionId)
+    return finishTaskLocked(subprocess, options)
+  })
+}
+
+/**
+ * {@link finishTask}'s body, with the task space already resolved and the lock held.
+ *
+ * Split out only so the lock wrapper above can be read on its own: nothing here is
+ * meant to be called from anywhere but that wrapper, and the ordering inside it is
+ * the whole of what a finish is.
+ * @param subprocess - the profile's subprocess service.
+ * @param options - as {@link finishTask}.
+ * @returns as {@link finishTask}.
+ */
+async function finishTaskLocked(subprocess, options) {
   const {
     task,
     project,
@@ -752,6 +942,50 @@ export async function finishTask(subprocess, options) {
   // container with no readable record deletes no branch at all, and says so.
   const warnings = []
   const recorded = await readTaskMetadata(taskPath)
+
+  // The record says which task this directory is, and the request says which task is
+  // being finished. They have to be the same task, because everything below removes
+  // what the record describes: a mismatch means this call is about to delete another
+  // task's worktrees and branch, which nothing later in the run can walk back.
+  //
+  // The path is not proof of identity on its own. `taskSpacePath` joins the caller's
+  // words into `<root>/<project>/<task>` and `existsSync` answers for whatever the
+  // filesystem resolves that to - so on a case-insensitive filesystem `Login` reaches
+  // the directory of `login`, and a name Win32 folds (a trailing dot, a trailing space)
+  // reaches a different task's directory than the one it spells. The record is a claim
+  // this plugin wrote into the directory itself, so it is the one answer no registry
+  // can be stale about, and comparing it exactly is what turns a lookalike name into a
+  // refusal instead of a removal of the wrong task.
+  //
+  // Exact, not case-folded: the record is the authority, and a name that differs from it
+  // in any character is not the task the record describes. Refusing is recoverable - the
+  // caller is told the recorded spelling and can ask again with it - while removing the
+  // wrong task is not.
+  //
+  // Only when the record carries the field. A container made before the JSON existed
+  // answers with three facts parsed from its note and has no `project` at all, and a
+  // space is never demoted for being old: a missing value is "unknown", not "different".
+  // `tasksRoot` is deliberately not compared: a moved or copied container is a supported
+  // shape, and its record keeps the root it was made under.
+  if (typeof recorded?.task === 'string' && recorded.task !== '' && recorded.task !== task) {
+    throw coded(
+      'E2007',
+      `${taskPath} holds the record of task '${recorded.task}', not of '${task}', so nothing in it will be deleted.\n`
+      + `  Recorded: ${recorded.task}\n`
+      + `  Requested: ${task}\n`
+      + '  If you meant that task, ask for it under the name its record uses.',
+      { path: taskPath, recorded: recorded.task, requested: task },
+    )
+  }
+  if (typeof recorded?.project === 'string' && recorded.project !== '' && recorded.project !== projectName) {
+    throw coded(
+      'E2007',
+      `${taskPath} holds the record of a task in project '${recorded.project}', not in '${projectName}', so nothing in it will be deleted.\n`
+      + `  Recorded: ${recorded.project}\n`
+      + `  Requested: ${projectName}`,
+      { path: taskPath, recorded: recorded.project, requested: projectName },
+    )
+  }
   // The caller's own answer, and nothing else. There is no policy to fall back on
   // any more: the tool refuses a `done` that does not say (E7006), and the panel
   // always says, so a merge happens exactly when the hand that called this asked
@@ -796,6 +1030,10 @@ export async function finishTask(subprocess, options) {
   // and a bypassed gate is recorded as a warning, never silently.
   const gateWarning = await assertDeliveryGate(recorded, taskPath, { merge, bypass: acknowledgeDelivery === true })
   if (gateWarning !== undefined) warnings.push(gateWarning)
+
+  // Before anything is read, so a checkout left under the probe name by a run that died
+  // is recognised as the repository it is rather than taken for a worktree of its own.
+  await recoverRemovalProbes(taskPath)
 
   const entries = await readdir(taskPath, { withFileTypes: true })
   // The repositories the container's own record names. It is what still recognises a
@@ -1000,13 +1238,50 @@ export async function finishTask(subprocess, options) {
         // reconciled and there is no merge to conclude, yet the page said to go and
         // reconcile it.
         const dirtyCheckout = error?.code === 'E5004' || /would be overwritten by merge/i.test(String(error?.message ?? ''))
-        outcome.conflict = !dirtyCheckout
         // The other stop that is not this side's to write: the user's own checkout has
         // work a merge would overwrite. Flagged so a caller can tell it from a conflict -
         // there are no markers to reconcile here, and sending someone after them wastes
         // the trip.
         outcome.dirtyCheckout = dirtyCheckout
-        await gitSucceeded(subprocess, mainRepo, ['merge', '--abort'])
+        // Whether a merge is genuinely unfinished, asked of git rather than inferred from
+        // "the error was not E5004" - which is what this used to do, and it made every
+        // failure a conflict. `resolveMergeTarget` throws E4008 from inside this `try`,
+        // before any merge is started, and so do a `rev-parse` that would not answer and
+        // the rehearsal in the task's own worktree when it fails without leaving a merge
+        // behind. None of those has a MERGE_HEAD or a conflicted file to reconcile, so
+        // marking them a conflict sent the reader after markers that do not exist, filed
+        // the audit record as E5001 ("unmerged work") instead of E5003 (a plain failure),
+        // and - through `summarize` - told the model the task had finished while dropping
+        // the actual reason out of the summary entirely.
+        //
+        // Both checkouts are asked, because a merge can be left standing in either: the
+        // task's own worktree is where the rehearsal runs, and the source repository is
+        // where the real merge runs when it is the target. A merge standing in the
+        // source checkout is the user's own and `mergeIntoBranch` refuses that as E5004
+        // above, but asking here costs one `rev-parse` and keeps this answer the same
+        // whichever path reached it.
+        const standingInWorktree = !dirtyCheckout && await mergeInProgress(subprocess, worktreePath)
+        const standingInMain = !dirtyCheckout && !standingInWorktree && mainRepo !== ''
+          && await mergeInProgress(subprocess, mainRepo)
+        outcome.mergeInProgress = standingInWorktree || standingInMain
+        outcome.conflict = outcome.mergeInProgress
+        if (outcome.mergeInProgress) {
+          outcome.mergeSite = standingInWorktree ? worktreePath : mainRepo
+          outcome.conflictedFiles = await conflictedFiles(subprocess, outcome.mergeSite)
+        }
+        // No abort here, and the reason is the whole of this guard. Everything that can
+        // reach this catch either failed before a merge was ever started - `E4008` from
+        // `resolveMergeTarget`, a `rev-parse` that would not answer, the rehearsal in the
+        // task's own worktree, the unfinished-merge refusal above - or was already
+        // aborted where it ran (`mergeIntoBranch` aborts its own merge in the source
+        // checkout, and drops the temporary worktree it made for any other target).
+        //
+        // An `merge --abort` here would therefore only ever hit a checkout where this
+        // call started nothing - and a checkout where the user has a merge of their own
+        // standing is exactly such a checkout. Aborting that one discards a resolution
+        // they may have written and staged by hand, with no reflog entry and no stash
+        // behind it. This used to be unconditional, and it was the one irreversible loss
+        // in this file.
         outcome.error = error.message
         repositories.push(outcome)
         failed = true
@@ -1226,9 +1501,38 @@ export async function finishTask(subprocess, options) {
       // somebody's files: a link is a name for somewhere else, and that somewhere can be
       // outside the task space entirely. So the links are left out of the copy and stay
       // where they are, named, and everything else in the stray is filed as usual.
-      const links = await symlinksRefused() ? await findLinks(source) : []
+      //
+      // A listing that stopped at its bound is not usable as a skip set, and the
+      // difference matters more than it looks: the set is what the copy filters by, so a
+      // link missing from it is a link `cp` then tries to recreate - the exact EPERM this
+      // branch exists to avoid, arriving through the branch that was meant to prevent it.
+      // "I found some links" and "I found every link" are different answers, and only the
+      // second makes a filter safe, so the truncated case is told apart and handled
+      // rather than treated as a short list.
+      const seenLinks = await symlinksRefused() ? await findLinks(source) : { links: [], truncated: false }
+      const links = seenLinks.truncated ? [] : seenLinks.links
       try {
         await mkdir(strayDestination, { recursive: true })
+        if (seenLinks.truncated) {
+          // Not filed at all, and said so. The stray is left where it is - which is the
+          // same outcome as a failed copy, and for the same reason: half an archive is
+          // worse than none, and the original is the thing that must survive.
+          //
+          // Completeness could be had by raising `maxEntries` until the walk finishes,
+          // and that is deliberately not done here: the bound exists because this runs
+          // while a person waits, and a tree with more entries than the bound is a tree
+          // whose copy was never going to be quick. Refusing is honest about that;
+          // walking it anyway would just move the wait.
+          warnings.push(warned(
+            'leftover-holds-links',
+            `could not archive '${name}' into '${strayDestination}': it holds more entries than the link scan will walk, `
+            + 'so whether it holds a link could not be settled - and a copy that cannot account for every link may stop part-way '
+            + 'on one. It is left in the task space exactly as it stands.',
+            { name, destination: strayDestination, links: [], truncated: true },
+          ))
+          keptByFailure.push(name)
+          continue
+        }
         if (links.length === 0) {
           await cp(source, destination, { recursive: true, force: false, errorOnExist: true })
         } else {

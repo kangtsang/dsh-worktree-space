@@ -48,6 +48,21 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES = [
 export const MAX_IGNORED_SCAN_DIRECTORIES = 200
 
 /**
+ * How long one ignored directory name may be.
+ *
+ * The count cap above bounds how many names there are; this bounds how big any one
+ * of them is. They are different runaway: two hundred names is a paste of a list,
+ * and one name of ten thousand characters is a paste of a line, and the second gets
+ * past a cap counted in names without touching it.
+ *
+ * 255 is the length a single path component may have on the filesystems this runs
+ * on, so it refuses only what could never exist as a directory anyway. A number
+ * chosen for how it reads rather than for that limit would refuse names the disk
+ * would have accepted, and the setting would be lying about what it can hold.
+ */
+export const MAX_IGNORED_SCAN_DIRECTORY_LENGTH = 255
+
+/**
  * The names a scan is actually skipping, given the two settings that hold the choices.
  *
  * One function, because there are two places that have to answer this and a

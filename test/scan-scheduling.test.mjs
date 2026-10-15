@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, SCAN_CONCURRENCY } from "../src/host/index.js"
+import { apply, parseGitArgv, SCAN_CONCURRENCY } from "../src/host/index.js"
 import { setAuditEnabled } from "../src/host/task/audit-log.js"
 
 afterEach(() => setAuditEnabled(true))
@@ -30,7 +30,10 @@ function slowHandler(porcelain) {
   const counters = { calls: [], peak: 0, active: 0 }
   const subprocess = {
     spawn({ argv, cwd }) {
-      const key = argv.slice(3).join(" ")
+      // Parsed by name, not by position: the git command line carries hardening `-c`
+      // settings before `-C`, so `argv[2]` is no longer the directory. See
+      // `parseGitArgv`.
+      const key = parseGitArgv(argv).args.join(" ")
       counters.calls.push({ key, cwd })
       counters.active++
       counters.peak = Math.max(counters.peak, counters.active)

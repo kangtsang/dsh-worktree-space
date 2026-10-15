@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { deployEnvironment, smokeEnvironment } from '../src/host/task/deploy.js'
 import { PLUGIN_ROOT, writeTaskMetadata, taskMetadata } from '../src/host/task/shared.js'
-
 const STATE = { url: 'http://localhost:1', services: ['web'], lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' } }
 
 /** The task space's own deploy root: the plugin's directory, then `deploy`. */
@@ -120,6 +119,129 @@ describe('the deploy scripts are told where their state lives', () => {
       await expect(deployEnvironment(subprocess, dir)).rejects.toMatchObject({ code: 'E5008' })
     } finally {
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * The entry path is re-checked where it is used, not only where it was chosen.
+ *
+ * `deployScript` lives in the record, the record lives inside the task space, and the task
+ * space is the working directory of the session that works there - so the value is a string
+ * an agent can write. The create-time check (E4014) confined it to the deploy root, but
+ * nothing re-ran that check between the record and `bash`, and `join` resolves `../..` out of
+ * the tree without complaint. These are the three shapes the attack takes, plus the legitimate
+ * one it must not break.
+ */
+describe('a recorded deploy script is confined to the deploy root at run time', () => {
+  /**
+   * A task space whose record names `entry`.
+   *
+   * The record is written through `writeTaskMetadata`, the same writer the plugin uses, so the
+   * value under test reaches `findDeployScript` by the ordinary route rather than by a
+   * hand-edited fixture that skips the schema.
+   * @param entry - the record's `deployScript`.
+   * @returns the task space directory.
+   */
+  async function spaceNaming(entry) {
+    const dir = await mkdtemp(join(tmpdir(), 'deploy-confine-'))
+    await mkdir(deployRoot(dir), { recursive: true })
+    await writeTaskMetadata(dir, taskMetadata({
+      task: 'login', project: 'public', tasksRoot: join(dir, '..'), sourceRoot: '/repo',
+      branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+      deployScript: entry,
+    }))
+    return dir
+  }
+
+  it('refuses an entry that walks out of the task space, and does not run it', async () => {
+    // The attack the review describes: `../../../evil.sh` in the record makes the next deploy
+    // run an out-of-bounds script as the host process, with the audit log recording a user
+    // pressing a button. The script is planted for real, at the path the record's own `../..`
+    // walk reaches, so a fix that merely rejected a nonexistent path would not be what this
+    // passes. The task space is nested one level deeper than the container so the escape lands
+    // inside this fixture rather than in the system temp directory.
+    const container = await mkdtemp(join(tmpdir(), 'deploy-confine-'))
+    const space = join(container, 'x', 'proj', 'login')
+    const evil = join(container, 'evil.sh')
+    try {
+      await writeFile(evil, 'echo pwned\n', 'utf8')
+      await mkdir(deployRoot(space), { recursive: true })
+      await writeTaskMetadata(space, taskMetadata({
+        task: 'login', project: 'proj', tasksRoot: container, sourceRoot: '/repo',
+        branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+        deployScript: '../../../evil.sh',
+      }))
+      const { subprocess, envs } = spawnRecorder()
+
+      await expect(deployEnvironment(subprocess, space)).rejects.toMatchObject({ code: 'E5008' })
+      await expect(smokeEnvironment(subprocess, space)).rejects.toMatchObject({ code: 'E5008' })
+      // The assertion that matters most: the script was never executed. A refusal that still
+      // spawned `bash evil.sh up` would be a refusal in name only.
+      expect(envs).toEqual([])
+      // And it is a refusal about containment, not about the file being missing - the file is
+      // right there, which is what makes this an escape rather than a typo.
+      expect(existsSync(evil)).toBe(true)
+      await expect(deployEnvironment(subprocess, space)).rejects.toThrow(/not inside the task space/)
+    } finally {
+      await rm(container, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an entry that resolves inside the task space but outside the deploy root', async () => {
+    // The narrower shape, and the one a containment check written against the task space alone
+    // would let through: the script is a real file the task session itself could have written,
+    // and it sits inside the task space - but not in the deploy root the create confined the
+    // entry to. `${PLUGIN_ROOT}/sibling.sh` is that path exactly: one level up from `deploy/`,
+    // still inside the space.
+    const dir = await spaceNaming(`${PLUGIN_ROOT}/sibling.sh`)
+    try {
+      await writeFile(join(dir, PLUGIN_ROOT, 'sibling.sh'), 'echo sibling\n', 'utf8')
+      const { subprocess, envs } = spawnRecorder()
+      await expect(deployEnvironment(subprocess, dir)).rejects.toMatchObject({ code: 'E5008' })
+      expect(envs).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses an entry that names a directory', async () => {
+    // `existsSync` is true for a directory, so the old check accepted one and the failure
+    // surfaced as a `bash` error about a file rather than as a refusal naming the record.
+    const dir = await spaceNaming(`${PLUGIN_ROOT}/deploy/not-a-script`)
+    try {
+      await mkdir(join(deployRoot(dir), 'not-a-script'), { recursive: true })
+      const { subprocess, envs } = spawnRecorder()
+      await expect(deployEnvironment(subprocess, dir)).rejects.toMatchObject({ code: 'E5008' })
+      await expect(deployEnvironment(subprocess, dir)).rejects.toThrow(/directory, not a file/)
+      expect(envs).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('still runs a legitimate entry inside the deploy root, subdirectory or not', async () => {
+    // The control for the three above: a fix that refused everything would pass them all.
+    const top = await spaceNaming(`${PLUGIN_ROOT}/deploy/deploy.sh`)
+    const deep = await spaceNaming(`${PLUGIN_ROOT}/deploy/variants/smoke-a.sh`)
+    try {
+      for (const dir of [top, deep]) {
+        await writeFile(join(deployRoot(dir), '.state.json'), `${JSON.stringify(STATE)}\n`, 'utf8')
+      }
+      await writeFile(join(deployRoot(top), 'deploy.sh'), 'echo top\n', 'utf8')
+      await mkdir(join(deployRoot(deep), 'variants'), { recursive: true })
+      await writeFile(join(deployRoot(deep), 'variants', 'smoke-a.sh'), 'echo deep\n', 'utf8')
+
+      const a = spawnRecorder()
+      const b = spawnRecorder()
+      await deployEnvironment(a.subprocess, top)
+      await deployEnvironment(b.subprocess, deep)
+
+      expect(a.envs[0].argv[1]).toBe(join(deployRoot(top), 'deploy.sh'))
+      expect(b.envs[0].argv[1]).toBe(join(deployRoot(deep), 'variants', 'smoke-a.sh'))
+    } finally {
+      await rm(top, { recursive: true, force: true })
+      await rm(deep, { recursive: true, force: true })
     }
   })
 })

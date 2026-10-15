@@ -33,18 +33,52 @@
  * report, never a failure to raise.
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { coded, warned } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
-import { DEPLOY_ROOT, PLUGIN_ROOT, readTaskMetadata, taskDeployRootPath } from './shared.js'
+import { isInside } from './paths.js'
+import { DEPLOY_DIR, DEPLOY_ROOT, PLUGIN_ROOT, readTaskMetadata, taskDeployRootPath } from './shared.js'
 
 /** The state file a deploy root carries, per the handshake. */
 const STATE_NAME = '.state.json'
 
 /** How much docker output a single call may hand back. */
 const DOCKER_MAX_BYTES = 512 * 1024
+
+/**
+ * The deadlines every subprocess here runs under.
+ *
+ * The `timeoutMs` parameter existed from the start and no caller ever passed it, so
+ * every docker call and every deploy script ran unbounded - which is not a slow
+ * request but a hung one. `docker ps` against an unresponsive daemon never comes
+ * back, and because each of those is awaited inside an HTTP handler, the panel spins
+ * with no way out: closing it aborts nothing on this side. These are the numbers the
+ * shape of each call asks for.
+ */
+
+/**
+ * A docker query - `ps`, `inspect`, `compose ps`, `rm`.
+ *
+ * Short, because these are questions about a local daemon and the panel asks them on
+ * every refresh: a query that has not answered in fifteen seconds is a daemon that is
+ * not answering, and the panel is better off showing what it knows than waiting.
+ */
+const DOCKER_TIMEOUT_MS = 15_000
+
+/**
+ * A deploy script's `up`: ten minutes.
+ *
+ * A rebuild pulls images, installs dependencies and starts services, so it is the one
+ * call here that is legitimately slow. The deadline is not a performance target - it
+ * is the point past which the call is not going to answer at all, and past which the
+ * person who pressed the button deserves to be told rather than left watching.
+ */
+const DEPLOY_UP_TIMEOUT_MS = 10 * 60 * 1000
+
+/** A deploy script's `smoke`: five minutes. It runs a test suite, not a build. */
+const DEPLOY_SMOKE_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
  * Run one command, as {@link `git.js`} runs git: one spawn seam, one shape of answer.
@@ -57,18 +91,39 @@ const DOCKER_MAX_BYTES = 512 * 1024
  * words), so the clock is one `AbortController` fired here. "It ran out of time"
  * is then read off that same signal rather than off `exitCode`, which cannot tell
  * a stop this call asked for from one somebody else sent.
+ *
+ * A deadline is not optional in practice: every call site below passes one, because
+ * a parameter nobody passes is the same as no deadline at all. `timeoutMs` stays
+ * optional in the signature so that a future caller can say "no deadline" on purpose,
+ * and it is then written down at that call site rather than inherited by accident.
  * @param subprocess - the profile's subprocess service.
  * @param argv - the whole command line, program included.
  * @param options - `cwd` to run in, `maxBytes` per stream, `timeoutMs` for a
- *   deadline (absent or non-positive: no deadline at all), and `env` for entries
- *   the child has to see (merged onto the harness's scrubbed parent base).
+ *   deadline (absent or non-positive: no deadline at all), `env` for entries
+ *   the child has to see (merged onto the harness's scrubbed parent base), and
+ *   `signal` to stop the call when the caller is cancelled.
  * @returns the exit code with the collected streams, plus whether the deadline
  *   stopped it.
  */
-async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, timeoutMs, env } = {}) {
+async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, timeoutMs, env, signal } = {}) {
   const deadlineMs = typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : undefined
-  const controller = deadlineMs === undefined ? undefined : new AbortController()
-  const timer = controller === undefined ? undefined : setTimeout(() => controller.abort(), deadlineMs)
+  // One controller for the deadline and the caller's signal both, for the same reason
+  // `runGit` uses one: the seam takes a single signal, and "was this the deadline?" has
+  // to stay answerable afterwards - which it would not be if the caller's abort and the
+  // timer reached the seam by different routes.
+  const controller = deadlineMs === undefined && signal === undefined ? undefined : new AbortController()
+  // Whether the clock is what stopped it, recorded as the timer fires rather than read
+  // back off the controller: a caller's own abort reaches the same controller, and
+  // asking the controller afterwards cannot tell the two apart.
+  let expired = false
+  const forward = () => controller.abort()
+  if (controller !== undefined && signal !== undefined) {
+    if (signal.aborted) controller.abort()
+    else signal.addEventListener('abort', forward, { once: true })
+  }
+  const timer = controller === undefined || deadlineMs === undefined
+    ? undefined
+    : setTimeout(() => { expired = true; controller.abort() }, deadlineMs)
   try {
     const handle = subprocess.spawn({
       argv,
@@ -79,7 +134,7 @@ async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, 
       ...(controller === undefined ? {} : { signal: controller.signal }),
     })
     const outcome = await handle.done
-    const timedOut = controller !== undefined && controller.signal.aborted
+    const timedOut = expired
     return {
       ok: !timedOut && outcome.exitCode === 0,
       exitCode: outcome.exitCode,
@@ -89,23 +144,72 @@ async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, 
     }
   } finally {
     if (timer !== undefined) clearTimeout(timer)
+    if (controller !== undefined && signal !== undefined) signal.removeEventListener('abort', forward)
   }
 }
 
-/** Run docker through {@link runProcess}. */
-async function runDocker(subprocess, args) {
-  return runProcess(subprocess, ['docker', ...args], { cwd: process.cwd() })
+/** Run docker through {@link runProcess}, under the query deadline. */
+async function runDocker(subprocess, args, { signal } = {}) {
+  return runProcess(subprocess, ['docker', ...args], {
+    cwd: process.cwd(),
+    timeoutMs: DOCKER_TIMEOUT_MS,
+    ...(signal === undefined ? {} : { signal }),
+  })
 }
 
 /**
  * {@link runDocker} with every failure - a missing docker first of all - answered
  * as "nothing came back". Callers below report absence in their own terms.
+ *
+ * A timed-out query lands here too, and that is deliberate: a daemon that will not
+ * answer is the same fact as one that is not installed, from the caller's side -
+ * there are no containers to report. The deadline is what stops the wait from being
+ * unbounded; what the wait would have found is not something this side can know.
+ *
+ * What this shape cannot say is *why* nothing came back, and that is what
+ * {@link askDocker} exists beside it for: "docker ran and matched nothing" and
+ * "docker could not be asked" are both `{ ok: false, stdout: '' }` here. That is
+ * the right answer for a caller that only wants to know whether anything came back
+ * - the panel's container list, say - and the wrong one for a caller deciding
+ * whether to skip a teardown, which is why the teardown uses {@link askDocker}.
  */
-async function tryDocker(subprocess, args) {
+async function tryDocker(subprocess, args, { signal } = {}) {
   try {
-    return await runDocker(subprocess, args)
+    return await runDocker(subprocess, args, { signal })
   } catch {
-    return { ok: false, exitCode: null, stdout: '', stderr: '' }
+    return { ok: false, exitCode: null, timedOut: false, stdout: '', stderr: '' }
+  }
+}
+
+/**
+ * {@link runDocker}, answering "was docker asked at all" as well as what it said.
+ *
+ * The distinction the teardown needs and {@link tryDocker} cannot carry:
+ * `answered: false` means docker could not be run or did not answer - not on PATH,
+ * daemon unreachable, the deadline expired - while `answered: true` with empty
+ * output means docker ran and matched nothing. Those are opposite facts about a
+ * machine. The first says this side does not know what is standing; the second says
+ * it knows nothing is.
+ *
+ * A sibling rather than a flag on {@link tryDocker}, because the lenient answer is
+ * the right one for the callers that only ask "did anything come back", and
+ * changing it in place would make every one of them handle a case it has no use
+ * for. Both go through {@link runDocker}, so there is one spawn path and one
+ * deadline.
+ * @param subprocess - the profile's subprocess service.
+ * @param args - the docker arguments, without the program.
+ * @param options - `signal` to stop the call when the caller is cancelled.
+ * @returns whether docker answered, why not when it did not, and what it said.
+ */
+async function askDocker(subprocess, args, { signal } = {}) {
+  try {
+    const out = await runDocker(subprocess, args, { signal })
+    // A deadline that expired is docker not answering rather than docker answering
+    // "nothing": the process was stopped before it could say either way.
+    if (out.timedOut) return { answered: false, reason: 'timed-out', out }
+    return { answered: true, reason: '', out }
+  } catch (error) {
+    return { answered: false, reason: String(error?.message ?? error) || 'not-runnable', out: undefined }
   }
 }
 
@@ -213,10 +317,10 @@ async function readDeliveryState(taskPath) {
  * @param envId - the environment id the label carries.
  * @returns one row per container, empty when docker says nothing.
  */
-async function containersFor(subprocess, envId) {
+async function containersFor(subprocess, envId, { signal } = {}) {
   const out = await tryDocker(subprocess, [
     'ps', '-a', '--filter', `label=dsh.env-id=${envId}`, '--format', '{{.Names}}\t{{.State}}',
-  ])
+  ], { signal })
   if (!out.ok || out.stdout.trim() === '') return []
   return out.stdout.trim().split(/\r?\n/).map((line) => {
     const [name, state] = line.split('\t')
@@ -224,9 +328,68 @@ async function containersFor(subprocess, envId) {
   }).filter((row) => row.name !== '')
 }
 
-async function containerIds(subprocess, envId) {
-  const out = await tryDocker(subprocess, ['ps', '-a', '-q', '--filter', `label=dsh.env-id=${envId}`])
+async function containerIds(subprocess, envId, { signal } = {}) {
+  const out = await tryDocker(subprocess, ['ps', '-a', '-q', '--filter', `label=dsh.env-id=${envId}`], { signal })
   return out.ok ? out.stdout.trim().split(/\r?\n/).filter((one) => one !== '') : []
+}
+
+/**
+ * The containers a task's environment is running, or why that cannot be answered.
+ *
+ * {@link containerIds} answers `[]` for both "none" and "docker could not be
+ * asked", which is fine where the caller only renders a list. This is the same
+ * question through {@link askDocker}, for the one caller that has to tell the two
+ * apart: the teardown, which otherwise reports "nothing to remove" about an
+ * environment it never looked at and lets the task space be deleted with the
+ * containers still standing.
+ * @param subprocess - the profile's subprocess service.
+ * @param envId - the environment id the label carries.
+ * @returns the ids, and whether docker answered the question at all.
+ */
+async function askedContainerIds(subprocess, envId, { signal } = {}) {
+  const answer = await askDocker(subprocess, ['ps', '-a', '-q', '--filter', `label=dsh.env-id=${envId}`], { signal })
+  if (!answer.answered) return { answered: false, ids: [], reason: answer.reason }
+  if (!answer.out.ok) {
+    // Docker ran and refused - a daemon that is up but rejects the query. That is
+    // still an answer of sorts, but not one that says "there are none", so it is
+    // reported the same way as not being able to ask.
+    return { answered: false, ids: [], reason: answer.out.stderr.trim() !== '' ? answer.out.stderr.trim() : `docker ps exited ${answer.out.exitCode}` }
+  }
+  return { answered: true, ids: answer.out.stdout.trim().split(/\r?\n/).filter((one) => one !== ''), reason: '' }
+}
+
+/**
+ * The acceptance URL a state file recorded, or nothing.
+ *
+ * One accessor for the two readers below, because the same value used to have two
+ * rules: `deliveryStateSummary` asked whether it was a non-empty string, and
+ * `deploymentStatus` took it as it came. A script-written state file is not a
+ * trusted document - it is JSON on disk - so `url` can be an object, a number, or a
+ * string that is not a URL at all.
+ *
+ * The panel renders this value, and that is why a non-string mattered rather than
+ * being merely untidy: React refuses an object as a child, the client has no error
+ * boundary, and a thrown render unmounts the whole settings page. A bad value must
+ * therefore read as "no acceptance URL recorded" - the same answer as a state file
+ * that never wrote one - rather than as a value that travels to a renderer.
+ *
+ * `http:` and `https:` only. `javascript:` and `data:` are not acceptance URLs, and
+ * while a `target="_blank"` link does not execute the former in current browsers,
+ * an audit of this plugin should not depend on that: a protocol this side would
+ * never produce is not one it forwards.
+ * @param value - the `url` field as the state file held it.
+ * @returns the URL string when it is a usable http(s) one, else null.
+ */
+function acceptanceUrl(value) {
+  if (typeof value !== 'string' || value === '') return null
+  let parsed
+  try {
+    parsed = new URL(value)
+  } catch {
+    // Not a URL at all - a path, a sentence, a fragment. Nothing to open.
+    return null
+  }
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? value : null
 }
 
 /**
@@ -245,12 +408,12 @@ async function containerIds(subprocess, envId) {
  * @param taskPath - the task space directory.
  * @returns the status the panel renders.
  */
-export async function deploymentStatus(subprocess, taskPath) {
+export async function deploymentStatus(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const policy = deliveryPolicyOf(recorded)
   const found = await readDeliveryState(taskPath)
-  const stateUrl = found?.state?.url ?? null
+  const stateUrl = acceptanceUrl(found?.state?.url)
   return {
     envId,
     target: policy.deploy.target,
@@ -260,7 +423,7 @@ export async function deploymentStatus(subprocess, taskPath) {
     destroyedAt: found?.state?.destroyedAt ?? null,
     stateFound: found !== undefined,
     statePath: found?.path ?? null,
-    containers: envId === '' ? [] : await containersFor(subprocess, envId),
+    containers: envId === '' ? [] : await containersFor(subprocess, envId, { signal }),
   }
 }
 
@@ -284,7 +447,7 @@ export async function deliveryStateSummary(taskPath) {
   const found = await readDeliveryState(taskPath)
   const smoke = found?.state?.lastSmoke
   return {
-    url: typeof found?.state?.url === 'string' && found.state.url !== '' ? found.state.url : null,
+    url: acceptanceUrl(found?.state?.url),
     lastSmoke: smoke === null || smoke === undefined || typeof smoke !== 'object'
       ? null
       : {
@@ -334,19 +497,53 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
   // can name the step rather than the code.
   const smoke = found?.state?.lastSmoke
   const passing = smoke !== null && typeof smoke === 'object' && smoke.result === 'pass'
-  if (passing) return undefined
+  // A green smoke is only evidence about the environment it was run against, so the smoke
+  // has to be no older than the last `up` this side ran. `deployedAt` is written by the
+  // host rather than by the script, so a script cannot date a deployment that never
+  // happened. Without this, deploy A -> smoke passes -> edit -> deploy B -> A's green
+  // light still opens B's merge, which is the stale-green shape of this gate.
+  //
+  // A check on evidence, never a wall: `bypass` - the user's own say-so from the panel -
+  // steps over it exactly as it steps over a red smoke. `deployedAt` is absent for a
+  // deploy run by a session rather than by this side, and an absent one is not a refusal:
+  // the alternative would be to refuse work the plugin never saw and cannot date.
+  const deployedAt = typeof found?.state?.deployedAt === 'string' ? found.state.deployedAt : ''
+  const smokeAt = smokeTime(smoke)
+  const stale = deployedAt !== '' && smokeAt !== undefined && smokeAt < Date.parse(deployedAt)
+  if (passing && !stale) return undefined
   const missing = found === undefined ? ['deployment', 'smoke'] : ['smoke']
   if (bypass) {
     return warned('delivery-gate-bypassed', 'the user acknowledged finishing without a passing smoke', { missing })
   }
+  const because = found === undefined
+    ? '`<deploy root>/.state.json` is absent'
+    : stale
+      ? `the recorded smoke (${smoke.at}) is older than the last deployment this side ran (${deployedAt}), so it says nothing about the environment standing now`
+      : 'it carries no `lastSmoke` with `result: "pass"`'
   throw coded(
     'E5006',
-    'the deployment records no passing smoke, so the merge is refused: `<deploy root>/.state.json` is either absent or '
-      + `carries no \`lastSmoke\` with \`result: "pass"\`${envId === '' ? '' : ` (environment ${envId})`}. `
+    `the deployment records no passing smoke, so the merge is refused: ${because}${envId === '' ? '' : ` (environment ${envId})`}. `
       + 'Deploy the task space and run its smoke, having that script merge `lastSmoke: { result, at }` into the state file, '
       + 'then merge.',
     { target: policy.deploy.target, envId, missing },
   )
+}
+
+/**
+ * When a recorded smoke was run, as a number, or undefined when it says nothing usable.
+ *
+ * The stamp is the deploy script's to write, so it is read defensively: a missing or
+ * unparseable one answers "no date", which the gate reads as "cannot be shown to be
+ * stale" rather than as a refusal. Dating evidence is a reason to ask again, never a
+ * reason to refuse work on the strength of a field somebody's script did not write.
+ * @param smoke - the `lastSmoke` object from the state file.
+ * @returns the epoch milliseconds, or undefined.
+ */
+function smokeTime(smoke) {
+  const at = smoke !== null && typeof smoke === 'object' ? smoke.at : undefined
+  if (typeof at !== 'string' || at.trim() === '') return undefined
+  const parsed = Date.parse(at)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
 
 /**
@@ -373,12 +570,17 @@ export async function deliveryGatePreview(recorded, taskPath) {
   // invent a requirement the finish will not enforce.
   if (policy.deploy.target === 'none') return { applies: false, missing: [], target: 'none' }
   const found = await readDeliveryState(taskPath)
-  // The same two keys the gate reports for the same two shapes: no state file means the
-  // deployment is missing and so is its smoke; a state file means only the smoke is.
+  // The same keys the gate reports, by the same judgement - one function, so a screen
+  // cannot say "nothing is missing" about a merge the gate then refuses. The smoke is
+  // read through the gate's own rule: green, run against an environment that is up, and
+  // no older than the last deployment this side ran.
   if (found === undefined) return { applies: true, missing: ['deployment', 'smoke'], target: policy.deploy.target }
   const missing = []
   const smoke = found.state?.lastSmoke
-  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass') missing.push('smoke')
+  const deployedAt = typeof found.state.deployedAt === 'string' ? found.state.deployedAt : ''
+  const smokeAt = smokeTime(smoke)
+  const stale = deployedAt !== '' && smokeAt !== undefined && smokeAt < Date.parse(deployedAt)
+  if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass' || stale) missing.push('smoke')
   return { applies: true, missing, target: policy.deploy.target }
 }
 
@@ -406,7 +608,7 @@ export async function deliveryGatePreview(recorded, taskPath) {
  *   and when the record names none there is nothing named to remove.
  * @returns what was removed, with a warning when part of it could not be.
  */
-export async function destroyDeployment(subprocess, taskPath, envId) {
+export async function destroyDeployment(subprocess, taskPath, envId, { signal } = {}) {
   let id = typeof envId === 'string' ? envId.trim() : ''
   let recordedForTarget
   if (id === '') {
@@ -427,7 +629,31 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
   // outside this flow, and teardown must never be the thing that gets refused:
   // containers nobody can take down from here are a worse end state than the
   // policy's own surprise. It falls through to the label path below, which finds them.
-  const ids = await containerIds(subprocess, id)
+  const found = await askedContainerIds(subprocess, id, { signal })
+  if (!found.answered) {
+    // Docker could not be asked, so this side does not know whether anything is
+    // standing. Reported rather than answered "nothing to remove": that answer let a
+    // finish delete the task space while the containers, networks and volumes stayed
+    // on the machine forever, and "docker is not on PATH" was indistinguishable from
+    // "there really are no containers".
+    //
+    // A warning and not a refusal, because teardown must never be the thing that
+    // blocks: the task space is going away either way, and what the user needs is to
+    // be told that the environment may still be standing and that docker has to be
+    // reachable to take it down.
+    return {
+      removed: false,
+      containers: 0,
+      unknown: true,
+      warning: warned(
+        'deploy-containers-unchecked',
+        `the environment's containers could not be looked up, so it is unknown whether any are still standing: `
+          + `docker could not be asked (${found.reason})`,
+        { envId: id, reason: found.reason },
+      ),
+    }
+  }
+  const ids = found.ids
   if (ids.length === 0) {
     // Nothing standing: nothing was destroyed, so no acceptance fact loses its
     // environment and the state files stay exactly as they are.
@@ -437,7 +663,7 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
   const inspect = await tryDocker(subprocess, [
     'inspect', ...ids,
     '--format', '{{index .Config.Labels "com.docker.compose.project.config_files"}}\t{{index .Config.Labels "com.docker.compose.project.working_dir"}}',
-  ])
+  ], { signal })
   let composed = false
   if (inspect.ok) {
     for (const line of inspect.stdout.split(/\r?\n/)) {
@@ -447,7 +673,7 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
         'compose', '--project-name', id, '--project-directory', dir,
         ...files.split(',').filter((file) => file.trim() !== '').flatMap((file) => ['-f', file.trim()]),
         'down', '-v', '--remove-orphans',
-      ])
+      ], { signal })
       if (down.ok) {
         composed = true
         break
@@ -457,13 +683,21 @@ export async function destroyDeployment(subprocess, taskPath, envId) {
 
   const warnings = []
   let removed = composed
-  const left = await containerIds(subprocess, id)
-  if (left.length > 0) {
-    const removedForce = await tryDocker(subprocess, ['rm', '-f', ...left])
+  const left = await askedContainerIds(subprocess, id, { signal })
+  if (!left.answered) {
+    // The same distinction after the teardown: a check that could not run is not a
+    // clean result. Reported so a partial teardown is not read as a complete one.
+    warnings.push(warned(
+      'deploy-containers-unchecked',
+      `whether the environment's containers are gone could not be checked: docker could not be asked (${left.reason})`,
+      { envId: id, reason: left.reason, after: 'teardown' },
+    ))
+  } else if (left.ids.length > 0) {
+    const removedForce = await tryDocker(subprocess, ['rm', '-f', ...left.ids], { signal })
     if (removedForce.ok) {
       removed = true
     } else {
-      warnings.push(warned('deploy-containers-left', `could not remove ${left.length} container${left.length === 1 ? '' : 's'} of environment ${id}: ${removedForce.stderr.trim() !== '' ? removedForce.stderr.trim() : 'docker failed'}`, { count: left.length, envId: id, reason: removedForce.stderr.trim() }))
+      warnings.push(warned('deploy-containers-left', `could not remove ${left.ids.length} container${left.ids.length === 1 ? '' : 's'} of environment ${id}: ${removedForce.stderr.trim() !== '' ? removedForce.stderr.trim() : 'docker failed'}`, { count: left.ids.length, envId: id, reason: removedForce.stderr.trim() }))
     }
   }
   await preserveStates(taskPath)
@@ -501,6 +735,40 @@ function outputTail(...streams) {
 }
 
 /**
+ * Why a candidate entry may not be run, or '' when it may.
+ *
+ * Two questions, both asked against the path this side is about to hand to `bash`, and
+ * neither answerable from `existsSync` alone. The first is containment: the record lives
+ * inside the task space (`{@link taskMetadataPath}`), which is the working directory of the
+ * session that works there, so its `deployScript` is a string an agent can write - and
+ * `join` happily resolves `../../../Users/me/evil.sh` out of the tree. The path was checked
+ * at create time (E4014, in `create.js`); that check is the promise, and this is the one
+ * that keeps it, because nothing re-runs the create-time check on the way to executing it.
+ *
+ * The second is that it is a real file. `existsSync` is true for a directory, and a
+ * directory handed to `bash` fails at spawn with a message about the file rather than about
+ * the record that named it.
+ *
+ * Both paths are resolved before the comparison, so the answer is about where the candidate
+ * really lands rather than about how it was spelled. The comparison itself is the plugin's
+ * one {@link isInside}, so a spelling that differs only in separators - or only in case, on
+ * Windows - is not a way past it.
+ * @param script - the candidate entry, as this side would run it.
+ * @param root - the directory it must sit strictly inside.
+ * @returns an empty string when the candidate may be run, else why it may not.
+ */
+function deployEntryRefusal(script, root) {
+  if (!isInside(resolve(root), resolve(script))) return 'outside'
+  let stats
+  try {
+    stats = statSync(script)
+  } catch {
+    return 'missing'
+  }
+  return stats.isFile() ? '' : 'not-a-file'
+}
+
+/**
  * The deploy root that can rebuild the environment: the entry the task's own record names
  * under `.worktree-space/deploy/`, else a `deploy.sh` at the top of the task space's own
  * orchestration root, then one inside a repository, in directory order - the same two
@@ -511,30 +779,66 @@ function outputTail(...streams) {
  * whatever `deploy.sh` happens to sit beside it. The entry may sit anywhere under the deploy
  * root, including a subdirectory - nothing about the state file depends on that, because the
  * plugin names its path.
+ *
+ * Every branch re-checks where its candidate lands before returning it
+ * ({@link deployEntryRefusal}). For the named branch that check is the whole defence: the
+ * value comes out of a file the task session can write, and the create-time validation that
+ * confined it to the deploy root is not repeated anywhere between the record and the spawn.
+ * For the two joined fallbacks it is defence in depth - their directory names come from
+ * `readdir` or from this plugin's own layout - but it is applied there too, so the rule is a
+ * property of the function rather than of the one branch that was attacked.
  * @param taskPath - the task space directory.
  * @param recorded - the task's own record, whose `deployScript` names the entry when a
  *   create chose one.
  * @returns the script and its directory, or undefined when the space deploys nothing.
+ * @throws Error carrying E5008 when the record names an entry that is not a file inside the
+ *   task space's own deploy root.
  */
 async function findDeployScript(taskPath, recorded) {
   const named = typeof recorded?.deployScript === 'string' ? recorded.deployScript.trim() : ''
+  const deployRoot = taskDeployRootPath(taskPath)
   if (named !== '') {
     // The record's value is relative to the task space's own root - the same relative path
     // the workspace uses, because the deploy root is copied to the same place on both sides
     // (`.worktree-space/deploy/`). So it is joined here and nowhere else, and the workspace's
     // spelling and this one cannot drift. The script's own directory is where it runs from,
     // so its siblings are reachable.
-    const script = join(taskPath, ...named.split('/').filter((part) => part !== ''))
-    return existsSync(script) ? { script, dir: dirname(script) } : undefined
+    const script = resolve(taskPath, ...named.split('/').filter((part) => part !== ''))
+    // Refused rather than skipped, and refused here rather than at the spawn: the record
+    // named this entry, so falling back to whatever `deploy.sh` sits beside it would run a
+    // script nobody chose - the same reasoning the missing-entry case already follows.
+    const refusal = deployEntryRefusal(script, deployRoot)
+    if (refusal !== '') {
+      const because = refusal === 'outside'
+        ? `it is not inside the task space's own deploy root (${deployRoot})`
+        : refusal === 'not-a-file'
+          ? 'it is a directory, not a file'
+          : 'it is not there'
+      throw coded(
+        'E5008',
+        `the deploy script this task's record names cannot be run: ${because}. The record is ${named}.\n`
+          + '  The record lives inside the task space, so the session working there can write it, and the path is '
+          + `re-checked here rather than trusted; put the entry under \`${DEPLOY_DIR}/\` inside the task space, or clear `
+          + 'the record\'s `deployScript` to fall back to that directory\'s own `deploy.sh`.',
+        { path: taskPath, deployScript: named, reason: refusal },
+      )
+    }
+    return { script, dir: dirname(script) }
   }
   const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
-  const candidates = [taskDeployRootPath(taskPath)]
+  const candidates = [{ dir: deployRoot, root: deployRoot }]
   for (const entry of entries) {
-    if (entry.isDirectory() && entry.name !== PLUGIN_ROOT) candidates.push(join(taskPath, entry.name, DEPLOY_ROOT))
+    if (entry.isDirectory() && entry.name !== PLUGIN_ROOT) {
+      // The repository shape: a single-repository space may carry its own deploy root inside
+      // the repository's worktree. It is that repository's file rather than this plugin's, so
+      // it is held to the task space rather than to the plugin's deploy root.
+      candidates.push({ dir: join(taskPath, entry.name, DEPLOY_ROOT), root: taskPath })
+    }
   }
-  for (const dir of candidates) {
-    const script = join(dir, 'deploy.sh')
-    if (existsSync(script)) return { script, dir }
+  for (const candidate of candidates) {
+    const script = join(candidate.dir, 'deploy.sh')
+    if (deployEntryRefusal(script, candidate.root) !== '') continue
+    return { script, dir: candidate.dir }
   }
   return undefined
 }
@@ -550,10 +854,11 @@ async function findDeployScript(taskPath, recorded) {
  * structural failures (no script, unstartable) raise.
  * @param subprocess - the profile's subprocess service.
  * @param taskPath - the task space directory.
+ * @param options - `signal`, when the caller has one, to stop the run in flight.
  * @returns the smoke output and the deployment status as it stands after it.
  * @throws Error carrying E5008 when there is no deploy script, or it failed to start.
  */
-export async function smokeEnvironment(subprocess, taskPath) {
+export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
   const found = await findDeployScript(taskPath, recorded)
@@ -565,9 +870,13 @@ export async function smokeEnvironment(subprocess, taskPath) {
     out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
       cwd: found.dir,
       maxBytes: 2 * 1024 * 1024,
+      // A smoke runs a test suite, so it is allowed minutes - but not forever. Without
+      // this the handler that asked for it waits on a script that may never exit.
+      timeoutMs: DEPLOY_SMOKE_TIMEOUT_MS,
       // Where the script must merge `lastSmoke`. Handed over rather than left to a
       // convention, so a script in a subdirectory writes the same file as one at the top.
       env: deployEnvironmentFor(taskPath, envId),
+      ...(signal === undefined ? {} : { signal }),
     })
   } catch (error) {
     throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
@@ -575,6 +884,11 @@ export async function smokeEnvironment(subprocess, taskPath) {
   return {
     output: outputTail(out.stderr, out.stdout),
     exitCode: out.exitCode,
+    // Reported rather than folded into the exit code, because a script this side stopped
+    // has no exit code to read: the smoke did not fail, it did not finish, and the card
+    // has to be able to say which. A red badge over a timeout would read as a real
+    // verdict on the environment.
+    timedOut: out.timedOut,
     status: await deploymentStatus(subprocess, taskPath),
     // The smoke is what the gate waits for, so this is the moment its answer is
     // most useful: a red one says so here, while the user is still on the card,
@@ -593,10 +907,11 @@ export async function smokeEnvironment(subprocess, taskPath) {
  * error (nothing new was deployed), and it names itself in the output tail.
  * @param subprocess - the profile's subprocess service.
  * @param taskPath - the task space directory.
+ * @param options - `signal`, when the caller has one, to stop the run in flight.
  * @returns the deploy output and the deployment status as it stands after it.
  * @throws Error carrying E5008 when there is no deploy script, or the build failed.
  */
-export async function deployEnvironment(subprocess, taskPath) {
+export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
   const found = await findDeployScript(taskPath, recorded)
@@ -608,16 +923,41 @@ export async function deployEnvironment(subprocess, taskPath) {
     out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
       cwd: found.dir,
       maxBytes: 2 * 1024 * 1024,
+      // A rebuild pulls images and starts services, so this is the longest deadline here
+      // - and still a deadline. A build that has not answered in ten minutes is one that
+      // is not going to, and the person who pressed the button is owed the answer.
+      timeoutMs: DEPLOY_UP_TIMEOUT_MS,
       // Where the script must write `url`. Handed over rather than left to a convention, so
       // a script in a subdirectory writes the same file as one at the top.
       env: deployEnvironmentFor(taskPath, envId),
+      ...(signal === undefined ? {} : { signal }),
     })
   } catch (error) {
     throw coded('E5008', `the deploy script could not be started (${error.message}); bash must be on the PATH the server runs with`)
   }
+  if (out.timedOut) {
+    // Named separately from a non-zero exit, because it asks for a different thing: the
+    // script did not fail, it did not finish, and what it left behind is unknown. The
+    // output tail is still shown, because whatever it printed before being stopped is
+    // the only account of where it got to.
+    throw coded(
+      'E5008',
+      `the deploy script did not finish within ${Math.round(DEPLOY_UP_TIMEOUT_MS / 60000)} minutes and was stopped:\n${outputTail(out.stderr, out.stdout)}`,
+    )
+  }
   if (!out.ok) {
     throw coded('E5008', `the deploy script failed with exit code ${out.exitCode}:\n${outputTail(out.stderr, out.stdout)}`)
   }
+  // Dated by this side, after the script that ran `up` has exited zero, and by no other
+  // writer: `deployedAt` is what tells a green smoke run against *this* environment from
+  // one recorded before it was rebuilt (see `assertDeliveryGate`). A script that wrote its
+  // own stamp could date a deployment that never happened, and the scripts own the other
+  // fields anyway - this one is deliberately not theirs, the way `destroyedAt` is not.
+  //
+  // Best effort: a state file that will not take the stamp leaves the gate where it was
+  // before this existed, which is the right trade against failing a deployment that has
+  // already come up.
+  await stampDeployedAt(taskPath)
   return {
     output: outputTail(out.stdout),
     status: await deploymentStatus(subprocess, taskPath),
@@ -625,5 +965,80 @@ export async function deployEnvironment(subprocess, taskPath) {
     // an E5006 refusal at the very end. The deploy has just run, so this is
     // the first moment the question can be answered at all.
     gate: await deliveryGatePreview(recorded, taskPath),
+    // Asked after `up` exited zero, which is the only moment it can be asked: the
+    // script has run, so whatever it started either carries the label or does not.
+    ...(await labelledContainerWarning(subprocess, envId, { signal })),
+  }
+}
+
+/**
+ * Whether this environment came up with containers the plugin can find, as a warning.
+ *
+ * The label is the whole handshake between the plugin and a deploy script, and nothing
+ * checked that it was ever applied. `up` exiting zero only says the script thought it
+ * succeeded; a script that started containers under a different project name, or under no
+ * label at all, left an environment this side cannot see - and a finish then finds no
+ * containers, reports "nothing to remove", and deletes the task space with the containers,
+ * networks and volumes still on the machine. The task space is what is gone, so nothing
+ * afterwards can find them either.
+ *
+ * A warning and never a refusal, which is the maintainer's standing rule: the script may
+ * legitimately start things the label cannot see - a stack it manages itself, a service on
+ * the host - and failing the deploy over that would block a workflow that works. What the
+ * user needs is to be told, while the card is still in front of them, that the finish will
+ * not be able to tear this environment down.
+ *
+ * Silent when docker cannot be asked: that is not evidence about the label, and a warning
+ * that fires on every machine without docker would be noise rather than a signal. The
+ * teardown reports the not-asked case in its own words, where it is the thing that matters.
+ * @param subprocess - the profile's subprocess service.
+ * @param envId - the environment id the label should carry; empty means no label was named.
+ * @param options - `signal` to stop the lookup when the caller is cancelled.
+ * @returns `{ warning }` when the environment has no findable container, else `{}`.
+ */
+async function labelledContainerWarning(subprocess, envId, { signal } = {}) {
+  if (envId === '') return {}
+  const found = await askedContainerIds(subprocess, envId, { signal })
+  if (!found.answered || found.ids.length > 0) return {}
+  return {
+    warning: warned(
+      'deploy-no-labelled-containers',
+      `the deploy script exited successfully but no container carries this environment's label `
+        + `(\`dsh.env-id=${envId}\`), so the finish will not be able to tear the environment down; `
+        + 'check that the script labels its containers with `$DEPLOY_ENV_ID`, or take them down yourself',
+      { envId, label: `dsh.env-id=${envId}` },
+    ),
+  }
+}
+
+/**
+ * Record that this side has just run the task's deployment, on every state file.
+ *
+ * Written only after `up` exited zero, and only by this side. The file is the deploy
+ * scripts' own while the task runs, so the merge is a read-modify-write of the one field
+ * this plugin owns - the same shape {@link preserveStates} uses for the other one.
+ *
+ * Truncated to whole seconds on purpose, because that is the precision the other stamp in
+ * this file has: `write-state.sh` writes `lastSmoke.at` with `date -u +...%SZ`, so a
+ * millisecond stamp here would read a smoke taken in the same second as *older* than the
+ * deployment it followed - and refuse a merge that had just been smoked. Both stamps are
+ * seconds, so they compare like for like; the cost is that a smoke from the previous
+ * deploy within the same second counts as current, which is a second of ambiguity against
+ * a false refusal every time the two land together.
+ * @param taskPath - the task space directory.
+ */
+async function stampDeployedAt(taskPath) {
+  const deployedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  for (const path of await deliveryStateFiles(taskPath)) {
+    try {
+      const state = JSON.parse(await readFile(path, 'utf8'))
+      if (state !== null && typeof state === 'object') {
+        await writeFile(path, `${JSON.stringify({ ...state, deployedAt })}\n`, 'utf8')
+      }
+    } catch {
+      // An unreadable state file is left exactly as it lies: the deployment has already
+      // succeeded, and rewriting this from nothing would trade a recoverable history for a
+      // certainly-empty one.
+    }
   }
 }

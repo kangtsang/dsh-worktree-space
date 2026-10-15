@@ -5,7 +5,8 @@
  */
 
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { coded } from './codes.js'
 import { tryRunGit } from './git.js'
 import { coerceDeliveryPolicy } from './delivery.js'
 import { deploymentEnvIdFor, validateProjectName, validateTaskName } from './naming.js'
@@ -128,17 +129,25 @@ export async function isLinkedWorktree(directory) {
  * rule - a task that names its own container root still goes where it was told -
  * and because it is the user's standing answer to "where do task spaces go",
  * which is what both the create dialog and the tool's own `suggest-root` report.
+ *
+ * A root the caller or the configuration named is resolved before it is handed back,
+ * and that is the whole of the reason this function is a boundary rather than a
+ * lookup: the answer goes straight into `assertIsolated`, whose comparisons are
+ * lexical by design. `E:/a/x/../b/c/wt` is not lexically inside `E:/a/b/c`, but it
+ * resolves to `E:\a\b\c\wt`, which really is - so a root that reaches a comparison
+ * unresolved makes the plugin's own "work and source stay isolated" invariant report
+ * itself satisfied about a task space sitting inside the source tree.
  * @param sourceRoot - the directory holding the source repositories.
  * @param requestedRoot - a caller-supplied container root, possibly empty.
  * @param configuredRoot - the container root the configuration names, possibly empty.
- * @returns the container root, in native separators.
+ * @returns the container root, absolute and in native separators.
  */
 
 export function resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot) {
   const requested = typeof requestedRoot === 'string' ? requestedRoot.trim() : ''
-  if (requested !== '') return requested
+  if (requested !== '') return resolve(requested)
   const configured = typeof configuredRoot === 'string' ? configuredRoot.trim() : ''
-  return configured === '' ? recommendTasksRoot(sourceRoot) : configured
+  return configured === '' ? recommendTasksRoot(sourceRoot) : resolve(configured)
 }
 
 
@@ -151,13 +160,28 @@ export function resolveTasksRoot(sourceRoot, requestedRoot, configuredRoot) {
  * call sites so that a path this plugin writes and a path it later reads back
  * can never disagree, and so the two relative names a caller could send cannot
  * walk out of the container root.
+ *
+ * The root itself is validated here too, because the two checks below only mean
+ * something once it is a real container. `''` and `.` join to a path relative to
+ * whatever directory the host process happens to be in, and `/` and `C:\` join to a
+ * path one level below a volume root - a layout no task space has, and one a finish
+ * would then delete inside. None of those is a container root, so none of them is
+ * accepted, and the refusal is E1004 - the code that already means "a tasks root is
+ * required" - with a sentence saying what the root has to be instead.
  * @param tasksRoot - the container root.
  * @param project - the project layer's name.
  * @param task - the task name.
  * @returns the task space directory.
+ * @throws Error carrying E1004 when the root is not an absolute, non-volume directory.
  */
 export function taskSpacePath(tasksRoot, project, task) {
   const root = String(tasksRoot ?? '').trim()
+  if (!isAbsolute(root) || dirname(root) === root) {
+    throw coded(
+      'E1004',
+      `a tasks root is required, and it must be an absolute directory that is not a volume root: ${root === '' ? '(empty)' : root}`,
+    )
+  }
   const path = join(root, validateProjectName(project), validateTaskName(task))
   assertTaskSpaceShape(root, path)
   return path
@@ -331,8 +355,16 @@ export function taskMetadata(details) {
  * or a conflict to resolve). The distinction is what lets a reader tell the
  * session that is running the task from one that was only ever asked a question
  * about it.
+ *
+ * `leader` names the session that dispatched the work. This is an **audit fact,
+ * not a test the plugin runs**: before it a record could say who was doing the
+ * work and never who had asked, so a reader that wanted to name the dispatcher -
+ * `list`, the panel, the recipient of a report - had nothing to read and had to
+ * guess from directories. It is deliberately not what the report header's role
+ * line is built from: that is decided by where a session works, which keeps
+ * working for a task space whose record predates this role.
  */
-export const TASK_SESSION_ROLES = ['task', 'handoff']
+export const TASK_SESSION_ROLES = ['task', 'handoff', 'leader']
 
 /**
  * Normalize the sessions a record carries into the shape this plugin writes.

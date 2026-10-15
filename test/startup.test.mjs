@@ -86,7 +86,7 @@ describe.each([
         ])
         expect(providers.length).toBe(skillBefore + 1)
         const candidates = await providers[skillBefore].list({})
-        expect(candidates.map(({ name }) => name)).toEqual(["task-worktree-space"])
+        expect(candidates.map(({ name }) => name)).toEqual(["worktree-space"])
         const body = await providers[skillBefore].get(candidates[0], {})
         expect(body.content).toContain("# Task Worktree Space")
         const mismatched = await carrier.fetch(requestFor("worktree.scan", { method: "worktree.status" }))

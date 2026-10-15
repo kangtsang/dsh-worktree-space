@@ -34,8 +34,10 @@
  * git call that has already spent its time spawning a process.
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { appendFile, readFile, rename, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { open, readFile, rename, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
+import { withTaskLock } from './task-lock.js'
 
 /** The log's own name at the container root. */
 export const AUDIT_FILE = 'worktree-space-log.jsonl'
@@ -244,8 +246,64 @@ const URL_CREDENTIALS = /\/\/[^\/\s@]*@/g
  * also why a value runs to the end of its line rather than to the next space:
  * an auth header is two words, and stopping at the first would hide the word
  * `Bearer` and leave the token behind it in plain text.
+ *
+ * The separator is `:` or `=`, or whitespace. Whitespace is the one that was
+ * missing: `--password hunter2` and `--token ghp_abc` are how a credential is
+ * handed to a command-line tool, and requiring an assignment character meant
+ * neither was redacted at all. A keyword in that position is a flag being given a
+ * value, which is the same act as an assignment.
+ *
+ * The keyword list is the vocabulary of the tools this plugin drives rather than a
+ * guess at what a secret is called: `auth` covers `--auth`, `Authorization` and
+ * `http.extraHeader=Authorization`, `credential` covers git's own
+ * `credential.helper`-adjacent spellings, and `access[-_]?key` covers
+ * `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` alike. `passwd` and `pwd` are
+ * here because `password` alone missed them.
  */
-const ASSIGNED_SECRET = /((?:token|password|passwd|secret|authorization|api[-_]?key)\s*[:=]\s*)("[^"]*"|'[^']*'|[^\r\n,;]+)/gi
+const ASSIGNED_SECRET = /((?:token|password|passwd|pwd|secret|authorization|auth|credential|api[-_]?key|access[-_]?key)\s*[:=\s]\s*)("[^"]*"|'[^']*'|[^\r\n,;]+)/gi
+
+/**
+ * A token that announces itself by its shape rather than by a keyword.
+ *
+ * `ghp_...` on its own - no `token=`, no `Authorization:` - is a credential a
+ * failing command echoes back inside a sentence, and the assignment rule cannot see
+ * it because nothing assigns it. These are the prefixes the providers actually
+ * issue, so a match is a credential and not a word that happens to look like one:
+ * `feature/token-refresh` is the counter-example this rule has to keep, and it
+ * carries none of these prefixes.
+ *
+ * `AKIA[0-9A-Z]{16}` is AWS's own access-key id shape, which is a fixed-length
+ * alphabet rather than a prefix - matched by the same pattern.
+ *
+ * The lookbehind is what keeps this from eating identifiers that merely end in a
+ * prefix. `sk-` is the dangerous one: `no-task-branch` contains `sk-branch`, and
+ * without the boundary the plugin's own warning code was written to the log as
+ * `no-ta***` - a redaction that destroyed the one field a reader greps for. A token
+ * prefix is a token prefix when nothing word-like precedes it.
+ */
+const TOKEN_SHAPES = /(?<![A-Za-z0-9_-])(?:(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|sk-|xox[baprs]-)[A-Za-z0-9_-]{6,}|AKIA[0-9A-Z]{16})/g
+
+/**
+ * An authentication scheme and the credential after it.
+ *
+ * `Authorization: Basic dXNlcjpwYXNz` is already covered by the assignment rule
+ * (the value runs to end of line), but a bare `Bearer eyJ...` in a sentence has no
+ * keyword before it. Two words, and the second is the secret: matched together so
+ * the scheme is hidden with the token rather than left behind as a clue.
+ */
+const AUTH_SCHEME = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}/g
+
+/**
+ * A PEM private key block, from its header to its footer.
+ *
+ * This is the shape the assignment rules cannot reach at all: there is no `key=` and
+ * no token prefix, just a block of base64 between two marker lines. `[\\s\\S]*?` spans
+ * the lines lazily so one block is one match and the text after the footer survives.
+ * The header alone is redacted even when the block is truncated, because a log
+ * holding `-----BEGIN OPENSSH PRIVATE KEY-----` and no footer is still holding the
+ * beginning of a key.
+ */
+const PEM_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g
 
 /**
  * Hide a password or token, wherever git was given it.
@@ -255,7 +313,41 @@ const ASSIGNED_SECRET = /((?:token|password|passwd|secret|authorization|api[-_]?
 function redact(value) {
   return String(value ?? '')
     .replace(URL_CREDENTIALS, '//***@')
+    .replace(PEM_BLOCK, '-----BEGIN PRIVATE KEY-----***')
+    .replace(AUTH_SCHEME, '$1 ***')
+    .replace(TOKEN_SHAPES, '***')
     .replace(ASSIGNED_SECRET, '$1***')
+}
+
+/**
+ * A record's own fields with every string value redacted.
+ *
+ * The file's comment above promises over-redaction, and the promise was about the
+ * strings the call sites redact one by one - `argv`, `stderr`, `stdout`, `message`,
+ * `stack`, `msg`. A field passed through `fields` was not among them, so a credential
+ * put in one appeared verbatim. No current caller does that, which is exactly why it
+ * is worth fixing here rather than at each call site: the next one to pass a token as
+ * a field would have to know this file's promise and remember it.
+ *
+ * Redaction is recursive into plain objects and arrays because a field may be one -
+ * `conflictedFiles` is an array of paths - and a nested string is the same string.
+ * Non-strings are left exactly as they are: `exit: 1`, `conflict: true` and
+ * `ms: 12` are facts a reader filters on, and turning them into text would break
+ * every `select(...)` in the file's own documentation. A value that cannot be walked
+ * (a Map, a class instance) is left alone rather than coerced, since coercing it is
+ * the one thing that could change what a caller meant to record.
+ * @param value - a field's value.
+ * @returns the value with every string inside it redacted.
+ */
+function redactedFields(value) {
+  if (typeof value === 'string') return redact(value)
+  if (Array.isArray(value)) return value.map(redactedFields)
+  // `null` is an object, and `Object.entries(null)` throws; the null check is the
+  // whole reason this is not a bare typeof test.
+  if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactedFields(entry)]))
+  }
+  return value
 }
 
 /**
@@ -288,17 +380,63 @@ async function auditRecord(kind, level, fields) {
       op: carried.op ?? '',
       task: carried.task ?? '',
       project: carried.project ?? '',
-      ...fields,
+      ...redactedFields(fields),
     })}\n`
     const path = join(tasksRoot, AUDIT_FILE)
-    // Absent is zero, not a failure: the first record of the first task has
-    // nothing to rotate away from.
-    const size = await stat(path).then((info) => info.size, () => 0)
-    if (size >= MAX_BYTES) await rotate(path)
-    // No directory is created here. `appendFile` into a container root that is
-    // not there fails, and that failure is what keeps a scan - which belongs to
-    // no task space - from bringing a container root into being to log itself.
-    await appendFile(path, line, 'utf8')
+    // One writer at a time, keyed by the resolved log path.
+    //
+    // The sequence below is `stat -> rotate -> append`, three awaits with nothing
+    // atomic in them, and the plugin reaches it concurrently: `inspect.js` maps
+    // `Promise.all` over tasks, and the scan paths run beside each other. Two
+    // callers entering at once used to lose records three different ways. Both read
+    // the size over the bound and both rotate, so the second `rename` gets ENOENT -
+    // and that record was dropped outright, because the whole block is wrapped in a
+    // `catch` that swallows everything. A caller appending between another's
+    // `rename` and its own `appendFile` wrote into the already-moved file. And a
+    // record longer than `PIPE_BUF` (4 KiB), written with more than one
+    // `appendFile`, could be interleaved into a half-line. The audit log is the
+    // only durable record of finishing and deleting, so a dropped line is the one
+    // thing it must not do.
+    //
+    // The key is the log's own path rather than the container root: the two are one
+    // to one, and the path is what the rotation and the append both act on, so
+    // serialising on it is exactly serialising the file. `withTaskLock` is the
+    // plugin's existing in-process keyed chain (`task/task-lock.js`), reused rather
+    // than copied - a second implementation of "serialise by key" would be a defect
+    // of its own. The keys are disjoint from its finish locks (a log path is not a
+    // task space), so a finish holding a task lock can log freely, and nothing here
+    // ever takes a task lock, so there is no cycle to deadlock on.
+    await withTaskLock(path, async () => {
+      // Absent is zero, not a failure: the first record of the first task has
+      // nothing to rotate away from.
+      const size = await stat(path).then((info) => info.size, () => 0)
+      if (size >= MAX_BYTES) {
+        // Its own `try`, and a rotation that fails does not take the record with it.
+        // An over-limit log is strictly better than a lost record: the file grows
+        // past its bound and is rotated on some later write, whereas a record that
+        // never lands is the one thing this file exists to prevent. The comment in
+        // {@link rotate} already argued this; this is the code matching it.
+        try {
+          await rotate(path)
+        } catch {
+          // Deliberately swallowed: see above. The append below still runs.
+        }
+      }
+      // No directory is created here. `open(path, 'a')` into a container root that
+      // is not there fails, and that failure is what keeps a scan - which belongs
+      // to no task space - from bringing a container root into being to log itself.
+      //
+      // One `open` and one `write` rather than `appendFile`: a single write on an
+      // append-mode descriptor is one syscall, so a record cannot be split across
+      // two appends and interleaved with another writer's half-line, however long
+      // the record is.
+      const handle = await open(path, 'a')
+      try {
+        await handle.write(line)
+      } finally {
+        await handle.close()
+      }
+    })
   } catch {
     // Serialising a value that cannot be serialised is not worth a failed task.
   }
@@ -312,6 +450,16 @@ async function auditRecord(kind, level, fields) {
  * replaced. A rotation that fails is not retried: the append that follows it
  * either grows the file past the bound or lands in a new one, and neither is
  * worth losing the records about.
+ *
+ * The name is collision-proof, because the archives are kept forever: the
+ * documented shape (`worktree-space-log.<YYYYMMDD-HHMMSS>.jsonl`) is the leading
+ * part, and two things are added after it. Milliseconds first, because two
+ * rotations in one second is ordinary on a machine that rotates a 10 MB log twice
+ * while a build runs. Then a counter, because milliseconds are not enough either:
+ * two rotations inside the same millisecond still collide, and `fs.rename` over an
+ * existing file *succeeds* - it destroys the earlier archive, which is a silent
+ * loss of the only account of what happened. "Keep all" is a promise the name has
+ * to keep.
  * @param path - the log to move.
  */
 async function rotate(path) {
@@ -320,8 +468,31 @@ async function rotate(path) {
   // Dashes, not colons: `YYYY-MM-DD HH:MM:SS` is the record's stamp and is not a
   // legal filename on Windows, and a rename that throws would take the rotation
   // with it - the file then grows past its bound forever, silently.
-  const stamp = localStamp().replace(/[: ]/g, '-')
-  await rename(path, join(dirname(path), `${basename(path, extname(path))}.${stamp}${extname(path)}`))
+  const stem = `${join(dirname(path), basename(path, extname(path)))}.${archiveStamp()}`
+  const extension = extname(path)
+  // The first candidate is the documented name; the counter is only reached when
+  // something already holds it. `existsSync` rather than a create-with-`wx`, because
+  // the rename below is the write and this loop only has to pick a name it will not
+  // overwrite.
+  let target = `${stem}${extension}`
+  for (let counter = 1; existsSync(target); counter++) {
+    target = `${stem}-${counter}${extension}`
+  }
+  await rename(path, target)
+}
+
+/**
+ * The stamp an archived log is named for: {@link localStamp} plus milliseconds.
+ *
+ * Composed from `localStamp` rather than formatted again, so the documented
+ * `YYYYMMDD-HHMMSS` part and the record's own `ts` cannot drift apart - the comment
+ * in {@link rotate} says why the two have to agree.
+ * @param date - the moment to render; defaults to now.
+ * @returns the stamp, e.g. `2026-10-02-11-35-26-042`.
+ */
+function archiveStamp(date = new Date()) {
+  const millis = String(date.getMilliseconds()).padStart(3, '0')
+  return `${localStamp(date).replace(/[: ]/g, '-')}-${millis}`
 }
 
 /**
@@ -495,13 +666,36 @@ export async function recordError(error, fields = {}) {
 
 /**
  * Record something that did not stop the operation but changes what it means.
- * @param message - what to report, in the plugin's own words.
+ *
+ * Accepts either a sentence or a `warned()` object, because both are what callers
+ * have. The object is the richer one and is what the finish passes: it carries the
+ * warning's `code` - the same code a screen translates - and the `values` that
+ * sentence needs, and taking the object's `message` while spreading those two into
+ * the record is what keeps the log line and the screen about the same warning.
+ *
+ * Before this, an object was stringified: `String({...})` is `[object Object]`, so
+ * every `kind: "warning"` line this plugin wrote lost both the sentence and the code
+ * and recorded that literal. `recordWarning` has one caller, so that was every
+ * warning there was - including `deploy-containers-left`, `leftover-refused` and
+ * `no-task-branch`. The test that should have caught it passed a string, which is
+ * the one shape that worked.
+ * @param message - a sentence, or a `warned()` object.
  * @param fields - what the record is about.
  */
 export async function recordWarning(message, fields = {}) {
+  // A warning object, as `warned()` builds one: a message and the values a screen
+  // needs. Detected by shape rather than by `instanceof`, because the object crosses
+  // module boundaries and `instanceof` is a statement about which copy of a class is
+  // in memory. `values` is spread as a nested field rather than flattened: the keys
+  // inside it are the warning's own and must not collide with the record's.
+  const warning = message !== null && typeof message === 'object' && typeof message.message === 'string'
+    ? message
+    : undefined
+  const text = warning === undefined ? message : warning.message
   await auditRecord('warning', 'warn', {
     ...fields,
-    message: truncate(redact(String(message ?? '')), MESSAGE_LIMIT),
+    ...(warning === undefined ? {} : { code: warning.code, values: warning.values }),
+    message: truncate(redact(String(text ?? '')), MESSAGE_LIMIT),
   })
 }
 

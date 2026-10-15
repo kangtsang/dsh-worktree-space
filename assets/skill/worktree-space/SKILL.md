@@ -1,5 +1,5 @@
 ---
-name: task-worktree-space
+name: worktree-space
 description: Use when the user starts a task or feature spanning one or more repositories and wants the work isolated in its own git worktree workspace rather than the source checkouts - multi-repo, parallel sessions, an isolated branch - or asks to list, merge or clean up a finished task, or to deploy a task's services to a Docker environment for acceptance - 部署验收, 隔离环境, 验收地址. Chinese phrasings that mean the same include 多仓库并行开发、独立工作目录、工作区隔离、任务空间、Worktree Space、收尾合并清理、部署验收.
 ---
 
@@ -142,7 +142,7 @@ Follow this order. Never create a workspace with a guessed location.
 10. **Report where it is, and say which entry opens the session.** When this call
    opened one, name the session id it answered with — the same id is now written into
    the task's record, and `action: "list"` reports it — and use it to watch or correct
-   that session (see "Watching a session you dispatched" below). When it did not, a
+   that session (see "Watching the member session" below). When it did not, a
    session is opened by hand — the panel's **Create and open** in the Worktree Space
    dialog, or picking the registered Workspace in the workspace list. Report the task
    directory path and the branch name, then name that entry rather than leaving the
@@ -157,6 +157,18 @@ Follow this order. Never create a workspace with a guessed location.
 11. **Work in the task directory**: it is where the task's session belongs.
 
 ### Putting a session on the work
+
+Two roles are named from here on. **You are the leader agent** (the leader): the session
+that creates the task space and dispatches the work. **The session you dispatch into it is
+the member agent** (the member); its session is the **member session**, also called the
+**task session** — the same session under two names.
+
+Choose between those two names by context, because both are accurate and neither is a
+correction of the other. **Use the member wording when the two are set against each
+other** — who talks to whom, who reports to whom, who watches whom — where the pairing
+gives the sentence a foil and makes the relation plain at a glance. **Use task session
+everywhere else**, where no role relation is in play and the plainer name is more direct.
+Do not mix the two names inside one sentence.
 
 A session is a conversation with its own context: it does not see this one, so the
 `prompt` has to stand alone. Two ways to open one, and they differ only in *when*:
@@ -185,9 +197,9 @@ open, and the work is the user's to start.
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
 
-### Watching a session you dispatched (and correcting it)
+### Watching the member session (and correcting it)
 
-A dispatched session is **not your child**: it has its own context and its own approval
+The member session is **not your child**: it has its own context and its own approval
 gate, and `send_message` refuses it outright (`belongs to another parent session`).
 Reach it with the session-control tools instead. The id you need is already in hand —
 `create` and `dispatch` write it into the task's record, and `action: "list"` reports
@@ -284,9 +296,9 @@ worktrees of different repositories:
   for you and which the next point covers.
 - **Who finishes is the user's decision, and both flows work.** Either the session
   working in the task space calls `done` itself once the work is complete, or it
-  reports back and whoever dispatched it — or the user — calls it. The authorisation
-  runs down the chain: the user authorised the dispatching agent, which instructed the
-  session, so a session finishing the work it was told to do is that authorisation
+  reports back and the leader — or the user — calls it. The authorisation runs down the
+  chain: the user authorised the leader, which instructed the member session, so a session
+  finishing the work it was told to do is that authorisation
   carried out, not a decision of its own. **Ask which flow is wanted when it is not
   stated**, because the two differ in one way that matters: `done` is atomic.
   - A session that finishes its own work is **not** its own blocker: the E5012 guard
@@ -428,16 +440,16 @@ while it is unsatisfied (E5006), this tool has no override to send, and the user
 | Flow | How it goes | What it costs |
 | --- | --- | --- |
 | **The session finishes its own work** | the session in the task space calls `done` when the work is complete, resolving any conflict itself | nothing — and it is the one that can resolve a conflict in the isolated checkout, where the merge is rehearsed |
-| **The dispatcher finishes** | the session reports back; the agent that dispatched it, or the user, calls `done` | one more round trip, and whoever calls it is not looking at the work |
+| **The leader finishes** | the member session reports back; the leader, or the user, calls `done` | one more round trip, and whoever calls it is not looking at the work |
 
 The plugin does not prefer either and does not restrict either. **The authorisation runs down
-the chain**: the user authorised the dispatching agent, which instructed the session, so a
+the chain**: the user authorised the leader, which instructed the member session, so a
 session finishing the work it was told to do is that authorisation carried out. What it must
 not do is invent one — merge only where the work was asked to land, and ask when the brief
 does not say which flow is wanted.
 
 Both flows are reachable: the E5012 guard counts the sessions working in the task space
-**except the caller**, so a session that calls `done` mid-turn is not refused with itself as
+**except the caller**, so the member session that calls `done` mid-turn is not refused with itself as
 the blocker. Other sessions in there still are.
 
 **`merge` is required — `done` refuses a call that omits it (E7006).** Pass `merge: true`
@@ -457,7 +469,7 @@ what each is doing (running, mid-turn, or holding queued work). **Stop them firs
 doing before you stop it. If the work is not meant to stop, leave the task space standing —
 nothing has been removed, and it is still there.
 
-**The caller is not one of those sessions.** A session finishing its own work is running, with a
+**The caller is not one of those sessions.** The member session finishing its own work is running, with a
 turn open, inside the task space it is asking to remove — so it is left out of the count, and
 `done` from inside the working turn is not refused with the caller as its own blocker. (That is
 what makes the session-finishes-its-own-work flow reachable at all; cancelling yourself first
@@ -480,8 +492,10 @@ Worktree Space panel can do it, where the box says what it costs. When the user 
 for the leftovers to be thrown away, tell them to finish from the panel; do not
 substitute `archive` silently either, because that is a different outcome than the one
 they asked for. `keepEntries` names individual entries to leave alone whatever
-`strays` says, and `documentsDirectory` says where `archive` files them (the panel
-passes the whole path it showed the user).
+`strays` says. Where `archive` files them is not this call's to name: they go to
+the archive directory the plugin is configured with, or to the plugin's own
+`archived-docs` folder under the container root when none is set, and the panel's
+finish dialog shows the user that path before they confirm.
 
 Name the task's own layer as well as the container: pass `tasksRoot` (the container
 root), `task`, and `project` — the source root's directory name. Passing `sourceRoot`
@@ -516,7 +530,7 @@ Confirm each destructive step with the user before passing it:
    `uncommitted work is waiting in <path>`. **Read the flag, not the sentence.**
    Nothing is committed until someone who has read the changes writes the message, and
    that is the job of the session working in the task space. In the panel it is the
-   user pressing **Hand the commits to the agent**; from a `done` you dispatched, it is
+   user pressing **Hand the commits to the agent**; from a `done` the leader dispatched, it is
    yours to route: `wts_session_tool_send` with `mode: "steer"` to the session id the
    finish answers with (or `wts_session_tool_find` by the checkout's directory; open one
    with `wts_session_tool_create` when the record names none), asking it to commit in
@@ -536,7 +550,7 @@ Confirm each destructive step with the user before passing it:
    The commits do not carry the finish on by themselves either: once that session
    stops the plugin reads the plan again, and where the worktrees have all come back
    clean the panel says the commits are done under a green light and waits for the
-   user's own **Finish task** press — the step after it is the merge. From a `done` you
+   user's own **Finish task** press — the step after it is the merge. From a `done` the leader
    dispatched, call `done` again once the session reports the commits are in — or let
    that session call it, if it was told to finish its own work.
 
@@ -554,7 +568,7 @@ Confirm each destructive step with the user before passing it:
 3. **A conflict?** The answer for a repository left on a conflict is flagged
    **`mergeInProgress: true`**, and reports `mergeSite` — the checkout the conflict
    stands in, inside the task space — and `conflictedFiles`. The panel opens it with
-   **Hand the conflict to the agent**; from a `done` you dispatched, route it the same
+   **Hand the conflict to the agent**; from a `done` the leader dispatched, route it the same
    way as step 2 (`wts_session_tool_send`, `mode: "steer"`, to the session the finish
    named). That session is
    shared by every conflicting repository and works in the common ancestor of their

@@ -25,10 +25,10 @@ import { ERROR_CODES, coded } from './codes.js'
 import { sourceFacts } from './create.js'
 import { isSourceRepository } from './discover.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
-import { validateProjectName } from './naming.js'
+import { validateProjectName, validateRepositoryDirectoryName } from './naming.js'
 import { isInside, refuseDelete, samePathLocation } from './paths.js'
 
-import { TASK_METADATA, TASK_README, listTaskWorktrees, pluginRootPath, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { TASK_METADATA, TASK_README, isLinkedWorktree, listTaskWorktrees, pluginRootPath, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /**
  * The branch every repository of a task shares, read from the container itself.
@@ -127,11 +127,20 @@ function assertAddIsolated(taskPath, repoPath, name) {
  * worktree. The task's own worktrees are not touched, and neither is its metadata:
  * the record is only written once every worktree exists, so a failure before that
  * leaves nothing to undo.
+ *
+ * Removing the worktree is only half of what has to go back. `worktree add -b` made
+ * the branch, and git does not delete a branch with the checkout that held it, so the
+ * branch is deleted here too - the same second step `create.js` takes. Left behind it
+ * keeps the name, and the name is the one thing a later create or add cannot work
+ * around: the next attempt at this task is refused as a branch already in use, in
+ * every repository the branch reached, with nothing in the plugin able to clear it.
  * @param subprocess - the profile's subprocess service.
+ * @param tasksRoot - the container root, the fence every removal is held to.
+ * @param branch - the branch this call created with `worktree add -b`.
  * @param created - the worktrees this call made, in the order it made them.
- * @returns the names of the worktrees that could not be removed.
+ * @returns the names of the worktrees, or branches, that could not be taken back.
  */
-async function rollbackAdded(subprocess, tasksRoot, created) {
+async function rollbackAdded(subprocess, tasksRoot, branch, created) {
   const stranded = []
   for (const entry of created) {
     // Same fence as everywhere else: git does this removal, so nothing else in
@@ -139,8 +148,45 @@ async function rollbackAdded(subprocess, tasksRoot, created) {
     // this call created.
     const refused = refuseDelete(tasksRoot, entry.path, `the worktree '${entry.name}'`)
     if (refused !== '') { stranded.push(entry.name); continue }
-    if (!(await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path]))) {
+    const removed = await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path])
+    if (!removed && await isLinkedWorktree(entry.path)) {
+      // A checkout git really made that this call could not take back: a leftover in its
+      // own right, and still holding the branch, so the branch is left alone - git refuses
+      // to delete one a worktree has checked out, and claiming otherwise would report a
+      // removal that did not happen.
+      //
+      // The disk is what decides this, and that is the correction to the obvious reading
+      // of "a worktree git never created is simply reported as stranded". The entry is in
+      // this list because it was pushed BEFORE `worktree add` ran - so a checkout git made
+      // and then failed on is inside this rollback's scope - and that also puts entries
+      // here for a refusal before anything was made at all. Reporting one of those as
+      // stranded names a leftover that is not on disk, and `create.js` has the sharper
+      // version of the same consequence: a non-empty `stranded` keeps the container, which
+      // with no record takes the name for good. So only a real checkout is a leftover.
       stranded.push(entry.name)
+      continue
+    }
+    if (!removed) {
+      // No checkout on disk, so git never got as far as registering one - but git creates
+      // the ref BEFORE the checkout, so a branch with this name can still have been left
+      // behind, and an orphan branch takes the name exactly as an orphan worktree does.
+      // Whether it is really there is asked rather than assumed: with nothing holding it,
+      // `-D` fails for the only reason it ever fails there - no such branch - which is the
+      // ordinary answer for a refusal that never began, and not a leftover to report.
+      if (await gitSucceeded(subprocess, entry.repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+        && !(await gitSucceeded(subprocess, entry.repoPath, ['branch', '-D', '--', branch]))) {
+        stranded.push(`${entry.name}'s branch ${branch}`)
+      }
+      continue
+    }
+    // Only after the worktree is gone: a worktree still on disk is still holding this
+    // branch, and git would refuse to delete it. The removal succeeded, so this call's own
+    // `worktree add` did make the branch, and `-D` is unconditional rather than gated on a
+    // second question. `-D` because the branch has no commits of its own yet and can have
+    // none now, and `--` for the reason archive.js gives - this is one of the calls here
+    // that leaves the container.
+    if (!(await gitSucceeded(subprocess, entry.repoPath, ['branch', '-D', '--', branch]))) {
+      stranded.push(`${entry.name}'s branch ${branch}`)
     }
   }
   return stranded
@@ -241,11 +287,19 @@ export async function addTaskRepositories(subprocess, options) {
   for (const raw of repositories) {
     const repoPath = typeof raw === 'string' ? raw.trim() : ''
     if (repoPath === '') throw coded('E4005', 'a repository path is required')
-    const name = basename(repoPath)
+    // The name this repository would take in the task space, checked as the
+    // directory name it is before anything else is asked about it. `taken` below
+    // catches a collision with a worktree the task already has, but it cannot catch
+    // a collision with the plugin's *own* entries - `.worktree-space` is not a
+    // worktree, so nothing in that set is it, and a repository by that name would
+    // put a checkout where the record and the deploy root live. `basename` returning
+    // `.` or `..` is refused for the same reason: `join(taskPath, '..')` is the
+    // project layer, one level above the task space.
+    const name = validateRepositoryDirectoryName(basename(repoPath))
     // Two of the repositories being added, before the ones the task already has:
     // the first is a choice this request made twice, the second is a name the task
     // took before it, and they are fixed differently.
-    if (selected.some((entry) => basename(entry) === name)) {
+    if (selected.some((entry) => entry.name === name)) {
       throw coded('E4002', `two of the repositories to add are both named '${name}'`)
     }
     if (taken.has(name)) {
@@ -265,7 +319,10 @@ export async function addTaskRepositories(subprocess, options) {
       throw coded('E3002', `base '${start}' not found in '${name}'`)
     }
     taken.add(name)
-    selected.push(repoPath)
+    // The validated name travels with the path rather than being recomputed at the
+    // copy: the guard above approved one string, and a second `basename` at the join
+    // would be a second answer to the same question.
+    selected.push({ repoPath, name })
   }
 
   // Read before the first worktree exists, so a rollback has the record as it was
@@ -277,8 +334,7 @@ export async function addTaskRepositories(subprocess, options) {
 
   const created = []
   try {
-    for (const repoPath of selected) {
-      const name = basename(repoPath)
+    for (const { repoPath, name } of selected) {
       const worktreePath = join(taskPath, name)
       // The source facts describe the checkout the worktree is cut from, so they
       // are read before the branch exists, exactly as a create reads them.
@@ -286,14 +342,47 @@ export async function addTaskRepositories(subprocess, options) {
       const args = start === undefined
         ? ['worktree', 'add', worktreePath, '-b', branch]
         : ['worktree', 'add', worktreePath, '-b', branch, start]
-      await runGit(subprocess, repoPath, args)
+      // Pushed BEFORE git runs, for the same reason `create.js` does it: `worktree add`
+      // can create the branch and the directory and then fail, and a half-made worktree
+      // that is not in this list is one the rollback never removes. Here the container
+      // belongs to a task that already exists, so the cost is a stray checkout rather
+      // than a lost name - but the branch it holds would still be left behind, and the
+      // rollback is what reports either. The two call sites are the same omission and
+      // are kept in step; see `rollbackAdded` for how an entry git never created is
+      // told from one it did.
       created.push({ name, path: worktreePath, repoPath, ...facts })
+      await runGit(subprocess, repoPath, args)
     }
 
     await writeTaskMetadata(taskPath, {
       ...recorded,
       branch,
-      baseRef: start ?? recorded.baseRef ?? null,
+      // The task's `baseRef` is NOT rewritten by an add, and that is the whole of this
+      // line's job. It used to read `start ?? recorded.baseRef ?? null`, which let one
+      // add that named a base overwrite the fact the CREATE recorded - so a task created
+      // from `main` and later extended with `baseRef: v1.2.0` would have its record say
+      // it was based on `v1.2.0`, and the repositories added at create time would be
+      // described by a base they were never cut from.
+      //
+      // It is not that both values are unknowable; it is that the field answers one
+      // question - "where did this task start" - and an add does not change the answer.
+      // What this call used is a fact about the repositories *this call* added, and it is
+      // already recorded on those entries: `startCommit` is the commit each checkout was
+      // actually cut from, which is a stronger statement than the ref that named it. A
+      // separate per-entry `baseRef` is deliberately NOT written - nothing reads it, and a
+      // field that is only ever written is one no test can hold to an interpretation.
+      //
+      // The field has exactly one writer (the create) and one reader (the note rendered
+      // for a session), which is what makes "one question, one writer" true here rather
+      // than aspirational. The base this call used is reported to the caller as
+      // `result.baseRef` and recorded in the audit line, so the fact is not lost - it is
+      // just not written into the task's identity, where it would be a second answer to a
+      // question the create already answered.
+      //
+      // `recorded.baseRef ?? null` is kept rather than dropped: it normalises a record
+      // that predates the field, and `null` is what `taskMetadata` writes for "no base was
+      // named", so a rewritten record keeps the same shape it was read with.
+      baseRef: recorded.baseRef ?? null,
       repositories: [
         ...(Array.isArray(recorded.repositories) ? recorded.repositories : []),
         ...created.map((entry) => ({
@@ -307,7 +396,7 @@ export async function addTaskRepositories(subprocess, options) {
       ],
     })
   } catch (error) {
-    const stranded = await rollbackAdded(subprocess, tasksRoot, created)
+    const stranded = await rollbackAdded(subprocess, tasksRoot, branch, created)
     await restoreMetadata(taskPath, previousJson, previousReadme)
     const suffix = stranded.length === 0 ? '' : ` (could not roll back: ${stranded.join(', ')})`
     // One code, decided here, for the record below and the error the caller

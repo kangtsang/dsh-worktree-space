@@ -6,8 +6,8 @@ import { coded, UNKNOWN } from './task/codes.js'
 import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
 import { resolveDeliveryPolicy } from './task/delivery.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
-import { mapWithLimit } from './task/concurrency.js'
-import { isInside } from './task/paths.js'
+import { mapWithLimit, SCAN_CONCURRENCY } from './task/concurrency.js'
+import { absolutePath, canonicalPath, isInside } from './task/paths.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
@@ -19,7 +19,7 @@ import { SessionWatch } from './session-watch.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
-export { detectDefaultBranch, parseWorktrees, runGit } from './task/git.js'
+export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
@@ -57,8 +57,8 @@ export const ok = (value) => ({ ok: true, value })
 // would then have to handle a distinction this side does not maintain. A test
 // asserts the two lists stay in step.
 export const PUBLIC_ERROR_CODES = new Set([
-  'E1001', 'E1002', 'E1003', 'E1004', 'E1005',
-  'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006',
+  'E1001', 'E1002', 'E1003', 'E1004', 'E1005', 'E1006',
+  'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006', 'E2007',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
   'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
@@ -103,67 +103,28 @@ export const cleanPath = (value) => {
 /**
  * Directory names a scan walks straight past.
  *
- * A build output directory holds no repository the user wants, but it holds a
- * great many directories - `node_modules` alone is tens of thousands - and each
- * one spends a share of {@link MAX_SCAN_DIRECTORIES}. So these are not a
- * nicety; on a Workspace that holds real projects, the difference between
- * skipping them and not is the difference between a scan that answers and one
- * that gives up with E4006.
+ * Defined in `task/scan-bounds.js` and re-exported here, because the task-side
+ * walk has to honour the same list and cannot import this module: the entry
+ * imports the task side, so a list owned here could only reach it by a cycle.
+ * While the two each had their own copy they disagreed, and the disagreement was
+ * invisible - a caller that passes its bounds explicitly never reads the default
+ * at all, so the two lists only came apart on the one call path that forgot to.
  *
- * Dot-directories need no entry: {@link discoverGitRoots} already skips anything
- * beginning with `.`, which covers `.venv`, `.gradle`, `.tox`, `.next`,
- * `.dart_tool`, `.stack-work` and the rest of that family. What is here is the
- * half that does not start with a dot.
- *
- * The list is a starting point rather than a rule - the user edits it on the
- * Plugins page - so nothing in it has to be defensible as permanent, only as a
- * good default. Names were left out where the same word is a place people keep
- * source: `bin` holds scripts in too many projects, `env` is a Django
- * `settings` directory as often as a virtual environment, and `out` means
- * whatever the build in front of you says it means.
+ * Imported as well as re-exported, because a re-export declares no local binding:
+ * `ignoredScanDirectorySet` below reads the list for itself, `scanBounds` reads the
+ * set, and `discoverGitRoots` reads both as parameter defaults.
  */
-const DEFAULT_IGNORED_SCAN_DIRECTORIES = [
-  // JavaScript and the web
-  'node_modules', 'dist', 'build', 'coverage', 'storybook-static',
-  // Python
-  '__pycache__', 'site-packages',
-  // The JVM, Rust, Scala, Clojure: Cargo and Maven agree on the name
-  'target',
-  // .NET
-  'obj', 'packages',
-  // Apple
-  'Library', 'DerivedData', 'Pods',
-  // PHP, and the dependency trees other ecosystems fetch into the project
-  'vendor', 'deps', 'elm-stuff',
-  // Haskell, Elixir, OCaml, Perl, Zig
-  'dist-newstyle', '_build', 'blib', 'zig-out',
-  // Unreal, which capitalises its generated directories
-  'Binaries', 'Intermediate', 'DerivedDataCache',
-  // This plugin's own task container, under both of the names it takes.
-  //
-  // Registering the container root as a Workspace is how the sessions a finish hands
-  // an agent end up under one group rather than in Ungrouped, and that puts the
-  // container in the set of roots a scan walks. What is in it is task spaces, which
-  // are linked worktrees of repositories the scan has already found elsewhere, and
-  // archived documents - so walking it spends budget on directories that hold no
-  // repository of their own. Named rather than skipped by path because a scan is
-  // handed Workspace roots and walks them: the name is the only thing left to compare.
-  // A user whose own directory is called this and does hold repositories can take the
-  // name back off this list on the Plugins page, which is what that setting is for.
-  'worktree-space', 'dsh-worktree-space',
-]
+import {
+  DEFAULT_IGNORED_SCAN_DIRECTORIES,
+  DEFAULT_IGNORED_SCAN_DIRECTORY_SET,
+  DEFAULT_SCAN_DEPTH,
+  MAX_SCAN_DIRECTORIES,
+  MAX_SCAN_DIRECTORIES_CEILING,
+  MIN_SCAN_DEPTH,
+  MAX_SCAN_DEPTH,
+} from './task/scan-bounds.js'
 
-/**
- * The names above, as the walk compares them.
- *
- * Case-insensitively, because the comparison is against directory names as the
- * filesystem reports them and those differ by platform: `Pods` and `Pods` are
- * different directories on a case-sensitive volume and the same one on macOS.
- * Matching one way would make this list mean different things depending on where
- * DSH runs, and a user who typed `deriveddata` expecting Xcode's folder to be
- * skipped would be right on Windows and wrong on Linux.
- */
-export const DEFAULT_IGNORED_SCAN_DIRECTORY_SET = new Set(DEFAULT_IGNORED_SCAN_DIRECTORIES.map((name) => name.toLowerCase()))
+export * from './task/scan-bounds.js'
 
 /**
  * The names in force: the ones the Host ships, less any that have been turned
@@ -201,8 +162,6 @@ export function ignoredScanDirectorySet(added, removed) {
 }
 
 /** Scan bounds. The Web UI offers these depths, and the Host enforces them. */
-export const MIN_SCAN_DEPTH = 1
-export const MAX_SCAN_DEPTH = 5
 /**
  * Three, not two.
  *
@@ -213,10 +172,32 @@ export const MAX_SCAN_DEPTH = 5
  * empty directory rather than one holding repositories it could not reach. Three
  * is still bounded by the same ceiling: the cost is the directories walked, and
  * the ceiling is on those, not on the depth.
+ *
+ * Re-exported from `task/scan-bounds.js`, which `export *` above puts back on this
+ * module's public surface: the task-side walk reads the same number and may not
+ * import this module.
  */
-export const DEFAULT_SCAN_DEPTH = 3
-/** Directories one scan may inspect before it refuses to guess any further. */
-export const MAX_SCAN_DIRECTORIES = 2000
+/**
+ * Directories one scan may inspect before it refuses to guess any further.
+ *
+ * The ceiling is the top option the configuration card offers, and it is a ceiling
+ * rather than a default for the reason `scanDepth` has one: a scan is a walk of
+ * somebody's disk, so the number is a promise about how much of it this plugin will
+ * touch. Without it a configuration holding a huge value - written by hand, or by a
+ * client that never saw the card - is honoured literally, and `worktree.cached`
+ * reports that number back as if it were a plan.
+ *
+ * It is exactly `DIRECTORY_LIMITS`' own top entry in
+ * `src/client/components/PluginConfigCard.tsx`, which is also the list both READMEs
+ * document, so no document has to change and the card cannot offer a value the
+ * schema refuses.
+ *
+ * Re-exported rather than declared, so the walk that falls back to a bound when
+ * its caller names none reads the same number this clamps to. The two used to be
+ * written separately, which meant the fallback could describe a ceiling the
+ * user's own setting was unable to reach. `export *` above is what re-exports
+ * these; the names are imported so the code below reads the same values.
+ */
 
 /**
  * Repositories asked about at once, and classifications the same.
@@ -225,8 +206,13 @@ export const MAX_SCAN_DIRECTORIES = 2000
  * disk is also running the editor and the build. Enough to stop waiting on the
  * slowest one, few enough that adding repositories costs time rather than
  * throughput.
+ *
+ * Re-exported rather than declared: the task side spawns the same git processes and
+ * may not import this module, so the number lives in the leaf both sides can read
+ * (`task/concurrency.js`). Keeping the name here is what leaves every existing
+ * importer of it unchanged.
  */
-export const SCAN_CONCURRENCY = 6
+export { SCAN_CONCURRENCY }
 
 /**
  * The configuration this entry is running under, exactly as `apply` was handed it.
@@ -267,7 +253,14 @@ function scanBounds() {
   const removed = settingValue(appliedConfig.removedScanDirectories)
   return {
     depth: resolveScanDepth(settingValue(appliedConfig.scanDepth)),
-    directories: Number.isFinite(directories) ? Math.max(1, Math.trunc(directories)) : MAX_SCAN_DIRECTORIES,
+    // Clamped the way the depth above is, and for the same reason: the schema is a
+    // promise about what a *new* configuration may hold, while this is what the walk
+    // actually obeys. A profile whose stored value predates the ceiling - or was
+    // written straight into the file - still reads through this line, so the walk is
+    // bounded even when the schema never saw the value.
+    directories: Number.isFinite(directories)
+      ? Math.min(MAX_SCAN_DIRECTORIES_CEILING, Math.max(1, Math.trunc(directories)))
+      : MAX_SCAN_DIRECTORIES,
     // A value that is not a list is not a list of names to honour, so the built-in
     // ones stand rather than the walk going past nothing.
     ignored: Array.isArray(added) || Array.isArray(removed)
@@ -730,7 +723,7 @@ export const Config = z.object({
   /** The Web UI's control is gone: this is the one place the depth is chosen. */
   scanDepth: z.number().min(MIN_SCAN_DEPTH).max(MAX_SCAN_DEPTH).step(1).default(DEFAULT_SCAN_DEPTH).volatile()
     .description('How many directory levels a scan descends from a Workspace root.'),
-  maxScanDirectories: z.number().min(1).step(1).default(MAX_SCAN_DIRECTORIES).volatile()
+  maxScanDirectories: z.number().min(1).max(MAX_SCAN_DIRECTORIES_CEILING).step(1).default(MAX_SCAN_DIRECTORIES).volatile()
     .description('Directories one scan may inspect before it stops looking.'),
   /**
    * Directory names a scan walks past, on top of the ones it always skips.
@@ -857,6 +850,37 @@ function settingValue(setting) {
   return setting
 }
 
+/**
+ * Whether a task space is registered as a DSH Workspace.
+ *
+ * The same question `task/tool.js` asks before it drops a registration, asked
+ * here for the opposite purpose: a rollback skips the session guard, and the
+ * skip is granted on the registry's own answer rather than on the caller's word.
+ *
+ * `false` means "not registered", which is the answer that lets a rollback
+ * through - and it is also what every failure returns: no `ctx.get`, no
+ * registry service, no `list` on it, or a list that throws. The asymmetry is
+ * deliberate and matches the plugin's standing rule that a gate may distrust an
+ * agent but must never block the user: an unreadable registry cannot be told
+ * apart from an unregistered task space, so it must not be the reason a real
+ * rollback is refused. Every failure mode of reading the registry therefore
+ * fails towards the user being able to finish.
+ * @param ctx - the host plugin context.
+ * @param taskPath - the task space whose registration is in question.
+ * @returns whether an entry for that path is in the registry's list.
+ */
+function isRegisteredTaskSpace(ctx, taskPath) {
+  try {
+    if (typeof ctx.get !== 'function') return false
+    const registry = ctx.get('workspaceRegistry')
+    if (registry === null || registry === undefined || typeof registry.list !== 'function') return false
+    const target = canonicalPath(taskPath)
+    return registry.list().some((entry) => entry !== null && entry !== undefined && canonicalPath(entry.path) === target)
+  } catch {
+    return false
+  }
+}
+
 export function apply(ctx, config = {}) {
   // Held, not read. The walk limits are resolved by `scanBounds()` at the moment a
   // walk starts, because this is set from the Plugins page while the entry is
@@ -926,9 +950,9 @@ export function apply(ctx, config = {}) {
   // callback returns the registration's disposer so cordis tears the tool down
   // with the plugin instead of leaking it.
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }))
+    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }))
   } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher })
+    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher })
   }
 
   // The session-control tools: finding, watching, reading, messaging, resuming
@@ -999,7 +1023,10 @@ export function apply(ctx, config = {}) {
       // could not answer says so in its own reply, and is not written down anywhere:
       // the log is a record of task spaces, and a scan is not one. That drop is
       // deliberate; see audit-log.js.
-      const porcelain = await runGit(ctx.subprocess, path, ['worktree', 'list', '--porcelain'], { log: false })
+      // The request's own signal travels with the call, so closing the panel stops a
+      // git process already in flight rather than only the walk that would have
+      // started the next one. It costs nothing here: the handler already holds it.
+      const porcelain = await runGit(ctx.subprocess, path, ['worktree', 'list', '--porcelain'], { log: false, signal })
       const worktrees = parseWorktrees(porcelain)
       // No fallback to a `rev-parse`: an empty porcelain is git saying this
       // directory has no worktrees, which is a repository that will not answer,
@@ -1111,15 +1138,19 @@ export function apply(ctx, config = {}) {
     })
 
     if (endpoint === 'worktree.status') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      // Resolved on the way in: this is an externally supplied path, and everything
+      // below it - the git calls, the remembered status, the panel's own comparison
+      // against a Workspace row - has to be talking about one location rather than
+      // about one of the several spellings a caller can send for it.
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'Worktree path is required.')
       const target = typeof payload.target === 'string' ? payload.target.trim() : ''
       // Two independent questions, asked together. The commit count is a range
       // over refs and never reads the status output, so running it after the
       // status was pure queueing.
       const [output, ahead] = await Promise.all([
-        runGit(ctx.subprocess, path, ['status', '--short', '--branch']),
-        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['rev-list', '--count', `${target}..HEAD`]),
+        runGit(ctx.subprocess, path, ['status', '--short', '--branch'], { signal }),
+        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['rev-list', '--count', `${target}..HEAD`], { signal }),
       ])
       const lines = output ? output.split(/\r?\n/) : []
       // What this worktree would carry back: everything on its HEAD the named branch
@@ -1139,7 +1170,7 @@ export function apply(ctx, config = {}) {
     })
 
     if (endpoint === 'task.classify-root') return recover(async () => {
-      const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
+      const sourceRoot = absolutePath(payload.sourceRoot)
       if (!sourceRoot) throw coded('E4004', 'A source root is required.')
       return classifySourceRoot(sourceRoot, { signal })
     })
@@ -1165,10 +1196,13 @@ export function apply(ctx, config = {}) {
     })
 
     if (endpoint === 'task.suggest-root') return recover(async () => {
-      const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
+      // Both are externally supplied paths, and both are compared - the source root
+      // against the recommendation and the recommendation against it - so both are
+      // resolved here, at the one place the request is read.
+      const sourceRoot = absolutePath(payload.sourceRoot)
       if (!sourceRoot) throw coded('E4004', 'A source root is required.')
       return suggestTaskRoot(ctx.subprocess, sourceRoot, {
-        tasksRoot: payload.tasksRoot,
+        tasksRoot: absolutePath(payload.tasksRoot),
         // An unnamed prefix is the configured one, not the built-in: the suggestion
         // is what the create dialog shows, and it must show the same default the
         // request will fall back to.
@@ -1178,6 +1212,9 @@ export function apply(ctx, config = {}) {
         // Likewise for the location, so the dialog opens on the container root the
         // configuration names instead of on the one it would otherwise derive.
         configuredRoot: configuredTasksRoot(),
+        // Closing the dialog should stop the walk it asked for, the same way it stops
+        // the classification: the signal is the request's own.
+        signal,
           // Same walk, same depth, same ignored names as the classification and
           // the create: the dialog previews what those two will act on.
           ...taskScanBounds(),
@@ -1243,7 +1280,10 @@ export function apply(ctx, config = {}) {
     })
 
     if (endpoint === 'task.create') return recover(async () => {
-      const sourceRoot = typeof payload.sourceRoot === 'string' ? payload.sourceRoot.trim() : ''
+      // Resolved here rather than deeper: `createTask` hands the source root to
+      // `assertIsolated` and to the repository walk, and both of those compare the
+      // path they are given rather than resolving it themselves.
+      const sourceRoot = absolutePath(payload.sourceRoot)
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
       if (!sourceRoot) throw coded('E4004', 'A source root is required.')
       if (!task) throw coded('E4003', 'A task name is required.')
@@ -1253,7 +1293,7 @@ export function apply(ctx, config = {}) {
       return createTask(ctx.subprocess, {
         sourceRoot,
         task,
-        tasksRoot: payload.tasksRoot,
+        tasksRoot: absolutePath(payload.tasksRoot),
         repos,
         baseRef: typeof payload.baseRef === 'string' ? payload.baseRef.trim() : undefined,
         deployScript: payload.deployScript,
@@ -1291,8 +1331,11 @@ export function apply(ctx, config = {}) {
       return addTaskRepositories(ctx.subprocess, {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
-        tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
-        repositories,
+        tasksRoot: absolutePath(payload.tasksRoot),
+        // Each of these is compared against the task space - `assertAddIsolated` asks
+        // whether one holds the other - so each is resolved here, at the boundary,
+        // rather than left as whatever spelling the caller sent.
+        repositories: repositories.map(absolutePath),
         baseRef: typeof payload.baseRef === 'string' && payload.baseRef.trim() !== ''
           ? payload.baseRef.trim()
           : undefined,
@@ -1306,12 +1349,12 @@ export function apply(ctx, config = {}) {
     // can see, so it can offer to register or clean up instead of reporting a name
     // clash the user can only answer by hand.
     if (endpoint === 'task.list') return recover(async () => {
-      const tasksRoot = typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : ''
+      const tasksRoot = absolutePath(payload.tasksRoot)
       return listTasks(ctx.subprocess, { tasksRoot })
     })
 
     if (endpoint === 'task.inspect') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'A task path is required.')
       return inspectTask(path)
     })
@@ -1319,7 +1362,7 @@ export function apply(ctx, config = {}) {
     if (endpoint === 'task.plan') return recover(async () => {
       const task = typeof payload.task === 'string' ? payload.task.trim() : ''
       if (!task) throw coded('E4003', 'A task name is required.')
-      const tasksRoot = typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : ''
+      const tasksRoot = absolutePath(payload.tasksRoot)
       const project = typeof payload.project === 'string' ? payload.project : ''
       const plan = await planTask(ctx.subprocess, {
         task,
@@ -1347,22 +1390,41 @@ export function apply(ctx, config = {}) {
       // and a guard on one door only would let the person-driven path do what the model is
       // refused - which is the wrong way round.
       //
-      // Skipped for a rollback (`cause`), and that exception is the point rather than a hole:
-      // a rollback is undoing a create whose Workspace would not register, so there is no
-      // finished work to protect and no session on it - and refusing it would leave the
-      // half-made task space the rollback exists to remove. Nothing else may skip it.
+      // Skipped for a rollback (`cause`), but the skip is granted on the registry's
+      // own answer rather than on the caller's word. A real rollback undoes a create
+      // whose Workspace would not register, so the task space is not in the workspace
+      // list - which the host can check for itself. `cause` alone bought nothing
+      // before this: any caller could send a non-empty string and walk past the
+      // guard on a task space that is registered, has finished work and may have a
+      // session on it.
+      //
+      // A registered task space is not a rollback, so the guard runs. An unregistered
+      // one is, so the guard is skipped exactly as before. When registration cannot be
+      // determined - no registry service, an unreadable list, no `ctx.get` - the guard
+      // is also skipped, deliberately: an undeterminable registry must not block the
+      // user, and it cannot block a real rollback. Nothing else may skip it.
+      const taskPath = taskSpacePath(
+        absolutePath(payload.tasksRoot),
+        typeof payload.project === 'string' ? payload.project : '',
+        task,
+      )
       const rollback = typeof payload.cause === 'string' && payload.cause.trim() !== ''
-      if (!rollback) {
-        refuseWhileSessionsWork(ctx, taskSpacePath(
-          typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
-          typeof payload.project === 'string' ? payload.project : '',
-          task,
-        ))
+      // Whether this finish is subject to the session guard at all, decided once so the
+      // early refusal and the one inside the lock cannot disagree. A rollback that the
+      // registry says is unregistered skips both; everything else runs both.
+      const guardSessions = !rollback || isRegisteredTaskSpace(ctx, taskPath)
+      if (guardSessions) {
+        refuseWhileSessionsWork(ctx, taskPath)
       }
       return finishTask(ctx.subprocess, {
         task,
         project: typeof payload.project === 'string' ? payload.project : '',
-        tasksRoot: typeof payload.tasksRoot === 'string' ? payload.tasksRoot.trim() : '',
+        tasksRoot: absolutePath(payload.tasksRoot),
+        // The guard above is the early refusal. Handing the same context on is what lets
+        // the finish ask again inside its own lock, where the answer cannot go stale
+        // between the question and the removal - see `finishTask`. Passed only when the
+        // guard applies, so a rollback that skips the early check skips both.
+        ...(guardSessions ? { ctx } : {}),
         // The panel always says whether to merge, so this is a plain boolean: there is
         // no record left to answer for it, and no default to fall back on.
         merge: payload.merge === true,
@@ -1381,6 +1443,10 @@ export function apply(ctx, config = {}) {
         // deleting the user's own files.
         strays: typeof payload.strays === 'string' ? payload.strays : undefined,
         keepEntries: Array.isArray(payload.keepEntries) ? payload.keepEntries.filter((name) => typeof name === 'string') : [],
+        // Deliberately not resolved, unlike every other path on this endpoint: the
+        // archive destination's own rule is that a relative one is ignored and the
+        // container-root default answers instead (CR-05). Resolving it here would turn
+        // `docs/../x` into a real absolute destination and undo that refusal.
         documentsDirectory: typeof payload.documentsDirectory === 'string' ? payload.documentsDirectory : undefined,
         // The user's own overrule of the delivery gate, from the panel's
         // "finish anyway?" confirmation. The tool never sends it: the model's way
@@ -1401,11 +1467,11 @@ export function apply(ctx, config = {}) {
     // What the task's deployment looks like right now, read live: a dynamic port
     // changes with every deploy, so the panel asks rather than remembers.
     if (endpoint === 'task.deploy-status') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'A task path is required.')
       // The fallback is the caller's to ask for: reading it runs the deploy root's
       // own `status` command, which the panel pays for only on an explicit press.
-      return deploymentStatus(ctx.subprocess, path, { derive: payload.derive === true })
+      return deploymentStatus(ctx.subprocess, path, { derive: payload.derive === true, signal })
     })
 
     // Tear the task's environment down, best effort by label. The endpoint answers
@@ -1414,27 +1480,27 @@ export function apply(ctx, config = {}) {
     // rather than raising, because a partial teardown is a fact about docker, not
     // a reason the panel should show nothing.
     if (endpoint === 'task.deploy-destroy') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'A task path is required.')
-      return destroyDeployment(ctx.subprocess, path)
+      return destroyDeployment(ctx.subprocess, path, undefined, { signal })
     })
 
     // The one-click rebuild behind a destroyed (or never-deployed) card: the
     // task space's own deploy script, run with the environment id the record
     // already carries, so the rebuilt environment lands under the same name.
     if (endpoint === 'task.deploy-up') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'A task path is required.')
-      return deployEnvironment(ctx.subprocess, path)
+      return deployEnvironment(ctx.subprocess, path, { signal })
     })
 
     // Re-run the smoke through the task's own script. A failed smoke is a
     // result, not an error: the script records it and the card shows the red
     // badge - the panel needs the answer, whatever it is.
     if (endpoint === 'task.deploy-smoke') return recover(async () => {
-      const path = typeof payload.path === 'string' ? payload.path.trim() : ''
+      const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'A task path is required.')
-      return smokeEnvironment(ctx.subprocess, path)
+      return smokeEnvironment(ctx.subprocess, path, { signal })
     })
 
     return fail(UNKNOWN, `Unknown endpoint: ${endpoint}`)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import {
@@ -103,6 +103,64 @@ describe("discoverSourceRepos", () => {
       expect(await discoverSourceRepos(root, { maxDepth: 3 })).toContain(hidden)
     } finally {
       await cleanup()
+    }
+  })
+
+  // Section 6 lists "discoverSourceRepos follows symbolic links while the git
+  // side does not" as a defect. It is not one, and this is the evidence: the
+  // walk's own `!entry.isDirectory()` already refuses to descend a link, because
+  // `readdir` reports a link - to a file, to a directory, and a junction alike -
+  // with `isDirectory() === false`. Measured on Windows and Linux; the probe is
+  // reproduced below rather than asserted from memory.
+  it("does not descend a link, and reports why the two walks differ in wording", async () => {
+    const { root, cleanup } = await fixture()
+    const outside = await mkdtemp(join(tmpdir(), "multi-worktree-outside-"))
+    try {
+      await mkdir(join(outside, "elsewhere", ".git"), { recursive: true })
+      // A link out of the tree, and a link back into it: the second is the shape
+      // that turns a walk into one that never returns (`node_modules/.pnpm` is
+      // full of them), and the first is the one that leaves the tree entirely.
+      await symlink(outside, join(root, "escape"), "junction")
+      await symlink(join(root, "alpha"), join(root, "loop"), "junction")
+
+      // The premise this rests on, asserted rather than assumed: whatever
+      // `readdir` says about a link, it does not say "directory".
+      const entries = await readdir(root, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.name === "escape" || entry.name === "loop") {
+          expect(entry.isDirectory(), `${entry.name} must not read as a directory`).toBe(false)
+        }
+      }
+
+      const found = await discoverSourceRepos(root, { maxDepth: 5 })
+      expect(found).not.toContain(join(root, "escape", "elsewhere"))
+      expect(found).not.toContain(join(root, "loop", "beta"))
+      // The negative control: the links are skipped, not the whole walk. The
+      // repositories that really are in the tree are still found, so this cannot
+      // be satisfied by a walk that stopped at the first link it met.
+      expect(found).toContain(join(root, "alpha"))
+      expect(found).toContain(join(root, "beta"))
+    } finally {
+      await cleanup()
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it("skips a junction on a platform that cannot make a symbolic link", async () => {
+    // The clause above is only worth anything if the platform really refuses the
+    // link, so on a machine without the symlink privilege the fixture would be
+    // silently absent and the test above would pass for no reason. Creating the
+    // junction is therefore itself the assertion: it fails loudly here rather
+    // than letting the case evaporate.
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-link-"))
+    const target = await mkdtemp(join(tmpdir(), "multi-worktree-target-"))
+    try {
+      await symlink(target, join(root, "junction"), "junction")
+      const entries = await readdir(root, { withFileTypes: true })
+      expect(entries.find((entry) => entry.name === "junction")?.isDirectory()).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(target, { recursive: true, force: true })
     }
   })
 })

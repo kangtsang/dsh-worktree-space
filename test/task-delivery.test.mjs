@@ -20,7 +20,7 @@ import {
   normalizeDeliveryPolicy,
   resolveDeliveryPolicy,
 } from '../src/host/task/delivery.js'
-import { deployEnvironment, deploymentStatus, destroyDeployment, assertDeliveryGate } from '../src/host/task/deploy.js'
+import { deployEnvironment, deploymentStatus, deliveryStateSummary, destroyDeployment, assertDeliveryGate } from '../src/host/task/deploy.js'
 import { PLUGIN_ROOT, taskMetadata } from '../src/host/task/shared.js'
 
 const STATE = {
@@ -166,6 +166,123 @@ describe('the delivery gate', () => {
     expect(none.code).toBe('delivery-gate-bypassed')
     expect(none.values).toEqual({ missing: ['deployment', 'smoke'] })
   })
+
+  it('refuses a green smoke older than the deployment now standing', async () => {
+    // The stale-green shape: deploy A -> smoke passes -> edit -> deploy B. A's green light
+    // says nothing about B, and without a stamp of when this side last ran `up` it would
+    // open B's merge. `deployedAt` is written by the host, so a script cannot date a
+    // deployment that never happened.
+    const { root } = await taskFixture({
+      metadataDelivery: { deploy: { target: 'docker' } },
+      state: {
+        ...STATE,
+        lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' },
+        deployedAt: '2026-10-06T00:00:00Z',
+      },
+    })
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+      .rejects.toMatchObject({ code: 'E5006' })
+    // And it says which of the shapes it is, so the reader is not sent after a red smoke.
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+      .rejects.toThrow(/older than the last deployment/)
+    // The user's own overrule still steps over it: this is a warning to the user, never a
+    // wall, and a gate the user could not answer would leave them unable to finish at all.
+    const bypassed = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true, bypass: true })
+    expect(bypassed.code).toBe('delivery-gate-bypassed')
+  })
+
+  it('accepts a smoke taken in the same second as the deployment', async () => {
+    // The precision trap, pinned. `write-state.sh` stamps `lastSmoke.at` with whole seconds
+    // (`date -u +...%SZ`) while `toISOString()` carries milliseconds, so a stamp written in
+    // the same second would read as *older* than the deployment it followed - and refuse a
+    // merge that had just been smoked. `stampDeployedAt` truncates to seconds for exactly
+    // this; the fixture writes the same shape the script does.
+    const { root } = await taskFixture({
+      metadataDelivery: { deploy: { target: 'docker' } },
+      state: {
+        ...STATE,
+        // The deploy and the smoke it ran, both inside one second, script-style.
+        lastSmoke: { at: '2026-10-06T12:00:00Z', result: 'pass' },
+        deployedAt: '2026-10-06T12:00:00Z',
+      },
+    })
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
+  })
+
+  it('treats a deploy the host did not run as datable evidence, not as a refusal', async () => {
+    // `deployedAt` is absent for a deploy a session ran rather than this side. Refusing on
+    // its absence would refuse work the plugin never saw and cannot date - the panel would
+    // then have to talk the user out of a gate it invented.
+    const { root } = await taskFixture({
+      metadataDelivery: { deploy: { target: 'docker' } },
+      state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' } },
+    })
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
+  })
+})
+
+describe('the acceptance URL a state file recorded', () => {
+  /** The status a state file with one given `url` produces, with docker answering nothing. */
+  async function statusWithUrl(url) {
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url } })
+    const subprocess = { spawn: () => ({
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+    }) }
+    return deploymentStatus(subprocess, root)
+  }
+
+  it('answers the two readers the same way, which is what one accessor is for', async () => {
+    // These two used to disagree: the summary checked `typeof === 'string'` and the
+    // status took the value as it came, so the same state file produced a null in one
+    // answer and an object in the other. A shared accessor is the whole fix, and this
+    // is the assertion that says so.
+    for (const value of [{ evil: true }, 'javascript:alert(1)', 'http://127.0.0.1:8080/', null]) {
+      const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url: value } })
+      const subprocess = { spawn: () => ({
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }) }
+      const status = await deploymentStatus(subprocess, root)
+      const summary = await deliveryStateSummary(root)
+      expect(status.url, `url ${JSON.stringify(value)}`).toBe(summary.url)
+    }
+  })
+
+  it('reads a non-string as no URL rather than passing it through', async () => {
+    // The state file is written by a deploy script, so `url` is whatever JSON that
+    // script left. The panel renders this value, React refuses an object as a child,
+    // and the client registers no error boundary - so an object here did not paint a
+    // blank row, it unmounted the whole settings page. "No URL recorded" is the answer
+    // that keeps the rest of the page.
+    for (const bad of [{ evil: true }, 42, true, null, undefined, ['http://localhost:1']]) {
+      const status = await statusWithUrl(bad)
+      expect(status.url, `url ${JSON.stringify(bad)}`).toBeNull()
+      expect(status.urlSource).toBe('none')
+    }
+  })
+
+  it('reads a string that is not an http(s) URL as no URL', async () => {
+    // `javascript:` and `data:` are not acceptance URLs, and neither is a bare path or a
+    // sentence. None of them is a value this side would ever have produced, so none is
+    // one it forwards to a link.
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'vbscript:msgbox(1)', 'not a url', '', '/tmp/x']) {
+      const status = await statusWithUrl(bad)
+      expect(status.url, `url ${JSON.stringify(bad)}`).toBeNull()
+      expect(status.urlSource).toBe('none')
+    }
+  })
+
+  it('keeps an http(s) URL exactly as the script wrote it', async () => {
+    // The value is not normalised on the way through: the card shows the URL the deploy
+    // handed out, and a rewritten one would be a different address from the one the
+    // script recorded.
+    const status = await statusWithUrl('http://127.0.0.1:8080/')
+    expect(status.url).toBe('http://127.0.0.1:8080/')
+    expect(status.urlSource).toBe('state')
+    const secure = await statusWithUrl('https://acceptance.example.com/task/login?token=abc')
+    expect(secure.url).toBe('https://acceptance.example.com/task/login?token=abc')
+  })
 })
 
 describe('deployment state reads and writes', () => {
@@ -244,6 +361,36 @@ describe('deployment state reads and writes', () => {
     expect(outcome.status.containers).toEqual([{ name: 'gw-1', state: 'running' }])
   })
 
+  it('dates the deployment it just ran, in the seconds the smoke stamp uses', async () => {
+    // The other half of the stale-smoke guard: the comparison needs a stamp to compare
+    // against, and this side is the one that writes it - after `up` exited zero, never
+    // before, so a failed build cannot date itself.
+    const { root, statePath } = await taskFixture({
+      metadataDelivery: { deploy: { target: 'docker' } },
+      state: { ...STATE, lastSmoke: { at: '2020-01-01T00:00:00Z', result: 'pass' } },
+    })
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up\n', 'utf8')
+    const subprocess = { spawn: () => ({
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+    }) }
+
+    await deployEnvironment(subprocess, root)
+
+    const written = JSON.parse(await readFile(statePath, 'utf8'))
+    expect(typeof written.deployedAt).toBe('string')
+    // Seconds, matching `write-state.sh`'s `date -u +...%SZ`: a millisecond stamp would
+    // read a smoke taken in the same second as older than the deploy it followed.
+    expect(written.deployedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+    // The fields the script owns are carried through, not dropped by the stamp.
+    expect(written.lastSmoke).toEqual({ at: '2020-01-01T00:00:00Z', result: 'pass' })
+    expect(written.url).toBe(STATE.url)
+    // And the older smoke is now stale, so the gate refuses rather than opening on it.
+    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+      .rejects.toMatchObject({ code: 'E5006' })
+  })
+
   it('refuses to rebuild when the space carries no deploy script', async () => {
     const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
     const subprocess = { spawn: vi.fn() }
@@ -299,7 +446,120 @@ describe('deployment state reads and writes', () => {
     const { root } = await taskFixture({})
     const subprocess = { spawn: vi.fn(() => { throw new Error('docker not found') }) }
     const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
-    expect(outcome).toEqual({ removed: false, containers: 0 })
+    // Docker could not be asked, so this is no longer reported as "nothing to remove" -
+    // see the "could not be asked" test below. It is still not a refusal.
+    expect(outcome.removed).toBe(false)
+    expect(outcome.containers).toBe(0)
+    expect(outcome.unknown).toBe(true)
+  })
+
+  it('reports docker that cannot be asked as unknown, not as nothing to remove', async () => {
+    // The distinction CR-18 turns on. `tryDocker` collapsed "docker is not on PATH",
+    // "the daemon is unreachable" and "the output was over the cap" into the same
+    // `{ ok: false }` as "the filter matched nothing", so the teardown said "nothing to
+    // remove" in all of them - and the task space was then deleted with the containers,
+    // networks and volumes still standing. Here docker throws, which is the not-on-PATH
+    // shape, and the answer has to say so rather than claim there was nothing there.
+    const { root } = await taskFixture({ state: STATE })
+    const subprocess = { spawn: () => { throw new Error('spawn docker ENOENT') } }
+    const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
+
+    expect(outcome.unknown).toBe(true)
+    expect(outcome.warning.code).toBe('deploy-containers-unchecked')
+    expect(outcome.warning.message).toMatch(/docker could not be asked/)
+    expect(outcome.warning.values).toMatchObject({ envId: 'dsh-public-login' })
+    // It is still a warning, never a refusal: the task space is going away either way.
+    expect(outcome.removed).toBe(false)
+    // And the acceptance facts are untouched, because nothing was removed.
+    const { statePath } = { statePath: join(root, PLUGIN_ROOT, 'deploy', '.state.json') }
+    const kept = JSON.parse(await readFile(statePath, 'utf8'))
+    expect(kept.url).toBe(STATE.url)
+    expect(kept.destroyedAt).toBeUndefined()
+  })
+
+  it('reports a teardown whose confirming lookup cannot run as possibly half done', async () => {
+    // The same distinction after the teardown: the containers were found and removed, and
+    // the check that they are gone is the one that cannot run. A silent pass there would
+    // report a complete teardown on no evidence.
+    const { root } = await taskFixture({ state: STATE })
+    let psCalls = 0
+    const subprocess = { spawn({ argv }) {
+      let text = ''
+      if (argv.includes('-q')) {
+        psCalls += 1
+        // The first lookup finds the container; the second cannot be asked.
+        if (psCalls > 1) throw new Error('docker daemon went away')
+        text = 'abc123'
+      } else if (argv.includes('inspect')) {
+        text = ''
+      }
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+    const outcome = await destroyDeployment(subprocess, root, 'dsh-public-login')
+
+    expect(outcome.warning.code).toBe('deploy-containers-unchecked')
+    expect(outcome.warning.values).toMatchObject({ after: 'teardown' })
+    // The containers were still found and removed, so the answer is not "nothing was done".
+    expect(outcome.containers).toBe(1)
+  })
+
+  it('warns when `up` succeeds without leaving a container this plugin can find', async () => {
+    // `up` exiting zero only says the script thought it succeeded. A script that started
+    // containers under another project name, or under no label, left an environment this
+    // side cannot see - and the finish then found no containers, reported "nothing to
+    // remove", and deleted the task space with the containers still on the machine.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up\n', 'utf8')
+    const subprocess = { spawn: ({ argv }) => ({
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      // Docker answers, and matches nothing.
+      collected: { stdout: { readFrom: () => ({ text: argv[0] === 'bash' ? 'acceptance http://localhost:1\n' : '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+    }) }
+
+    const outcome = await deployEnvironment(subprocess, root)
+
+    // The warning, naming the label the script failed to apply.
+    expect(outcome.warning.code).toBe('deploy-no-labelled-containers')
+    expect(outcome.warning.values).toMatchObject({ envId: 'dsh-public-login' })
+    expect(outcome.warning.message).toContain('dsh.env-id=dsh-public-login')
+    // And the deploy still reports success: the script may legitimately start things the
+    // label cannot see, and blocking that would block a workflow that works.
+    expect(outcome.output).toContain('acceptance http://localhost:1')
+    expect(outcome.status).toBeDefined()
+    // The deploy is still dated, so the stale-smoke guard is unaffected by the warning.
+    const written = JSON.parse(await readFile(join(root, PLUGIN_ROOT, 'deploy', '.state.json'), 'utf8'))
+    expect(typeof written.deployedAt).toBe('string')
+  })
+
+  it('does not warn when `up` leaves a labelled container, or when docker cannot be asked', async () => {
+    // The two controls for the warning above: a fix that always warned would pass it, and
+    // a warning that fired on a machine without docker would be noise rather than a signal.
+    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up\n', 'utf8')
+
+    const labelled = { spawn: ({ argv }) => ({
+      done: Promise.resolve({ exitCode: 0, signal: null }),
+      collected: { stdout: { readFrom: () => ({ text: argv[0] === 'bash' ? '' : 'abc123' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+    }) }
+    expect((await deployEnvironment(labelled, root)).warning).toBeUndefined()
+
+    // The script itself runs; only the docker lookup throws, which is what a machine with
+    // no docker on the PATH looks like from here.
+    const noDocker = { spawn: ({ argv }) => {
+      if (argv[0] === 'bash') {
+        return {
+          done: Promise.resolve({ exitCode: 0, signal: null }),
+          collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+        }
+      }
+      throw new Error('docker not found')
+    } }
+    expect((await deployEnvironment(noDocker, root)).warning).toBeUndefined()
   })
 })
 
@@ -378,5 +638,44 @@ describe('applyStraysPolicy', () => {
     expect(named.documentsDirectory.startsWith('E:\\docs')).toBe(true)
     const custom = applyStraysPolicy({ strays: 'archive' }, { strategy: 'custom', directory: 'D:\\docs' }, TASK)
     expect(custom.documentsDirectory.startsWith('D:\\docs')).toBe(true)
+  })
+
+  it('builds an absolute POSIX destination for a POSIX task path', () => {
+    // The one assertion the Windows cases cannot make. The default used to be built by
+    // splitting on separators and rejoining with backslashes, so on a POSIX task path the
+    // result was a single relative name - the leading slash gone, every separator a literal
+    // backslash - and `mkdir(recursive)` then created one bizarre directory under the host
+    // process's own cwd instead of under the container root. The three loose assertions the
+    // Windows case makes (`toContain('archived-docs')`, `toContain('proj')`, the suffix)
+    // all pass on that malformed value, which is why this one is written against the shape.
+    const r = applyStraysPolicy({}, ARCHIVE, '/home/u/tasks/proj/login')
+    expect(r.documentsDirectory.startsWith('/')).toBe(true)
+    expect(r.documentsDirectory).toContain('archived-docs/proj/')
+    expect(r.documentsDirectory).toMatch(/^\/home\/u\/tasks\/archived-docs\/proj\/login-\d{8}-\d{6}$/)
+    // And the same in the Windows style, so "absolute" is not simply asserted one way.
+    const windows = applyStraysPolicy({}, ARCHIVE, 'D:\\space\\worktree-space\\proj\\login')
+    expect(windows.documentsDirectory).toMatch(/^D:\\space\\worktree-space\\archived-docs\\proj\\login-\d{8}-\d{6}$/)
+  })
+
+  it('ignores a destination that is not absolute, falling back to the container root', () => {
+    // `.` and `..` are the dangerous shapes: `archive.js` runs `mkdir(recursive)` and then
+    // `cp`, so either would file the whole task space into the host process's own working
+    // directory. A relative name is refused the same way. The answer is a fallback rather
+    // than a refusal, because a finish must never be blocked on a destination this side
+    // already knows how to build.
+    const fallback = /^D:\/space\/worktree-space\/archived-docs\/proj\/login-\d{8}-\d{6}$/
+    for (const documentsDirectory of ['.', '..', 'docs', './archived', '..\\elsewhere']) {
+      const r = applyStraysPolicy({ strays: 'archive', documentsDirectory }, ARCHIVE, TASK)
+      expect(r.documentsDirectory, `'${documentsDirectory}' must not be taken verbatim`).not.toBe(documentsDirectory)
+      expect(r.documentsDirectory, `'${documentsDirectory}' must fall back`).toMatch(fallback)
+    }
+    // The same rule holds for the configured custom root: a relative directory typed into
+    // the setting falls back to the container root rather than filing archives into cwd.
+    const relative = applyStraysPolicy({ strays: 'archive' }, { strategy: 'custom', directory: 'relative\\docs' }, TASK)
+    expect(relative.documentsDirectory).toMatch(fallback)
+    // An absolute one is still obeyed, which is what keeps the two apart: the fallback is
+    // a rule about absoluteness, not a rule that ignores the caller.
+    const absolute = applyStraysPolicy({ strays: 'archive' }, { strategy: 'custom', directory: 'D:\\docs' }, TASK)
+    expect(absolute.documentsDirectory).toMatch(/^D:\\docs\\archived-docs\\proj\\login-\d{8}-\d{6}$/)
   })
 })

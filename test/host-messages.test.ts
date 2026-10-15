@@ -106,6 +106,15 @@ describe("every sentence the Host's codes are said with", () => {
    * than as a missing test. Both are caught here, in both languages at once.
    */
   const failures: [string, HostValues, string][] = [
+    // The create flow's own refusals, which are the ones a Chinese interface used to
+    // show as the Host's English sentence. None carries a value: they are raised from
+    // a layout check rather than from a sentence built out of names.
+    ["E1001", {}, ""],
+    ["E1002", {}, ""],
+    ["E1003", {}, ""],
+    ["E1005", {}, ""],
+    ["E3002", {}, ""],
+    ["E4002", {}, ""],
     ["E2003", { path: "/w/login" }, "/w/login"],
     ["E2004", { path: "/w/login", reason: "none" }, "/w/login"],
     ["E2004", { path: "/w/login", reason: "no-worktrees-to-extend" }, "/w/login"],

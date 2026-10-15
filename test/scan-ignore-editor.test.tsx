@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { format, t } from "../src/client/lib/i18n"
-import { MAX_IGNORED_SCAN_DIRECTORIES } from "../src/client/lib/scan-ignore"
+import { MAX_IGNORED_SCAN_DIRECTORIES, MAX_IGNORED_SCAN_DIRECTORY_LENGTH } from "../src/client/lib/scan-ignore"
 import { ScanIgnoreEditor } from "../src/client/components/ScanIgnoreEditor"
 
 const BUILT_IN = ["node_modules", "target", "__pycache__"]
@@ -324,6 +324,50 @@ describe("ScanIgnoreEditor", () => {
     // A name typed with room around it is the name, not a name with spaces in it.
     await user.click(confirmAdd())
     expectNames([...BUILT_IN, "output"])
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("refuses the two relative names, which are not directory entries a walk matches", async () => {
+    // `.` and `..` have no separator and no whitespace, so the old rule let both
+    // through - and neither is a name `discoverGitRoots` would ever compare against a
+    // directory entry. Stored, they are a setting that reads as doing something.
+    const { user, onSave } = open()
+    await user.click(screen.getByRole("button", { name: t("ignoredScanDirectoriesAdd") }))
+    const input = screen.getByRole("textbox", { name: t("ignoredScanDirectoriesAdd") })
+
+    for (const name of [".", ".."]) {
+      await user.clear(input)
+      await user.type(input, name)
+      // Refused before the press, not after it: a button that offers a name and then
+      // discards it is the reply that leaves the user with nothing to act on.
+      expect(confirmAdd().disabled, `${name} was offered as addable`).toBe(true)
+      await user.click(confirmAdd())
+      expect(tags(), `${name} reached the list`).not.toContain(name)
+    }
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("caps one name's length, which a cap counted in names cannot see", async () => {
+    // The list already has a ceiling on how many names there are. One enormous name
+    // is a different runaway and gets past that ceiling untouched: the count is one.
+    const { user, onSave } = open()
+    await user.click(screen.getByRole("button", { name: t("ignoredScanDirectoriesAdd") }))
+    const input = screen.getByRole("textbox", { name: t("ignoredScanDirectoriesAdd") })
+
+    // Typed in one change rather than keystroke by keystroke: 256 characters through
+    // `user.type` is slower than this file's budget and would be measuring the typing.
+    const tooLong = "x".repeat(MAX_IGNORED_SCAN_DIRECTORY_LENGTH + 1)
+    fireEvent.change(input, { target: { value: tooLong } })
+    expect(confirmAdd().disabled).toBe(true)
+    await user.click(confirmAdd())
+    expect(tags()).not.toContain(tooLong)
+
+    // The cap is a limit and not a ban: a name at the limit is still a name.
+    const atLimit = "y".repeat(MAX_IGNORED_SCAN_DIRECTORY_LENGTH)
+    fireEvent.change(input, { target: { value: atLimit } })
+    expect(confirmAdd().disabled).toBe(false)
+    await user.click(confirmAdd())
+    expect(tags()).toContain(atLimit)
     expect(onSave).not.toHaveBeenCalled()
   })
 

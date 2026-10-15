@@ -1,8 +1,15 @@
 import esbuild from "esbuild"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const root = process.cwd()
+// The repository root is this file's own directory, not the process's working
+// directory. `process.cwd()` is whatever directory the caller happened to be in, so
+// `node build.mjs` from anywhere but the root read the wrong `package.json` (or none)
+// and wrote `lib/` and `client/` beside the caller - and `pnpm build` from a workspace
+// root or a nested script would do the same without a word. A build script knows where
+// it lives; that is the only fact that makes it work from anywhere.
+const root = dirname(fileURLToPath(import.meta.url))
 const minify = !process.argv.includes("--no-minify")
 const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"))
 const moduleId = packageJson.name

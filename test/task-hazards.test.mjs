@@ -37,7 +37,8 @@ describe("the link probe a create runs", () => {
         return
       }
       const found = await findLinks(dir)
-      expect(found).toContain(join("nested", "alias.txt"))
+      expect(found.links).toContain(join("nested", "alias.txt"))
+      expect(found.truncated).toBe(false)
     } finally {
       await cleanup()
     }
@@ -54,7 +55,65 @@ describe("the link probe a create runs", () => {
       // A walk that followed `self` would never come back; the bound is what makes
       // this terminate either way, and the assertion is that it did.
       const found = await findLinks(dir)
-      expect(found).toEqual(["self"])
+      expect(found.links).toEqual(["self"])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  // The listing is used as a *filter*: `archive.js` copies a stray with every path
+  // the scan named excluded, and `fs.cp` recreates the links it does not exclude. So
+  // a link missing from a short list is a link the copy then tries to recreate - the
+  // EPERM the filter exists to avoid, arriving through the filter itself. A caller
+  // therefore has to be able to tell "no links" from "no links I looked far enough to
+  // see", and this is that distinction.
+  it("says when it stopped at its bound, rather than reporting a short list as the whole one", async () => {
+    const { dir, cleanup } = await scratch("dsh-links-truncated-")
+    try {
+      // More entries than the bound, so the walk cannot finish. The links are placed
+      // after the filler, which is what makes the count wrong rather than merely short:
+      // a caller trusting `links.length` here would report fewer links than exist.
+      for (let index = 0; index < 6; index += 1) {
+        await mkdir(join(dir, `filler-${index}`), { recursive: true })
+      }
+      try {
+        await symlink(join(dir, "filler-0"), join(dir, "zzz-alias"))
+      } catch {
+        // No link privilege on this machine: the truncation flag is still the subject,
+        // and it does not depend on a link being creatable.
+      }
+
+      const bounded = await findLinks(dir, { maxEntries: 2 })
+      expect(bounded.truncated, "a walk that stopped at its bound must say so").toBe(true)
+
+      // The negative control: a bound large enough for the whole tree reports the
+      // whole tree, so `truncated` is not simply always true.
+      const whole = await findLinks(dir, { maxEntries: 1000 })
+      expect(whole.truncated).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  // The same question asked of the other way the walk runs out: the budget is spent
+  // exactly when the queue still holds directories nobody has read. There the inner
+  // loop never trips, because it never sees a `seen` past the bound - the queue is
+  // what says the walk is unfinished. Removing that half leaves `truncated` false for
+  // this shape, and a caller would then copy a stray believing it had the whole list
+  // of links. Kept as its own case because the two triggers fail independently.
+  it("says so when the budget runs out with directories still queued", async () => {
+    const { dir, cleanup } = await scratch("dsh-links-queued-")
+    try {
+      // One child holding one grandchild: reading the root's child costs one, reading
+      // the grandchild's entries costs the second, and the grandchild itself is then
+      // queued and unread when the budget ends.
+      await mkdir(join(dir, "nested", "deep"), { recursive: true })
+      const atBound = await findLinks(dir, { maxEntries: 2 })
+      expect(atBound.truncated, "a queue still holding directories is an unfinished walk").toBe(true)
+      // And one more entry of budget is enough to finish, which is what shows the flag
+      // tracks the budget rather than being set whenever the queue was ever non-empty.
+      const justEnough = await findLinks(dir, { maxEntries: 3 })
+      expect(justEnough.truncated).toBe(false)
     } finally {
       await cleanup()
     }

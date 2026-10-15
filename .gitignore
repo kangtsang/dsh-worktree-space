@@ -13,4 +13,8 @@ _preview/
 # up as an untracked entry in `git status`, which is not somewhere anyone looks long
 # enough to act on it.
 _test-output/
-
+# The WorkBuddy client's own working directory, created in the repository root when it
+# is opened on this checkout. It holds that tool's state, not the plugin's - a task
+# space is what this repository uses for isolated work, and it lives outside the
+# checkout by design - so nothing in it is a source of this plugin.
+/.workbuddy/

@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { registerTaskTool } from "../src/host/task/tool.js"
+import { parseGitArgv } from "../src/host/task/git.js"
 import { PLUGIN_ROOT } from "../src/host/task/shared.js"
+import { SCAN_CONCURRENCY } from "../src/host/task/concurrency.js"
 
 /**
  * The record, from the task space directory: the plugin keeps it in its own directory, so
@@ -48,7 +50,9 @@ function toolContext(subprocess = quietSubprocess, services = {}) {
  */
 const creatingSubprocess = {
   spawn: ({ argv }) => ({
-    done: Promise.resolve({ exitCode: argv.slice(3).join(" ").startsWith("show-ref") ? 1 : 0, signal: null }),
+    // Parsed by name, not by position: the git command line carries hardening `-c`
+    // settings before `-C`, so `argv[2]` is no longer the directory.
+    done: Promise.resolve({ exitCode: parseGitArgv(argv).args.join(" ").startsWith("show-ref") ? 1 : 0, signal: null }),
     collected: {
       stdout: { readFrom: () => ({ text: "" }) },
       stderr: { readFrom: () => ({ text: "" }) },
@@ -128,10 +132,14 @@ const CONTAINER = join(tmpdir(), "wts-tool-container")
  * real repository does at that stop, so the flags the tool reports are produced by the
  * same code an agent would meet - not hand-built rows. `session` seeds the task record
  * with the session that was working in it, which is what the summary names.
+ *
+ * `unknownBranch` makes `show-ref` answer the way git does for a branch that is not
+ * there, so a `target` the caller names resolves to nothing - the E4008 shape, which is
+ * a failure that never starts a merge.
  * @param options - the shape to mock, and whether the removal should leave the worktree.
  * @returns the container root, the task space, the double, the calls made and a cleanup.
  */
-async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = false, uncommitted = false, dirtyCheckout = false, session = "sess-task" } = {}) {
+async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = false, uncommitted = false, dirtyCheckout = false, unknownBranch = false, session = "sess-task" } = {}) {
   const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-done-"))
   const taskPath = join(container, PROJECT, "login")
   const worktree = join(taskPath, "alpha")
@@ -150,19 +158,36 @@ async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = fal
   const calls = []
   const subprocess = {
     spawn: ({ argv }) => {
-      const key = argv.slice(3).join(" ")
+      // Parsed by name, not by position: the git command line carries hardening `-c`
+      // settings before `-C`, so `argv[2]` is no longer the directory.
+      const { cwd: gitCwd, args } = parseGitArgv(argv)
+      const key = args.join(" ")
       calls.push(key)
       let exitCode = 0
       let stdout = ""
       if (key.startsWith("rev-parse --verify --quiet MERGE_HEAD")) {
         // A merge is standing only in the conflict shape.
         exitCode = conflict ? 0 : 1
-      } else if (key.startsWith("rev-parse --abbrev-ref HEAD")) stdout = argv[2] === worktree ? "task/login" : "main"
+      } else if (key.startsWith("rev-parse --abbrev-ref HEAD")) stdout = gitCwd === worktree ? "task/login" : "main"
       else if (key.startsWith("worktree list --porcelain")) stdout = porcelain
-      else if (key.startsWith("status --short")) {
+      else if (key.startsWith("show-ref --verify --quiet refs/heads/")) {
+        // git's way of saying a branch is not there: a non-zero exit and no output.
+        // `resolveMergeTarget` reads it as "this target is unusable" and throws E4008,
+        // which is the failure that never starts a merge.
+        if (unknownBranch) exitCode = 1
+      } else if (key.startsWith("status --short")) {
         if (uncommitted) stdout = " M a.ts\n"
-      } else if (key.startsWith("diff --name-only --diff-filter=U")) {
-        if (conflict) stdout = "src/a.ts\n"
+      } else if (key.startsWith("diff --name-only -z --diff-filter=U")) {
+        // `-z` output, so the records are NUL-separated and there is no trailing newline
+        // to trim. The stub has to produce the bytes real git produces under `-z`, not the
+        // `\n`-separated shape of the same command without it: the reader splits on `\0`,
+        // so a `\n` here would make the whole string one path - and the test would then be
+        // verifying a shape git never emits.
+        if (conflict) stdout = "src/a.ts\0"
+      } else if (key.startsWith("diff --name-only -z HEAD")) {
+        // The other `-z` listing `archive.js` reads: every path the merge changed, which
+        // the marker scan then opens. Two of them, so the multi-record case is covered.
+        if (conflict) stdout = "src/a.ts\0src/b.ts\0"
       } else if (key.startsWith("merge --no-ff --no-edit")) {
         // The rehearsal the finish runs before touching the target branch. A conflict
         // stops it with the merge standing; the dirty-checkout shape is refused by git
@@ -174,8 +199,10 @@ async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = fal
         }
       }
       // The mocked removal has to change the filesystem: the container only becomes
-      // removable once the directory it held is really gone.
-      else if (key.startsWith("worktree remove") && !keepWorktree) rmSync(argv[5], { recursive: true, force: true })
+      // removable once the directory it held is really gone. The path is read off the
+      // parsed arguments rather than by position, because the hardening `-c` settings
+      // before `-C` moved every position along.
+      else if (key.startsWith("worktree remove") && !keepWorktree) rmSync(args[args.length - 1], { recursive: true, force: true })
       const stderr = dirtyCheckout && key.startsWith("merge --no-ff --no-edit")
         ? "error: Your local changes to the following files would be overwritten by merge:\n\ta.ts\n"
         : ""
@@ -466,7 +493,11 @@ describe("registerTaskTool", () => {
     expect(properties.strays.description).toMatch(/REFUSED here/)
     expect(properties.strays.description).toMatch(/E7007/)
     expect(properties.keepEntries.type).toBe("array")
-    expect(properties).toHaveProperty("documentsDirectory")
+    // The archive destination is not the model's to name: a caller-supplied directory
+    // was the one parameter on this tool that could write outside the task space, and
+    // the panel builds that path itself. The panel's own `task.done` endpoint still
+    // carries it - see task-finish.test.tsx - so only the tool's declaration is gone.
+    expect(properties).not.toHaveProperty("documentsDirectory")
     // `merge` is still a plain optional boolean in the schema - it is the `done`
     // branch, not the declaration, that makes it required - so the model is told so
     // in the description instead.
@@ -520,6 +551,50 @@ describe("registerTaskTool", () => {
       await source.cleanup()
     }
   })
+
+  it("asks about a repository's branch a few at a time, not all of them at once", async () => {
+    // The dialog names the branch every repository's HEAD is on, which is one
+    // `git rev-parse` each. Asking for all of them together is the shape the scan was
+    // fixed for: with forty repositories it was forty `git.exe` processes alive at once,
+    // competing for process creation rather than doing git work. The double counts what
+    // is in flight while it takes real time - an instant one would let a serial loop and
+    // a parallel one look identical.
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-tool-many-"))
+    const count = 24
+    for (let index = 0; index < count; index++) {
+      await mkdir(join(root, `repo-${String(index).padStart(2, "0")}`, ".git"), { recursive: true })
+    }
+    let active = 0
+    let peak = 0
+    const subprocess = {
+      spawn() {
+        active++
+        peak = Math.max(peak, active)
+        return {
+          done: new Promise((resolve) => setTimeout(() => {
+            active--
+            resolve({ exitCode: 0, signal: null })
+          }, 2)),
+          collected: {
+            stdout: { readFrom: () => ({ text: "" }) },
+            stderr: { readFrom: () => ({ text: "" }) },
+          },
+        }
+      },
+    }
+    const { ctx, captured } = toolContext(subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute({ action: "suggest-root", sourceRoot: root }, {})
+      // Every repository, once: the ceiling changed the scheduling, not the answer.
+      expect(value.repositories).toHaveLength(count)
+      expect(peak).toBeGreaterThan(1)
+      expect(peak).toBeLessThanOrEqual(SCAN_CONCURRENCY)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
 
   it("proposes the plugin's configured location over its own recommendation", async () => {
     const source = await sourceFixture()
@@ -592,13 +667,18 @@ describe("registerTaskTool", () => {
     const gamma = join(container, "..", "multi-worktree-tool-add-elsewhere", "gamma")
     await mkdir(join(gamma, ".git"), { recursive: true })
     const subprocess = {
-      spawn: ({ argv }) => ({
-        done: Promise.resolve({ exitCode: argv.slice(3).join(" ").startsWith("show-ref") ? 1 : 0, signal: null }),
-        collected: {
-          stdout: { readFrom: () => ({ text: argv.slice(3).join(" ").includes("--abbrev-ref") ? "task/login" : "" }) },
-          stderr: { readFrom: () => ({ text: "" }) },
-        },
-      }),
+      spawn: ({ argv }) => {
+        // Parsed by name, not by position: the git command line carries hardening `-c`
+        // settings before `-C`, so `argv[2]` is no longer the directory.
+        const key = parseGitArgv(argv).args.join(" ")
+        return {
+          done: Promise.resolve({ exitCode: key.startsWith("show-ref") ? 1 : 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: key.includes("--abbrev-ref") ? "task/login" : "" }) },
+            stderr: { readFrom: () => ({ text: "" }) },
+          },
+        }
+      },
     }
     const { ctx, captured } = toolContext(subprocess)
     try {
@@ -1253,6 +1333,113 @@ describe("registerTaskTool", () => {
     }
   })
 
+  it("refuses to open a session at full access while the user's grant for it is off", async () => {
+    // The one capability on this tool's surface that is not the model's to hand itself.
+    // The description says "ask the user first", and a description is content a model can
+    // be talked out of - so the grant is read here, and a call that asks for the whole
+    // machine while it is off is refused with the code the panel path uses.
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const services = {
+      sessionController: { create: async () => { created.push("session"); return { sessionId: "session-3" } }, prompt: async () => ({}) },
+      sessions: { get: () => ({ append: () => {} }) },
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      // Nothing passed to the registrar: a deployment that wires no reader answers `off`,
+      // which is the setting's own default.
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "danger-full-access" },
+        { agent: { session: { id: "session-caller" } } },
+      )).rejects.toMatchObject({ code: "E4012" })
+      // Refused before anything was opened: no session left in the task space with no work.
+      expect(created).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("opens a session at full access when the user has switched the grant on", async () => {
+    // The other half of the gate: with the setting on, the call the panel would have made
+    // is allowed here too - and written as the pair DSH's own table means.
+    const fixture = await taskSpaceFixture()
+    const appended = []
+    const services = {
+      sessionController: { create: async () => ({ sessionId: "session-3" }), prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => undefined },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx, { configuredFullAccess: () => "on" })
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", permission: "danger-full-access" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(appended).toEqual([
+        { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
+        { type: "approval/policy", data: { policy: "never", source: "delegation" } },
+      ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves `inherit` alone even while the grant is off", async () => {
+    // The boundary of the gate, and the reason it is not a general permission check: with
+    // the caller's own override already at full access, `inherit` copies exactly that - a
+    // grant the user made for the session they are in - so it can never be wider than its
+    // caller, and refusing it would be this side overruling the user's own authorisation.
+    const fixture = await taskSpaceFixture()
+    const appended = []
+    const services = {
+      sessionController: { create: async () => ({ sessionId: "session-3" }), prompt: async () => ({}) },
+      sessions: { get: () => ({ append: (type, data) => appended.push({ type, data }) }) },
+      sandboxPolicy: { overrideOf: () => "danger-full-access" },
+    }
+    const { ctx, captured } = toolContext(fixture.subprocess, services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(value.sessionId).toBe("session-3")
+      expect(appended).toEqual([
+        { type: "sandbox/mode", data: { mode: "danger-full-access", source: "delegation" } },
+        { type: "approval/policy", data: { policy: "never", source: "delegation" } },
+      ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a create that asked for full access before it cuts anything", async () => {
+    // The same gate on the other door, and at the earlier point: a create that refused
+    // after cutting the worktrees would leave a task space on disk with no session on it
+    // and a caller told the call failed - the state E2002 exists to describe. So nothing
+    // is made, and the task name is still free afterwards.
+    const source = await sourceFixture()
+    const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-fullaccess-"))
+    try {
+      const { ctx, captured } = toolContext(creatingSubprocess, {
+        sessionController: { create: async () => ({ sessionId: "session-1" }), prompt: async () => ({}) },
+        sessions: { get: () => ({ append: () => {} }) },
+      })
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, prompt: "go", permission: "danger-full-access" },
+        { agent: { session: { id: "session-caller" } } },
+      )).rejects.toMatchObject({ code: "E4012" })
+      expect(existsSync(join(container, source.root.split(/[\\/]/).pop()))).toBe(false)
+    } finally {
+      await source.cleanup()
+      await rm(container, { recursive: true, force: true })
+    }
+  })
+
   it("says no session was opened when the deployment serves no session service", async () => {
     // Not a failure: the task space is still there, and the answer has to say what to do
     // instead rather than leaving the caller to believe a session is running.
@@ -1434,28 +1621,36 @@ describe("registerTaskTool", () => {
     }
   })
 
-  it("files strays into the documents directory the call names, and clears the space", async () => {
+  it("files strays into the container-root default, ignoring a directory the call names", async () => {
     // `archive`, the default when the call says nothing, is the one answer that neither
-    // loses the caller's content nor leaves the task space standing. A named directory
-    // wins over the plugin's own root, and the content arrives there.
+    // loses the caller's content nor leaves the task space standing. The destination is
+    // not this call's to name any more: the tool declares no such parameter, and a call
+    // that still carries one is ignored rather than obeyed - so the content lands in the
+    // container root's own `archived-docs`, which is the path the panel shows the user.
     const fixture = await taskSpaceFixture()
     await writeFile(join(fixture.taskPath, "notes.md"), "kept for the record\n")
-    const documents = await mkdtemp(join(tmpdir(), "multi-worktree-tool-documents-"))
+    const named = await mkdtemp(join(tmpdir(), "multi-worktree-tool-documents-"))
     const { ctx, captured } = toolContext(fixture.subprocess)
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false, documentsDirectory: documents },
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: false, documentsDirectory: named },
         {},
       )
       expect(value.repositories[0].removed).toBe(true)
       expect(existsSync(join(fixture.taskPath, "notes.md"))).toBe(false)
-      expect(existsSync(join(documents, "notes.md"))).toBe(true)
+      // The directory the call named is not the destination: nothing was filed there.
+      expect(existsSync(join(named, "notes.md"))).toBe(false)
+      // It went to the default instead, under the container root, in the project and
+      // stamped-task folders the panel's own dialog would have proposed.
+      const [folder] = await readdir(join(fixture.container, "archived-docs", PROJECT))
+      expect(folder).toMatch(/^login-\d{8}-\d{6}$/)
+      expect(existsSync(join(fixture.container, "archived-docs", PROJECT, folder, "notes.md"))).toBe(true)
       // Everything left the space, so the container went with it.
       expect(value.container).toBe("")
     } finally {
       await fixture.cleanup()
-      await rm(documents, { recursive: true, force: true })
+      await rm(named, { recursive: true, force: true })
     }
   })
 
@@ -1477,6 +1672,76 @@ describe("registerTaskTool", () => {
         { action: "dispatch", task: "nope", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
         {},
       )).rejects.toThrow(/no task space/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("calls a failure a failure when no merge was ever started", async () => {
+    // The E4008 shape: an explicit `target` that is not a local branch. `resolveMergeTarget`
+    // throws it from inside the finish's `try`, before any merge is started, so there is no
+    // MERGE_HEAD and no conflicted file to reconcile. Marking it a conflict - which is what
+    // `conflict = !dirtyCheckout` did - sent the reader after markers that do not exist,
+    // filed the audit record as E5001 ("unmerged work") instead of E5003, and dropped the
+    // row out of `attention` entirely: the model read "Task 'login' finished", a "need
+    // attention" list that named nothing, and no reason anywhere.
+    const fixture = await taskSpaceFixture({ unknownBranch: true })
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true, target: "nope" },
+        {},
+      )
+      const row = value.repositories[0]
+      // A plain failure, not a conflict: nothing is standing and there is nothing to reconcile.
+      expect(row.conflict).toBe(false)
+      expect(row.mergeInProgress).toBe(false)
+      expect(row.mergeSite).toBe("")
+      expect(row.conflictedFiles).toEqual([])
+      expect(row.merged).toBe(false)
+      expect(row.removed).toBe(false)
+      // The real reason reaches the model, in the attention list, naming the repository.
+      // The code is part of the sentence now, ahead of the message - see `coded` in
+      // codes.js for why: the harness hands a tool failure to the model as `error.message`
+      // alone, so a code that lived only on `.code` was one the model was told to branch on
+      // and never received.
+      expect(row.error).toMatch(/merge target 'nope' is not a local branch/)
+      expect(row.error).toContain("E4008")
+      expect(value.failed).toBe(true)
+      expect(value.summary).toContain("need attention")
+      expect(value.summary).toMatch(/alpha: E4008: merge target 'nope' is not a local branch/)
+      // And the headline does not claim the task finished over a row that did nothing.
+      expect(value.summary).not.toMatch(/Task 'login' finished/)
+      expect(value.summary).toContain("is unfinished")
+      // The path is named, so the reader knows what to go and look at.
+      expect(value.summary).toContain(join(fixture.taskPath, "alpha"))
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("still calls a standing merge a conflict, and routes it", async () => {
+    // The other half of the same distinction, kept green: a merge that really is standing
+    // has a MERGE_HEAD and files to reconcile, and that is what the reader is sent after.
+    // Without this, "call nothing a conflict" would satisfy the test above.
+    const fixture = await taskSpaceFixture({ conflict: true })
+    const { ctx, captured } = toolContext(fixture.subprocess)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "done", task: "login", project: PROJECT, tasksRoot: fixture.container, merge: true },
+        {},
+      )
+      const row = value.repositories[0]
+      expect(row.conflict).toBe(true)
+      expect(row.mergeInProgress).toBe(true)
+      expect(row.conflictedFiles).toEqual(["src/a.ts"])
+      expect(value.summary).toContain("a merge is waiting to be resolved")
+      expect(value.summary).toContain("call done again")
+      // Routed through the handoff sentence, and the conflict's own files are named
+      // there rather than repeated in the plain attention list.
+      expect(value.summary).toContain("Resolve src/a.ts")
     } finally {
       await fixture.cleanup()
     }

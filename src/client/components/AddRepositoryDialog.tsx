@@ -10,6 +10,39 @@ import type { createWorktreeApi } from "../lib/api"
 
 type BaseMode = "head" | "named"
 
+/** Characters Git refuses anywhere in a ref name, wherever they appear. */
+const ILLEGAL_REF_CHARACTERS = /[\s~^:?*\[\]\\\u0000-\u001f\u007f]/
+
+/**
+ * Whether a named base ref is one Git would accept, so the dialog does not offer a
+ * value that cannot work.
+ *
+ * The Host is still the authority and checks the ref server-side - `create.js` and
+ * `add.js` both run `rev-parse --verify` against it in every selected repository -
+ * and this cannot replace that: only the Host can say whether a *valid* ref exists in
+ * a particular repository. What this rules out is the value that is obviously
+ * unusable, so the user is told here instead of by a refusal after the worktrees are
+ * under way.
+ *
+ * The rule is `git check-ref-format`'s own list of what a ref may not contain, minus
+ * the parts that only apply to a full ref path: a base ref is resolved by `rev-parse`
+ * and may be a branch, a tag, a remote-tracking name or a commit id, so it is held to
+ * what a *revision argument* may be rather than to what `refs/heads/x` may be. The
+ * two shapes a name can take that the character rule cannot catch are `..` and the
+ * `@{` sequence, and a leading `-` is refused because `rev-parse` would read it as an
+ * option rather than as the ref.
+ * @param ref - the ref as typed, already trimmed.
+ * @returns the message key to show, or `""` when the ref can be used.
+ */
+function baseRefProblem(ref: string) {
+  if (ref === "") return ""
+  if (ILLEGAL_REF_CHARACTERS.test(ref)) return "invalidBaseRef"
+  if (ref.includes("..") || ref.includes("@{")) return "invalidBaseRef"
+  if (ref.startsWith("-") || ref.startsWith("/") || ref.endsWith("/")) return "invalidBaseRef"
+  if (ref.endsWith(".lock")) return "invalidBaseRef"
+  return ""
+}
+
 interface AddRepositoryDialogProps {
   /** The task space to extend; its own record says where it is filed and what branch it is on. */
   taskPath: string
@@ -86,7 +119,11 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
   // allowed to reach — is asked at the finish, where it is actually asked, rather
   // than warned about here over an operation that has not happened yet.
   const baseRef = baseMode === "named" ? namedBase.trim() : ""
-  const canAdd = picked.length > 0 && (baseMode === "head" || baseRef !== "") && !loading
+  // The value that would actually be sent, validated rather than the field. An empty
+  // field is not "each repository's HEAD" here - that is the other radio - so it is
+  // still refused, and the rule above is what keeps an unusable ref from being sent.
+  const refProblem = baseMode === "named" ? baseRefProblem(baseRef) : ""
+  const canAdd = picked.length > 0 && (baseMode === "head" || baseRef !== "") && refProblem === "" && !loading
 
   const add = async () => {
     if (busyRef.current || !inspection || !canAdd) return
@@ -170,8 +207,8 @@ export function AddRepositoryDialog({ taskPath, api, workspaces, repositories, o
       </label>)}
     </div>
     {baseMode === "named" ? <>
-      <Input className="dws-base-ref" value={namedBase} disabled={fieldsDisabled} onChange={(event) => setNamedBase(event.target.value)} placeholder={t("baseRefPlaceholder")} autoComplete="off" spellCheck={false} aria-label={t("baseNamed")} aria-describedby={`${id}-base-note`} />
-      <p id={`${id}-base-note`} className="dws-form-note">{t("baseRefHint")}</p>
+      <Input className="dws-base-ref" value={namedBase} disabled={fieldsDisabled} onChange={(event) => setNamedBase(event.target.value)} placeholder={t("baseRefPlaceholder")} autoComplete="off" spellCheck={false} aria-label={t("baseNamed")} aria-describedby={`${id}-base-note`} aria-invalid={refProblem !== "" || undefined} />
+      <p id={`${id}-base-note`} className={refProblem === "" ? "dws-form-note" : "dws-form-note dws-field-note-warning"}>{refProblem === "" ? t("baseRefHint") : t(refProblem)}</p>
     </> : null}
   </fieldset>
 

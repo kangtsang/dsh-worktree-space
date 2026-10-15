@@ -15,7 +15,7 @@ import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { DeployCard } from "./DeployCard"
 import { finishScenes } from "../lib/finish-scene"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
+import { Button, Input, Select } from "./ui"
 
 /** The three views this page has, in the order they are offered: a Workspace is where a
  *  task space starts from, a repository is what one is opened across, a task space is
@@ -172,10 +172,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
   }, [view, api, workspaces, reclassifyToken])
   /** Path of the task whose archive dialog is open, if any. */
   const [archiving, setArchiving] = useState<string | null>(null)
-  /** The task whose finish press met an unsatisfied delivery gate, waiting on the user's yes/no. */
-  const [gateConfirm, setGateConfirm] = useState<string | null>(null)
-  /** Whether the finish now opening carries the user's own overrule of the gate. */
-  const [gateAcknowledged, setGateAcknowledged] = useState(false)
   /** Path of the task whose add-repository dialog is open, if any. */
   const [extending, setExtending] = useState<string | null>(null)
   // Adding a repository to the repository view. The field is here rather than in a
@@ -216,24 +212,30 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
    * rather than waited for.
    */
   /**
-   * The finish press. The delivery gate asks here rather than inside the finish
-   * dialog: the user's instruction outranks the policy, so an unsatisfied gate is
-   * a question - "finish anyway?" - answered once, and the dialog then opens with
-   * that answer carried. A status that cannot be read at all (no docker, no
-   * deployment) never stands between the user and the finish panel.
+   * The finish press: open the dialog, and nothing else.
+   *
+   * The delivery gate used to be asked here, by reading a deployment status and comparing
+   * it to the policy before the dialog was allowed to open. That pre-check was wrong in two
+   * ways, and both of them trapped the user rather than the model:
+   *
+   * - It asked a *different* question from the gate. It required a state file to exist
+   *   before it would even warn (`status.stateFound`), so a task whose deploy script never
+   *   wrote one - the commonest shape of "no passing smoke" - opened the dialog with no
+   *   warning and no acknowledgement, and the finish was then refused with E5006 and no way
+   *   for the user to answer. The gate itself treats a missing file and a red smoke as the
+   *   same answer.
+   * - It only ran on this one entry. The workspace menu's own finish item opens the dialog
+   *   directly, and so does the report left behind by a finish that stopped - both bypassed
+   *   the question entirely, and both were then refused.
+   *
+   * The gate is a warning to the user, never a wall: the panel's job is to say what is
+   * missing and let them go on, and the Host records the overrule. So the question belongs
+   * to the dialog, which every entry reaches, and it is answered there from the plan the
+   * Host computes with the gate's own function. This function now only opens the door.
    */
   const finishClick = useCallback(async (task: TaskGroup) => {
-    try {
-      const status = await api.deployStatus(task.path)
-      // The smoke is the whole of the gate. There used to be a second condition here
-      // for a human acceptance ack the policy could wait for; that gate is gone, and
-      // with it the last reason a status read had to carry a policy field.
-      const unmet = status.target !== "none" && status.stateFound && status.lastSmoke?.result !== "pass"
-      if (unmet) { setGateConfirm(task.path); return }
-    } catch { /* unreadable is not blocking */ }
-    setGateAcknowledged(false)
     setArchiving(task.path)
-  }, [api])
+  }, [])
 
   const refresh = useCallback(async (extra: string[] = []) => {
     refreshController.current?.abort()
@@ -841,24 +843,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
       workspaces={workspaces}
       sessions={sessions}
       uiWorkspace={uiWorkspace}
-      acknowledgeDelivery={gateAcknowledged}
       onArchived={() => { void refresh() }}
       onClose={() => setArchiving(null)}
       onLeave={onLeave}
       config={config}
     /> : null}
-    {gateConfirm ? <Dialog open onOpenChange={(open) => { if (!open) setGateConfirm(null) }}>
-      <DialogContent className="dws-confirm-dialog dws-confirm-narrow" showClose={false}>
-        {/* No heading, like every one-sentence confirm in this panel: the question
-            is the whole content, and a title above it would be two things to read. */}
-        <div className="dws-dialog-body">
-          <DialogDescription className="dws-confirm-body">{t("deliveryGateConfirm")}</DialogDescription>
-        </div>
-        <footer className="dws-dialog-footer">
-          <Button onClick={() => setGateConfirm(null)}>{t("cancel")}</Button>
-          <Button className="dws-button-primary" onClick={() => { setGateAcknowledged(true); setArchiving(gateConfirm); setGateConfirm(null) }}>{t("deliveryGateContinue")}</Button>
-        </footer>
-      </DialogContent>
-    </Dialog> : null}
   </section>
 }

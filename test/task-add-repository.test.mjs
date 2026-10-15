@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { addTaskRepositories } from "../src/host/task/add.js"
 import { readAudit } from "../src/host/task/audit-log.js"
+import { parseGitArgv } from "../src/host/task/git.js"
 import { PLUGIN_ROOT } from "../src/host/task/shared.js"
 
 /**
@@ -51,8 +52,10 @@ function subprocessMock(handlers = {}) {
   }
   const subprocess = {
     spawn({ argv }) {
-      const cwd = argv[2]
-      const args = argv.slice(3)
+      // Parsed by name, not by position: the git command line carries hardening `-c`
+      // settings before `-C`, so `argv[2]` is no longer the directory. See
+      // `parseGitArgv`.
+      const { cwd, args } = parseGitArgv(argv)
       const key = args.join(" ")
       calls.push({ cwd, args, key })
       const handler = replyFor(key)
@@ -170,15 +173,71 @@ function addSucceeds(taskPath) {
     },
     // Removal is what a rollback is made of, so the mock has to really take the
     // checkout away — a `worktree remove` that only reported success would leave
-    // the directory behind and the test would prove nothing.
+    // the directory behind and the test would prove nothing. It also has to refuse a
+    // path that is not a checkout, with the exit and sentence real git uses (measured
+    // on 2.39.1: exit 128, "is not a working tree"): the rollback reads that answer to
+    // tell a worktree git really made from one it never reached, and a double that
+    // answered "ok" for both would hide the half-made case CR-13 is about.
     "worktree remove": async ({ args }) => {
-      await rm(args[args.length - 1], { recursive: true, force: true })
+      const target = args[args.length - 1]
+      if (!existsSync(join(target, ".git"))) return { exitCode: 128, stderr: "fatal: not a working tree\n" }
+      await rm(target, { recursive: true, force: true })
       return ""
     },
   })
 }
 
 describe("addTaskRepositories", () => {
+  // A repository contributes its own directory name to the task space, so a name the
+  // plugin has taken is refused before any worktree is cut - the same rule `create`
+  // applies, which is what stops a repository refused at create from being added here
+  // afterwards. End to end rather than on the validator alone: the point is that the
+  // refusal reaches the caller as a request error, before anything is made.
+  it("refuses a repository whose directory name the plugin itself uses", async () => {
+    const fixture = await taskFixture()
+    try {
+      // A real repository on disk, named after the plugin's own directory, so the
+      // refusal cannot be explained by the path being bogus.
+      const collision = join(fixture.sources, PLUGIN_ROOT)
+      await mkdir(join(collision, ".git"), { recursive: true })
+      const { subprocess, calls } = addSucceeds(fixture.taskPath)
+
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [collision],
+      })).rejects.toThrow(/belongs to this plugin/)
+
+      // Negative control: nothing was cut. A guard that refused after the worktree
+      // existed would satisfy the assertion above and still have made the mess.
+      expect(fixture.adds(calls)).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a repository path whose last segment is the relative name `..`", async () => {
+    const fixture = await taskFixture()
+    try {
+      // The raw spelling a caller can send: `basename` answers `..` for it, and
+      // `join(taskPath, '..')` is the project layer - one level above the task space,
+      // and inside the container, so the delete fence allows it. Today only git's own
+      // "destination directory is not empty" stops a worktree landing there; this
+      // refuses it as the request error it is.
+      const { subprocess, calls } = addSucceeds(fixture.taskPath)
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [`${fixture.sources}/alpha/..`],
+      })).rejects.toThrow(/must not be '\.' or '\.\.'/)
+      expect(fixture.adds(calls)).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("gives the new repository a worktree on the branch the task is already on", async () => {
     const fixture = await taskFixture()
     const { subprocess, calls } = addSucceeds(fixture.taskPath)
@@ -254,6 +313,63 @@ describe("addTaskRepositories", () => {
       expect(fixture.adds(calls)).toEqual([
         ["worktree", "add", join(fixture.taskPath, "gamma"), "-b", BRANCH, "release"],
       ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  // The task's `baseRef` answers one question - where did this task start - and an add
+  // does not change the answer. It used to be rewritten by any add that named a base, so
+  // a task created from `main` and later extended from `release` had its record claim it
+  // began at `release`, and the repositories cut at create time were described by a base
+  // they were never taken from. The note a session reads is rendered from that same
+  // field, so the wrong answer reached the reader too.
+  it("does not rewrite the task's own base when this call names one", async () => {
+    const fixture = await taskFixture()
+    const recorded = await fixture.readMetadata()
+    await writeFile(fixture.metadataPath, `${JSON.stringify({ ...recorded, baseRef: "main" }, null, 2)}\n`, "utf8")
+    try {
+      const result = await addTaskRepositories(addSucceeds(fixture.taskPath).subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+        baseRef: "release",
+      })
+      const after = await fixture.readMetadata()
+
+      // The task's identity is untouched by the add...
+      expect(after.baseRef).toBe("main")
+      // ...the note rendered from it still says `main`, so the reader is not misled...
+      expect(await readFile(noteAt(fixture.taskPath), "utf8")).toContain("- Base: `main`")
+      // ...and the base this call actually used is reported to its caller rather than
+      // dropped, so the fact is not lost - it is just not written into the identity.
+      expect(result.baseRef).toBe("release")
+      // The repository this call added still records the commit it was cut from, which
+      // is the stronger statement about where it started.
+      expect(after.repositories.find((entry) => entry.name === "gamma")).toMatchObject({ name: "gamma", startCommit: "deadbeef" })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves the task's base alone when the add names none, and reports none", async () => {
+    // The negative control for the case above: a create that named no base has `null`
+    // in the record, and an add without one must leave that `null` rather than turn it
+    // into an empty string or a fabricated ref.
+    const fixture = await taskFixture()
+    try {
+      const before = await fixture.readMetadata()
+      expect(before.baseRef).toBe(null)
+      const result = await addTaskRepositories(addSucceeds(fixture.taskPath).subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+      })
+      const after = await fixture.readMetadata()
+      expect(after.baseRef).toBe(null)
+      expect(result.baseRef).toBeUndefined()
     } finally {
       await fixture.cleanup()
     }
@@ -409,7 +525,7 @@ describe("addTaskRepositories", () => {
     const base = addSucceeds(fixture.taskPath)
     const subprocess = {
       spawn(request) {
-        const key = request.argv.slice(3).join(" ")
+        const key = parseGitArgv(request.argv).args.join(" ")
         // The first repository goes in; the second is refused by git, which is
         // the only failure that can arrive after validation has passed.
         if (key.startsWith("worktree add") && key.includes("beta")) {
@@ -438,6 +554,139 @@ describe("addTaskRepositories", () => {
       expect(existsSync(join(fixture.taskPath, "alpha"))).toBe(true)
       expect(existsSync(join(fixture.taskPath, "gamma"))).toBe(false)
       // And the record still says what it said: the worktrees are written to it
+      // only once every one of them exists.
+      expect(await fixture.readMetadata()).toEqual(before)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("takes the branch back with the worktree it made, so the task name is usable again", async () => {
+    const fixture = await taskFixture(["gamma", "beta"])
+    const base = addSucceeds(fixture.taskPath)
+    const subprocess = {
+      spawn(request) {
+        const key = parseGitArgv(request.argv).args.join(" ")
+        // The first repository goes in; the second is refused by git, which is the
+        // only failure that can arrive after validation has passed.
+        if (key.startsWith("worktree add") && key.includes("beta")) {
+          return {
+            done: Promise.resolve({ exitCode: 1, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "" }) },
+              stderr: { readFrom: () => ({ text: "fatal: could not add worktree\n" }) },
+            },
+          }
+        }
+        return base.subprocess.spawn(request)
+      },
+    }
+    try {
+      const failure = await addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+      }).then(() => undefined, (error) => error)
+
+      // `worktree add -b` makes the branch, and `worktree remove` never deletes it.
+      // Left behind it takes the name for good: the next create or add of this task
+      // is refused with E3001 in the repository that still carries it, and nothing
+      // in the plugin can clear it.
+      const removed = base.calls.findIndex((call) => call.key === `worktree remove --force ${join(fixture.taskPath, "gamma")}`)
+      const deleted = base.calls.findIndex((call) => call.key === "branch -D -- task/login")
+      expect(removed).toBeGreaterThanOrEqual(0)
+      // After the removal, never before: the worktree is holding the branch until it
+      // is gone, and git refuses to delete a branch a checkout still has.
+      expect(deleted).toBeGreaterThan(removed)
+      // In the repository whose worktree was holding it, and in no other.
+      expect(base.calls.filter((call) => call.key === "branch -D -- task/login").map((call) => call.cwd)).toEqual([fixture.repo.gamma])
+
+      // The caller still reads the failure git reported, not a rollback outcome:
+      // taking the branch back is what makes that message true again.
+      expect(failure.message).toMatch(/could not add worktree/)
+      expect(existsSync(join(fixture.taskPath, "gamma"))).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("names a branch it could not take back instead of saying it left nothing", async () => {
+    const fixture = await taskFixture(["gamma", "beta"])
+    const base = addSucceeds(fixture.taskPath)
+    const subprocess = {
+      spawn(request) {
+        const key = parseGitArgv(request.argv).args.join(" ")
+        if (key.startsWith("worktree add") && key.includes("beta")) {
+          return {
+            done: Promise.resolve({ exitCode: 1, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "" }) },
+              stderr: { readFrom: () => ({ text: "fatal: could not add worktree\n" }) },
+            },
+          }
+        }
+        if (key === "branch -D -- task/login") {
+          return {
+            done: Promise.resolve({ exitCode: 1, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "" }) },
+              stderr: { readFrom: () => ({ text: "error: cannot delete branch\n" }) },
+            },
+          }
+        }
+        return base.subprocess.spawn(request)
+      },
+    }
+    try {
+      // A branch still on disk is exactly what the record must not deny, so it is
+      // named to the caller instead of hiding behind "rolled back".
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+      })).rejects.toThrow(/could not roll back: gamma's branch task\/login/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("takes back a worktree git made and then failed on, so nothing half-made is left", async () => {
+    const fixture = await taskFixture()
+    // `worktree add` can create the branch and the checkout and *then* fail - a failed
+    // checkout, a hook, a lock, a full disk. The mock reproduces exactly that: the
+    // checkout is made and git still reports a non-zero exit.
+    const { subprocess, calls } = subprocessMock({
+      "show-ref --verify --quiet refs/heads/task/login": { exitCode: 1 },
+      "rev-parse --abbrev-ref HEAD": ({ cwd }) => (cwd.startsWith(fixture.taskPath) ? BRANCH : "main"),
+      "rev-parse HEAD": "deadbeef",
+      "status --porcelain": "",
+      "worktree add": async ({ args }) => {
+        await mkdir(args[2], { recursive: true })
+        await writeFile(join(args[2], ".git"), "gitdir: /elsewhere/.git/worktrees/new\n", "utf8")
+        return { exitCode: 1, stderr: "fatal: could not check out" }
+      },
+      "worktree remove": async ({ args }) => {
+        await rm(args[args.length - 1], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const before = await fixture.readMetadata()
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+      })).rejects.toThrow(/could not check out/)
+
+      // The half-made checkout was inside the rollback's scope, and the branch it was
+      // holding went with it. Left behind, that branch is what no later add or create
+      // of this task can work around.
+      expect(existsSync(join(fixture.taskPath, "gamma"))).toBe(false)
+      expect(calls.some((call) => call.key === "branch -D -- task/login")).toBe(true)
+      // And the task's own record is exactly as it was: the worktrees are written to it
       // only once every one of them exists.
       expect(await fixture.readMetadata()).toEqual(before)
     } finally {
@@ -503,7 +752,7 @@ describe("addTaskRepositories", () => {
     const base = addSucceeds(fixture.taskPath)
     const subprocess = {
       spawn(request) {
-        const key = request.argv.slice(3).join(" ")
+        const key = parseGitArgv(request.argv).args.join(" ")
         // The first repository goes in; the second fails on something git names,
         // which is the code the caller has to be told rather than a catch-all.
         if (key.startsWith("worktree add") && key.includes("beta")) {

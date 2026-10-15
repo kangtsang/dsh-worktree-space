@@ -14,10 +14,10 @@ import { discoverSourceRepos, resolveSourceRepos } from './discover.js'
 import { E2E_NAMES_SHOWN, inspectE2eConfigs } from './e2e.js'
 import { gitSucceeded, runGit, tryRunGit } from './git.js'
 import { findLinks, symlinksRefused } from './links.js'
-import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateTaskName } from './naming.js'
+import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateRepositoryDirectoryName, validateTaskName } from './naming.js'
 import { assertIsolated, isInside, refuseDelete } from './paths.js'
 
-import { DEPLOY_DIR, DEPLOY_ROOT, TASK_OWNED_ENTRIES, readTaskMetadata, resolveTasksRoot, sourceDeployRootPath, taskDeployRootPath, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { DEPLOY_DIR, DEPLOY_ROOT, TASK_OWNED_ENTRIES, isLinkedWorktree, readTaskMetadata, resolveTasksRoot, sourceDeployRootPath, taskDeployRootPath, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /** How many links a create-time warning names before it says how many more there are. */
 const LINK_NAMES_SHOWN = 3
@@ -247,8 +247,37 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
     // call put there, so it is asked first.
     const refused = refuseDelete(tasksRoot, entry.path, `the worktree '${entry.name}'`)
     if (refused !== '') { stranded.push(entry.name); continue }
-    if (!(await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path]))) {
+    const removed = await gitSucceeded(subprocess, entry.repoPath, ['worktree', 'remove', '--force', entry.path])
+    if (!removed && await isLinkedWorktree(entry.path)) {
+      // A checkout git really made that this call could not take back. It is a leftover,
+      // and it is still holding the branch, so the branch is left alone: git refuses to
+      // delete one a worktree has checked out, and claiming otherwise would report a
+      // removal that did not happen.
+      //
+      // The disk is what decides this, and that is the correction to the obvious
+      // reading of "a worktree git never created is simply reported as stranded". Every
+      // entry in this list was pushed BEFORE `worktree add` ran - that is the point of
+      // the push, so a checkout git made and then failed on is inside the rollback's
+      // scope - and that also puts entries here for a `worktree add` git refused before
+      // it made anything at all. Reporting one of those as stranded is not harmless: a
+      // non-empty `stranded` keeps the container, and a container kept with no record
+      // takes the name for good, because every later create reads no metadata and
+      // refuses with E2001. So only a real checkout is a leftover.
       stranded.push(entry.name)
+      continue
+    }
+    if (!removed) {
+      // No checkout on disk, so git never got as far as registering one - but git
+      // creates the ref BEFORE the checkout, so a branch with this name can still have
+      // been left behind, and an orphan branch takes the name exactly as an orphan
+      // worktree does. That is the shape the push exists for. Whether it is really there
+      // is asked rather than assumed: with nothing holding it, `-D` fails for the only
+      // reason it ever fails there - no such branch - which is the ordinary answer for a
+      // refusal that never began, and not a leftover to report.
+      if (await gitSucceeded(subprocess, entry.repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+        && !(await gitSucceeded(subprocess, entry.repoPath, ['branch', '-D', '--', branch]))) {
+        stranded.push(`${entry.name}'s branch ${branch}`)
+      }
       continue
     }
     // Removing the worktree is half of what has to go back: the branch was made
@@ -256,11 +285,13 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
     // held it. Left behind it takes the name, and the same task cannot be
     // created again - which is the opposite of what the record below then says.
     //
-    // Deleting it is safe because it cannot be anybody else's: this create
-    // refused every repository that already had this branch before it made
-    // anything, and the worktree that was holding it is gone. `-D` because it
-    // has no commits and can have none now, and `--` for the reason archive.js
-    // gives - this is the one call here that leaves the container.
+    // The removal succeeded, so this call's own `worktree add` did make the branch,
+    // and `-D` is unconditional rather than gated on a second question. Deleting it
+    // is safe because it cannot be anybody else's: this create refused every
+    // repository that already had this branch before it made anything, and the
+    // worktree that was holding it is gone. `-D` because it has no commits and can
+    // have none now, and `--` for the reason archive.js gives - this is the one call
+    // here that leaves the container.
     if (!(await gitSucceeded(subprocess, entry.repoPath, ['branch', '-D', '--', branch]))) {
       stranded.push(`${entry.name}'s branch ${branch}`)
     }
@@ -269,12 +300,29 @@ async function rollbackTask(subprocess, tasksRoot, taskPath, branch, created) {
 
   // The container is the last thing standing, and "no task space was left behind"
   // is a claim about it, so the claim is made only when it is demonstrably gone.
-  // Four ways that fails, and only the first is a clean no-op: a readdir failing
+  // Five ways that fails, and only the first is a clean no-op: a readdir failing
   // because the directory is already absent PROVES it is gone, while one failing
-  // for any other reason proves nothing and has to be reported; a container holding
-  // something this call did not put there is left alone on purpose, which still
-  // takes the name; and a removal that throws leaves it.
+  // for any other reason proves nothing and has to be reported; the fence refusing
+  // the path is named rather than deleted; a container holding something this call
+  // did not put there is left alone on purpose, which still takes the name; and a
+  // removal that throws leaves it.
   const container = `the task space ${basename(taskPath)}`
+  // Fence, asked before the path is read through and before the removal itself.
+  // The container this call made is a directory it may remove - but a name that has
+  // become a link is a name for somewhere else, often outside the container root,
+  // and removing it is the user's to do rather than this plugin's. It is the same
+  // question the worktrees above are asked, and a refusal is answered the same way:
+  // the container is named as stranded instead of deleted, so the caller is told
+  // what is still on disk rather than told the rollback left nothing.
+  //
+  // Asked before the readdir for the same reason the worktree loop asks first: a
+  // link that points nowhere makes the readdir answer ENOENT, which this function
+  // reads as proof the directory is gone - and the name would still be there.
+  const refused = refuseDelete(tasksRoot, taskPath, container)
+  if (refused !== '') {
+    stranded.push(container)
+    return stranded
+  }
   let leftovers
   try {
     leftovers = await readdir(taskPath)
@@ -399,7 +447,20 @@ export async function createTask(subprocess, options) {
     )
   }
 
-  const names = selected.map((repoPath) => basename(repoPath))
+  // Every repository contributes its own directory name to the task space, so the
+  // names are checked as directory names before anything is made. `basename` answers
+  // `.` or `..` for a path ending in one, and `join(taskPath, '..')` is the project
+  // layer rather than a worktree - inside the container, so the delete fence allows
+  // it, and only git's own "the destination directory is not empty" happens to stop
+  // it today. The plugin's own entry names are refused for the other half of the
+  // same reason: a worktree called `.worktree-space` would put a checkout where the
+  // record, the note and the deploy root go.
+  //
+  // Checked here, with the other request guards, rather than where the worktree is
+  // cut: a name that cannot be one has to fail as a request, not halfway through a
+  // rollback. `validateRepositoryDirectoryName` is the same rule `add` applies, so a
+  // repository this refuses cannot be added to an existing task either.
+  const names = selected.map((repoPath) => validateRepositoryDirectoryName(basename(repoPath)))
   const duplicate = names.find((entry, index) => names.indexOf(entry) !== index)
   if (duplicate !== undefined) {
     throw coded('E4002', `two selected repositories are both named '${duplicate}'; select repositories with distinct names`)
@@ -535,16 +596,29 @@ export async function createTask(subprocess, options) {
       await writeFile(join(taskDeployRootPath(taskPath), '.state.json.example'), STATE_EXAMPLE)
     }
 
-    for (const repoPath of selected) {
-      const worktreePath = join(taskPath, basename(repoPath))
+    for (const [index, repoPath] of selected.entries()) {
+      // The validated name, not a fresh `basename`: the guard above approved one
+      // string and this has to be the same string, or a name refused could still
+      // reach the path through a second `basename` that happens to agree with it.
+      const worktreePath = join(taskPath, names[index])
       // Read the source facts before the branch exists, so they describe the
       // checkout the worktree was cut from rather than the worktree itself.
       const facts = await sourceFacts(subprocess, repoPath)
       const args = baseRef === undefined || `${baseRef}`.trim() === ''
         ? ['worktree', 'add', worktreePath, '-b', branch]
         : ['worktree', 'add', worktreePath, '-b', branch, `${baseRef}`]
+      // Pushed BEFORE git runs, not after. `worktree add` creates the branch and the
+      // directory and can then fail - a failed checkout, a hook, a lock, a full disk -
+      // and a half-made worktree that is not in this list is one the rollback never
+      // removes. It is on disk, so the container is not empty either, and
+      // `holdsOnlyOurs` therefore keeps a container that has no record: a later create
+      // of the same name reads no metadata, concludes the directory is somebody else's
+      // task, and refuses with E2001 for good. The rollback fences each removal and
+      // reports what it could not remove, so an entry for a worktree git never created
+      // is answered there rather than here - see `rollbackTask`, which asks the disk
+      // before it calls a missing checkout stranded.
+      created.push({ name: names[index], path: worktreePath, repoPath, ...facts })
       await runGit(subprocess, repoPath, args)
-      created.push({ name: basename(repoPath), path: worktreePath, repoPath, ...facts })
     }
 
     await writeTaskMetadata(taskPath, taskMetadata({
@@ -627,10 +701,28 @@ export async function createTask(subprocess, options) {
   // warnings and never thrown: the task space exists and the work is not wrong, so
   // refusing the create would be reporting a delivery-time hazard as a failure.
   const links = []
+  let linksTruncated = false
   if (await symlinksRefused()) {
-    for (const entry of created) links.push(...await findLinks(entry.path))
+    for (const entry of created) {
+      const found = await findLinks(entry.path)
+      links.push(...found.links)
+      // A walk that stopped at its bound leaves the count short, and this warning is a
+      // count. Saying "the worktrees hold 3 of them" about a tree with more would be a
+      // number the reader could rely on and should not, so the two are told apart and
+      // the truncated case says what it is rather than reporting the lower bound as a
+      // total.
+      if (found.truncated) linksTruncated = true
+    }
   }
-  if (links.length > 0) {
+  if (linksTruncated) {
+    warnings.push(warned(
+      'workspace-holds-links',
+      'this machine will not recreate a symbolic link, and a worktree holds more entries than the link scan will walk - '
+      + `so the links in this task space could not be counted (${links.length} were found before the scan stopped). `
+      + 'They cannot be filed when this task is finished; move or delete them before then, or the finish will leave them in place and stop.',
+      { count: links.length, links: links.slice(0, LINK_NAMES_SHOWN), shown: LINK_NAMES_SHOWN, truncated: true },
+    ))
+  } else if (links.length > 0) {
     const named = links.slice(0, LINK_NAMES_SHOWN).join(', ')
     const more = links.length > LINK_NAMES_SHOWN ? ` (and ${links.length - LINK_NAMES_SHOWN} more)` : ''
     warnings.push(warned(

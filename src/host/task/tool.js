@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { projectNameFor } from './naming.js'
 import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot } from './operations.js'
-import { canonicalPath, isInside } from './paths.js'
+import { absolutePath, canonicalPath, isInside } from './paths.js'
 import { coded } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
 import { normalizeSessions, readTaskMetadata, recordTaskSession, taskSpacePath } from './shared.js'
@@ -30,7 +30,7 @@ const DESCRIPTION = [
   'A create may name a deploy script inside the workspace\'s own `.worktree-space/deploy/` directory: pass deployScript as a path relative to the workspace (e.g. ".worktree-space/deploy/notify.sh"). It must live under that directory (E4014 refuses anything else), it travels into the task space under its own name with the rest of the deploy root, and the task\'s record remembers it as the entry to run. Nothing is renamed or overwritten. The workspace\'s `.worktree-space/deploy/` is copied whole to the same relative place in the task space, which is where the entry runs from: omit deployScript and the entry is `.worktree-space/deploy/deploy.sh`, run in the task space as `./.worktree-space/deploy/deploy.sh`.',
   'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
   'done REQUIRES merge. Pass merge: true to land the task branches on their targets, or merge: false to leave the work where it is. There is no default, because this is the one decision a finish cannot take back: a merge that landed has to be reverted by hand, and a branch that was not merged keeps its commits where they are. Decide it from what the user asked for - do not guess, and do not call done without it (E7006).',
-  'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine. The session id a create or a dispatch opened is written into the task\'s own record, and `list` reports it together with what each task\'s deploy recorded (the acceptance URL and the last smoke) - so neither has to be searched for or read out of a file.',
+  'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine - and it is refused (E4012) unless the user has switched on the setting that grants it. The session id a create or a dispatch opened is written into the task\'s own record, and `list` reports it together with what each task\'s deploy recorded (the acceptance URL and the last smoke) - so neither has to be searched for or read out of a file.',
   'Watch and correct that session through the session-control tools: wts_session_tool_find locates a session by directory, title or id; wts_session_tool_status reports running, openTurn, lastActivity, pendingWork and lastReply; wts_session_tool_read reads its messages; wts_session_tool_send says something to it; wts_session_tool_wait waits for one output; wts_session_tool_resume brings an offline session back; wts_session_tool_cancel stops it. A dispatched session is NOT this session\'s child, so send_message cannot reach it. Anything time-sensitive must be sent with mode "steer": mode "queue" is only read at a turn boundary, and a long task is often one long turn.',
   'You are told when that session dies mid-turn: unless watchSession is false, a turn that ends error, interrupted, blocked or max-tokens reports back to you with the session id and the failure, because a session that dies cannot report itself. A turn that completes, and one the user cancels, are never reported. Treat such a notice as the task NOT being done, and use the session-control tools to see where it stopped and put it back to work.',
   'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
@@ -42,7 +42,7 @@ const DESCRIPTION = [
   'A `dirtyCheckout` row is the user\'s own working checkout, which a merge would overwrite. It is NOT a conflict: no merge was started and there are no markers to reconcile. That work is theirs and may have nothing to do with this task, so do not commit or stash it for them - say what is in the way and let them deal with it, then call done again.',
   'A merge lands on the branch each source repository has checked out unless another is named; a branch that is checked out nowhere is merged in a worktree of its own, so no source checkout is ever switched.',
   'A task that deploys (deployTarget docker) has a finish gate: done with merge: true is refused while `.worktree-space/deploy/.state.json` records no passing smoke (E5006 - either the file does not exist, or its `lastSmoke.result` is not "pass"). The way past is to deploy and run the smoke through the task space\'s own deploy entry (the record\'s deployScript, or `deploy/deploy.sh`, both run from `.worktree-space/`) - never to retry, and never to ask for an override, because this tool cannot send one. A task with no deployment (deployTarget none) has no gate at all - a good answer when the user chose it, never one to reach by leaving the acceptance question unasked.',
-  'strays says what happens to the files in the task space that git never tracked: "archive" (the default when omitted) files them into the archive directory and clears build output, so one finish removes the space; "keep" touches nothing, which leaves the directory non-empty and the task space on disk. "discard" deletes them outright and this tool refuses it (E7007) - deleting the user\'s own writing is theirs to decide, on the panel, so archive the content or leave the space standing instead. `keepEntries` names individual entries to leave alone whatever the choice, and `documentsDirectory` says where archive files them. The plugin\'s own `.worktree-space/` is never one of these entries: it goes with the container when the space is cleared, and `keep` leaves it standing with everything else.',
+  'strays says what happens to the files in the task space that git never tracked: "archive" (the default when omitted) files them into the archive directory and clears build output, so one finish removes the space; "keep" touches nothing, which leaves the directory non-empty and the task space on disk. "discard" deletes them outright and this tool refuses it (E7007) - deleting the user\'s own writing is theirs to decide, on the panel, so archive the content or leave the space standing instead. `keepEntries` names individual entries to leave alone whatever the choice. Where the archive files them is not this call\'s to name: they go to the configured archive directory, or to the plugin\'s own archived-docs folder under the container root when none is set, and the panel\'s own finish dialog shows the user that path. The plugin\'s own `.worktree-space/` is never one of these entries: it goes with the container when the space is cleared, and `keep` leaves it standing with everything else.',
 ].join('\n')
 
 /**
@@ -210,9 +210,9 @@ function required(value, name) {
  * @throws Error when neither is available.
  */
 async function containerFor(subprocess, tasksRoot, sourceRoot, configuredRoot = '') {
-  const explicit = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
+  const explicit = absolutePath(tasksRoot)
   if (explicit !== '') return explicit
-  const source = typeof sourceRoot === 'string' ? sourceRoot.trim() : ''
+  const source = absolutePath(sourceRoot)
   if (source === '') throw coded('E7006', 'tasksRoot is required (or sourceRoot, to use its recommended task space)')
   return (await suggestTaskRoot(subprocess, source, { configuredRoot })).suggested
 }
@@ -644,6 +644,40 @@ async function dispatchToSession(ctx, exec, request, watcher) {
 }
 
 /**
+ * Record the dispatching session as this task's leader, beside its member.
+ *
+ * A dispatch knows both ends: the session it just opened, and the session that
+ * called the tool. Writing only the first left the record unable to say who the
+ * member's report answers to, so every reader that cares had to infer it from a
+ * directory. The caller id comes from `exec`, which the harness sets on every tool
+ * run - the same expression the `done` branch uses for the session to leave out of
+ * the active-session check - so it is a fact about the run rather than a value a
+ * model can name in the arguments.
+ *
+ * A session that dispatched its own task space records one entry, the member's, not
+ * two spellings of one id. And a write that fails is a warning, exactly as the
+ * member's is: the session is running, and losing the work to save the note about it
+ * would be the worse trade.
+ * @param taskPath - the task space whose record is being written.
+ * @param memberSessionId - the session the work was handed to, already recorded.
+ * @param exec - the tool run context, for the calling session's id.
+ * @param warnings - where a write that could not happen is reported.
+ */
+async function recordDispatchLeader(taskPath, memberSessionId, exec, warnings) {
+  const callerSessionId = exec?.agent?.session?.id ?? exec?.agent?.id ?? ''
+  if (typeof callerSessionId !== 'string' || callerSessionId === '') return
+  if (callerSessionId === memberSessionId) return
+  // Read again rather than reusing the caller's copy: the member was written a moment
+  // ago, and an append to the record that no longer says what is on disk would drop it.
+  const current = await readTaskMetadata(taskPath).catch(() => undefined)
+  if (!(await recordTaskSession(taskPath, current, callerSessionId, 'leader'))) {
+    warnings.push(`the dispatching session (${callerSessionId}) could not be written into the task's record at `
+      + `${taskPath} as its leader, so a report from the member cannot name who it answers to; the session it `
+      + 'dispatched is still recorded, and its id is in this answer')
+  }
+}
+
+/**
  * Start watching a dispatched session for the turns that end badly.
  *
  * The watcher is handed in by the entry rather than looked up, so a deployment that serves no
@@ -664,6 +698,39 @@ function watchDispatchedSession(watcher, sessionId, task, exec) {
   } catch {
     // A watch that cannot be armed must not fail the dispatch: the session is running.
   }
+}
+
+/**
+ * Refuse a call that would open a session wider than the user has authorised.
+ *
+ * The one request this side may not answer by itself. `danger-full-access` in DSH's own
+ * table is the whole machine without approval prompts, and the user's grant of it is a
+ * setting they switch - the same setting, read through the same function the panel's own
+ * endpoint uses. The tool's description says "ask the user first", and a description is
+ * content a model can be talked out of, which is exactly why this is a gate instead:
+ * refused with E4012, the way the panel path refuses it.
+ *
+ * Only an explicitly named `danger-full-access` is asked about. `inherit` copies the
+ * caller's own explicit override and nothing else, so it can never be wider than the
+ * session that called - that is a grant the user already made, not an escalation - and
+ * `workspace-write` narrows. Checking either would be this side second-guessing the
+ * user's own authorisation rather than refusing one the model invented.
+ *
+ * Asked at the entry to each branch that can open a session, before anything is made:
+ * a create that refused here after cutting the worktrees would leave a task space with no
+ * session on it and a caller told the call failed.
+ * @param requested - the permission the call named, already defaulted.
+ * @param granted - the setting, `on` when the user has authorised it.
+ * @throws Error carrying E4012 when full access is asked for while the setting is off.
+ */
+function refuseUngrantedFullAccess(requested, granted) {
+  if (requested !== 'danger-full-access' || granted === 'on') return
+  throw coded(
+    'E4012',
+    'Full access for the sessions handed to an agent is switched off, so this call cannot open a session with '
+      + '`danger-full-access`. Turn the setting on first, or open the session at `workspace-write` (or leave the '
+      + 'permission at `inherit`, which copies this session\'s own override and nothing more).',
+  )
 }
 
 /**
@@ -904,15 +971,30 @@ function summarize(action, value) {
   const uncommitted = value.repositories.filter((row) => row.needsCommit === true)
   const blocked = value.repositories.filter((row) => row.dirtyCheckout === true)
   const settled = new Set([...conflicted, ...uncommitted, ...blocked])
+  // Everything with a reason that none of those three sections rendered. The rule is
+  // "has an error and was not spoken for", not "is not a conflict": a plain failure -
+  // a merge target that is not a local branch, a `rev-parse` that would not answer, a
+  // worktree that could not be removed - has no section of its own, and leaving it out
+  // is how the summary came to say "Some repositories need attention:" and then name
+  // nothing at all. Read from the flags, never from git's wording.
   const attention = value.repositories
     .filter((row) => row.error !== '' && !settled.has(row))
     .map((row) => `${row.name}: ${row.error}`).join('; ')
   // A handed-on conflict is not a failure to report and move past: it is the step
   // that is left, so the summary says where it is rather than calling the task done.
   const handedOn = value.repositories.filter((row) => row.mergeInProgress)
-  const headline = handedOn.length === 0
-    ? `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.`
-    : `Task '${value.task}' is unfinished: a merge is waiting to be resolved in ${handedOn.map((row) => row.mergeSite).join(', ')}.`
+  // What is still on disk because a repository failed and was neither merged nor
+  // removed. `handedOn` is not the only way a finish is unfinished: a plain failure
+  // leaves its worktree and branch exactly as they were, and a headline that said
+  // "finished" over that told the model the task was done when nothing had landed.
+  const stranded = value.repositories.filter((row) => row.error !== '' && row.merged !== true && row.removed !== true)
+  const headline = handedOn.length > 0
+    ? `Task '${value.task}' is unfinished: a merge is waiting to be resolved in ${handedOn.map((row) => row.mergeSite).join(', ')}.`
+    : stranded.length > 0
+      // Named by path, so the reader knows what to go and look at rather than only that
+      // something went wrong. "Unfinished" is the claim; the list is what backs it.
+      ? `Task '${value.task}' is unfinished: ${stranded.length === 1 ? 'one repository' : `${stranded.length} repositories`} could not be finished and ${stranded.length === 1 ? 'is' : 'are'} still on disk at ${stranded.map((row) => row.path).join(', ')}.`
+      : `Task '${value.task}' finished. Task space ${value.container === '' ? 'removed' : `kept at ${value.container}`}.`
   // Who to hand work to, said here rather than left to a lookup. The caller that can act
   // is the one that dispatched the work, and what it needs is the session that owns these
   // checkouts - named when the record has one, and otherwise with the way to get one. A
@@ -1006,6 +1088,11 @@ export function registerTaskTool(ctx, options = {}) {
   // Read per call rather than captured once: the setting can change while a
   // session is running, and the next create should follow it.
   const configuredRoot = () => typeof options.configuredRoot === 'function' ? options.configuredRoot() : ''
+  // Whether the user has granted full access to the sessions this plugin opens for them.
+  // Read per call rather than captured once, for the same reason the container root is:
+  // the setting can change while a session is running, and the next dispatch should follow
+  // it. A deployment that passes nothing answers `off`, which is the setting's own default.
+  const configuredFullAccess = () => typeof options.configuredFullAccess === 'function' ? options.configuredFullAccess() : 'off'
   // Where the strays handling files content away, when a done asks for `archive`
   // without naming a directory: the same archive preference the finish dialog reads.
   const configuredArchive = () => typeof options.configuredArchive === 'function' ? options.configuredArchive() : undefined
@@ -1040,7 +1127,7 @@ export function registerTaskTool(ctx, options = {}) {
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create). Omitted it registers, which is what the panel does; pass false only when the user asked for a task space that stays out of the workspace list.' },
       merge: { type: 'boolean', description: 'REQUIRED for done: true merges the task branches into their targets before the worktrees are removed, false leaves the work on the task branches. There is no default - a finish that omits it is refused with E7006, because a merge is the one step here that cannot be walked back.' },
       prompt: { type: 'string', description: 'The complete, self-contained job for a session (create, dispatch). Given on create, the session is opened in the new task space and handed this in the same call; given on dispatch, it is handed to a session in a task space that already exists. A session does not share this conversation\'s context, so include everything it needs.' },
-      permission: { type: 'string', enum: ['inherit', 'workspace-write', 'danger-full-access'], description: 'What the session opened by this call may write (create, dispatch). inherit, the default, copies this session\'s own explicit sandbox override and nothing more, so the new session is never wider than this one. Ask the user before naming danger-full-access: that is the whole machine.' },
+      permission: { type: 'string', enum: ['inherit', 'workspace-write', 'danger-full-access'], description: 'What the session opened by this call may write (create, dispatch). inherit, the default, copies this session\'s own explicit sandbox override and nothing more, so the new session is never wider than this one. `danger-full-access` is the whole machine without approval prompts, and it is refused (E4012) unless the user has switched on the setting that grants it - ask them before naming it, and expect the refusal when they have not.' },
       watchSession: { type: 'boolean', description: 'Whether to watch the session this call opens and report back to you when a turn ends abnormally (create, dispatch). True by default. A session that dies mid-turn cannot report itself - its model call failed, it hit the output ceiling, a pre-step hook refused it, or the process crashed - so with this on you are told, with the session id, instead of having to poll a session you had no reason to suspect. Pass false for a task whose failures you do not need to hear about. Turns that complete, and turns the user cancels, are never reported either way.' },
       target: { type: 'string', description: 'Branch to merge into (done), for every repository. Omit for the branch each source repository has checked out.' },
       deleteBranch: { type: 'boolean', description: 'Delete each branch (done), after a merge. Needs merge: true; deleting a branch that never landed is refused here. Omitted the branch is kept, which is the half that can be walked back.' },
@@ -1050,7 +1137,6 @@ export function registerTaskTool(ctx, options = {}) {
         description: 'What happens to the files in the task space that git never tracked (done). "archive" (the default when omitted) files them into the archive directory and clears build output, so this finish can remove the space. "keep" touches nothing, which leaves the directory non-empty and the task space on disk - use it when the user wants to come back to that content. "discard" deletes them outright and is REFUSED here (E7007): it is irreversible and the user\'s own decision, so it is reachable only from the Worktree Space panel. Never reach for it to get a finish to go through - archive the content, or leave the space standing and say why.',
       },
       keepEntries: { type: 'array', items: { type: 'string' }, description: 'Entry names in the task space to leave alone whatever strays says (done). Omit when nothing specific has to survive.' },
-      documentsDirectory: { type: 'string', description: 'Where strays: "archive" files the content (done). Omit for the plugin\'s own archived-docs folder under the container root.' },
       force: { type: 'boolean', description: 'Discard uncommitted changes (done). Refused here, always - the user decides that themselves, on the management page.' },
       unregisterWorkspace: { type: 'boolean', description: 'Unregister the Workspace of the task space a finish removed (done). Omitted it unregisters, which is what the panel does; pass false only when the user asked to keep that task\'s group after finishing.' },
     },
@@ -1077,7 +1163,10 @@ export function registerTaskTool(ctx, options = {}) {
       const action = args.action
 
       if (action === 'suggest-root') {
-        const sourceRoot = required(args.sourceRoot, 'sourceRoot')
+        // Resolved, because this path is about to be compared - `suggestTaskRoot`
+        // hands it to `assertIsolated` against the recommendation - and a spelling
+        // with a `..` in it compares as a string, not as the directory it names.
+        const sourceRoot = absolutePath(required(args.sourceRoot, 'sourceRoot'))
         const result = await suggestTaskRoot(ctx.subprocess, sourceRoot, {
           tasksRoot: args.tasksRoot,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
@@ -1094,7 +1183,15 @@ export function registerTaskTool(ctx, options = {}) {
       }
 
       if (action === 'create') {
-        const sourceRoot = required(args.sourceRoot, 'sourceRoot')
+        const sourceRoot = absolutePath(required(args.sourceRoot, 'sourceRoot'))
+        // Asked before the task space is cut, not after: a create that refused once the
+        // worktrees were on disk would leave a space with no session on it and a caller
+        // told the call failed. A create with no prompt opens no session, so it asks
+        // nothing.
+        if (typeof args.prompt === 'string' && args.prompt.trim() !== '') {
+          const requested = typeof args.permission === 'string' && args.permission.trim() !== '' ? args.permission.trim() : 'inherit'
+          refuseUngrantedFullAccess(requested, configuredFullAccess())
+        }
         // The one delivery decision this call makes: whether the task expects a
         // deployment. It is a plain argument now, not a JSON policy blob, so the
         // schema's own enum refuses a bad value before this line and the value
@@ -1202,6 +1299,10 @@ export function registerTaskTool(ctx, options = {}) {
               value.warnings.push(`the session id (${opened.sessionId}) could not be written into the task's record at `
                 + `${result.path}; find it again with wts_session_tool_find, by the task space directory`)
             }
+            // The other end of the dispatch, in the same record: the session that asked for
+            // the work. The member is written first so a failure between the two leaves a
+            // record naming the session doing the work rather than one naming only the asker.
+            await recordDispatchLeader(result.path, opened.sessionId, exec, value.warnings)
           }
         }
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
@@ -1219,8 +1320,9 @@ export function registerTaskTool(ctx, options = {}) {
           tasksRoot,
           // Absolute paths, not names: a repository added to an existing task need
           // not sit under the source root that task began from, so there is no
-          // directory to resolve a name against.
-          repositories: Array.isArray(args.repos) ? args.repos : [],
+          // directory to resolve a name against. Each is resolved all the same,
+          // because `addTaskRepositories` compares it against the task space.
+          repositories: Array.isArray(args.repos) ? args.repos.map(absolutePath) : [],
           baseRef: typeof args.baseRef === 'string' && args.baseRef.trim() !== '' ? args.baseRef.trim() : undefined,
         })
         const value = envelope(action)
@@ -1305,7 +1407,8 @@ export function registerTaskTool(ctx, options = {}) {
         // turn open, inside the very task space it is asking to remove, so counting it would make
         // that flow impossible - it would be refused with itself as the blocker. Every other
         // session in there still counts.
-        refuseWhileSessionsWork(ctx, taskSpacePath(tasksRoot, project, task), exec?.agent?.session?.id ?? exec?.agent?.id ?? '')
+        const callerSessionId = exec?.agent?.session?.id ?? exec?.agent?.id ?? ''
+        refuseWhileSessionsWork(ctx, taskSpacePath(tasksRoot, project, task), callerSessionId)
         // Read before the finish, not after: a finish that completes removes the task
         // space and with it the record this is read from, and the caller still needs to
         // know which session was on the work. Read leniently - a missing or unreadable
@@ -1316,6 +1419,11 @@ export function registerTaskTool(ctx, options = {}) {
           task,
           project,
           tasksRoot,
+          // The early refusal above is the cheap one. Handing the context on is what lets
+          // the finish ask again inside its own lock, where no session can start working
+          // between the question and the removal - see `finishTask`.
+          ctx,
+          callerSessionId,
           merge: args.merge,
           target: typeof args.target === 'string' ? args.target : undefined,
           deleteBranch: typeof args.deleteBranch === 'boolean' ? args.deleteBranch : undefined,
@@ -1324,7 +1432,6 @@ export function registerTaskTool(ctx, options = {}) {
           // answer that neither loses anything nor leaves the task space standing.
           strays: typeof args.strays === 'string' ? args.strays : undefined,
           keepEntries: Array.isArray(args.keepEntries) ? args.keepEntries : [],
-          documentsDirectory: typeof args.documentsDirectory === 'string' ? args.documentsDirectory : undefined,
           deliveryArchive: configuredArchive(),
         })
         const value = envelope(action)
@@ -1418,6 +1525,9 @@ export function registerTaskTool(ctx, options = {}) {
         // The declared enum is what refuses a name outside these three, before this branch is
         // reached; what is left here is the default and what the call asked for.
         const requested = typeof args.permission === 'string' && args.permission.trim() !== '' ? args.permission.trim() : 'inherit'
+        // Asked here, before the session is opened: a dispatch that refused after opening
+        // one would leave a session in the task space with no work and nothing recording it.
+        refuseUngrantedFullAccess(requested, configuredFullAccess())
         // Same default as a create: watch unless the call says not to.
         const watch = args.watchSession !== false
         const value = envelope(action)
@@ -1447,6 +1557,8 @@ export function registerTaskTool(ctx, options = {}) {
             value.warnings.push(`the session id (${opened.sessionId}) could not be written into the task's record at `
               + `${taskPath}; find it again with wts_session_tool_find, by the task space directory`)
           }
+          // The other end of the dispatch, in the same record (see the create's own note above).
+          await recordDispatchLeader(taskPath, opened.sessionId, exec, value.warnings)
         }
         value.summary = summarize(action, value)
         return value

@@ -15,6 +15,18 @@
  */
 
 /**
+ * How many of those questions may be in flight at once.
+ *
+ * Here rather than in the entry module, because the entry module is not the only
+ * caller that has to obey it and is not a module the others may import: `index.js`
+ * imports the task side, so a constant it owned would come back the wrong way
+ * round. This file is a leaf - it imports nothing - which is what makes it the one
+ * place both sides can read the number from. The entry re-exports it, so its public
+ * surface is unchanged.
+ */
+export const SCAN_CONCURRENCY = 6
+
+/**
  * Apply `worker` to every item with at most `limit` of them in flight, and keep
  * the results in the order the items came in.
  *

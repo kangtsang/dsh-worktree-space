@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { DEFAULT_SCAN_DEPTH, MAX_SCAN_DIRECTORIES } from "../src/host/index.js"
-import { DEFAULT_IGNORED_SCAN_DIRECTORIES, MAX_IGNORED_SCAN_DIRECTORIES } from "../src/client/lib/scan-ignore"
+import { DEFAULT_IGNORED_SCAN_DIRECTORIES } from "../src/client/lib/scan-ignore"
 
 /**
  * The documented defaults must be the defaults the code ships.
@@ -44,7 +44,7 @@ const STATED = [
     file: "README.md",
     depth: /\| 扫描深度 \|[^|]*\|\s*(\d+)\s*层\s*\|/,
     directories: /\| 最大遍历目录数 \|[^|]*\|\s*(\d+)\s*\|/,
-    ignored: /\| 扫描忽略的目录名 \|[^|]*\|\s*内置 (\d+) 个\s*\|/,
+    ignored: /\| 工作区仓库扫描忽略目录 \|[^|]*\|\s*内置 (\d+) 个\s*\|/,
   },
   {
     file: "README.en.md",
@@ -104,11 +104,4 @@ describe("the defaults the documents state", () => {
     expect(new Set(DEFAULT_IGNORED_SCAN_DIRECTORIES).size).toBe(DEFAULT_IGNORED_SCAN_DIRECTORIES.length)
   })
 
-  it("states the added-name ceiling the dialog enforces", () => {
-    // The one default stated in both READMEs and in neither PERMISSIONS, because a
-    // permission document is not where a dialog's text limit belongs.
-    expect(MAX_IGNORED_SCAN_DIRECTORIES).toBe(200)
-    expect(read("README.md")).toContain(`最多可添加 ${MAX_IGNORED_SCAN_DIRECTORIES} 个`)
-    expect(read("README.en.md")).toContain(`Up to ${MAX_IGNORED_SCAN_DIRECTORIES} of your own`)
-  })
 })

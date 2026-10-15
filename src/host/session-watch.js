@@ -114,13 +114,23 @@ export class SessionWatch {
    */
   constructor(deps) {
     this.deps = deps
-    /** watched session id -> { task, sender, dispose }. */
+    /** watched session id -> { task, sender, lastTurn }. */
     this.watched = new Map()
     this.installed = false
+    /** The `ctx.on` disposer, when the host returned one. */
+    this.unsubscribe = undefined
   }
 
   /**
    * Start listening. Idempotent, and safe on a host that serves no session service.
+   *
+   * The disposer `ctx.on` returns is kept rather than dropped, and that is the difference
+   * between a listener this instance owns and one it can only stop by being garbage
+   * collected. Without it `dispose()` cleared the watch table and set `installed` back to
+   * false - so a `dispose()` followed by an `install()` put a **second** listener on the
+   * feed, and every event was then handled twice. The host's own disposal of the plugin
+   * fibre removes the first one, so this is not about reloads: it is about this object's
+   * own lifecycle staying honest, which is what `installed` claims to describe.
    * @returns whether the feed was subscribed to.
    */
   install() {
@@ -133,13 +143,16 @@ export class SessionWatch {
     try {
       // A root-context listener sees every session's appends. The handler contains its own
       // failures, because this runs inside another session's append path.
-      ctx.on('session/event', (session, event) => {
+      const off = ctx.on('session/event', (session, event) => {
         try {
           this.onSessionEvent(session, event)
         } catch (error) {
           this.emit(`watching a session event failed: ${String(error?.message ?? error)}`)
         }
       })
+      // A host that returns no disposer is one this cannot unregister from, and saying so
+      // is better than storing a value that is not callable and failing at disposal time.
+      this.unsubscribe = typeof off === 'function' ? off : undefined
       this.installed = true
       return true
     } catch (error) {
@@ -163,11 +176,31 @@ export class SessionWatch {
     this.watched.set(sessionId, {
       task: typeof task === 'string' ? task : '',
       sender: typeof senderSessionId === 'string' ? senderSessionId : '',
-      lastTurn: undefined,
+      lastKey: undefined,
     })
   }
 
-  /** Stop watching one session. */
+  /**
+   * Stop watching one session.
+   *
+   * Deliberately has no caller in this plugin, and the review lists that as a finding. It is
+   * a design decision rather than an oversight, and the reason is what an entry holds: a
+   * session id, the task name to say in a notice, and the id to address it to. None of those
+   * expires. `notify` resolves the sending agent afresh each time, so an entry for a session
+   * that has gone is inert until a later dispatch into that same session replaces it - and
+   * that replacement keeps the newest task and sender rather than accumulating a second.
+   *
+   * Dropping entries at some event would be worse than keeping them. The obvious candidate
+   * is a finish, and that is the moment a dispatched session may still be running - a report
+   * about its death is exactly what the dispatcher is waiting for when it goes to look - so
+   * a watch cancelled there would suppress the one notice this module exists to deliver.
+   * Cancelling on the session's own end would need a signal this module does not receive.
+   *
+   * The table is therefore bounded by the number of sessions this plugin has dispatched into,
+   * which is small and does not grow on its own. It is kept as a method rather than deleted
+   * because it is the correct way to stop watching one session, and a deployment that learns
+   * a reliable end-of-session signal should call it there rather than reach into the map.
+   */
   unwatch(sessionId) {
     this.watched.delete(sessionId)
   }
@@ -177,9 +210,30 @@ export class SessionWatch {
     return [...this.watched.keys()]
   }
 
-  /** Stop everything. */
+  /**
+   * Stop everything: the watches, and the subscription itself.
+   *
+   * Unsubscribing is what makes `installed` mean what it says. Clearing the table and
+   * setting the flag false, without removing the listener, describes an instance that is
+   * no longer watching while it is still receiving every event - and an `install()` after
+   * that would add a second listener, so each event would be judged twice and every notice
+   * sent twice. A host that returned no disposer is the one case this cannot undo, and it
+   * is reported rather than hidden.
+   */
   dispose() {
     this.watched.clear()
+    if (this.installed && this.unsubscribe === undefined) {
+      this.emit('the session event feed gave no way to unsubscribe, so this listener stays attached until the plugin is unloaded')
+    }
+    const off = this.unsubscribe
+    this.unsubscribe = undefined
+    if (typeof off === 'function') {
+      try {
+        off()
+      } catch (error) {
+        this.emit(`the session event feed could not be unsubscribed from: ${String(error?.message ?? error)}`)
+      }
+    }
     this.installed = false
   }
 
@@ -202,9 +256,21 @@ export class SessionWatch {
     // Reported once per turn: the same turn cannot end twice, but a replayed or resumed log
     // can carry the same `turn/end` again, and a duplicate notice would read as a second
     // failure that never happened.
-    const turn = typeof event.data?.turn === 'number' ? event.data.turn : -1
-    if (entry.lastTurn === turn) return
-    entry.lastTurn = turn
+    //
+    // Deduplicated by the event's own identity, and NOT by a sentinel for a missing turn.
+    // This used to fall back to `-1` when `data.turn` was absent, which made "this event has
+    // no turn number" indistinguishable from "this is turn -1" - so the first such notice
+    // was sent, `lastTurn` became `-1`, and **every later abnormal turn without a turn
+    // number was silently dropped**. The failure direction was the bad one: a missing field
+    // suppressed the report of a session that had died, which is the one thing this module
+    // exists to prevent. The log's `seq` is the event's own identity, present whenever the
+    // event is real, so it is what the dedup key uses.
+    //
+    // A missing `seq` is treated as **not a duplicate** rather than as one: reporting a
+    // turn twice is a repeated sentence, while missing one is a session nobody hears about.
+    const key = typeof event.seq === 'number' ? `seq:${event.seq}` : typeof event.data?.turn === 'number' ? `turn:${event.data.turn}` : ''
+    if (key !== '' && entry.lastKey === key) return
+    if (key !== '') entry.lastKey = key
     this.notify(entry, sessionId, kind, failureDetail(event.data?.reason))
   }
 

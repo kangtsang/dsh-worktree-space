@@ -11,6 +11,20 @@ import { readdir, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { isInside, samePathLocation } from './paths.js'
 import { coded } from './codes.js'
+import { MAX_SCAN_DIRECTORIES } from './scan-bounds.js'
+
+/**
+ * The directory ceiling this walk applies when its caller names none.
+ *
+ * Read from {@link ./scan-bounds.js} rather than written here, so this walk and
+ * the entry module that clamps the configuration obey one number. An unbounded
+ * default is what this replaces, and the harm was real: a walk with no ceiling
+ * reaches the whole disk when it is pointed at the wrong directory, and every
+ * caller in this plugin passes a configured bound anyway - so the default is only
+ * ever reached by the caller that forgot, and the safe answer there is the same
+ * ceiling the setting is clamped to.
+ */
+const DEFAULT_MAX_DIRECTORIES = MAX_SCAN_DIRECTORIES
 
 /**
  * Whether a directory is a source repository, that is, its `.git` is a real
@@ -50,14 +64,25 @@ export async function isSourceRepository(directory) {
  *   historical contract for a caller that passes no bounds.
  * @param options.maxDirectories - the ceiling on directories inspected; the walk
  *   stops and keeps what it found rather than throwing, because one oversized root
- *   must not cost the caller every other root's repositories.
- * @param options.ignored - lower-cased directory names the walk skips.
+ *   must not cost the caller every other root's repositories. Bounded by default
+ *   rather than unbounded: a walk with no ceiling is one that reaches the whole
+ *   disk when it is pointed at the wrong directory, and every caller in this
+ *   plugin passes a configured bound anyway - the default is for the caller that
+ *   forgot, and the safe answer there is "audit the same ceiling the setting is
+ *   clamped to", not "walk until the disk ends".
+ * @param options.ignored - lower-cased directory names the walk skips. Empty by
+ *   default, and deliberately left that way: this is the *mechanism*, and every
+ *   caller here supplies the configured list. The built-in names are the entry
+ *   module's `DEFAULT_IGNORED_SCAN_DIRECTORY_SET`, which it passes as
+ *   `scanBounds().ignored`; a copy of that list here would be the second
+ *   definition the parity test exists to prevent, and it would also mean a caller
+ *   that wanted *no* skips had no way to say so.
  * @returns the repository paths in stable order; empty when none are found.
  */
 export async function discoverSourceRepos(sourceRoot, {
   signal,
   maxDepth = 1,
-  maxDirectories = Number.POSITIVE_INFINITY,
+  maxDirectories = DEFAULT_MAX_DIRECTORIES,
   ignored = new Set(),
   exclude = [],
 } = {}) {
@@ -99,6 +124,16 @@ export async function discoverSourceRepos(sourceRoot, {
         return
       }
       for (const entry of entries) {
+        // `isDirectory()` alone is what keeps a link out of this walk, and that is
+        // not luck - it is measured. `readdir` with `withFileTypes` reports a
+        // symbolic link and a junction with `isDirectory() === false` on Windows
+        // and on Linux alike (a link to a directory included, and a junction
+        // included), so the test below already refuses to descend one and no
+        // separate `isSymbolicLink()` clause is needed. It is written down because
+        // the scan-side walk `discoverGitRoots` states both conditions, and the
+        // difference reads as an oversight: it is not one, and a reader who
+        // "fixed" it by adding the clause here would be adding a line no fixture
+        // can make fail.
         if (!entry.isDirectory()) continue
         if (entry.name.startsWith('.')) continue
         if (entry.name.endsWith('.worktrees')) continue

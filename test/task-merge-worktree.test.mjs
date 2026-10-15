@@ -24,6 +24,17 @@ import { PLUGIN_ROOT, taskMetadata, writeTaskMetadata } from "../src/host/task/s
  */
 const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.json")
 
+/**
+ * A file name git will C-quote by default, which is the whole point of the `-z` reads.
+ *
+ * `git diff --name-only` prints `"\346\226\207.txt"` for the pure-ASCII spelling of this
+ * name - a string that does not name a file on disk. The plugin opens every path that
+ * listing reports to look for conflict markers, so a quoted one throws, lands in the
+ * handler written for submodules, and the merge is reported resolved while its markers
+ * are still in the file.
+ */
+const NON_ASCII_FILE = "文.txt"
+
 const gitAvailable = (() => {
   try {
     execFileSync("git", ["--version"], { stdio: "ignore" })
@@ -51,13 +62,18 @@ function succeeded(repo, args) {
 /** The profile's subprocess service, backed by real git. */
 function realSubprocess() {
   return {
-    spawn({ argv, cwd }) {
-      const args = argv.slice(3)
+    spawn({ argv, env }) {
+      // The real command line is passed through as it stands, minus the program name:
+      // this double exists to run real git, so dropping the hardening `-c` settings
+      // would make it run a different command than the one under test. The environment
+      // is passed the same way, for the same reason - `LC_ALL=C` in particular is what
+      // keeps git's diagnostics in the language `gitFailureCode` matches on.
+      const args = argv.slice(1)
       let stdout = ""
       let stderr = ""
       let exitCode = 0
       try {
-        stdout = execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" })
+        stdout = execFileSync("git", args, { encoding: "utf8", ...(env === undefined ? {} : { env: { ...process.env, ...env } }) })
       } catch (error) {
         exitCode = typeof error.status === "number" ? error.status : 1
         stdout = String(error.stdout ?? "")
@@ -80,9 +96,10 @@ function realSubprocess() {
  *
  * `conflict: true` moves the same line on `main`, so merging the task branch there
  * cannot apply; `held: true` checks `main` out in a second worktree, which is what
- * makes a scratch checkout impossible.
+ * makes a scratch checkout impossible. `nonAscii: true` does the same as `conflict`
+ * but for a file whose name is not pure ASCII, which is the shape git C-quotes.
  */
-async function fixture({ conflict = false, held = false, second = false } = {}) {
+async function fixture({ conflict = false, held = false, second = false, nonAscii = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), "dsh-task-merge-"))
   const source = join(root, "source")
   const tasksRoot = join(root, "tasks")
@@ -117,9 +134,26 @@ async function fixture({ conflict = false, held = false, second = false } = {}) 
   await writeFile(join(taskRepo, "shared.txt"), "task\n")
   git(taskRepo, ["commit", "-qam", "task work"])
 
-  if (conflict) {
+  if (nonAscii) {
+    // The task side of the same file, so the merge on `main` has two edits to the same
+    // line and cannot apply - the conflict this test needs, on a path git will quote.
+    await writeFile(join(taskRepo, NON_ASCII_FILE), "base\ntask\n")
+    git(taskRepo, ["add", "-A"])
+    git(taskRepo, ["commit", "-qm", "task edit to the non-ASCII file"])
+  }
+
+  if (conflict || nonAscii) {
     git(source, ["checkout", "-q", "main"])
-    await writeFile(join(source, "shared.txt"), "main\n")
+    // The same edit on `main`, in a file whose name git will C-quote. `conflict` uses
+    // the plain name and `nonAscii` the quoted one, so the two shapes can be told apart:
+    // a bug in the reading of the path shows up only in the second.
+    const name = nonAscii ? NON_ASCII_FILE : "shared.txt"
+    if (nonAscii) {
+      await writeFile(join(source, name), "base\n")
+      git(source, ["add", "-A"])
+      git(source, ["commit", "-qm", "add a file with a non-ASCII name"])
+    }
+    await writeFile(join(source, name), "main\n")
     git(source, ["commit", "-qam", "main edit"])
     git(source, ["checkout", "-q", "develop"])
   }
@@ -233,8 +267,59 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
     }
   }, GIT_TIMEOUT)
 
-  it("merges into the checked-out branch where it stands when none is named", async () => {
-    const fixtureUnderTest = await fixture()
+  // The review's item 10, end to end and against real git. A conflicted file whose name
+  // is not pure ASCII is C-quoted by `git diff --name-only`, and the quoted string does
+  // not name anything on disk - so the marker scan skipped it and the conflict was
+  // reported as resolved. Read with `-z` the path arrives verbatim.
+  it("reads a conflicted path git would have quoted, so the markers are found", async () => {
+    const fixtureUnderTest = await fixture({ nonAscii: true })
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+
+      // The premise, asserted rather than assumed: this name really is one git quotes,
+      // and the quoted spelling really does not exist. If a future git stops quoting, the
+      // test should say so rather than quietly stop exercising anything.
+      const quoted = execFileSync("git", ["-C", source, "diff", "--name-only", "HEAD"], { encoding: "utf8" }).trim()
+      if (quoted !== "" && quoted !== NON_ASCII_FILE) {
+        expect(quoted).toMatch(/^"/)
+        expect(existsSync(join(source, quoted))).toBe(false)
+      }
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true, targets: { source: "main" } })
+
+      // The conflict is seen, so the flags tell the caller there is a merge to conclude
+      // and nothing was removed...
+      expect(result.failed).toBe(true)
+      expect(result.repositories[0].conflict).toBe(true)
+      expect(result.repositories[0].removed).toBe(false)
+      // ...and the file is still there with its markers, which is what a reader is told to
+      // go and reconcile.
+      expect(existsSync(join(fixtureUnderTest.taskRepo, NON_ASCII_FILE))).toBe(true)
+      expect(readFileSync(join(fixtureUnderTest.taskRepo, NON_ASCII_FILE), "utf8")).toContain("<<<<<<<")
+
+      // What this assertion holds, and what it does not, measured by reverting each `-z`
+      // read in turn:
+      //
+      //   - `conflictedFiles` (the `--diff-filter=U` listing) IS held here: reverting it
+      //     fails this test, because `conflictedFiles` is what the `pending.length > 0`
+      //     branch consults and the file has to be named for the sentence to be right.
+      //   - `conflictMarkers`' own listing (`--name-only -z HEAD`) is NOT held here:
+      //     reverting just that one leaves this test green, and no other end-to-end test
+      //     covers it either. It is held only by the unit stubs in
+      //     `task-operations.test.mjs`, whose payloads are the NUL-separated bytes real
+      //     git emits under `-z`.
+      //
+      // `conflict` itself is not the instrument: it comes from `MERGE_HEAD`, so it is true
+      // whether or not the marker scan could open the file. That is why the assertion below
+      // is on the file being named, not on the flag.
+      expect(result.repositories[0].conflictedFiles ?? []).toContain(NON_ASCII_FILE)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("merges into the checked-out branch where it stands when none is named", async () => {    const fixtureUnderTest = await fixture()
     const subprocess = realSubprocess()
     try {
       const { source, tasksRoot, project } = fixtureUnderTest
@@ -300,6 +385,99 @@ describe.skipIf(!gitAvailable)("merging a task into a branch of its own choosing
       // And the branch did not move.
       expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "develop"])).toBe(false)
       expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("leaves a merge the user has of their own in the source checkout alone", async () => {
+    // The one irreversible loss this file used to have. A finish that failed for any
+    // reason ran `git merge --abort` in the source checkout unconditionally - including
+    // on the failure paths where this call never started a merge there at all. A user in
+    // the middle of their own merge, with the conflict already resolved by hand and
+    // staged, lost that resolution: no reflog entry, no stash, nothing to recover.
+    //
+    // This is that failure path: an unusable merge target (E4008) is refused before
+    // anything is started, in either checkout. The user's merge is not this call's, so
+    // the refusal must not touch it.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      // A conflict of the user's own on `shared.txt`: two branches off the same base
+      // that both rewrote it.
+      git(source, ["branch", "userwork"])
+      git(source, ["checkout", "-q", "userwork"])
+      await writeFile(join(source, "shared.txt"), "the user's side\n")
+      git(source, ["commit", "-qam", "user side"])
+      git(source, ["checkout", "-q", "develop"])
+      await writeFile(join(source, "shared.txt"), "develop side\n")
+      git(source, ["commit", "-qam", "develop side"])
+      expect(succeeded(source, ["merge", "userwork"])).toBe(false)
+      expect(existsSync(join(source, ".git", "MERGE_HEAD"))).toBe(true)
+      // Resolved by hand and staged: work that exists nowhere but in this checkout.
+      await writeFile(join(source, "shared.txt"), "RESOLVED BY HAND\n")
+      git(source, ["add", "shared.txt"])
+
+      const result = await finishTask(subprocess, {
+        task: "sample", project, tasksRoot, merge: true,
+        // Not a local branch, so the finish refuses before it starts any merge.
+        targets: { source: "nope" },
+      })
+
+      expect(result.failed).toBe(true)
+      expect(result.repositories[0].error).toMatch(/not a local branch/)
+      expect(result.repositories[0].merged).toBe(false)
+      // The resolution and the merge standing behind it are exactly as they were.
+      expect(readFileSync(join(source, "shared.txt"), "utf8")).toBe("RESOLVED BY HAND\n")
+      expect(existsSync(join(source, ".git", "MERGE_HEAD"))).toBe(true)
+      // The task's own worktree is untouched too, so the finish can be tried again.
+      expect(existsSync(fixtureUnderTest.taskRepo)).toBe(true)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  }, GIT_TIMEOUT)
+
+  it("refuses to merge over a merge of the user's that touches a path the task never did", async () => {
+    // The same loss by the other door, and the one the dirty-path guard cannot see: that
+    // guard only refuses over paths this merge writes, so a user's merge standing on some
+    // other file passes it. Git then refuses the merge itself - "You have not concluded
+    // your merge" - and the abort that followed that refusal was the one that discarded
+    // the resolution. `mergeIntoBranch` asks for MERGE_HEAD before it starts anything,
+    // which is what this pins.
+    const fixtureUnderTest = await fixture()
+    const subprocess = realSubprocess()
+    try {
+      const { source, tasksRoot, project } = fixtureUnderTest
+      // A conflict on a path the task branch never touches: the task only ever wrote
+      // `shared.txt`, so no dirty path of this one is in the merge's way.
+      git(source, ["branch", "userwork"])
+      git(source, ["checkout", "-q", "userwork"])
+      await writeFile(join(source, "notes.txt"), "the user's side\n")
+      git(source, ["add", "-A"])
+      git(source, ["commit", "-qm", "user notes"])
+      git(source, ["checkout", "-q", "develop"])
+      await writeFile(join(source, "notes.txt"), "develop side\n")
+      git(source, ["add", "-A"])
+      git(source, ["commit", "-qm", "develop notes"])
+      expect(succeeded(source, ["merge", "userwork"])).toBe(false)
+      await writeFile(join(source, "notes.txt"), "RESOLVED BY HAND\n")
+      git(source, ["add", "notes.txt"])
+
+      const result = await finishTask(subprocess, { task: "sample", project, tasksRoot, merge: true })
+
+      expect(result.failed).toBe(true)
+      // Refused as the user's own checkout, not as a conflict: there is nothing here for
+      // a caller to reconcile, and nothing was started for one to conclude.
+      expect(result.repositories[0].conflict).toBe(false)
+      expect(result.repositories[0].dirtyCheckout).toBe(true)
+      expect(result.repositories[0].merged).toBe(false)
+      // Named for what it is, and by the path, rather than left as git's refusal.
+      expect(result.repositories[0].error).toMatch(/merge of its own in progress/)
+      // The hand resolution survived, which is the whole of the test.
+      expect(readFileSync(join(source, "notes.txt"), "utf8")).toBe("RESOLVED BY HAND\n")
+      expect(existsSync(join(source, ".git", "MERGE_HEAD"))).toBe(true)
+      expect(succeeded(source, ["merge-base", "--is-ancestor", "feat/sample", "develop"])).toBe(false)
     } finally {
       await fixtureUnderTest.cleanup()
     }

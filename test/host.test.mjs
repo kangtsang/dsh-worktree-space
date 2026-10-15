@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { apply, branchTargets, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, ignoredScanDirectorySet, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MIN_SCAN_DEPTH, parseWorktrees, resolveScanDepth, topLevelRequestedPaths } from "../src/host/index.js"
+import { fileURLToPath } from "node:url"
+import { apply, branchTargets, Config, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, ignoredScanDirectorySet, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MAX_SCAN_DIRECTORIES_CEILING, MIN_SCAN_DEPTH, parseGitArgv, parseWorktrees, resolveScanDepth, topLevelRequestedPaths } from "../src/host/index.js"
 import { setAuditEnabled } from "../src/host/task/audit-log.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js"
+
+/** The repository root, so a test can read a file it is comparing a constant against. */
+const ROOT = fileURLToPath(new URL("..", import.meta.url))
 
 // `handleFor` runs `apply`, which pushes the audit-log switch into a module-level
 // cell. A handler built with `auditLog: "off"` would otherwise leave the log off
@@ -17,7 +22,10 @@ function handleFor(outputs = {}, config, asked, services) {
   const routes = new Map()
   const subprocess = {
     spawn({ argv }) {
-      const key = argv.slice(3).join(" ")
+      // Parsed by name, not by position: the git command line carries hardening `-c`
+      // settings before `-C`, so `argv[2]` is no longer the directory. See
+      // `parseGitArgv`.
+      const key = parseGitArgv(argv).args.join(" ")
       // Opt-in, because "what did this scan ask git" is the question a scan test
       // should be able to ask and nothing else needs to record anything.
       if (asked !== undefined) asked.push(key)
@@ -939,6 +947,45 @@ describe("the scan limits the running entry is held to", () => {
     expect((await handler("worktree.cached", { paths: [] })).value.current.directories).toBe(250)
   })
 
+  it("clamps a directory cap written past the ceiling, rather than reporting it back", async () => {
+    // The cap is the number of directories a walk may read, so an unbounded one is a
+    // walk with no bound at all. A configuration that holds 50,000,000 - written by hand,
+    // or by a client that never saw the card - used to be echoed straight back by
+    // `worktree.cached`, which reads as a plan to read fifty million directories. The
+    // ceiling is the top option the card offers, so no client can produce a value this
+    // refuses to report as itself.
+    const handler = handleFor({}, { maxScanDirectories: live(() => 1e9) })
+    expect((await handler("worktree.cached", { paths: [] })).value.current.directories).toBe(MAX_SCAN_DIRECTORIES_CEILING)
+
+    // A value below the ceiling is untouched: the clamp bounds, it does not normalise.
+    const below = handleFor({}, { maxScanDirectories: live(() => MAX_SCAN_DIRECTORIES_CEILING - 1) })
+    expect((await below("worktree.cached", { paths: [] })).value.current.directories).toBe(MAX_SCAN_DIRECTORIES_CEILING - 1)
+  })
+
+  it("refuses a directory cap past the ceiling in the schema, as it does for the depth", async () => {
+    // The other half of the clamp, and the one that is a promise about new values: the
+    // schema refuses what the walk would have clamped anyway. The cost is real and
+    // deliberate - a config already holding an out-of-range value can make the plugin
+    // refuse to start - and it is the `scanDepth` precedent, where the same trade was
+    // taken for the same reason: a bound the walk applies silently is a bound nobody
+    // can see.
+    expect(() => Config({ maxScanDirectories: 1e9 })).toThrow(/<= 10000/)
+    expect(() => Config({ maxScanDirectories: 0 })).toThrow(/>= 1/)
+    // And the ceiling itself is accepted, so the card's top option is not refused.
+    // The field is `volatile()`, so the Loader hands back the live reference rather
+    // than the value - the same shape `scanBounds` unwraps.
+    const accepted = Config({ maxScanDirectories: MAX_SCAN_DIRECTORIES_CEILING }).maxScanDirectories
+    expect(accepted.get()).toBe(MAX_SCAN_DIRECTORIES_CEILING)
+    // The ceiling has to be the card's own top option, or the card would offer a value
+    // the schema refuses. Read from the card's source, since the constant is private to
+    // it: this is the check that keeps the two from drifting apart.
+    const card = readFileSync(join(ROOT, "src/client/components/PluginConfigCard.tsx"), "utf8")
+    const limits = card.match(/const DIRECTORY_LIMITS = \[([^\]]*)\]/)
+    expect(limits, "PluginConfigCard no longer declares DIRECTORY_LIMITS where this can read it").not.toBeNull()
+    const offered = limits[1].split(",").map((one) => Number(one.trim()))
+    expect(offered[offered.length - 1]).toBe(MAX_SCAN_DIRECTORIES_CEILING)
+  })
+
   it("scans at the requested depth rather than the configured one", async () => {
     const fixture = await scanFixture("depth")
     try {
@@ -1120,5 +1167,104 @@ describe("the request that widens a handed-on session", () => {
     })
     expect(reply.ok).toBe(false)
     expect(reply.error.code).not.toBe("E5012")
+  })
+
+  it("refuses a `cause` on a registered task space, where the string buys nothing", async () => {
+    // `cause` is not a capability: the endpoint accepts it from any caller, and the
+    // model-facing tool never sends it. Before this, any non-empty string skipped the
+    // guard. A registered task space is in the workspace list, so it can hold finished
+    // work and a session on it - the protection applies and the string is irrelevant.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const taskPath = join(tasksRoot, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: taskPath }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+      workspaceRegistry: {
+        list: () => [{ id: "workspace-login", path: taskPath, title: "public/login" }],
+      },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", {
+      task: "login", project: "public", tasksRoot, merge: false,
+      cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+    })
+    expect(reply).toMatchObject({ ok: false, error: { code: "E5012" } })
+  })
+
+  it("still skips the guard for a `cause` on an unregistered task space", async () => {
+    // The rollback case the skip exists for. The registry answers, and its list holds
+    // no entry for this task space - so the caller really is rolling back a create
+    // that never registered, and the guard must not stand in the way.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const taskPath = join(tasksRoot, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: taskPath }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+      workspaceRegistry: {
+        list: () => [{ id: "workspace-other", path: join(tasksRoot, "public", "other"), title: "public/other" }],
+      },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", {
+      task: "login", project: "public", tasksRoot, merge: false,
+      cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+    })
+    // It fails for its own reason - there is no task space on this fake filesystem - but
+    // not with the guard's code.
+    expect(reply.ok).toBe(false)
+    expect(reply.error.code).not.toBe("E5012")
+  })
+
+  it("does not block a `cause` when registration cannot be determined", async () => {
+    // No registry service at all, which is also what the existing rollback test above
+    // exercises. An undeterminable registry must not become the reason a real rollback
+    // is refused, so every unreadable answer fails towards the user finishing.
+    const tasksRoot = join(tmpdir(), "wts-host-container")
+    const taskPath = join(tasksRoot, "public", "login")
+    const services = {
+      agents: {
+        list: () => [{
+          id: "session-worker",
+          status: "running",
+          session: { header: { id: "session-worker", cwd: taskPath }, snapshotEvents: () => [] },
+          inbox: {},
+        }],
+      },
+      // A service that is registry-shaped but cannot be read: `list` throws.
+      workspaceRegistry: { list: () => { throw new Error("registry unavailable") } },
+    }
+    const handler = handleFor({}, {}, undefined, services)
+
+    const reply = await handler("task.done", {
+      task: "login", project: "public", tasksRoot, merge: false,
+      cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+    })
+    expect(reply.ok).toBe(false)
+    expect(reply.error.code).not.toBe("E5012")
+
+    // And the plain undeterminable case: `ctx.get` answers nothing for the registry.
+    const absent = handleFor({}, {}, undefined, {
+      agents: services.agents,
+    })
+    const absentReply = await absent("task.done", {
+      task: "login", project: "public", tasksRoot, merge: false,
+      cause: "creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made.",
+    })
+    expect(absentReply.ok).toBe(false)
+    expect(absentReply.error.code).not.toBe("E5012")
   })
 })

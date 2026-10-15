@@ -67,14 +67,24 @@ let linkProbe
  * An unreadable directory is skipped rather than raised over: the caller is asking what
  * links it can see, and one it cannot look inside is not a link it can name. The walk is
  * bounded because both callers run it on a directory a person is waiting on.
+ *
+ * **The bound is reported, not just applied.** A caller that used a short list to mean
+ * "there are no other links" would be wrong about exactly the case the bound exists for,
+ * and the harm is not a shorter list - it is that the callers *filter a copy by this
+ * list*, so a link left out of it is a link `fs.cp` then tries to recreate, stopping the
+ * copy part-way with an EPERM and leaving half an archive behind. So the answer says
+ * whether the walk finished, and a caller whose decision depends on the list being
+ * complete has to ask.
  * @param directory - the directory to look through.
  * @param options - `maxEntries` bounds the walk.
- * @returns the relative paths, in the order they were found.
+ * @returns `{ links, truncated }`, where `truncated` means the walk stopped at its bound
+ *   and there may be links it did not see.
  */
 export async function findLinks(directory, { maxEntries = 2000 } = {}) {
   const found = []
   const queue = [directory]
   let seen = 0
+  let truncated = false
   while (queue.length > 0 && seen < maxEntries) {
     const current = queue.shift()
     let children
@@ -85,7 +95,10 @@ export async function findLinks(directory, { maxEntries = 2000 } = {}) {
     }
     for (const child of children) {
       seen += 1
-      if (seen > maxEntries) break
+      if (seen > maxEntries) {
+        truncated = true
+        break
+      }
       const path = join(current, child.name)
       if (child.isSymbolicLink()) {
         found.push(relative(directory, path))
@@ -94,5 +107,8 @@ export async function findLinks(directory, { maxEntries = 2000 } = {}) {
       if (child.isDirectory()) queue.push(path)
     }
   }
-  return found
+  // Reached the bound with work still queued, or with entries left unread in the
+  // directory being walked: either way the list is short of what is there.
+  if (queue.length > 0 && seen >= maxEntries) truncated = true
+  return { links: found, truncated }
 }

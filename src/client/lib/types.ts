@@ -332,6 +332,15 @@ export interface TaskPlan {
    * dialog opens, so this costs no extra call.
    */
   activeSessions?: TaskPlanActiveSession[]
+  /**
+   * What the delivery gate would say about a merge of this task.
+   *
+   * Computed by the Host, through the same function the refusal itself uses, so the panel
+   * and the gate can never disagree about whether a merge is allowed. Absent from a Host
+   * old enough not to send it, and absent reads as "no gate" - which is what such a Host
+   * enforced for the finish press anyway.
+   */
+  gate?: DeliveryGatePreview
 }
 
 /** Answer of `task.done`. */
@@ -423,6 +432,16 @@ export interface DeploymentContainer {
 export interface DeploymentStatus {
   envId: string
   target: string
+  /**
+   * The acceptance URL, or null when the deployment recorded none.
+   *
+   * `string | null` is the Host's own contract since it started validating the state
+   * file's `url` (`acceptanceUrl` in `src/host/task/deploy.js`); before that the field
+   * was whatever JSON the deploy script had written, which is why `DeployCard` still
+   * runs the value through the client's copy of that guard rather than trusting the
+   * declaration. A Host older than the fix can put an object here, and this type cannot
+   * stop it.
+   */
   url: string | null
   /**
    * Where the URL came from. Only `state` is reachable now - the one-off read of a
@@ -461,6 +480,14 @@ export interface DeliveryGatePreview {
 export interface DeploySmokeResult {
   output: string
   exitCode: number | null
+  /**
+   * Whether the smoke was stopped at its deadline rather than finishing.
+   *
+   * Reported apart from `exitCode`, because a stopped script has no exit code to read:
+   * the smoke did not fail, it did not finish, and a card that painted the red badge
+   * over it would be presenting this side's own timeout as a verdict on the environment.
+   */
+  timedOut?: boolean
   status: DeploymentStatus
   gate?: DeliveryGatePreview
 }

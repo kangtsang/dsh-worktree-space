@@ -344,6 +344,38 @@ describe("adding a repository to a task already under way", () => {
     expect(next.api.addRepositories.mock.calls[1][0]).toMatchObject({ baseRef: "release" })
   })
 
+  it("refuses a named base ref Git would not accept, instead of sending it", async () => {
+    // The Host is still the authority and resolves the ref with `rev-parse --verify`
+    // in every repository. What this stops is the dialog offering a value that is
+    // obviously unusable, so the refusal arrives here rather than after the worktrees
+    // are under way. Each of these is a shape the character rule alone does not catch:
+    // whitespace, the `..` range operator, the `@{` sequence, and a leading `-` that
+    // `rev-parse` would read as an option rather than as the ref.
+    const next = mountedTask()
+    await waitFor(() => expect(screen.getByRole("heading", { name: "login" })).toBeTruthy())
+    openDialog()
+    await waitFor(() => expect(screen.getByText("/elsewhere/beta")).toBeTruthy())
+    fireEvent.click(screen.getByRole("checkbox", { name: /beta/ }))
+    fireEvent.click(screen.getByRole("radio", { name: t("baseNamed") }))
+    const field = screen.getByRole("textbox", { name: t("baseNamed") })
+    const confirm = () => screen.getByRole("button", { name: t("addRepositoriesConfirm") }) as HTMLButtonElement
+
+    for (const bad of ["release 1", "a..b", "head@{1}", "-x", "release/"]) {
+      fireEvent.change(field, { target: { value: bad } })
+      expect(confirm().disabled, `${bad} was offered as addable`).toBe(true)
+    }
+    // And an empty field is still refused: with "named" chosen, emptiness is not
+    // "each repository's HEAD" - that is the other radio.
+    fireEvent.change(field, { target: { value: "" } })
+    expect(confirm().disabled).toBe(true)
+
+    // A usable ref is offered, and is what the request carries.
+    fireEvent.change(field, { target: { value: "origin/release" } })
+    expect(confirm().disabled).toBe(false)
+    await act(async () => { fireEvent.click(confirm()) })
+    expect(next.api.addRepositories).toHaveBeenCalledWith(expect.objectContaining({ baseRef: "origin/release" }))
+  })
+
   it("keeps the dialog open and shows why when the Host refuses", async () => {
     const next = mountedTask()
     next.api.addRepositories.mockRejectedValue(Object.assign(
@@ -356,7 +388,11 @@ describe("adding a repository to a task already under way", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /beta/ }))
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: t("addRepositoriesConfirm") })) })
 
-    expect(screen.getByRole("alert").textContent).toContain("already holds a repository named 'beta'")
+    // Said in the interface language rather than in the Host's English: E4002 is one of
+    // the codes this plugin has a sentence for, and a Chinese interface used to show
+    // the English message verbatim. What the dialog does about it - staying open with
+    // the reason on screen - is the part that is being asserted here.
+    expect(screen.getByRole("alert").textContent).toBe(t("hostE4002"))
     expect(screen.getByRole("button", { name: t("addRepositoriesConfirm") })).toBeTruthy()
   })
 

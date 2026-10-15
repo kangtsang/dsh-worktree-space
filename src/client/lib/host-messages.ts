@@ -58,6 +58,29 @@ function missingText(t: Translate, keys: string[]): string {
  */
 export function hostFailureText(t: Translate, code: string, values: HostValues): string | undefined {
   switch (code) {
+    // The create flow's own refusals. They arrive with no values beside them - the
+    // Host raises these from a layout check rather than from a sentence built out of
+    // names - so the sentence is the whole of what a reader gets, and it has to say
+    // which rule was broken rather than name the paths the Host's own message names.
+    case "E1001":
+      return t("hostE1001")
+    case "E1002":
+      return t("hostE1002")
+    case "E1003":
+      return t("hostE1003")
+    // One code, two refusals: the container root is a git repository, and a task space
+    // path that is not `<container root>/<project>/<task>`. Both are thrown by the same
+    // code and neither carries a value saying which, so the sentence names both causes
+    // rather than asserting one - the same reason `leftover-refused` was reworded.
+    case "E1005":
+      return t("hostE1005")
+    case "E3002":
+      return t("hostE3002")
+    // E4002 covers the create's own duplicate and the add's name already taken; both
+    // are the one condition `codes.js` states for it - two repositories in a task
+    // sharing a name - so one sentence serves them.
+    case "E4002":
+      return t("hostE4002")
     case "E2003":
       return format(t("hostE2003"), { path: text(values.path) })
     case "E2004": {
@@ -182,6 +205,12 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
       return t("warnNoDeploymentRecorded")
     case "deploy-containers-left":
       return format(t("warnDeployContainersLeft"), { count: text(values.count), envId: text(values.envId), reason: text(values.reason) })
+    case "deploy-containers-unchecked":
+      return values.after === "teardown"
+        ? format(t("warnDeployContainersUncheckedAfter"), { envId: text(values.envId), reason: text(values.reason) })
+        : format(t("warnDeployContainersUnchecked"), { envId: text(values.envId), reason: text(values.reason) })
+    case "deploy-no-labelled-containers":
+      return format(t("warnDeployNoLabelledContainers"), { envId: text(values.envId), label: text(values.label) })
     case "deploy-cleanup-failed":
       return format(t("warnDeployCleanupFailed"), { envId: text(values.envId), reason: text(values.reason) })
     default:

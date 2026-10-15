@@ -21,6 +21,7 @@
  * older version, or edited by hand, is no reason to refuse a finish).
  */
 
+import { posix, win32 } from 'node:path'
 import { coded } from './codes.js'
 
 /**
@@ -191,38 +192,86 @@ export function applyStraysPolicy(request, archive, taskPath) {
   // the panel builds the whole path (`<root>/archived-docs/<project>/<task>-<stamp>`)
   // before it sends it, so nesting it under a second `archived-docs` would file
   // everything one level deeper than the dialog just promised the user.
-  if (named !== '') {
+  //
+  // Only an absolute directory is taken. A relative one is ignored in favour of the
+  // strategy default rather than refused, and `.` and `..` are the shape that matters:
+  // the copy below runs `mkdir(recursive)` and then `cp`, so either of them would land
+  // the whole archive in the host process's own working directory. Falling back keeps
+  // a finish from being blocked - a destination this side already knows is always
+  // available - and a caller with a legitimate directory still names an absolute one.
+  if (named !== '' && isAbsoluteDirectory(named)) {
     return { cleanStray: true, discardDocuments: false, documentsDirectory: named, keep }
   }
   // Otherwise the configured root decides, and the folder layout mirrors what the
   // panel's dialog would have built: <root>/archived-docs/<project>/<task>-<stamp>,
-  // the stamp keeping two finishes apart.
-  const strategy = archive && archive.strategy === 'custom' && String(archive.directory ?? '').trim() !== ''
-    ? String(archive.directory).trim()
-    : containerRootOf(taskPath)
+  // the stamp keeping two finishes apart. The configured root is held to the same
+  // absolute-path rule as a named one, for the same reason: a relative directory
+  // typed into the setting would file every archive into the working directory.
+  const configured = archive && archive.strategy === 'custom' ? String(archive.directory ?? '').trim() : ''
+  const custom = configured !== '' && isAbsoluteDirectory(configured) ? configured : ''
+  const strategy = custom !== '' ? custom : containerRootOf(taskPath)
   const now = new Date()
   const pad = (value) => String(value).padStart(2, '0')
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   const parts = String(taskPath).split(/[\\/]+/).filter((part) => part !== '')
   const task = parts[parts.length - 1] ?? 'task'
   const project = parts[parts.length - 2] ?? 'project'
-  const root = String(strategy).replace(/[\\/]+$/, '')
+  // The directory being filed under decides the separator style, so a POSIX root
+  // yields a POSIX path and a Windows one keeps its backslashes - on either host.
+  // Joining with the other flavour's `join` leaves the foreign separator in place
+  // and the whole destination reads as one file name to the host that receives it.
+  const flavour = flavourOf(custom !== '' ? custom : taskPath)
   return {
     cleanStray: true,
     discardDocuments: false,
-    documentsDirectory: `${root}\\archived-docs\\${project}\\${task}-${stamp}`,
+    documentsDirectory: flavour.join(strategy, 'archived-docs', project, `${task}-${stamp}`),
     keep,
   }
 }
 
 /**
+ * The `node:path` flavour a value is written in.
+ *
+ * A backslash anywhere means the Windows flavour, which is also what a Windows path
+ * with forward slashes is joined by - `win32` accepts both separators. A value with
+ * no backslash is read as POSIX, which is the shape a path built on a POSIX host has
+ * and the one the client counterpart picks its separator from.
+ * @param value - a path in either separator style.
+ * @returns the `node:path` export that joins paths of that style.
+ */
+function flavourOf(value) {
+  return String(value ?? '').includes('\\') ? win32 : posix
+}
+
+/**
+ * Whether a directory a caller or the configuration named may be filed into.
+ *
+ * Both flavours are asked because the value is not read from this host's own
+ * filesystem: a path the panel built on Windows arrives here with a drive letter,
+ * and one a POSIX host built arrives with a leading slash. `.`, `..` and a bare
+ * relative name are absolute under neither, which is exactly the answer wanted for
+ * them.
+ * @param value - the destination to test.
+ * @returns whether the value names a location from a root of its own.
+ */
+function isAbsoluteDirectory(value) {
+  const text = String(value ?? '').trim()
+  return text !== '' && (win32.isAbsolute(text) || posix.isAbsolute(text))
+}
+
+/**
  * The container root a task space lives under: two levels up, as the layout lays
- * it out. A path too short to have two levels above it answers `.`, the current
- * directory, rather than an empty string - a destination of `''` reads as "no
- * destination at all" and would send the caller down the discard path.
+ * it out. Derived from the path itself rather than by splitting on separators and
+ * rejoining, because rejoining loses the leading separator of a POSIX path and
+ * turns the rest into one name. A path too short to have two levels above it
+ * answers `.`, the current directory, rather than an empty string - a destination
+ * of `''` reads as "no destination at all" and would send the caller down the
+ * discard path.
+ * @param taskPath - the task space directory.
+ * @returns the container root, in the separator style of the path it was read from.
  */
 function containerRootOf(taskPath) {
-  const parts = String(taskPath ?? '').split(/[\\/]+/).filter((part) => part !== '')
-  const up = parts.slice(0, -2).join('\\')
+  const flavour = flavourOf(taskPath)
+  const up = flavour.dirname(flavour.dirname(String(taskPath ?? '')))
   return up === '' ? '.' : up
 }

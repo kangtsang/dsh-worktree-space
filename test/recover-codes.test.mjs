@@ -190,19 +190,46 @@ describe("the code table and the public filter are one list", () => {
     // Each entry says where it comes from. That claim is checked rather than
     // trusted, because a code table that points at the wrong file is worse than
     // no table - it sends a reader to the wrong line and they believe it.
+    //
+    // EVERY file an entry names is checked, not just the first. An entry covering
+    // two conditions names two files (`E1005`), and a guard that stopped at the
+    // first would leave the second half of the sentence unverified - which is the
+    // half a reader is sent to when the first condition is not the one they hit.
+    // The entry's own prose is free from here on; what is held to the claim is
+    // every `<name>.js` it mentions.
     for (const [code, description] of Object.entries(ERROR_CODES)) {
-      const file = /^\s*(?:E\d4?)?.*?([\w-]+\.js)\s*-/.exec(description)?.[1] ?? /([\w-]+\.js)/.exec(description)?.[1]
-      expect(file, `${code} names no file`).toBeTruthy()
-      const source = sources.get(file) ?? (file === "index.js" ? indexSource : undefined)
-      expect(source, `${code} names ${file}, which was not read`).toBeTruthy()
-      if (file !== "index.js") {
-        expect(source.includes(code), `${code} is not raised in ${file}, only documented`).toBe(true)
+      const named = [...description.matchAll(/([\w-]+\.js)/g)].map((match) => match[1])
+      expect(named.length, `${code} names no file`).toBeGreaterThan(0)
+      for (const file of new Set(named)) {
+        const source = sources.get(file) ?? (file === "index.js" ? indexSource : undefined)
+        expect(source, `${code} names ${file}, which was not read`).toBeTruthy()
+        // `index.js` is the entry module and raises codes by re-exporting the tables
+        // the task side fills, so the literal appears in the module that owns the
+        // throw rather than in the entry. Every other file has to contain it.
+        if (file !== "index.js") {
+          expect(source.includes(code), `${code} is said to come from ${file}, but ${file} never raises it`).toBe(true)
+        }
       }
     }
   })
 
-  it("registers every code the host actually raises", async () => {
-    // The other direction. A code thrown somewhere but missing from the table is
+  // The tool descriptions tell the model to branch on codes - "do not call done without it
+  // (E7006)", "refused here (E7007)". The harness hands a tool failure to the model as the
+  // error's `message` alone, so a code that lived only on `.code` was one the model was told
+  // to act on and never received.
+  it("puts the code in the message, which is the only part a tool failure carries", async () => {
+    const { coded } = await import("../src/host/task/codes.js")
+    const error = coded("E7007", "force cannot be done from a tool call")
+    // Both readers: this side branches on `.code`, the model reads the message.
+    expect(error.code).toBe("E7007")
+    expect(error.message).toContain("E7007")
+    expect(error.message).toContain("force cannot be done from a tool call")
+    // The code leads, so the sentence after it is unbroken and anything matching on the
+    // message body still matches.
+    expect(error.message.startsWith("E7007: ")).toBe(true)
+  })
+
+  it("registers every code the host actually raises", async () => {    // The other direction. A code thrown somewhere but missing from the table is
     // silently flattened to E9001 by publicCode, so the caller is told "something
     // failed" about a refusal that was written down carefully - E7007 was raised in
     // tool.js with no entry, and nothing caught it.

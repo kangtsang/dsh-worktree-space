@@ -1,9 +1,41 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { fileURLToPath } from "node:url"
+
+/**
+ * A switch the mocked `rename` reads, so one test can make a rotation fail on purpose.
+ *
+ * `vi.hoisted` because `vi.mock` is hoisted above the imports: a factory referring to an
+ * ordinary top-level `const` would run before that binding exists.
+ */
+const renameControl = vi.hoisted(() => ({ fail: false }))
+
+/**
+ * `node:fs/promises` with one behaviour made controllable.
+ *
+ * The rotation is a `rename`, and there is no portable filesystem condition that makes a
+ * `rename` of an ordinary file inside a writable directory fail - which is exactly why the
+ * failure had to be simulated. Everything else passes straight through, so the fixtures and
+ * every other test in this file still touch the real filesystem.
+ */
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    rename: async (from, to) => {
+      if (renameControl.fail) {
+        const error = new Error("EACCES: rename refused")
+        error.code = "EACCES"
+        throw error
+      }
+      return actual.rename(from, to)
+    },
+  }
+})
+
 import {
   AUDIT_FILE,
   auditEnabled,
@@ -17,6 +49,7 @@ import {
   setAuditEnabledReader,
 } from "../src/host/task/audit-log.js"
 import { gitSucceeded, runGit, tryRunGit } from "../src/host/task/git.js"
+import { warned } from "../src/host/task/codes.js"
 import { listTasks } from "../src/host/task/operations.js"
 
 /** The bound in `auditLog.js` moves a log aside at, repeated here so the test cannot drift from it. */
@@ -497,6 +530,151 @@ describe("the audit log", () => {
     }
   })
 
+  it("hides a credential the keyword did not sit immediately before a separator", async () => {
+    // The shapes measured against the real regex that were NOT redacted. Two causes,
+    // and both are here: the separator only accepted `:` or `=` (so `--password hunter2`
+    // and `--token ghp_abc` were untouched), and the value had to be announced by a
+    // keyword at all (so a bare `Bearer eyJ...`, a PEM header and a bare `ghp_...` were).
+    // The counter-example is in the same test on purpose: a rule that redacts everything
+    // is not the fix, and `feature/token-refresh` is what says so.
+    const container = await containerFixture()
+    try {
+      auditEnter({ op: "task.create", task: "login", project: "alpha", tasksRoot: container.root })
+      const secrets = [
+        "--password hunter2",
+        "--token ghp_abc",
+        "AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
+        "Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "ghp_1234567890abcdefghij",
+        "glpat-abcdefghijklmn",
+        "xoxb-1234567890-abcdef",
+        "sk-abcdefghijklmnopqrst",
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
+      ]
+      await expect(
+        runGit(subprocessDouble({ exitCode: 128, stderr: secrets.join("\n") }), "E:/src/alpha", [
+          "-c", ...secrets, "fetch", "feature/token-refresh",
+        ]),
+      ).rejects.toThrow()
+
+      const [record] = await readAudit(container.root)
+      // Asserted against the on-disk JSON, which is what a reader opens.
+      const text = JSON.stringify(record)
+      for (const secret of ["hunter2", "ghp_abc", "AKIAIOSFODNN7EXAMPLE", "eyJhbGciOiJIUzI1NiJ9", "MIIEowIBAAKCAQEA", "glpat-abcdefghijklmn", "xoxb-1234567890-abcdef", "sk-abcdefghijklmnopqrst"]) {
+        expect(text, `credential ${secret} reached the log`).not.toContain(secret)
+      }
+      // The one that must survive, spelled exactly: a branch whose name merely contains
+      // `token` is not a credential, and redacting it would lose the branch from the log.
+      expect(record.argv[record.argv.length - 1]).toBe("feature/token-refresh")
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("leaves an identifier that merely ends in a token prefix alone", async () => {
+    // The counter-example the value-shape rule has to keep, and the one that caught this
+    // rule's first version: `no-task-branch` contains `sk-branch`, so a bare `sk-` prefix
+    // rule rewrote the plugin's own warning code to `no-ta***` in the log - destroying the
+    // one field a reader greps for. A token prefix is a prefix when nothing word-like
+    // precedes it, which is the boundary this asserts.
+    const container = await containerFixture()
+    try {
+      auditEnter({ op: "task.done", task: "login", project: "alpha", tasksRoot: container.root })
+      await recordWarning(warned("no-task-branch", "no task branch is recorded", {}), { phase: "done" })
+      await recordEvent("info", "task/login", { phase: "done", branch: "task/login", code: "E5001" })
+
+      const records = await readAudit(container.root)
+      expect(records[0].code).toBe("no-task-branch")
+      expect(records[1].code).toBe("E5001")
+      expect(records[1].branch).toBe("task/login")
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("redacts string values in the record's own fields, not only in argv and stderr", async () => {
+    // The file's comment promises over-redaction, and the promise covered the strings
+    // each call site redacts by hand. A value passed through `fields` was not among
+    // them, so a credential put there appeared verbatim - verified by a probe that put
+    // one in a field and found it in the log three times. No caller does that today,
+    // which is exactly why the redaction belongs here rather than at each call site.
+    const container = await containerFixture()
+    try {
+      auditEnter({ op: "task.done", task: "login", project: "alpha", tasksRoot: container.root })
+      await recordEvent("warn", "carrying on", {
+        phase: "done",
+        remote: "https://bot:hunter2@git.example.com/x",
+        token: "ghp_1234567890abcdefghij",
+        nested: { header: "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig" },
+        list: ["--password hunter3"],
+        // Non-strings are left as they are: a reader filters on these.
+        exit: 1,
+        conflict: true,
+        count: 3,
+      })
+
+      const [record] = await readAudit(container.root)
+      const text = JSON.stringify(record)
+      for (const secret of ["hunter2", "hunter3", "ghp_1234567890abcdefghij", "eyJhbGciOiJIUzI1NiJ9"]) {
+        expect(text, `credential ${secret} reached a field`).not.toContain(secret)
+      }
+      // The facts a filter reads are untouched, in type as well as value.
+      expect(record.exit).toBe(1)
+      expect(record.conflict).toBe(true)
+      expect(record.count).toBe(3)
+      expect(record.phase).toBe("done")
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("records a warning object's own code and message, not its stringification", async () => {
+    // `recordWarning` has one caller, and that caller passes a `warned()` object. It
+    // was stringified, so every `kind: "warning"` line this plugin wrote recorded
+    // `"message":"[object Object]"` and dropped the code and the values - including
+    // `deploy-containers-left`, `leftover-refused` and `no-task-branch`. The test above
+    // it passed a string, which is the one shape that worked, and is why this was never
+    // caught.
+    const container = await containerFixture()
+    try {
+      auditEnter({ op: "task.done", task: "login", project: "alpha", tasksRoot: container.root })
+      await recordWarning(warned("leftover-refused", "a leftover is a link, so it was left alone", { name: ".git", count: 1 }), { phase: "done" })
+
+      const [record] = await readAudit(container.root)
+      expect(record.kind).toBe("warning")
+      expect(record.level).toBe("warn")
+      // The code a screen translates, and the sentence a reader reads.
+      expect(record.code).toBe("leftover-refused")
+      expect(record.message).toBe("a leftover is a link, so it was left alone")
+      expect(record.values).toEqual({ name: ".git", count: 1 })
+      // And the stringification is gone, which is the symptom that was visible.
+      expect(JSON.stringify(record)).not.toContain("[object Object]")
+      // The caller's own fields still land beside it.
+      expect(record.phase).toBe("done")
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("still takes a plain sentence, which is the shape the older caller used", async () => {
+    // Both shapes have to work: the string is what the existing test passes, and a
+    // fix that accepted only the object would have moved the breakage rather than
+    // ended it.
+    const container = await containerFixture()
+    try {
+      auditEnter({ op: "task.done", task: "a", project: "p", tasksRoot: container.root })
+      await recordWarning("worktree is prunable", { path: "E:/ws/a" })
+      const [record] = await readAudit(container.root)
+      expect(record.message).toBe("worktree is prunable")
+      expect(record.path).toBe("E:/ws/a")
+      // No code is invented for a caller that did not give one.
+      expect(record.code).toBeUndefined()
+    } finally {
+      await container.cleanup()
+    }
+  })
+
   it("writes nothing, and creates no container root, when there is no root yet", async () => {
     const absent = await absentFixture()
     try {
@@ -546,7 +724,10 @@ describe("the audit log", () => {
       expect(entries).toHaveLength(3) // alpha/, the new log, the moved log
       expect(entries).toContain("alpha")
       expect(entries).toContain(AUDIT_FILE)
-      expect(moved).toMatch(new RegExp(`^${stem}\\.\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.jsonl$`))
+      // The documented shape is the leading part, and the milliseconds and any
+      // collision counter follow it. Kept as a pattern rather than a literal: the
+      // exact stamp is the moment the test ran.
+      expect(moved).toMatch(new RegExp(`^${stem}\\.\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{2}-\\d{3}(?:-\\d+)?\\.jsonl$`))
       // The stamp a record carries is `2026-10-02 11:35:26`, and that is not a
       // legal filename on Windows - a rename that throws would take the rotation
       // with it and the log would then grow past its bound forever, silently.
@@ -558,6 +739,67 @@ describe("the audit log", () => {
       expect(records).toHaveLength(1)
       expect(records[0].argv[0]).toBe("worktree")
       expect((await readFile(join(container.root, moved), "utf8")).length).toBe(MAX_BYTES)
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("keeps both archives when two rotations land in the same second", async () => {
+    // The maintainer's decision is that archives stay forever, which makes a silent
+    // overwrite a contract violation rather than housekeeping: `fs.rename` over an
+    // existing file succeeds, so a name that collides destroys the earlier archive and
+    // nothing reports it. `localStamp` has second precision, so two rotations in one
+    // second is exactly the shape that used to collide - and a 10 MB log rotated twice
+    // while a build runs is not exotic.
+    const container = await containerFixture()
+    try {
+      // A clock held still for the whole test: this is the second-precision case made
+      // deterministic rather than hoped for. Without the fix both rotations below choose
+      // the same name, and the first archive's contents are gone.
+      const frozen = new Date(2026, 9, 2, 11, 35, 26, 42)
+      vi.useFakeTimers()
+      vi.setSystemTime(frozen)
+      try {
+        // Each fill is marked, so which archive is which can be told apart by content
+        // rather than only by name - that is what proves the second rename did not
+        // land on the first file.
+        await writeFile(join(container.root, AUDIT_FILE), `MARKER-ONE${"A".repeat(MAX_BYTES)}`, "utf8")
+        auditEnter({ op: "task.plan", task: "login", project: "alpha", tasksRoot: container.root })
+        await recordEvent("info", "first rotation", { phase: "plan" })
+        // The log now holds the record above; grow it past the bound again and rotate a
+        // second time, in the same frozen second and the same millisecond.
+        await appendFile(join(container.root, AUDIT_FILE), `MARKER-TWO${"B".repeat(MAX_BYTES)}`, "utf8")
+        await recordEvent("info", "second rotation", { phase: "plan" })
+      } finally {
+        vi.useRealTimers()
+      }
+
+      const stem = AUDIT_FILE.replace(/\.jsonl$/, "")
+      const archives = (await readdir(container.root)).filter((name) => name.startsWith(`${stem}.`) && name !== AUDIT_FILE).sort()
+      // Two distinct files, both still on disk: the whole point of "keep all".
+      expect(archives).toHaveLength(2)
+      expect(new Set(archives).size).toBe(2)
+
+      // Both archives are whole, and each holds its own fill - so neither rename
+      // destroyed the other, which is the failure this test exists for.
+      const texts = await Promise.all(archives.map((name) => readFile(join(container.root, name), "utf8")))
+      const joined = texts.join("\n")
+      expect(joined).toContain("MARKER-ONE")
+      expect(joined).toContain("MARKER-TWO")
+      expect(texts.filter((text) => text.includes("MARKER-ONE"))).toHaveLength(1)
+      expect(texts.filter((text) => text.includes("MARKER-TWO"))).toHaveLength(1)
+      // The second archive is the larger one: it is the first archive's successor, and
+      // it carries the record the first rotation left in the log.
+      expect(Math.max(...texts.map((text) => text.length))).toBeGreaterThan(MAX_BYTES)
+      expect(joined).toContain("first rotation")
+
+      // Still a legal filename on Windows, counter or not.
+      for (const name of archives) expect(name).not.toMatch(/[:*?"<>|]/)
+      // And the current log is the one the second rotation started, holding only the
+      // record written after it.
+      const current = await readAudit(container.root)
+      expect(current).toHaveLength(1)
+      expect(current[0].msg).toBe("second rotation")
     } finally {
       await container.cleanup()
     }
@@ -576,6 +818,135 @@ describe("the audit log", () => {
     } finally {
       await container.cleanup()
     }
+  })
+
+  /**
+   * The write is serialised, so concurrency loses nothing.
+   *
+   * `auditRecord` was `stat -> rotate -> appendFile`, three awaits with nothing atomic in
+   * them, and the plugin reaches it concurrently: `inspect.js` maps `Promise.all` over tasks
+   * and the scan paths run beside each other. Every test here asserts the count of lines on
+   * disk, because a dropped record is invisible in any other form - the caller is answered,
+   * the operation carries on, and the only account of what happened is short by one line.
+   */
+  describe("concurrent records all land", () => {
+    it("writes every one of N concurrent records, with no line lost or merged", async () => {
+      // The regression itself. Without the lock this is where the loss shows: the callers
+      // interleave, and - once the log is over its bound - two of them both rotate and the
+      // second `rename` gets ENOENT inside the swallowing `catch`.
+      const container = await containerFixture()
+      try {
+        // Over the bound, so every caller's `stat` sees a rotation due and the rotation path
+        // is exercised concurrently rather than only the append. Newline-terminated, the way
+        // a real over-limit log ends: a filler that ran into the next record would make one
+        // unparseable line and prove nothing about the writers.
+        await writeFile(join(container.root, AUDIT_FILE), `${"x".repeat(MAX_BYTES - 1)}\n`, "utf8")
+        auditEnter({ op: "task.plan", task: "login", project: "alpha", tasksRoot: container.root })
+
+        const writers = 25
+        await Promise.all(Array.from({ length: writers }, (_, index) => recordEvent("info", `record ${index}`, { index })))
+
+        // Exactly one line per call, across the current log and whatever was archived. A
+        // count taken over the current log alone would pass while records sat in an archive.
+        const names = await readdir(container.root)
+        const logs = names.filter((name) => name === AUDIT_FILE || name.startsWith(AUDIT_FILE.replace(/\.jsonl$/, ".")))
+        const lines = []
+        for (const name of logs) {
+          const text = await readFile(join(container.root, name), "utf8")
+          for (const line of text.split("\n")) {
+            // The filler the fixture planted is not a record; everything the writers wrote
+            // starts with `{`. A record split across two appends would still be caught here,
+            // because its first fragment would not parse.
+            if (!line.startsWith("{")) continue
+            lines.push(JSON.parse(line))
+          }
+        }
+        const written = lines.filter((entry) => entry.kind === "event")
+        expect(written).toHaveLength(writers)
+        // And each one is the record it claimed to be, so a lost line cannot hide behind a
+        // duplicate of another.
+        expect(new Set(written.map((entry) => entry.index)).size).toBe(writers)
+        // The current log holds only records - one rotation moved the filler aside, and no
+        // writer's bytes were spliced into another's line.
+        const current = await readFile(join(container.root, AUDIT_FILE), "utf8")
+        for (const line of current.split("\n")) {
+          if (line.trim() === "") continue
+          expect(() => JSON.parse(line), `not one line: ${line.slice(0, 80)}`).not.toThrow()
+        }
+      } finally {
+        await container.cleanup()
+      }
+    })
+
+    it("keeps a record longer than PIPE_BUF as one intact line", async () => {
+      // 4 KiB is `PIPE_BUF`, the size past which a single `appendFile` no longer guarantees
+      // an atomic write. Building the line once and writing it through one `open` + one
+      // `write` is what makes the record indivisible however long it is; two appends could be
+      // interleaved with another writer's, producing a half-line that `readAudit` drops.
+      const container = await containerFixture()
+      try {
+        auditEnter({ op: "task.done", task: "login", project: "alpha", tasksRoot: container.root })
+        // Comfortably past 4 KiB once serialised, and past the record's own field limits too,
+        // so this is a record the plugin really can produce rather than a synthetic one.
+        const long = "z".repeat(5000)
+        await Promise.all([
+          recordEvent("info", "short one", { phase: "done" }),
+          recordEvent("info", long, { phase: "done", long }),
+          recordEvent("info", "short two", { phase: "done" }),
+        ])
+
+        const text = await readFile(join(container.root, AUDIT_FILE), "utf8")
+        const records = await readAudit(container.root)
+        expect(records).toHaveLength(3)
+        // The long record survived whole, and nothing was spliced into it.
+        const longRecord = records.find((entry) => entry.long !== undefined)
+        expect(longRecord.long).toBe(long)
+        // Line-oriented proof as well: every non-empty line is valid JSON, so no writer's
+        // bytes landed inside another's line.
+        for (const line of text.split("\n")) {
+          if (line.trim() === "") continue
+          expect(() => JSON.parse(line), `not one line: ${line.slice(0, 80)}`).not.toThrow()
+        }
+      } finally {
+        await container.cleanup()
+      }
+    })
+
+    it("still appends the record when the rotation fails", async () => {
+      // An over-limit log is strictly better than a lost record, and the comment in `rotate`
+      // already argued it. The failure is simulated because no portable filesystem condition
+      // makes a `rename` of an ordinary file in a writable directory fail - see the mock at
+      // the top of this file.
+      const container = await containerFixture()
+      try {
+        // Newline-terminated, so the appended record starts its own line - the shape a real
+        // over-limit log has, and what makes the record readable back.
+        await writeFile(join(container.root, AUDIT_FILE), `${"x".repeat(MAX_BYTES)}\n`, "utf8")
+        auditEnter({ op: "task.done", task: "login", project: "alpha", tasksRoot: container.root })
+
+        renameControl.fail = true
+        try {
+          await recordEvent("info", "recorded despite a failed rotation", { phase: "done" })
+        } finally {
+          renameControl.fail = false
+        }
+
+        // The record is there, on the end of the log that could not be moved aside.
+        const records = await readAudit(container.root)
+        expect(records).toHaveLength(1)
+        expect(records[0].msg).toBe("recorded despite a failed rotation")
+        // And nothing was archived, which is the other half of "the rotation failed".
+        const stem = AUDIT_FILE.replace(/\.jsonl$/, "")
+        const archives = (await readdir(container.root)).filter((name) => name.startsWith(`${stem}.`) && name !== AUDIT_FILE)
+        expect(archives).toEqual([])
+        // The file really did grow past its bound rather than being silently truncated.
+        const grown = await readFile(join(container.root, AUDIT_FILE), "utf8")
+        expect(grown.length).toBeGreaterThan(MAX_BYTES)
+      } finally {
+        renameControl.fail = false
+        await container.cleanup()
+      }
+    })
   })
 })
 

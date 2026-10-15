@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync } from "node:fs"
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import {
@@ -19,6 +19,7 @@ import {
   suggestTaskRoot,
 } from "../src/host/task/operations.js"
 import { readAudit } from "../src/host/task/audit-log.js"
+import { parseGitArgv } from "../src/host/task/git.js"
 
 /** The record, inside the plugin's own directory in the task space. */
 const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, TASK_METADATA)
@@ -73,16 +74,18 @@ const CAN_CREATE_SYMLINKS = (() => {
  * @param taskPath - the task space directory.
  * @param task - the task's name.
  */
-async function writeMetadataFiles(taskPath, task) {
+async function writeMetadataFiles(taskPath, task, { sourceRoot = "E:/source" } = {}) {
   const metadata = {
     version: 1,
     task,
     tasksRoot: "E:/worktree-space",
-    sourceRoot: "E:/source",
     branch: "task/" + task,
     baseRef: null,
     createdAt: "2026-09-28T04:00:00.000Z",
     repositories: [],
+    // An empty value writes the field as absent, which is the shape a container made
+    // before the JSON existed has - the case a missing `sourceRoot` has to stand for.
+    ...(sourceRoot === "" ? {} : { sourceRoot }),
   }
   await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
   await writeFile(recordAt(taskPath), JSON.stringify(metadata, null, 2) + "\n")
@@ -111,11 +114,41 @@ function subprocessMock(handlers = {}) {
   }
   const subprocess = {
     spawn({ argv }) {
-      const cwd = argv[2]
-      const args = argv.slice(3)
+      // Parsed by name, not by position: the git command line carries hardening `-c`
+      // settings before `-C`, so `argv[2]` is no longer the directory. See
+      // `parseGitArgv`.
+      const { cwd, args } = parseGitArgv(argv)
       const key = args.join(" ")
       calls.push({ cwd, args, key })
       const handler = replyFor(key)
+      // `worktree add` and `worktree remove` are answered from the filesystem when no
+      // handler covers them, because the rollback reads the disk to tell a checkout git
+      // really made from one it never reached. A double that reported both without
+      // touching the disk would be modelling a state git cannot produce: a removal that
+      // succeeded for a worktree nobody ever made.
+      //
+      // `worktree add` leaves what a real one leaves - the directory and the `.git` file
+      // that makes it a linked worktree. `worktree remove` refuses a path that is not one,
+      // with the exit and sentence real git uses (measured on 2.39.1: exit 128, "is not a
+      // working tree"), and otherwise really removes it. A test that wants other behaviour
+      // supplies its own handler, which wins.
+      if (handler === undefined && args[0] === "worktree" && args[1] === "add") {
+        mkdirSync(args[2], { recursive: true })
+        writeFileSync(join(args[2], ".git"), "gitdir: /elsewhere/.git/worktrees/mock\n")
+      }
+      if (handler === undefined && args[0] === "worktree" && args[1] === "remove") {
+        const target = args[args.length - 1]
+        if (!existsSync(join(target, ".git"))) {
+          return {
+            done: Promise.resolve({ exitCode: 128, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "" }) },
+              stderr: { readFrom: () => ({ text: "fatal: not a working tree\n" }) },
+            },
+          }
+        }
+        rmSync(target, { recursive: true, force: true })
+      }
       // A reply that puts something on disk is only meaningful once it is there.
       // The code under test reads the filesystem the moment a git call reports
       // back, so an async handler's side effects belong inside the reply.
@@ -178,6 +211,44 @@ async function sourceFixture() {
 async function containerFixture() {
   const root = await mkdtemp(join(tmpdir(), "multi-worktree-container-"))
   return { root, cleanup: () => rm(root, { recursive: true, force: true }) }
+}
+
+/**
+ * A task space holding one linked worktree, with the record a create leaves.
+ *
+ * Deliberately not the richer `finishTask` fixture: the tests about the lock and the
+ * session guard are about *whether* a finish runs, not about what it does with two
+ * repositories, and one worktree is enough to tell "ran" from "refused". Kept at the
+ * top level so those tests can share it without reaching into another describe's scope.
+ * @returns the container root, the task path, the git replies and a cleanup.
+ */
+async function lockedTaskFixture() {
+  const container = await containerFixture()
+  const taskPath = join(container.root, PROJECT, "login")
+  const mainRepo = join(tmpdir(), "multi-worktree-lock-main-alpha")
+  await mkdir(join(taskPath, "alpha"), { recursive: true })
+  await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
+  await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+  await writeFile(recordAt(taskPath), JSON.stringify({
+    task: "login", project: PROJECT, branch: "task/login",
+    repositories: [{ name: "alpha", sourcePath: mainRepo, branch: "task/login" }],
+  }, null, 2) + "\n")
+  const handlers = {
+    "rev-parse --abbrev-ref HEAD": "main",
+    "worktree list --porcelain": [
+      `worktree ${mainRepo}`, "HEAD aaa", "branch refs/heads/main", "",
+      `worktree ${join(taskPath, "alpha")}`, "HEAD bbb", "branch refs/heads/task/login", "",
+    ].join("\n"),
+    "show-ref --verify --quiet refs/heads/main": "",
+    "rev-parse --verify --quiet MERGE_HEAD": { exitCode: 1 },
+  }
+  return {
+    container,
+    taskPath,
+    handlers,
+    finish: (subprocess, options = {}) => finishTask(subprocess, { project: PROJECT, tasksRoot: container.root, ...options }),
+    cleanup: () => container.cleanup(),
+  }
 }
 
 /** Replies that make a create of `task/<task>` succeed across both repositories. */
@@ -963,7 +1034,73 @@ describe("createTask", () => {
     }
   })
 
-  it("takes the branch it made back with the worktrees, so the name is free again", async () => {
+  it("leaves no half-made worktree and no branch behind when `worktree add` fails after starting", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const taskPath = join(container.root, source.project, "login")
+    // `worktree add` can create the branch and the directory and *then* fail - a failed
+    // checkout, a hook, a lock, a full disk. The mock reproduces exactly that: the
+    // branch and the checkout are made, and git still reports a non-zero exit.
+    const { subprocess, keys } = subprocessMock({
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(taskPath, "alpha")} -b task/login`]: async ({ args }) => {
+        await mkdir(args[2], { recursive: true })
+        await writeFile(join(args[2], ".git"), "gitdir: /elsewhere/.git/worktrees/alpha\n")
+        return { exitCode: 1, stderr: "fatal: could not check out" }
+      },
+    })
+    try {
+      const failure = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root })
+        .then(() => undefined, (error) => error)
+
+      // The half-made checkout was inside the rollback's scope, so it was removed
+      // rather than escaping as an orphan that keeps the container.
+      expect(keys()).toContain(`worktree remove --force ${join(taskPath, "alpha")}`)
+      expect(existsSync(join(taskPath, "alpha"))).toBe(false)
+      // The branch it created went with it: left behind it takes the name, and the
+      // name is what no later create or add can work around.
+      expect(keys()).toContain("branch -D -- task/login")
+      // And the container is gone, so the same name can be created again. A container
+      // kept here would have no record, and every later create of this name would read
+      // no metadata and refuse with E2001 for good.
+      expect(existsSync(taskPath)).toBe(false)
+      expect(failure.message).toMatch(/could not check out/)
+      expect(failure.message).not.toContain("could not roll back")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("does not call a worktree git never made a leftover, so the container still goes", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const taskPath = join(container.root, source.project, "login")
+    // The other half of pushing the entry early: a `worktree add` git refuses before it
+    // makes anything leaves a path that is not there. Called stranded, that entry keeps
+    // the container - over an empty directory, with no record - which is the permanent
+    // E2001 this fix exists to prevent, and it would be a regression introduced by the
+    // push rather than a pre-existing one.
+    const { subprocess, keys } = subprocessMock({
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(taskPath, "alpha")} -b task/login`]: { exitCode: 128, stderr: "fatal: could not create leading directories" },
+    })
+    try {
+      const failure = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root })
+        .then(() => undefined, (error) => error)
+
+      expect(existsSync(taskPath)).toBe(false)
+      expect(failure.message).not.toContain("could not roll back")
+      expect(keys()).not.toContain("branch -D -- task/login")
+      const written = (await readAudit(container.root)).filter((record) => record.kind === "error")
+      expect(written[0].stranded).toBeUndefined()
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("takes the branch back with the worktrees, so the name is free again", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
     const taskPath = join(container.root, source.project, "login")
@@ -1102,6 +1239,135 @@ describe("createTask", () => {
       expect(written.map((record) => record.code)).toEqual(["E3003"])
       // The claim E2005 makes is that nothing is left, so naming the container here
       // is what keeps that claim true for every other failure that reaches it.
+      expect(written[0].stranded).toEqual(["the task space login"])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  // git writes progress, then the diagnostic, then often a usage block. The failure sentence
+  // reaches a model, so what it carries starts at the diagnostic: the progress before it says
+  // nothing about the failure, and everything after it may be the part a reader needs (the
+  // lines under `error: The following untracked working tree files...` are the file names).
+  it("carries the diagnostic and what follows it, not the progress before it", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const taskPath = join(container.root, source.project, "login")
+    const verbose = "Preparing worktree (new branch 'task/login')\nfatal: cannot create\n\nusage: git worktree add [<options>] <path> [<commit-ish>]\n"
+    const { subprocess } = subprocessMock({
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(taskPath, "alpha")} -b task/login`]: { exitCode: 128, stderr: verbose },
+    })
+    try {
+      const failure = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root })
+        .then(() => undefined, (error) => error)
+
+      // The diagnostic is there...
+      expect(failure.message).toContain("fatal: cannot create")
+      // ...and the progress line that came before it is not: it says the command was trying,
+      // not what went wrong.
+      expect(failure.message).not.toContain("Preparing worktree")
+      // The first line of the sentence is the diagnostic, so a reader sees the reason first.
+      expect(failure.message.split("\n")[0]).toMatch(/^E3003: git worktree add .*failed \(exit 128\): fatal: cannot create$/)
+      // What follows the diagnostic is kept rather than cut at one line, because that is
+      // where git puts the file names a refusal is about.
+      expect(failure.message).toContain("usage: git worktree add")
+      // The record holds the whole of it either way.
+      const written = await readAudit(container.root)
+      const withStderr = written.filter((record) => typeof record.stderr === "string")
+      expect(withStderr.map((record) => record.stderr).join("\n")).toContain("usage: git worktree add")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("rolls the container back through the fence, and hands the caller git's own error unchanged", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const taskPath = join(container.root, source.project, "login")
+    // The first worktree is the one that fails, so nothing was created to strand:
+    // the rollback walks straight to the container, which is the path the fence now
+    // sits on. The container is a real directory strictly inside the root, so the
+    // fence has to let it through - and this is the assertion that it does.
+    const { subprocess } = subprocessMock({
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(taskPath, "alpha")} -b task/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
+    })
+    try {
+      const failure = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root })
+        .then(() => undefined, (error) => error)
+
+      // The container this call made is gone, so the same name can be used again.
+      expect(existsSync(taskPath)).toBe(false)
+      // The project layer it made above the task is not the rollback's to remove.
+      expect(existsSync(join(container.root, source.project))).toBe(true)
+      // The error is rebuilt to carry the rollback's outcome in its message; with
+      // nothing stranded there is no suffix, so what the caller reads is git's own failure,
+      // carrying git's own code. Two things changed here deliberately, and both are about
+      // what that sentence may contain because a model reads it: the code leads it, and the
+      // absolute working directory is no longer appended. See the note in `git.js`.
+      expect(failure.code).toBe("E3003")
+      expect(failure.message).toMatch(/^E3003: git worktree add .* failed \(exit 128\): fatal: cannot create$/)
+      expect(failure.message).not.toContain("could not roll back")
+      // The path is present, and that is right: it is an argument of the command that
+      // failed, which is what makes the sentence actionable. What is gone is the trailing
+      // `: <cwd>` the message used to end with - a bare working directory appended to a
+      // failure that already names the task and repository it is about.
+      expect(failure.message).not.toMatch(/: [A-Za-z]:[\\/][^:]*$/)
+
+      const written = (await readAudit(container.root)).filter((record) => record.kind === "error")
+      expect(written.map((record) => record.code)).toEqual(["E3003"])
+      expect(written[0].stranded).toBeUndefined()
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("names the container instead of removing it when the name has become a link", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const taskPath = join(container.root, source.project, "login")
+    const outside = join(container.root, "outside")
+    // The link's target holds ONLY the plugin's own directory name, so the two
+    // checks that already stood in the way of a delete - a readdir read through the
+    // link, and `holdsOnlyOurs` over what it answers - both pass. That is the point:
+    // with the fence removed this test fails, because the removal then goes ahead.
+    // A target holding anything else would be refused by `holdsOnlyOurs` whether or
+    // not the fence exists, which is a test of the wrong thing.
+    await mkdir(join(outside, PLUGIN_ROOT), { recursive: true })
+    await writeFile(join(outside, PLUGIN_ROOT, "keep.md"), "not this plugin's to delete\n")
+    // The container is a real directory when the create makes it, and becomes a link
+    // before the rollback reaches it - what another process, or the user, putting a
+    // junction in its place looks like. The side effect rides the worktree removal
+    // the rollback performs first, which is the only hook this test has: the rollback
+    // runs the worktree loop to completion before it ever asks about the container.
+    const { subprocess } = subprocessMock({
+      ...branchIsNew("task/login"),
+      [`worktree add ${join(taskPath, "beta")} -b task/login`]: { exitCode: 128, stderr: "fatal: cannot create" },
+      [`worktree remove --force ${join(taskPath, "alpha")}`]: async () => {
+        await rm(taskPath, { recursive: true, force: true })
+        symlinkSync(outside, taskPath, "junction")
+        return { exitCode: 0 }
+      },
+    })
+    try {
+      const failure = await createTask(subprocess, { sourceRoot: source.root, task: "login", tasksRoot: container.root })
+        .then(() => undefined, (error) => error)
+
+      // The fence refused, so the name is still there and still a link - not removed,
+      // and not walked through. `lstatSync` rather than `existsSync` because the one
+      // question being asked is whether this name is a link.
+      expect(lstatSync(taskPath).isSymbolicLink()).toBe(true)
+      expect(existsSync(join(outside, PLUGIN_ROOT, "keep.md"))).toBe(true)
+      // And the refusal is reported as the container being stranded, rather than
+      // hidden behind a rollback that claims to have left nothing.
+      expect(failure.message).toMatch(/could not roll back: the task space login/)
+      expect(failure.code).toBe("E3003")
+
+      const written = (await readAudit(container.root)).filter((record) => record.kind === "error")
       expect(written[0].stranded).toEqual(["the task space login"])
     } finally {
       await source.cleanup()
@@ -1268,6 +1534,47 @@ describe("the container root", () => {
 })
 
 describe("listTasks", () => {
+  it("refuses a root that is itself a git repository", async () => {
+    const container = await containerFixture()
+    // `C:\Users\X` is the review's example: a directory that is not a container at all.
+    // A repository is the sharpest form of it, because its subdirectories are its source
+    // layout rather than projects, and listing one would run git against the user's own
+    // working tree.
+    await mkdir(join(container.root, ".git"), { recursive: true })
+    const { subprocess, keys } = subprocessMock({})
+    try {
+      await expect(listTasks(subprocess, { tasksRoot: container.root }))
+        .rejects.toThrow(/must not be a git repository itself/)
+
+      // Refused before a single git process was started, which is the whole point:
+      // the harm is the walk, not the answer.
+      expect(keys()).toEqual([])
+    } finally {
+      await container.cleanup()
+    }
+  })
+
+  it("still lists a container that merely holds a task whose worktree is a repository", async () => {
+    // The control for the check above: a worktree's `.git` is a file, not a directory,
+    // and it sits inside a task, not at the root. A rule that refused this would refuse
+    // every real container.
+    const container = await containerFixture()
+    const taskPath = join(container.root, PROJECT, "login")
+    await mkdir(join(taskPath, "alpha"), { recursive: true })
+    await writeFile(join(taskPath, "alpha", ".git"), "gitdir: /elsewhere\n")
+    const { subprocess } = subprocessMock({
+      "rev-parse --abbrev-ref HEAD": () => "task/login",
+      "status --porcelain": "",
+    })
+    try {
+      const result = await listTasks(subprocess, { tasksRoot: container.root })
+
+      expect(result.tasks.map((entry) => entry.name)).toEqual(["login"])
+    } finally {
+      await container.cleanup()
+    }
+  })
+
   it("reports each task's worktrees with branch and dirty count, skipping strays", async () => {
     const container = await containerFixture()
     const taskPath = join(container.root, PROJECT, "login")
@@ -1429,6 +1736,139 @@ describe("finishTask", () => {
     }
   })
 
+  it("refuses to finish a directory whose record names a different task", async () => {
+    const fixture = await taskFixture()
+    // The record is what makes the directory a task space, and it is what a finish
+    // trusts about what is inside. Here the path agrees with the request and the record
+    // does not - a copied, moved or hand-edited container, which is a state the record
+    // being a plain file inside the directory makes reachable. Without this check the
+    // finish would delete the worktrees and branch of the task the record describes,
+    // under a name nobody asked for.
+    await writeFile(recordAt(fixture.taskPath), JSON.stringify({
+      task: "other-task", project: PROJECT, branch: "task/login",
+      repositories: [],
+    }, null, 2) + "\n")
+    const { subprocess, keys } = subprocessMock({ ...fixture.handlers })
+    try {
+      const failure = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+        .then(() => undefined, (error) => error)
+
+      expect(failure.code).toBe("E2007")
+      expect(failure.message).toMatch(/holds the record of task 'other-task', not of 'login'/)
+      // Nothing was read, merged or removed: the refusal comes before the first thing
+      // this function does that leaves a mark.
+      expect(keys()).toEqual([])
+      expect(existsSync(fixture.taskPath)).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a lookalike task name that resolves to another task's directory", async () => {
+    const fixture = await taskFixture()
+    const { subprocess, keys } = subprocessMock({ ...fixture.handlers })
+    try {
+      // `Login` against the directory `login`. What this reaches depends on the
+      // filesystem, and the answer is asserted per platform rather than assuming one:
+      // Win32 folds case, so the path resolves and the record is what refuses it. On a
+      // case-sensitive filesystem the path does not resolve at all, and E2003 says so
+      // before any record is read. Both are refusals; neither deletes anything.
+      const failure = await fixture.finish(subprocess, { task: "Login", merge: true, target: "main" })
+        .then(() => undefined, (error) => error)
+
+      if (process.platform === "win32") {
+        expect(failure.code).toBe("E2007")
+        expect(failure.message).toMatch(/holds the record of task 'login', not of 'Login'/)
+      } else {
+        expect(failure.code).toBe("E2003")
+      }
+      expect(keys()).toEqual([])
+      expect(existsSync(fixture.taskPath)).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses to finish a directory whose record names a different project", async () => {
+    const fixture = await taskFixture()
+    await writeFile(recordAt(fixture.taskPath), JSON.stringify({
+      task: "login", project: "other-project", branch: "task/login",
+      repositories: [],
+    }, null, 2) + "\n")
+    const { subprocess, keys } = subprocessMock({ ...fixture.handlers })
+    try {
+      const failure = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+        .then(() => undefined, (error) => error)
+
+      expect(failure.code).toBe("E2007")
+      expect(failure.message).toMatch(/project 'other-project', not in '/)
+      expect(keys()).toEqual([])
+      expect(existsSync(fixture.taskPath)).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("finishes a container whose older record carries no project at all", async () => {
+    // A container made before the JSON existed answers with three facts parsed from its
+    // note and has no `project`. A missing value is "unknown", not "different", and a
+    // space is never demoted for being old - so this has to keep working.
+    const fixture = await taskFixture()
+    await writeFile(recordAt(fixture.taskPath), JSON.stringify({
+      task: "login", branch: "task/login", repositories: [],
+    }, null, 2) + "\n")
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+
+      expect(result.failed).toBe(false)
+      expect(existsSync(fixture.taskPath)).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("leaves a warning in the log that carries the warning's own code, not its stringification", async () => {
+    // The end-to-end half of the audit-log test: `finishTask` is the one caller of
+    // `recordWarning`, and it passes a `warned()` object. A record with no branch is the
+    // cheapest way to make a finish produce one - `no-task-branch` is a real warning
+    // this flow emits, and it is one of the three the review named.
+    const fixture = await taskFixture()
+    // The record names no branch, which is the state `no-task-branch` describes.
+    await writeFile(recordAt(fixture.taskPath), JSON.stringify({
+      task: "login", project: PROJECT,
+      repositories: ["alpha", "beta"].map((name) => ({ name, sourcePath: fixture.mainRepos[name], branch: "task/login" })),
+    }, null, 2) + "\n")
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+      // The caller sees the warning, which is the same object the log has to describe.
+      expect(result.warnings.map((entry) => entry.code)).toContain("no-task-branch")
+
+      const warnings = (await readAudit(fixture.container.root)).filter((record) => record.kind === "warning")
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].code).toBe("no-task-branch")
+      expect(warnings[0].message).toMatch(/no task branch is recorded in/)
+      expect(warnings[0].phase).toBe("done")
+      // The symptom the review found: every warning line carried this literal.
+      expect(JSON.stringify(warnings[0])).not.toContain("[object Object]")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("merges into a named branch in a worktree of its own, leaving the source checkout alone", async () => {
     const fixture = await taskFixture()
     const { subprocess, calls, keys } = subprocessMock({
@@ -1571,7 +2011,7 @@ describe("finishTask", () => {
       },
       // The merge is still standing: git says so, and names what it could not settle.
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (standing.has(cwd) ? "" : { exitCode: 1 }),
-      "diff --name-only --diff-filter=U": ({ cwd }) => (standing.has(cwd) ? "src/a.ts\nsrc/b.ts\n" : ""),
+      "diff --name-only -z --diff-filter=U": ({ cwd }) => (standing.has(cwd) ? "src/a.ts\0src/b.ts\0" : ""),
       "worktree remove": "",
     })
     try {
@@ -1651,8 +2091,8 @@ describe("finishTask", () => {
       // The files were edited - no markers left - but the merge was never committed, and
       // writing that commit is the agent's job rather than something guessed at here.
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
-      "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
-      "diff --name-only --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "diff --name-only -z HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\0" : ""),
+      "diff --name-only -z --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\0" : ""),
       "add -A": "",
       "commit --no-edit": "",
       "worktree remove": "",
@@ -1689,8 +2129,8 @@ describe("finishTask", () => {
     const { subprocess, calls, keys } = subprocessMock({
       ...fixture.handlers,
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
-      "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
-      "diff --name-only --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\n" : ""),
+      "diff --name-only -z HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\0" : ""),
+      "diff --name-only -z --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "src/app.ts\0" : ""),
       "add -A": "",
       "commit --no-edit": "",
       "worktree remove": "",
@@ -1796,8 +2236,8 @@ describe("finishTask", () => {
     const { subprocess } = subprocessMock({
       ...fixture.handlers,
       "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : { exitCode: 1 }),
-      "diff --name-only HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "huge.bin\nearly.bin\n" : ""),
-      "diff --name-only --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "huge.bin\n" : ""),
+      "diff --name-only -z HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "huge.bin\0early.bin\0" : ""),
+      "diff --name-only -z --diff-filter=U": ({ cwd }) => (basename(cwd) === "alpha" ? "huge.bin\0" : ""),
       "add -A": "",
       "commit --no-edit": "",
       "worktree remove": "",
@@ -1845,7 +2285,10 @@ describe("finishTask", () => {
         ? " M staged-and-dirty.txt\0 M café.txt\0RM renamed.txt\0shared.txt\0?? scratch.log\0"
         : ""),
       "merge-base main task/login": "abc123",
-      "diff --name-only abc123 task/login": "staged-and-dirty.txt\ncafé.txt\nrenamed.txt\n",
+      // `-z` output: NUL-separated, no trailing newline. See the note on the sibling
+      // stubs above - a `\n` here would be a shape real git never produces under `-z`,
+      // and the reader splits on `\0`.
+      "diff --name-only -z abc123 task/login": "staged-and-dirty.txt\0café.txt\0renamed.txt\0",
       "merge --no-ff --no-edit task/login": "",
       "worktree remove": "",
     })
@@ -2178,6 +2621,196 @@ describe("finishTask", () => {
       await fixture.cleanup()
     }
   })
+
+  it("records a merge that never started as a plain failure, not as unmerged work", async () => {
+    // `resolveMergeTarget` throws E4008 from inside the finish's `try`, so its failure
+    // used to be caught by the outer handler and marked a conflict - `conflict =
+    // !dirtyCheckout` - even though no merge was ever started and there are no markers
+    // to reconcile. The audit record then said E5001 ("a merge is still standing"),
+    // which sends whoever reads the log after a conflict that does not exist, where the
+    // truth is E5003: one repository could not be finished and needs another attempt.
+    const fixture = await taskFixture()
+    // `show-ref` failing is how git says a branch is not there, which is exactly the
+    // answer `resolveMergeTarget` reads as "this target is unusable".
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "show-ref --verify --quiet refs/heads/nope": { exitCode: 1 },
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "nope" })
+
+      expect(result.failed).toBe(true)
+      for (const entry of result.repositories) {
+        expect(entry.merged).toBe(false)
+        // Not a conflict, and not a merge standing anywhere: there is nothing to resolve.
+        expect(entry.conflict).toBe(false)
+        expect(entry.mergeInProgress).toBe(false)
+        expect(entry.mergeSite).toBe("")
+        expect(entry.conflictedFiles).toEqual([])
+        // Not one of the two stops that are somebody else's work to write either.
+        expect(entry.needsCommit).toBe(false)
+        expect(entry.dirtyCheckout).toBe(false)
+        expect(entry.error).toMatch(/merge target 'nope' is not a local branch/)
+      }
+      // The log says the same thing the answer does: E5003, a failure to retry - not
+      // E5001, which is the code for a merge that has to be settled first.
+      const records = await readAudit(fixture.container.root)
+      const errors = records.filter((record) => record.level === "error")
+      expect(errors.some((record) => record.code === "E5003")).toBe(true)
+      expect(errors.some((record) => record.code === "E5001")).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("recovers the probe name before it reads the directory, not after", async () => {
+    // A process killed between the probe's two renames leaves a checkout under
+    // `<name>.dsh-removal-probe`. That is not cosmetic: the rename carries the `.git` file
+    // with it, so the directory is still a linked worktree - under a name git has never
+    // heard of, whose removal it refuses and whose branch it cannot attribute. Recovering
+    // it after the directory scan would be too late, because the scan has already taken
+    // the leftover for a worktree of this task.
+    const fixture = await taskFixture()
+    const strandedBeta = `${join(fixture.taskPath, "beta")}.dsh-removal-probe`
+    await rename(join(fixture.taskPath, "beta"), strandedBeta)
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login" })
+
+      // Recovered: the name is back, the finish went through, and no row was invented
+      // for the probe directory.
+      expect(existsSync(strandedBeta)).toBe(false)
+      expect(result.failed).toBe(false)
+      expect(result.repositories.map((entry) => entry.name).sort()).toEqual(["alpha", "beta"])
+      expect(result.repositories.every((entry) => entry.removed)).toBe(true)
+      expect(result.strays).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("puts back a leftover left by a run that died on the second worktree", async () => {
+    // Recovery has to cover every entry, not only the first: a crash partway through a
+    // list leaves the probe name on whichever directory it had reached.
+    const fixture = await taskFixture()
+    const strandedAlpha = `${join(fixture.taskPath, "alpha")}.dsh-removal-probe`
+    const strandedBeta = `${join(fixture.taskPath, "beta")}.dsh-removal-probe`
+    await rename(join(fixture.taskPath, "alpha"), strandedAlpha)
+    await rename(join(fixture.taskPath, "beta"), strandedBeta)
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login" })
+
+      expect(existsSync(strandedAlpha)).toBe(false)
+      expect(existsSync(strandedBeta)).toBe(false)
+      expect(result.failed).toBe(false)
+      expect(result.repositories.map((entry) => entry.name).sort()).toEqual(["alpha", "beta"])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("finishTask under its own lock", () => {
+  /**
+   * A context whose agent registry reports the sessions a test names.
+   * @param sessions - the rows `agents.list()` should answer.
+   * @returns a context that can be handed to `finishTask`.
+   */
+  const contextWith = (sessions) => ({ get: (name) => (name === "agents" ? { list: () => sessions } : undefined) })
+
+  /** A session the registry reports as working in `taskPath`. */
+  const workerIn = (taskPath) => ({
+    id: "session-worker",
+    status: "running",
+    session: { header: { cwd: taskPath }, snapshotEvents: () => [{ type: "turn/start", data: { turn: 1 } }] },
+    inbox: {},
+  })
+
+  it("asks again inside the lock, and refuses on the answer it finds there", async () => {
+    // The outer check is a cheap early refusal; this is the real one. What it buys is
+    // that nothing can start working between the question and the removal, because
+    // every other finish of this space is behind the same lock - so the answer cannot
+    // go stale in the gap the old check-then-act left open.
+    //
+    // Staged by answering the registry differently on the two calls: the early check
+    // sees an empty space, and by the time the locked check runs a session is in it.
+    // A finish that only asked once would remove the worktrees out from under it.
+    const fixture = await lockedTaskFixture()
+    let asked = 0
+    const ctx = {
+      get: (name) => (name === "agents" ? { list: () => (++asked === 1 ? [] : [workerIn(fixture.taskPath)]) } : undefined),
+    }
+    const { subprocess, keys } = subprocessMock(fixture.handlers)
+    try {
+      await expect(fixture.finish(subprocess, { task: "login", ctx }))
+        .rejects.toMatchObject({ code: "E5012" })
+      // Asked twice - once early, once under the lock - and refused on the second.
+      expect(asked).toBe(2)
+      // Nothing was merged or removed on the way to that refusal.
+      expect(keys().filter((key) => key.startsWith("merge ") || key.startsWith("worktree remove"))).toEqual([])
+      expect(existsSync(join(fixture.taskPath, "alpha"))).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("lets a finish through when no session is working, lock and all", async () => {
+    // The negative control: the lock and the second check must not refuse a space
+    // nobody is working in, or every finish would be blocked.
+    const fixture = await lockedTaskFixture()
+    const ctx = contextWith([])
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", ctx })
+      expect(result.failed).toBe(false)
+      expect(result.repositories.every((entry) => entry.removed)).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("does not ask the registry at all when no context is given", async () => {
+    // A caller that has no context - the operation's own direct callers, and every
+    // test above - must not be made to pass one: the guard is best effort and simply
+    // does not run, which is the behaviour it has always had.
+    const fixture = await lockedTaskFixture()
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login" })
+      expect(result.failed).toBe(false)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
 })
 
 describe("finishTask documents", () => {
@@ -2431,7 +3064,10 @@ describe("planTask", () => {
     // The leftovers a task directory collects: this plugin's own breadcrumb,
     // build output, editor state, and writing the user did themselves.
     await writeFile(join(taskPath, "README.en.md"), "# Task: login\n")
-    await writeMetadataFiles(taskPath, "login")
+    // `E:/source/main-alpha` is the main repository `worktree list` reports below, and
+    // the record names the source root that really contains it - otherwise the plan
+    // refuses the walk, which is the point of the ownership check.
+    await writeMetadataFiles(taskPath, "login", { sourceRoot: "E:/source" })
     // The deploy root a create copies in, which lives inside the plugin's own directory:
     // it is this plugin's own tree, not the user's writing to file away.
     await mkdir(deployAt(taskPath), { recursive: true })
@@ -2450,7 +3086,7 @@ describe("planTask", () => {
       // remote's default is `main` — the case that used to name the wrong branch.
       "rev-parse --abbrev-ref HEAD": ({ cwd }) => (basename(cwd).startsWith("main-") ? "develop" : "feat/login"),
       "worktree list --porcelain": ({ cwd }) => [
-        `worktree E:/main-${basename(cwd)}`, "HEAD aaa", "branch refs/heads/develop", "",
+        `worktree E:/source/main-${basename(cwd)}`, "HEAD aaa", "branch refs/heads/develop", "",
         `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/feat/login", "",
       ].join("\n"),
       // `alpha` has one modified and one untracked file; `beta` is clean.
@@ -2485,7 +3121,7 @@ describe("planTask", () => {
         path: join(fixtureUnderTest.taskPath, "alpha"),
         // Where the source repository is: the dialog needs it to open a session whose
         // working directory reaches the git directory a commit has to write into.
-        mainRepo: "E:/main-alpha",
+        mainRepo: "E:/source/main-alpha",
         branch: "feat/login",
         target: "develop",
         checkedOut: "develop",
@@ -2578,6 +3214,76 @@ describe("planTask", () => {
       // of what could be counted rather than a number that was never measured.
       expect(byName.beta.commits).toBe(1)
       expect(plan.commits).toBe(1)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("refuses a worktree whose source repository is not one the task recorded", async () => {
+    const fixtureUnderTest = await fixture()
+    const { subprocess, keys } = subprocessMock({
+      ...fixtureUnderTest.handlers,
+      // `worktree list` names a main repository somewhere else entirely, which is what a
+      // hand-edited record or a rewritten `.git` file produces. Without the ownership
+      // check the plan follows it and asks the rest of its questions of that repository.
+      "worktree list --porcelain": ({ cwd }) => [
+        "worktree E:/somewhere/else/alpha", "HEAD aaa", "branch refs/heads/develop", "",
+        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/feat/login", "",
+      ].join("\n"),
+    })
+    try {
+      await expect(planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root }))
+        .rejects.toThrow(/not one of the repositories this task recorded/)
+
+      // The refusal lands before the walk leaves the container: no question was asked
+      // of the repository it named.
+      expect(keys().some((key) => key.includes("E:/somewhere/else"))).toBe(false)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("plans a repository the task added from outside its source root", async () => {
+    // The control for the check above, and the case that makes it more than a prefix
+    // test: `add-repositories` deliberately takes a repository from anywhere - another
+    // directory, another volume - and records it as a `sourcePath`. A rule that only
+    // knew about `sourceRoot` would refuse exactly the feature it must not restrict.
+    const fixtureUnderTest = await fixture()
+    await writeFile(recordAt(fixtureUnderTest.taskPath), JSON.stringify({
+      version: 1,
+      task: "login",
+      tasksRoot: fixtureUnderTest.root,
+      sourceRoot: "E:/source",
+      branch: "task/login",
+      repositories: [{ name: "alpha", sourcePath: "E:/somewhere/else/alpha", branch: "task/login" }],
+    }, null, 2) + "\n")
+    const { subprocess } = subprocessMock({
+      ...fixtureUnderTest.handlers,
+      "worktree list --porcelain": ({ cwd }) => [
+        "worktree E:/somewhere/else/alpha", "HEAD aaa", "branch refs/heads/develop", "",
+        `worktree ${cwd}`, "HEAD bbb", "branch refs/heads/feat/login", "",
+      ].join("\n"),
+    })
+    try {
+      const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
+
+      expect(plan.repositories).toHaveLength(2)
+      expect(plan.repositories[0].mainRepo).toBe("E:/somewhere/else/alpha")
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("plans a container whose older record carries no source root at all", async () => {
+    // A missing value is "unknown", not "different": a space is never demoted for
+    // being old, so a record without `sourceRoot` keeps planning.
+    const fixtureUnderTest = await fixture()
+    await writeMetadataFiles(fixtureUnderTest.taskPath, "login", { sourceRoot: "" })
+    const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
+    try {
+      const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
+
+      expect(plan.repositories).toHaveLength(2)
     } finally {
       await fixtureUnderTest.cleanup()
     }

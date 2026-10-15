@@ -824,3 +824,8 @@
 .dws-deploy-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: 0 0 auto; }
 .dws-deploy-destroy-armed { color: #b42318; border-color: #b42318; }
 .dws-deploy-error { font-size: 12px; color: #b42318; }
+/* The one line here that is not a failure: an action ran and this is what it could
+   not finish, so it wears the plugin's warning amber rather than the error red.
+   The fallback is for a card drawn outside the token scope, where the variable is
+   undefined and the colour would otherwise drop out entirely. */
+.dws-deploy-warning { font-size: 12px; color: var(--wt-warn, #b45309); }

@@ -28,6 +28,10 @@ const REAL_GIT = [
   // a real copy of the runner, so what it checks is process-tree behaviour. Same
   // reason for the layer - the assertion only means something against real processes.
   "test/suite-runner-budget.test.mjs",
+  // Runs `git init` and a real `git worktree add` to put a `gitdir` marker inside a
+  // repository's own `.git/worktrees/`, which is the only way to prove the sender-role
+  // scan does not mistake that marker for a linked worktree.
+  "test/sender-role-git.test.mjs",
 ]
 
 /**

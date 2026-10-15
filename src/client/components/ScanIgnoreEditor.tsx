@@ -2,7 +2,33 @@ import { useEffect, useMemo, useState } from "react"
 import { Plus, Search, X } from "./icons"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
 import { format, useT } from "../lib/i18n"
-import { MAX_IGNORED_SCAN_DIRECTORIES, forcedIgnoreNames } from "../lib/scan-ignore"
+import { MAX_IGNORED_SCAN_DIRECTORIES, MAX_IGNORED_SCAN_DIRECTORY_LENGTH, forcedIgnoreNames } from "../lib/scan-ignore"
+
+/**
+ * The name a typed draft would be stored as, or `""` when it cannot be used.
+ *
+ * One rule for both the button and the add itself, because a control that looks
+ * pressable and then does nothing is the reply that leaves a user with nothing to
+ * act on - and a second copy of the rule is how the button and the submit come to
+ * disagree about the same name.
+ *
+ * Surrounding whitespace and separators are trimmed rather than refused: a pasted
+ * `/output/` is the name `output` with a path around it. Everything else a name is
+ * held to is refused. A name is one path component, so a separator inside it is a
+ * mistake rather than a nested path the walk would never match. The two relative
+ * names go for the same reason and one more: a name is what a walk matches against a
+ * directory entry, and `.` and `..` never are one - stored they would read as a
+ * setting that does something. The length cap is the per-name half of the ceiling
+ * the list already carries; the count cap cannot see one enormous name.
+ * @param draft - what the add box holds.
+ * @returns the name to store, or `""` when the draft cannot become one.
+ */
+function storedIgnoredName(draft: string) {
+  const name = draft.trim().replace(/^[/\\]+|[/\\]+$/g, "")
+  if (name === "" || /[/\\]/.test(name)) return ""
+  if (name === "." || name === "..") return ""
+  return name.length <= MAX_IGNORED_SCAN_DIRECTORY_LENGTH ? name : ""
+}
 
 /**
  * The same names, with the repeats taken out.
@@ -175,10 +201,11 @@ useEffect(() => {
     setFull(false)
   }
   const submit = () => {
-    const name = draft.trim().replace(/^[/\\]+|[/\\]+$/g, "")
-    // A directory name is a single path component, so a slash in it is a mistake
-    // rather than a nested path the walk would never match anyway.
-    if (name === "" || /[/\\]/.test(name)) return
+    const name = storedIgnoredName(draft)
+    // The same rule the add button is disabled by, so the two cannot disagree about
+    // a name: one the button offers is one this stores, and one it refuses is not
+    // stored by a keyboard Enter that got past the disabled state.
+    if (name === "") return
     const held = present.some((entry) => entry.toLowerCase() === name.toLowerCase())
     // Adding what is already there is not a mistake to report and not a second
     // entry to store: either way the answer is the list as it stands, so this
@@ -220,7 +247,7 @@ useEffect(() => {
           ? <div className="dws-add-source-row">
             <Input aria-label={t("ignoredScanDirectoriesAdd")} placeholder={t("ignoredScanDirectoriesAddPlaceholder")} value={draft} autoFocus autoComplete="off" spellCheck={false}
               onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submit() } }} />
-            <Button className="dws-button-primary" disabled={draft.trim() === "" || /[/\\]/.test(draft.trim())} onClick={submit}>{t("ignoredScanDirectoriesAddConfirm")}</Button>
+            <Button className="dws-button-primary" disabled={storedIgnoredName(draft) === ""} onClick={submit}>{t("ignoredScanDirectoriesAddConfirm")}</Button>
             <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAdding(false); setDraft("") }}><X size={14} /></Button>
           </div>
           : <Button className="dws-button dws-add-source-button" disabled={busy}

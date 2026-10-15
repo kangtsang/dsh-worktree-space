@@ -3,6 +3,7 @@ import { AlertCircle, Check, Loader2 } from "./icons"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { errorText } from "../lib/error-text"
+import { gateMissingText } from "../lib/deploy-gate-text"
 import { hostWarningText } from "../lib/host-messages"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
@@ -30,12 +31,6 @@ interface ArchiveTaskDialogProps {
    * second copy of a setting that lives in the Host.
    */
   config?: ConfigFormLike
-  /**
-   * The user's own answer to "finish anyway?", asked at the finish press when the
-   * delivery policy is not satisfied. Carried to the done call, which records it
-   * as a warning; the model-facing tool has no way to set it.
-   */
-  acknowledgeDelivery?: boolean
   /** Called once the task is archived, so the opener can refresh what it shows. */
   onArchived?: () => void
   onClose: () => void
@@ -84,7 +79,7 @@ interface HandoffTarget {
  * back to Ungrouped with their history intact; and a session still running here
  * stops the archive instead of having its directory pulled out from under it.
  */
-export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, config, acknowledgeDelivery = false, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
+export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace, config, onArchived, onClose, onLeave }: ArchiveTaskDialogProps) {
   const t = useT()
   // Looked up before the state below so the documents folder can be named after
   // the registered Workspace, which reads as `kratos-admin/testb`.
@@ -325,6 +320,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    */
   const activeSessions = plan?.activeSessions ?? []
   const running = activeSessions.length > 0
+  /**
+   * What the delivery gate is still waiting for, as the Host computed it.
+   *
+   * Read from the plan rather than derived here, so the panel and the refusal cannot
+   * disagree: this is the same function's answer that would refuse the merge. Shown as a
+   * warning, never a lock - the user's press is the overrule, and the finish carries it.
+   * Empty while the plan is still loading, which is not the same as satisfied and is why
+   * the notice only appears once there is a plan.
+   */
+  const gateMissing = plan?.gate?.applies === true ? plan.gate.missing : []
   /** Strays carrying writing, which the warning names one by one. */
   const documentStrays = (plan?.strays ?? []).filter((stray) => stray.documents > 0)
   // Build output and editor state are expected in a working directory; anything
@@ -501,9 +506,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // the pair the other way round.
         deleteBranch: options.deleteBranch && (options.merge || options.force),
         force: options.force,
-        // The user's "finish anyway" from the finish press, when the delivery
-        // policy was not satisfied; the Host records the overrule as a warning.
-        ...(acknowledgeDelivery ? { acknowledgeDelivery: true } : {}),
+        // The user's own overrule, and it is sent by the panel's finish on every path
+        // through it. The delivery gate is a warning to the user, never a wall: this
+        // dialog is the one place every entry reaches - the task row's button, the
+        // workspace menu's item, and a report left behind by a finish that stopped - so
+        // the overrule belongs to the press that confirms the finish rather than to
+        // whichever door happened to open it. The Host records it as a
+        // `delivery-gate-bypassed` warning when it actually steps over something, and
+        // says nothing when the gate was satisfied anyway. The model-facing tool cannot
+        // send this at all, which is the asymmetry that matters: the model's way past the
+        // gate is deploying and smoking, never a flag.
+        acknowledgeDelivery: true,
         // What happens to the files git never tracked, as one choice rather than the
         // three flags this used to send. The dialog's box is the whole decision: ticked
         // (its default) files the content away and clears the build output, so this
@@ -967,7 +980,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
               </li>)}</ul>}
             {noiseStrays.length > 0 ? <p className="dws-plan-noise">{format(t("planNoise"), {
               count: String(noiseStrays.length),
-              names: noiseStrays.map(strayName).join("、"),
+              names: noiseStrays.map(strayName).join(t("listJoin")),
             })}</p> : null}
             <p className="dws-plan-breadcrumb">{t("planBreadcrumb")}</p>
           </div> : null}
@@ -1089,7 +1102,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 count: String(shownSessions.length),
                 job: t(shownSessions.every((session) => session.kind === "conflict") ? "finishHandoffJobConflict" : "finishHandoffJobCommit"),
               })}{shownSessions.map((session, index) => <span key={session.sessionId}>
-                {index > 0 ? "、" : null}
+                {index > 0 ? t("listJoin") : null}
                 <span className="dws-finish-handoff-boundary" title={session.fullAccess === true ? t("finishHandoffScopeFullAccess") : session.wide ? t("finishHandoffScopeWide") : t("finishHandoffScopeTight")}>{format(t("finishHandoffBoundary"), { path: slashPath(session.boundary) })}</span>
               </span>)}</p>
               <ul className="dws-finish-handoff-sessions">{shownHandoff.map((opened) => <li key={`${opened.kind}:${opened.name}`}>
@@ -1130,6 +1143,16 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
           </div> : null}
           {result === null && plan !== null ? <>
             <p className="dws-notice" role="status"><AlertCircle size={15} aria-hidden="true" /><span>{t("archiveConsequence")}</span></p>
+            {/* What the delivery gate is waiting for, said where the finish is confirmed
+                rather than at one of the doors into it. This is the warning the press
+                overrules: the button below carries `acknowledgeDelivery`, the Host records
+                the overrule when it steps over something, and nothing here blocks the
+                user - a gate that could not be answered would leave them unable to finish
+                a task at all. */}
+            {gateMissing.length > 0 ? <p className="dws-notice" role="status">
+              <AlertCircle size={15} aria-hidden="true" />
+              <span>{format(t("finishGateWarning"), { missing: gateMissingText(t, gateMissing) })}</span>
+            </p> : null}
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.merge} onChange={(event) => setOptions((current) => ({ ...current, merge: event.target.checked, deleteBranch: event.target.checked || current.force ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishMerge")}</span><span className="dws-check-path">{t("finishMergeHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled || (!options.merge && !options.force)} checked={options.deleteBranch && (options.merge || options.force)} onChange={(event) => setOptions((current) => ({ ...current, deleteBranch: event.target.checked }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishDeleteBranch")}</span><span className="dws-check-path">{t("finishDeleteBranchHint")}</span></span></label>
             <label className="dws-check-option"><input type="checkbox" className="dws-checkbox" disabled={optionsDisabled} checked={options.force} onChange={(event) => setOptions((current) => ({ ...current, force: event.target.checked, deleteBranch: current.merge || event.target.checked ? current.deleteBranch : false }))} /><span className="dws-check-copy"><span className="dws-check-label">{t("finishForce")}</span><span className="dws-check-path">{t("finishForceHint")}</span></span></label>
@@ -1146,7 +1169,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
               {!options.archiveDocuments ? <p className="dws-notice dws-notice-danger" role="alert">
                 <AlertCircle size={15} aria-hidden="true" />
                 <span>{format(t("archiveDocumentsWarning"), {
-                  names: contentStrays.map(strayName).join("、"),
+                  names: contentStrays.map(strayName).join(t("listJoin")),
                   count: String(documentStrays.reduce((total, stray) => total + stray.documents, 0)),
                 })}</span>
               </p> : null}</> : null}

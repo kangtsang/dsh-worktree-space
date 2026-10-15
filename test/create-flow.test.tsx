@@ -666,6 +666,30 @@ describe("the default branch prefix this dialog may record", () => {
     expect(note()).toBe(format(t("branchPrefixHint"), { prefix: "feat/" }))
   })
 
+  it("refuses an unusable configured prefix rather than sending it", async () => {
+    // The field is validated as typed, but the request carries `effectivePrefix`, which
+    // falls back to the configured default when the field is empty. Validating only the
+    // typed text let an illegal *configured* prefix through this check, and the Host
+    // then refused the create - after the user had filled the form in and pressed the
+    // button, with the refusal arriving from somewhere they could not see.
+    const { form: config } = configForm("bad prefix/")
+    const next = setup(config)
+    next.mount()
+    await ready()
+
+    // Clearing the field is what asks for the configured default; the field itself is
+    // prefilled with it, so this is the reachable shape of the bug.
+    fireEvent.change(prefixField(), { target: { value: "" } })
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+
+    expect(next.api.createTask).not.toHaveBeenCalled()
+    // And the sentence names the prefix that was refused, because it is not in the field
+    // for the user to read it off.
+    await waitFor(() => expect(document.querySelector(".dws-error")?.textContent)
+      .toContain(format(t("invalidConfiguredBranchPrefix"), { prefix: "bad prefix/" })))
+  })
+
   it("creates the task space even when the Host refuses the new default", async () => {    const { form: form0 } = configForm("task/", false)
     const next = setup(form0)
     next.mount()

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw, X } from "./icons"
 import { format, useT } from "../lib/i18n"
+import { gateMissingText } from "../lib/deploy-gate-text"
+import { hostWarningText, type HostWarning } from "../lib/host-messages"
+import { acceptanceUrl } from "../lib/links"
 import { Button } from "./ui"
 import type { DeliveryGatePreview, DeploymentStatus } from "../lib/types"
 
@@ -17,23 +20,6 @@ function stamp(iso: string | null | undefined) {
   if (Number.isNaN(d.getTime())) return iso
   const p = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
-
-/**
- * The gate's missing keys, said in the reader's language.
- *
- * Mapped explicitly rather than looked up by a built key, because a key the Host
- * adds later would then be printed raw: a name nobody translated is worse than the
- * Host's own English sentence, and this list is the one place that can notice.
- * An unrecognised key falls back to the Host's sentence through `t`'s own default
- * path - it is shown, not swallowed.
- */
-function gateMissingText(t: (key: any) => string, missing: string[]) {
-  const labels: Record<string, string> = {
-    deployment: t("deployGateMissingDeployment"),
-    smoke: t("deployGateMissingSmoke"),
-  }
-  return missing.map((key) => labels[key] ?? key).join(t("deployGateAnd"))
 }
 
 /**
@@ -58,18 +44,34 @@ export function DeployCard({ api, path }: Props) {
   // *policy*, produced by an action, and a plain status read cannot produce it.
   const [gate, setGate] = useState<DeliveryGatePreview | null>(null)
   const [error, setError] = useState("")
+  // A warning is not an error: the action ran and answered, and this is what it could
+  // not finish. Kept apart from `error` for that reason - the red line says the call
+  // failed, and a destroy that removed three of five containers failed at neither.
+  const [warning, setWarning] = useState("")
   const [working, setWorking] = useState(false)
   const [failed, setFailed] = useState(false)
+  // Whether the last smoke this card ran was stopped at its deadline rather than
+  // finishing. Held beside the status rather than folded into it, because the status
+  // comes from the state file the script writes - and a script that was stopped never
+  // got to write one, so the badge would otherwise go on showing whatever the last
+  // completed run recorded, as though this one had answered.
+  const [smokeTimedOut, setSmokeTimedOut] = useState(false)
   const [armingDestroy, setArmingDestroy] = useState(false)
   const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
       const next: DeploymentStatus = await api.deployStatus(path, { signal })
+      // A read that was aborted describes a state nobody is waiting for any more -
+      // the card is gone, or a later press has replaced it. Painting it would put a
+      // stale answer on screen, and on unmount it would be a state update into
+      // nothing, which is the same bug the mount effect's abort exists to prevent.
+      if (signal?.aborted) return
       setStatus(next)
       setFailed(false)
       setError("")
     } catch {
+      if (signal?.aborted) return
       // A read that came back empty is not a card: a machine without docker, a
       // task space that is gone — the row above already says what that is.
       setFailed(true)
@@ -82,6 +84,13 @@ export function DeployCard({ api, path }: Props) {
     return () => controller.abort()
   }, [load])
 
+  // The controller for the read `run` falls back to when an action answers with
+  // nothing to paint. Held in a ref so unmounting aborts it, exactly as the effect
+  // above does for the read on mount: without a signal the fallback could set state
+  // into a card that is already gone.
+  const runController = useRef<AbortController | null>(null)
+  useEffect(() => () => runController.current?.abort(), [])
+
   // An armed destroy disarms itself, so a first press left alone means nothing.
   useEffect(() => () => { if (disarmTimer.current !== null) clearTimeout(disarmTimer.current) }, [])
 
@@ -91,9 +100,37 @@ export function DeployCard({ api, path }: Props) {
       // Operations that ran a script answer with the live status already in hand
       // (the smoke's own verdict is in it, red included) - paint that, and only
       // fall back to a fresh read when the action returned nothing to paint.
-      const result = await action() as { status?: DeploymentStatus; gate?: DeliveryGatePreview } | undefined
-      if (result?.status) setStatus(result.status)
-      else await load()
+      const result = await action() as { status?: DeploymentStatus; gate?: DeliveryGatePreview; timedOut?: boolean; warning?: HostWarning | string } | undefined
+      if (result?.status) {
+        setStatus(result.status)
+        // The action answered with a status, which is what a success looks like
+        // here. Clearing the error is the other half of that: left standing, the
+        // red line from the previous failure reads as a verdict on this one, and
+        // the user is told an action that worked had failed.
+        setError("")
+      } else {
+        // The fallback read gets a signal of its own, and the one from the press
+        // before it is dropped: two reads racing would let the older answer land
+        // last, and on unmount there would be nothing to abort at all.
+        runController.current?.abort()
+        const controller = new AbortController()
+        runController.current = controller
+        await load(controller.signal)
+      }
+      // Only a smoke answers with `timedOut`; any other action clears the note, so a
+      // re-run that really did finish does not leave the previous timeout on screen.
+      setSmokeTimedOut(result?.timedOut === true)
+      // What the action could not finish, said rather than dropped: a destroy that
+      // docker refused answers with a warning instead of raising, and without this
+      // the containers simply stay on the card with nothing explaining why.
+      //
+      // Only an action that answered replaces it. An action that answered with no
+      // warning clears it - the press that produced the last one has been superseded,
+      // and a line still standing over a teardown that has since worked reads as a
+      // failure that is not there. A plain refresh answers with nothing to paint, so
+      // it leaves the last answer standing rather than blanking a fact that is still
+      // true: the containers are still listed, and the reason still explains them.
+      if (result !== undefined) setWarning("warning" in result && result.warning ? hostWarningText(t, result.warning) : "")
       // An action that answered with the gate has just changed what the finish
       // waits for, so its answer replaces the last one; an action that did not
       // (a destroy, a plain refresh) leaves the previous answer standing rather
@@ -131,6 +168,11 @@ export function DeployCard({ api, path }: Props) {
     : smoke?.result === "fail"
       ? { cls: "dws-status-unavailable", label: t("deploySmokeFail") }
       : { cls: "dws-status-checking", label: t("deploySmokeNone") }
+  // Read through the guard rather than straight off the status: a Host older than the
+  // one that added it still forwards the state file's `url` as it came, and this
+  // component has no error boundary above it - an object here would throw during
+  // render and unmount the whole settings page rather than paint a blank row.
+  const url = acceptanceUrl(status.url)
 
   return <div className="dws-deploy">
     <div className="dws-deploy-head">
@@ -157,8 +199,8 @@ export function DeployCard({ api, path }: Props) {
       : null}
     <div className="dws-deploy-row">
       <span className="dws-deploy-label">{t("deployUrlLabel")}</span>
-      {status.url
-        ? <a className="dws-deploy-url" href={status.url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{status.url}</a>
+      {url
+        ? <a className="dws-deploy-url" href={url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{url}</a>
         : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
       <div className="dws-deploy-actions">
         {deploys && containers
@@ -177,6 +219,14 @@ export function DeployCard({ api, path }: Props) {
     {containers && !status.stateFound
       ? <span className="dws-deploy-error">{t("deployStateMissing")}</span>
       : null}
+    {/* A smoke this side stopped is not a smoke that failed, and saying so here is the
+        only place that distinction can be made: the state file it would otherwise be
+        read from was never written. */}
+    {smokeTimedOut ? <span className="dws-deploy-error">{t("deploySmokeTimeout")}</span> : null}
     {error !== "" ? <span className="dws-deploy-error">{error}</span> : null}
+    {/* A warning is not the red line above it: the action ran and this is what it
+        left undone, so it wears the warning tone. The reason it exists at all is the
+        one press whose failure was previously silent - destroy, refused by docker. */}
+    {warning !== "" ? <span className="dws-deploy-warning" role="status">{warning}</span> : null}
   </div>
 }

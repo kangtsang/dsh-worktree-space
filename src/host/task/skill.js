@@ -15,8 +15,18 @@ import { coded } from './codes.js'
 /** Provider name in the `ctx.skills` registry. */
 export const PROVIDER_NAME = 'dsh-worktree-space'
 
-/** Kebab-case skill name; the asset directory carries the same name. */
-export const SKILL_NAME = 'task-worktree-space'
+/**
+ * Kebab-case skill name; the asset directory carries the same name.
+ *
+ * It is the plugin's product name rather than the tool's, and deliberately so:
+ * a skill name is what a person types to invoke it, so it has to outlive the
+ * tool's own spelling. The tool was `task_worktree_space` and is now
+ * `wts_worktree_space`; this stayed `task-worktree-space` through that rename and
+ * is now aligned to the product name instead of to either. DSH validates it with
+ * `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`, so an underscore spelling - the tool's own - is
+ * not available here.
+ */
+export const SKILL_NAME = 'worktree-space'
 
 /** Package this module belongs to, used to locate its own assets. */
 const PACKAGE_NAME = 'dsh-worktree-space'

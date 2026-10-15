@@ -11,10 +11,55 @@
  * source root.
  */
 import { dirname, join, parse, resolve } from 'node:path'
-import { lstatSync } from 'node:fs'
+import { lstatSync, realpathSync } from 'node:fs'
 
 /** Windows compares paths case-insensitively; POSIX does not. */
 const CASE_INSENSITIVE = process.platform === 'win32'
+
+/**
+ * Fold `.` and `..` segments out of a separator-normalised path, lexically.
+ *
+ * Deliberately not `resolve()`: that also makes the path absolute and collapses
+ * it against the process's working directory, which is the opposite of what this
+ * is for. Two spellings of one directory only have to compare equal to each
+ * other - `<root>/<project>/task` and `<root>/<project>/x/../task` name the same
+ * place - and neither of them has to exist for that to be true.
+ *
+ * A `..` with nothing left to pop is **kept, and nothing after it is folded**.
+ * Both halves of that matter. Keeping it means a path that really does climb out
+ * of its own root is still spelled with the `..` that says so, rather than being
+ * silently rewritten into a path that looks contained. Stopping there means the
+ * fold never *invents* a containment: `a/../../b` is not `b` - the first `..`
+ * escapes `a` against a directory this text does not know, and once the path has
+ * left the frame, no later segment can be folded back into it against the real
+ * root. Folding past that point is what would turn a spelling that escapes the
+ * container into one that reads as inside it.
+ * @param path - a path whose separators are already `/`.
+ * @returns the same path with the `..` segments that can be folded, folded.
+ */
+function foldDotSegments(path) {
+  const absolute = path.startsWith('/')
+  const segments = []
+  let escaped = false
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      if (!escaped && segments.length > 0 && segments[segments.length - 1] !== '..') {
+        segments.pop()
+        continue
+      }
+      // Above the frame this text can account for: kept verbatim, and every
+      // segment after it is kept verbatim too.
+      escaped = true
+      segments.push(segment)
+      continue
+    }
+    segments.push(segment)
+  }
+  const body = segments.join('/')
+  if (absolute) return `/${body}`
+  return body
+}
 
 /**
  * Reduce a path to a comparison key.
@@ -22,6 +67,19 @@ const CASE_INSENSITIVE = process.platform === 'win32'
  * Git reports forward-slash paths on Windows while the filesystem hands out
  * backslash paths, so identity checks must never compare raw strings. The key
  * unifies separators, drops trailing separators, and folds case on Windows.
+ *
+ * Deliberately *lexical and unreduced*: `.` and `..` are left exactly as they
+ * were written. Folding them here would look like a tidy-up and is the wrong
+ * place for it - this key is the base of `isInside`, `samePathLocation` and
+ * `assertIsolated`, whose whole design is two layers: a fast textual comparison,
+ * with resolution happening at the boundary that receives an outside path. A
+ * fold here would move that job up into the comparison and quietly change what
+ * four callers mean by "the same path", including the one that deliberately
+ * asserts a `..` is *not* caught lexically so that the resolving boundary can be
+ * shown to be what catches it.
+ *
+ * Callers that need dot-segment equivalence ask for it by name, through
+ * {@link reducedPath}.
  * @param value - a path in any of the forms this plugin exchanges.
  * @returns the comparison key.
  */
@@ -32,6 +90,33 @@ export function canonicalPath(value) {
 }
 
 /**
+ * The comparison key for a path whose `.` and `..` segments are to be folded.
+ *
+ * The same key {@link canonicalPath} builds, with the dot segments reduced
+ * first - for the callers whose question is about a *location* rather than about
+ * the text they were handed. The delete fence is the one that needs it: it is
+ * asked about a path assembled from a caller-supplied root and two
+ * caller-supplied names, and `<root>/<project>/x/../task` names a task space that
+ * a purely textual comparison calls something else - so a delete of it is
+ * refused although it is legitimate, which is the failure mode this exists to
+ * prevent.
+ *
+ * The fold is pure text and never touches the filesystem or the working
+ * directory. It stops at the first `..` that has nothing left to pop, keeping
+ * that segment and every segment after it verbatim: `a/../../b` really does
+ * climb out of the frame this text can account for, and folding past that point
+ * would turn a spelling that escapes its root into one that reads as inside it.
+ * @param value - a path in any of the forms this plugin exchanges.
+ * @returns the reduced comparison key.
+ */
+export function reducedPath(value) {
+  const unified = String(value ?? '').replace(/[\\/]+/g, '/')
+  const folded = foldDotSegments(unified)
+  if (folded === '' || folded === '/') return '/'
+  return CASE_INSENSITIVE ? folded.toLowerCase() : folded
+}
+
+/**
  * Whether two paths name the same location.
  * @param left - first path.
  * @param right - second path.
@@ -39,6 +124,52 @@ export function canonicalPath(value) {
  */
 export function samePathLocation(left, right) {
   return canonicalPath(left) === canonicalPath(right)
+}
+
+/**
+ * A set of paths reduced to one comparison key.
+ *
+ * For the callers that identify a *collection* of Workspaces rather than one
+ * path: the scan cache files an answer under the set of paths it covered, and
+ * the set has to become one string. Deduplicated and sorted, so neither the
+ * order a caller happens to list its Workspaces in nor one of them arriving
+ * twice can produce a second key for one set.
+ * @param values - the paths.
+ * @returns the key; empty when nothing usable was given.
+ */
+export function canonicalPathSet(values) {
+  const unique = new Set()
+  for (const value of values ?? []) {
+    const key = reducedPath(value)
+    if (key !== '' && key !== '/') unique.add(key)
+  }
+  return [...unique].sort().join('\n')
+}
+
+/**
+ * An externally supplied path, as the absolute path it names.
+ *
+ * The comparisons in this file are deliberately lexical - each is checked immediately
+ * before the operation it guards, against the path this plugin is holding at that
+ * moment - and that is exactly why a path from outside has to be resolved before it
+ * reaches one. `E:/a/x/../b/c/wt` is not lexically inside `E:/a/b/c`, and yet it
+ * resolves to `E:\a\b\c\wt`, which really is: a container root like that passes
+ * {@link assertIsolated} while every worktree it holds lands inside the source tree,
+ * so the plugin's own "work and source are isolated" invariant reports itself
+ * satisfied about the one layout it exists to refuse.
+ *
+ * So this is the boundary's job and not the comparison's: every caller-supplied or
+ * configuration-supplied path goes through here on its way in, and nothing below it
+ * has to remember to resolve anything. An empty value stays empty rather than becoming
+ * the process's working directory, because "no path was given" is a case the callers
+ * already answer in their own words (E1004, E4005) and resolving it would silently
+ * turn a missing argument into a real one.
+ * @param value - a path as a caller or the configuration spelled it.
+ * @returns that path resolved to an absolute one, or an empty string.
+ */
+export function absolutePath(value) {
+  const text = typeof value === 'string' ? value.trim() : ''
+  return text === '' ? '' : resolve(text)
 }
 
 /**
@@ -113,6 +244,60 @@ export class FenceError extends Error {
 }
 
 /**
+ * The real location a path names, for a path that may not exist.
+ *
+ * `realpathSync` answers only for something on disk, and a delete target is
+ * frequently already gone: the fence runs immediately before a removal, and the
+ * entry may have been removed by the operation that led here. So the nearest
+ * ancestor that does exist is resolved - which is where a junction on the parent
+ * chain shows up, and that is the case this exists for - and the segments below
+ * it are appended as they were written. Those segments cannot be links, because
+ * they are not there.
+ *
+ * A failure to resolve is *not* answered with the untouched path. Returning it
+ * would be fail-open in the one place where being wrong deletes the wrong
+ * directory: an unresolvable ancestor is a `realpath` error, not a statement
+ * that the path is inside the container.
+ * @param value - the path to resolve.
+ * @returns its real location, or undefined when it cannot be determined.
+ */
+function realLocation(value) {
+  const text = String(value ?? '')
+  if (text === '') return undefined
+  const rest = []
+  let current = resolve(text)
+  for (;;) {
+    try {
+      const real = realpathSync(current)
+      return rest.length === 0 ? real : join(real, ...rest.reverse())
+    } catch {
+      const parent = dirname(current)
+      // The volume root has no parent: nothing above it can answer either.
+      if (parent === current) return undefined
+      rest.push(current.slice(parent.length).replace(/^[\\/]+/, ''))
+      current = parent
+    }
+  }
+}
+
+/**
+ * Whether a resolved path is below a resolved root.
+ *
+ * A separate comparison from {@link isInside} because it is answered on real
+ * locations rather than on the strings held: the fence cannot use the lexical
+ * one alone without a parent-chain junction defeating it.
+ * @param root - the real container root.
+ * @param target - the real delete target.
+ * @returns whether the target is strictly below the root.
+ */
+function isInsideReal(root, target) {
+  const outer = reducedPath(root)
+  const inner = reducedPath(target)
+  if (outer === '/' || inner === '/') return false
+  return inner !== outer && inner.startsWith(`${outer}/`)
+}
+
+/**
  * Refuse a delete whose target is not strictly inside the container root.
  *
  * The container root is the fence every removal in this plugin is held to, and
@@ -124,21 +309,40 @@ export class FenceError extends Error {
  * is about to remove from and is refused unless the answer is a strict descendant
  * of the root.
  *
- * Deliberately lexical, and checked immediately before the removal rather than
- * once at the start: the fence is about the path this plugin is holding, and a
- * check that ran at entry would still be describing a path some other call may
- * have moved since.
+ * Two comparisons, and both have to pass. The lexical one is the historical
+ * check and catches every `..` a caller can write. The real one exists because a
+ * junction or symbolic link on the *parent chain* defeats it: `<container>/link`
+ * where `link` points outside reads as a descendant lexically, and a recursive
+ * delete through it reaches the target. Only the real location knows.
+ *
+ * Failing to resolve either side is a refusal rather than a pass. The fence may
+ * distrust an agent but never blocks the user, and this is not that distinction:
+ * a path whose real location cannot be determined is a path this cannot promise
+ * is inside the container, and there is no correct deletion to protect by
+ * guessing.
  * @param tasksRoot - the container root.
  * @param target - the path about to be deleted.
  * @param what - the thing being deleted, named in the refusal.
  * @throws FenceError carrying E1005 when `target` is the root itself or sits outside it.
  */
 export function assertInsideContainer(tasksRoot, target, what = 'this path') {
-  const root = canonicalPath(tasksRoot)
-  const inner = canonicalPath(target)
+  // Both halves of the fence are asked of the *reduced* key rather than of
+  // `canonicalPath`: a path assembled from a root and two names is routinely
+  // spelled with segments that a textual comparison cannot see through, and the
+  // question here is where the path points, not how it is written.
+  const root = reducedPath(tasksRoot)
+  const inner = reducedPath(target)
   const inside = inner.startsWith(root.endsWith('/') ? root : `${root}/`)
   if (!inside) {
     throw new FenceError('E1005', `${what} is outside the container root and will not be deleted: ${target}\n  the container root is ${tasksRoot}`)
+  }
+  const realRoot = realLocation(tasksRoot)
+  const realTarget = realLocation(target)
+  if (realRoot === undefined || realTarget === undefined) {
+    throw new FenceError('E1005', `${what} could not be resolved to a real location, so whether it is inside the container root cannot be shown, and it will not be deleted: ${target}\n  the container root is ${tasksRoot}`)
+  }
+  if (!isInsideReal(realRoot, realTarget)) {
+    throw new FenceError('E1005', `${what} resolves to ${realTarget}, which is outside the container root and will not be deleted: ${target}\n  the container root is ${tasksRoot}`)
   }
 }
 
@@ -178,8 +382,15 @@ export function assertTaskSpaceShape(tasksRoot, taskPath) {
  */
 export function refuseDelete(tasksRoot, target, what = 'this path') {
   try {
-    assertInsideContainer(tasksRoot, target, what)
+    // The link test first, and it is not a stylistic order. A junction sitting in the
+    // container is *both* "a link" and, once followed, "a path outside the root" - the
+    // second is a consequence of the first. Asking the containment question first
+    // therefore answers with the symptom and hides the cause, and the cause is the one
+    // a reader can act on: a link is a name this plugin will not walk through, and it is
+    // the same refusal wherever the link happens to point - into the container or out of
+    // it. `assertRealDirectory` is also the cheaper question, answered by one `lstat`.
     assertRealDirectory(target, what)
+    assertInsideContainer(tasksRoot, target, what)
     return ''
   } catch (error) {
     return error instanceof FenceError ? error.message : `refusing to delete ${what}: ${target}`

@@ -286,6 +286,44 @@ describe("finishing a task", () => {
     expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it("warns about an unsatisfied delivery gate without ever blocking the finish", async () => {
+    // The gate is a warning to the user, never a wall, and this is the case that used to be
+    // unfinishable. The old pre-check asked whether a state file *existed* before it would
+    // warn at all, so a task whose deploy script never wrote one opened with no warning, no
+    // acknowledgement, and a finish the Host then refused with E5006 - with no way for the
+    // user to answer. The warning now comes from the plan, computed by the Host with the
+    // gate's own function, and the confirm button stays live either way.
+    const user = userEvent.setup()
+    const next = setup({
+      plan: (built) => ({ ...built, gate: { applies: true, missing: ["deployment", "smoke"], target: "docker" } }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    // Said where the finish is confirmed, naming what is missing.
+    const expected = format(t("finishGateWarning"), {
+      missing: `${t("deployGateMissingDeployment")}${t("deployGateAnd")}${t("deployGateMissingSmoke")}`,
+    })
+    expect(screen.getByText(expected)).toBeTruthy()
+    // And nothing is blocked: the user can still finish, carrying their own overrule.
+    const confirm = screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    await user.click(confirm)
+    await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ acknowledgeDelivery: true })))
+  })
+
+  it("says nothing about the gate when the plan reports it satisfied", async () => {
+    // The negative control for the warning above: a satisfied gate must not produce a
+    // sentence, or a notice that always showed would pass the test above.
+    const user = userEvent.setup()
+    setup({ plan: (built) => ({ ...built, gate: { applies: true, missing: [], target: "docker" } }) })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    expect(screen.queryByText(/交付闸门还没满足/)).toBeNull()
+    expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it("merges and deletes branches only as chosen, then reports every repository", async () => {
     const user = userEvent.setup()
     const next = setup()
@@ -303,7 +341,10 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
-    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", project, tasksRoot: root, merge: true, deleteBranch: true, force: false })
+    // The overrule travels with every panel finish, not only a warned one: the gate is a
+    // warning to the user rather than a wall, and the Host records
+    // `delivery-gate-bypassed` only when it actually steps over something.
+    expect(next.api.doneTask).toHaveBeenCalledWith({ task: "antest", project, tasksRoot: root, merge: true, deleteBranch: true, force: false, acknowledgeDelivery: true })
     await waitFor(() => expect(screen.getByText(t("finishDone"))).toBeTruthy())
     expect(screen.getAllByText(new RegExp(t("finishMerged").replace("{target}", "main")))).toHaveLength(2)
     expect(screen.getAllByText(new RegExp(t("finishRemoved"))).length).toBeGreaterThan(0)

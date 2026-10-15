@@ -24,16 +24,27 @@
  * Each entry says where it is thrown, because that is the other half of the
  * promise. The codes are written literally at the throw site rather than looked
  * up here, so `grep -n E2003` finds the line itself.
+ *
+ * Where a code covers more than one condition, the entry names each condition
+ * rather than listing its throw sites and stopping there. A list of files says
+ * which lines to read; it does not say whether they are the same failure, and for
+ * several codes here they are not - E1005 is raised both by a container root that
+ * is refused at creation and by a delete that the fence refuses, which are two
+ * different problems with two different answers. Spelling the conditions out is
+ * what keeps this file usable for the thing it is for: a reader who has a code and
+ * a log line wants to know what class of failure they are looking at, and "it is
+ * thrown in two files" does not tell them.
  */
 
 /** Every code, with the place that raises it. The shape is checked by a test. */
 export const ERROR_CODES = {
   // --- E1xxx container and isolation --------------------------------------
-  E1001: 'paths.js - the tasks root is the repositories directory itself',
+  E1001: 'paths.js, inspect.js - the tasks root is the repositories directory itself, or is a repository itself',
   E1002: 'paths.js, add.js - the container, or the task space, is inside a repository',
   E1003: 'paths.js, add.js - the container, or the task space, holds a repository',
   E1004: 'paths.js, container.js, archive.js, inspect.js, add.js - the tasks root is missing or empty',
-  E1005: 'container.js - the tasks root was refused on creation',
+  E1005: 'two conditions, both "this path is not one this plugin will touch". (1) paths.js - a delete is refused by the fence: the path is outside the container root, is not a <container root>/<project>/<task> shape, or is a link rather than a directory. (2) container.js - the container root is itself a git repository, refused before a task space is made under it',
+  E1006: 'archive.js - a task worktree resolves to a source repository the task never recorded',
 
   // --- E2xxx task space lifecycle -----------------------------------------
   E2001: 'create.js - the task name is taken by a different task space',
@@ -42,13 +53,20 @@ export const ERROR_CODES = {
   E2004: 'archive.js, add.js - the task space holds no git worktrees',
   E2005: 'create.js, add.js - creating or extending failed with no code of its own, and everything was rolled back',
   E2006: 'create.js, add.js - creating or extending failed with no code of its own, and the rollback left something behind',
+  E2007: 'archive.js - the task space at that path belongs to a different task or project than the one asked for',
 
   // --- E3xxx git and branches ---------------------------------------------
+  // The two codes below are not thrown where a literal could be grepped: they are
+  // chosen at runtime from git's own stderr, by `gitFailureCode` in git.js and by
+  // its deliberate duplicate `gitRecordCode` in audit-log.js (duplicated because
+  // git.js imports audit-log.js, so sharing one would be a cycle; a test asserts
+  // the two agree). `grep -n E3003` finds the classifier rather than a throw, which
+  // is the honest description of where these come from.
   E3001: 'create.js, add.js - the branch to cut the worktree from is already in use',
   E3002: 'create.js, add.js - the requested base ref does not exist in that repository',
-  E3003: 'git.js - a git command failed, for any reason not covered below',
-  E3004: 'git.js - the directory is not a git repository',
-  E3005: 'git.js - the worktree checkout has gone',
+  E3003: 'git.js - derived from git stderr: a git command failed for any reason not covered below',
+  E3004: 'git.js - derived from git stderr: the directory is not a git repository',
+  E3005: 'git.js - derived from git stderr: the worktree checkout has gone',
 
   // --- E4xxx arguments and validation -------------------------------------
   E4001: 'create.js, add.js - no repository was selected',
@@ -56,7 +74,7 @@ export const ERROR_CODES = {
   E4003: 'index.js - the task name is missing',
   E4004: 'index.js - the source root is missing',
   E4005: 'index.js, add.js - a path is required, either a worktree, a task space or a repository',
-  E4006: 'index.js - the workspace scan hit its directory limit',
+  E4006: 'two conditions, both "the request named nothing this could act on". (1) index.js - no usable Workspace path was given to scan. (2) discover.js - a requested repository is not inside the source root. NOTE: hitting the directory ceiling is NOT this code any more - a walk that runs out of budget reports through onIssue and keeps the repositories it did find',
   E4007: 'archive.js - deleting an unmerged branch was not forced',
   E4008: 'archive.js - the merge target is unusable',
   E4009: 'naming.js - the task name or branch prefix is not usable',
@@ -112,6 +130,8 @@ export const WARNING_CODES = {
   'leftover-copy-failed': 'archive.js - filing a leftover into the documents directory failed',
   'no-deployment-recorded': 'deploy.js - no deployment environment is recorded for this task space',
   'deploy-containers-left': 'deploy.js - containers of the environment could not be removed',
+  'deploy-containers-unchecked': 'deploy.js - docker could not be asked what containers the environment has, so whether any are still standing is unknown',
+  'deploy-no-labelled-containers': 'deploy.js - the deploy script exited successfully but no container carries the environment label, so the finish will not be able to tear the environment down',
   'deploy-cleanup-failed': 'archive.js - tearing the deployment down while finishing failed',
   'workspace-holds-links': 'create.js - a worktree holds links this machine will not recreate, so the finish will not be able to file them',
   'workspace-e2e-points-elsewhere': 'create.js - a repository\'s own e2e configuration names the host stack rather than this task\'s instance',
@@ -138,17 +158,30 @@ export function warned(code, message, values) {
  * The code is written as a literal at every call site rather than referenced
  * through a name here, so that searching the tree for a code finds the line that
  * raises it. This is only the constructor.
+ *
+ * **The code is prefixed onto the message as well as set on `.code`**, and that is a
+ * correction rather than a style choice. The tool descriptions tell the model to branch on
+ * these codes - "do not call done without it (E7006)", "refused here (E7007)" - and the
+ * harness hands a tool failure to the model as the error's `message` **alone**
+ * (`errorMessage` in `@deepseek-ai/dsh-tools`: `error instanceof Error` -> `return
+ * error.message`). So a message "free of the code" meant the model was told to act on a
+ * code it never received, and the only way to learn it was to guess from the prose.
+ *
+ * Both places are kept because they have different readers: `.code` is what this side
+ * branches on and what the audit log records, and the prefix is what a model sees. The
+ * message body after the prefix is unchanged, so anything matching on the sentence still
+ * matches.
  * @param code - one of {@link ERROR_CODES}.
- * @param message - the message, which stays free of the code.
+ * @param message - the message, which has the code prefixed to it.
  * @param details - the values the failure is about, where a screen has to say the same
  * thing in another language. The message is written once, in English, because it is
  * also what the audit log keeps and what anything showing it verbatim prints; a
  * translated screen cannot recover a path from that sentence without reading English
  * prose, so the values travel beside it as data instead.
- * @returns the error, with `code` set.
+ * @returns the error, with `code` set and named in the message.
  */
 export function coded(code, message, details) {
-  const error = new Error(message)
+  const error = new Error(`${code}: ${message}`)
   error.code = code
   error.details = details ?? {}
   // The sentence the operation would tell a person, which the message alone

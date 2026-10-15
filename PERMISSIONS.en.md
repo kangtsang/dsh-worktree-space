@@ -27,7 +27,7 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
   - The container root's `<container root>/.git` and `<container root>/README.md`: the first, if present,
     means the container root is itself a Git repository and creation is refused; the second, if present, is
     never written over. Both are existence checks only.
-  - `assets/skill/task-worktree-space/SKILL.md` inside this package (registered as a bundled skill, read
+  - `assets/skill/worktree-space/SKILL.md` inside this package (registered as a bundled skill, read
     only, never copied anywhere).
   - The paths the user chooses (source root; the Worktree Space container root, either typed into the create dialog
     or named by the Custom Worktree Space container root setting; and the archive directory).
@@ -179,6 +179,15 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
 
 - **Global resources**: no global packages installed, no daemon, no system service, no permission changes, no
   symbolic links; the scan cache lives in the DSH instance's memory only and is gone when the instance exits.
+
+  That last one has one exception, recorded here so this file and the code agree: **asking whether this machine
+  will let the process create a symbolic link means actually creating one under a temporary directory and
+  deleting it** (`symlinksRefused` in `links.js`). The question is what the machine's policy is, so the only
+  way to ask it is to try; the probe is made with `mkdtemp(tmpdir())` and removed recursively immediately
+  after. It **changes no permission on any user file, and touches neither the task spaces nor the source
+  root** - so it does not conflict with the intent of "no symbolic links", which is about not creating them
+  for the user's own content. It is a real creation outside that intent, hence named here. It runs once per
+  process.
 
 ### Every git subcommand invoked
 

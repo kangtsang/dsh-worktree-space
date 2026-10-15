@@ -91,7 +91,7 @@ const expected = [
   "PERMISSIONS.md",
   "README.en.md",
   "README.md",
-  "assets/skill/task-worktree-space/SKILL.md",
+  "assets/skill/worktree-space/SKILL.md",
   "client/client.js",
   "cordis.patch.yml",
   "docs/img/finish-task.png",

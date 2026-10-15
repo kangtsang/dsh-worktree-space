@@ -182,7 +182,20 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   // at all, which is what the preview and the request then both say.
   const typedPrefix = branchPrefix.trim()
   const effectivePrefix = typedPrefix === "" ? configuredPrefix || suggestedPrefix : typedPrefix
-  const prefixProblem = branchPrefixProblem(typedPrefix)
+  // The value that is actually sent, not the field: an empty field falls back to the
+  // configured default, and validating only what was typed let an illegal configured
+  // prefix pass this check and be refused by the Host instead. The fallback is not a
+  // guess either way - `configuredPrefix` is what the Plugins page holds and
+  // `suggestedPrefix` is what the Host itself resolved.
+  const prefixProblem = branchPrefixProblem(effectivePrefix)
+  // The empty field is the one case where the offending prefix is not on screen: it
+  // is the configured default, so the note names it rather than saying "invalid"
+  // about a field the user left blank.
+  const prefixNote = prefixProblem === ""
+    ? format(t("branchPrefixHint"), { prefix: effectivePrefix || suggestedPrefix })
+    : typedPrefix === "" && configuredPrefix !== ""
+      ? format(t("invalidConfiguredBranchPrefix"), { prefix: effectivePrefix })
+      : t(prefixProblem)
   // The checkbox promises a new default for the *next* task space, so it is offered
   // only for a prefix that could actually become one: an unset one has nothing to
   // save, an unusable one would be refused by the Host, and there is nothing to save
@@ -335,7 +348,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
       return
     }
     if (prefixProblem !== "") {
-      setError(t(prefixProblem))
+      // The field's own sentence, not the bare rule: an illegal configured default
+      // is not visible in the field, so the error has to name the prefix that was
+      // refused rather than say "invalid" about something the user cannot see.
+      setError(prefixNote)
       return
     }
     if (selected.length === 0) {
@@ -514,9 +530,9 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         <span id={`${id}-name-note`} className="dws-field-note dws-visually-hidden">{invalidName ? t(nameProblem) : t("taskNameHint")}</span>
       </div>
       <div className="dws-field-row">
-        <label className="dws-field-label" htmlFor={`${id}-prefix`}><span id={`${id}-prefix-label`}>{t("branchPrefix")}</span><span className={prefixNoteClass}>{prefixProblem ? t(prefixProblem) : format(t("branchPrefixHint"), { prefix: effectivePrefix || suggestedPrefix })}</span></label>
+        <label className="dws-field-label" htmlFor={`${id}-prefix`}><span id={`${id}-prefix-label`}>{t("branchPrefix")}</span><span className={prefixNoteClass}>{prefixNote}</span></label>
         <Input id={`${id}-prefix`} aria-labelledby={`${id}-prefix-label`} value={branchPrefix} disabled={fieldsDisabled} onChange={(event) => setBranchPrefix(event.target.value)} placeholder={suggestedPrefix} autoComplete="off" spellCheck={false} aria-invalid={prefixProblem !== "" || undefined} aria-describedby={`${id}-prefix-note`} />
-        <span id={`${id}-prefix-note`} className="dws-field-note dws-visually-hidden">{prefixProblem ? t(prefixProblem) : format(t("branchPrefixHint"), { prefix: effectivePrefix || suggestedPrefix })}</span>
+        <span id={`${id}-prefix-note`} className="dws-field-note dws-visually-hidden">{prefixNote}</span>
         {/* The offer disappears rather than sitting disabled once it has nothing to
             promise: the field already holds the default, or the value cannot be one. */}
         {canSaveDefault ? <label className="dws-default-prefix" htmlFor={`${id}-default-prefix`}>

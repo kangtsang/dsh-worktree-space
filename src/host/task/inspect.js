@@ -8,7 +8,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
 import { coded } from './codes.js'
-import { mapWithLimit } from './concurrency.js'
+import { mapWithLimit, SCAN_CONCURRENCY } from './concurrency.js'
 import { discoverSourceRepos, isSourceRepository } from './discover.js'
 import { tryRunGit } from './git.js'
 import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
@@ -120,14 +120,15 @@ async function isExistingDirectory(directory) {
 }
 
 
-export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX, configuredRoot = '', ...bounds } = {}) {
+export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branchPrefix = DEFAULT_BRANCH_PREFIX, configuredRoot = '', signal, ...bounds } = {}) {
   const requested = typeof tasksRoot === 'string' ? tasksRoot.trim() : ''
   const suggested = resolveTasksRoot(sourceRoot, requested, configuredRoot)
   assertIsolated(sourceRoot, suggested)
   // The same walk the classification and the create perform, with the same bounds:
   // this dialog lists what a create would take, and a preview of 94 repositories
-  // beside a create that finds none is worse than either number alone.
-  const repositories = await discoverSourceRepos(sourceRoot, bounds)
+  // beside a create that finds none is worse than either number alone. The caller's
+  // signal travels with it, so closing the dialog stops a walk already in flight.
+  const repositories = await discoverSourceRepos(sourceRoot, { signal, ...bounds })
   return {
     sourceRoot,
     suggested,
@@ -135,17 +136,25 @@ export async function suggestTaskRoot(subprocess, sourceRoot, { tasksRoot, branc
     // The same resolution a create performs, so the preview the dialog shows and
     // the branch the host would make cannot disagree.
     branchPrefix: validateBranchPrefix(branchPrefix),
-    // One git call per repository, in parallel: the dialog's cards name the branch
-    // each HEAD is on, which is the fact the repository view shows for its main
-    // worktree.
-    repositories: await Promise.all(repositories.map(async (repoPath) => {
+    // One git call per repository, a few at a time: the dialog's cards name the
+    // branch each HEAD is on, which is the fact the repository view shows for its
+    // main worktree.
+    //
+    // Bounded rather than `Promise.all`, and that is not a detail. A repository is
+    // one `git rev-parse`, and this used to spawn all of them at once: with forty
+    // repositories that was forty `git.exe` processes alive together, spending their
+    // time in process creation competing with each other - the same mistake the scan
+    // was fixed for, and the sibling function above already reads its repositories
+    // through the same pool. The two entry points funnel here (`task.suggest-root`
+    // and the agent tool's `suggest-root`), so this one line is the ceiling for both.
+    repositories: await mapWithLimit(repositories, SCAN_CONCURRENCY, async (repoPath) => {
       const branch = await currentBranchOf(subprocess, repoPath)
       return {
         name: basename(repoPath),
         path: repoPath,
         ...(branch === undefined ? {} : { branch }),
       }
-    })),
+    }),
   }
 }
 
@@ -213,6 +222,24 @@ export async function listTasks(subprocess, { tasksRoot } = {}) {
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   const root = tasksRoot.trim()
   if (!existsSync(root)) return { tasksRoot: root, tasks: [] }
+
+  // A container root is a directory this plugin made, and a repository is not one: it
+  // has a `.git` of its own. Without this, `task.list` enumerates whatever directory the
+  // caller names - `C:\Users\X`, say - and starts a git process against every `.git` it
+  // finds two levels down. The repository is the case worth refusing by name, because it
+  // is the one that makes this a scan of the user's own working tree rather than of a
+  // container: a repository's subdirectories are its source layout, not projects.
+  //
+  // This is the same class of proof `finishTask` asks for before it deletes anything,
+  // and it is deliberately weaker - a listing deletes nothing - so it is only the one
+  // fact that makes the directory certainly not a container.
+  if (existsSync(join(root, '.git'))) {
+    throw coded(
+      'E1001',
+      `the tasks root must not be a git repository itself: ${root}\n  a container root is a directory this plugin created, and a repository's subdirectories are its source layout rather than projects`,
+      { path: root },
+    )
+  }
 
   // Two levels: the container root holds one directory per project, and a project
   // holds one per task. The archive folder is the one directory at the root that
