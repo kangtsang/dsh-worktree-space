@@ -22,6 +22,7 @@ import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { setTimeout as delay } from "node:timers/promises"
 import { GIT_TIMEOUT_MS, runGit } from "../src/host/task/git.js"
 import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from "../src/host/task/deploy.js"
 import { PLUGIN_ROOT, taskMetadata, writeTaskMetadata } from "../src/host/task/shared.js"
@@ -36,22 +37,9 @@ afterEach(() => vi.useRealTimers())
  * filesystem before it spawns anything, and those reads are real I/O that a fully
  * faked clock cannot drive - so a test that advanced the clock first would advance it
  * before the spawn existed and then wait forever on a deadline that was never armed.
- * Leaving `setImmediate` real gives the helper below a way to let that I/O finish.
+ * Leaving `setImmediate` real keeps the I/O that runs underneath the faked clock real.
  */
 const fakeDeadlineClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-
-/**
- * Wait for a real condition, yielding to the event loop (and so to I/O) between checks.
- * @param condition - what to wait for.
- * @param what - named in the failure, so a broken precondition says which one.
- */
-async function until(condition, what) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    if (condition()) return
-    await new Promise((resolve) => setImmediate(resolve))
-  }
-  throw new Error(`waited for ${what} and it never happened`)
-}
 
 /**
  * A subprocess double that hangs unless it is told to answer.
@@ -65,9 +53,13 @@ async function until(condition, what) {
  */
 function hangingSubprocess({ stdout = "", answers = () => false } = {}) {
   const spawns = []
+  // A test waits on these rather than on a number of event-loop turns, so the wait
+  // lasts as long as this machine needs instead of as long as a fast one needed.
+  const waiting = new Set()
   const subprocess = {
     spawn(options) {
       spawns.push(options)
+      for (const waiter of [...waiting]) waiter(options)
       let settle
       const done = new Promise((resolve) => { settle = resolve })
       const stop = () => settle({ exitCode: null, signal: "SIGTERM" })
@@ -95,7 +87,41 @@ function hangingSubprocess({ stdout = "", answers = () => false } = {}) {
       }
     },
   }
-  return { subprocess, spawns }
+  /**
+   * Wait until a call matching `matches` has been spawned.
+   *
+   * Bounded by the clock rather than by a count of turns. The path up to a spawn runs
+   * real filesystem I/O, so a fixed number of yields is a claim about how fast the
+   * machine answers it: under a loaded runner the yields run out before the read has
+   * been answered, and a test that is merely slow fails saying the spawn never
+   * happened. `delay` comes from `node:timers/promises`, which the fake clock above
+   * does not replace, so it is a real pause.
+   * @param matches - which spawn to wait for.
+   * @param what - named in the failure, so a broken precondition says which one.
+   */
+  async function waitForSpawn(matches, what, budgetMs = 10_000) {
+    const already = spawns.find(matches)
+    if (already !== undefined) return already
+    let waiter
+    const matched = new Promise((resolve) => {
+      waiter = (options) => {
+        if (matches(options)) {
+          waiting.delete(waiter)
+          resolve(options)
+        }
+      }
+      waiting.add(waiter)
+    })
+    try {
+      return await Promise.race([
+        matched,
+        delay(budgetMs).then(() => { throw new Error(`waited for ${what} and it never happened`) }),
+      ])
+    } finally {
+      waiting.delete(waiter)
+    }
+  }
+  return { subprocess, spawns, waitForSpawn }
 }
 
 /**
@@ -130,9 +156,9 @@ describe("runGit's deadline", () => {
     // another process holds - used to hang the HTTP handler that awaited it, with no
     // way out for the panel. The deadline is what turns that into an answer.
     fakeDeadlineClock()
-    const { subprocess, spawns } = hangingSubprocess()
+    const { subprocess, spawns, waitForSpawn } = hangingSubprocess()
     const call = outcomeOf(runGit(subprocess, "E:/repo", ["rev-parse", "--abbrev-ref", "HEAD"], { timeoutMs: 50 }))
-    await until(() => spawns.length > 0, "the git call to spawn")
+    await waitForSpawn(() => true, "the git call to spawn")
     await vi.advanceTimersByTimeAsync(50)
     const { ok, error } = await call
     expect(ok).toBe(false)
@@ -157,9 +183,9 @@ describe("runGit's deadline", () => {
     // never think about deadlines are exactly the ones that need one.
     expect(GIT_TIMEOUT_MS).toBe(30_000)
     fakeDeadlineClock()
-    const { subprocess, spawns } = hangingSubprocess()
+    const { subprocess, spawns, waitForSpawn } = hangingSubprocess()
     const call = outcomeOf(runGit(subprocess, "E:/repo", ["rev-parse", "HEAD"]))
-    await until(() => spawns.length > 0, "the git call to spawn")
+    await waitForSpawn(() => true, "the git call to spawn")
     await vi.advanceTimersByTimeAsync(GIT_TIMEOUT_MS)
     const { ok, error } = await call
     expect(ok).toBe(false)
@@ -252,11 +278,11 @@ describe("the deadlines the deploy side hands to runProcess", () => {
     fakeDeadlineClock()
     const dir = await deployableTaskSpace()
     try {
-      const { subprocess, spawns } = hangingSubprocess()
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess()
       const call = outcomeOf(deployEnvironment(subprocess, dir))
       // The record and the script are read from disk before anything spawns, and that
       // read is real I/O: wait for the spawn, then advance the deadline it armed.
-      await until(() => spawns.length > 0, "the `up` script to spawn")
+      await waitForSpawn(() => true, "the `up` script to spawn")
       await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
       const { ok, error } = await call
       expect(ok).toBe(false)
@@ -278,9 +304,9 @@ describe("the deadlines the deploy side hands to runProcess", () => {
     try {
       // The smoke script hangs; the docker status read that follows it answers, so the
       // test is about the script's deadline rather than about a second one behind it.
-      const { subprocess, spawns } = hangingSubprocess({ answers: (argv) => argv[0] === "docker" })
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({ answers: (argv) => argv[0] === "docker" })
       const call = smokeEnvironment(subprocess, dir)
-      await until(() => spawns.some((options) => options.argv[0] === "bash"), "the `smoke` script to spawn")
+      await waitForSpawn((options) => options.argv[0] === "bash", "the `smoke` script to spawn")
       await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
       const outcome = await call
       expect(outcome.timedOut).toBe(true)
@@ -300,9 +326,9 @@ describe("the deadlines the deploy side hands to runProcess", () => {
     fakeDeadlineClock()
     const dir = await deployableTaskSpace()
     try {
-      const { subprocess, spawns } = hangingSubprocess()
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess()
       const call = deploymentStatus(subprocess, dir)
-      await until(() => spawns.length > 0, "the docker query to spawn")
+      await waitForSpawn(() => true, "the docker query to spawn")
       // The query deadline is 15s; the containers it finds are none, because a stopped
       // query reports absence. Nothing here needs a caller signal to be bounded.
       await vi.advanceTimersByTimeAsync(15_000)
@@ -327,7 +353,7 @@ describe("the deadlines the deploy side hands to runProcess", () => {
       // The first query finds a container, so teardown goes on to inspect and remove it;
       // everything after that answers empty, which is what an emptied environment says.
       let queries = 0
-      const { subprocess, spawns } = hangingSubprocess({
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({
         answers: (argv) => {
           if (argv[0] !== "docker") return true
           queries += 1
@@ -335,7 +361,7 @@ describe("the deadlines the deploy side hands to runProcess", () => {
         },
       })
       const call = destroyDeployment(subprocess, dir, "dsh-public-login")
-      await until(() => spawns.length > 0, "the first docker query to spawn")
+      await waitForSpawn(() => true, "the first docker query to spawn")
       // Long enough for every query this teardown makes to hit its own deadline, so no
       // call is left hanging when the assertions run.
       await vi.advanceTimersByTimeAsync(60_000)

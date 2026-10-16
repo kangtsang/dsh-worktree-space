@@ -95,6 +95,7 @@ const expected = [
   "client/client.js",
   "cordis.patch.yml",
   "docs/img/finish-task.png",
+  "docs/img/isolation-model.png",
   "docs/img/manage-worktree-space.png",
   "docs/img/user-story-flow.png",
   "docs/img/new-worktree-space.png",
