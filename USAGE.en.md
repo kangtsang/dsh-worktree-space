@@ -1,12 +1,12 @@
-# Worktree Space manual
+# Worktree Space guide
 
 Everything operating a task needs, from creating it to finishing it, lives here.
 
 **What the plugin is, what it does and how each setting changes behaviour: see the [README](README.en.md).**
 
-The manual is **two parts that neither needs the other**:
+The guide is **two parts that neither needs the other**:
 
-- **Part one (sections 1-9) is the manual route** — every step is something you do on screen, click by
+- **Part one (sections 1-9) is the guide route** — every step is something you do on screen, click by
   click. The README carries the short version of it; this is the long one.
 - **Part two (sections 10-14) is an agent orchestrating end to end** — the agent in your session drives
   the whole thing with the tools, and you press nothing on the panel.
@@ -16,7 +16,7 @@ the end that only a person may decide (section 14). Read only the half you mean 
 in section 15 serve both.
 
 > **The wording follows what the plugin does now.** Interface labels switch with DSH's own language
-> setting, and this manual names the Chinese ones. Every behaviour here can be checked against the
+> setting, and this guide names the Chinese ones. Every behaviour here can be checked against the
 > source: the client is under `src/client/` (`CreateWorktreeDialog.tsx`, `ArchiveTaskDialog.tsx`,
 > `DeployCard.tsx`, `WorktreesSettings.tsx`), the host under `src/host/` (`task/create.js`,
 > `task/deploy.js`, `task/delivery.js`, `task/archive.js`, `task/tool.js`, `session-tools.js`,
@@ -30,7 +30,7 @@ in section 15 serve both.
 
 - [0. Terms](#0-terms)
 
-**Part one · the manual route**
+**Part one · the guide route**
 
 - [1. The whole life of one task](#1-the-whole-life-of-one-task)
 - [2. Opening the management page](#2-opening-the-management-page)　[3. Creating a task space](#3-creating-a-task-space)
@@ -69,7 +69,7 @@ Two more words — the **leader** and the **member** — belong to part two alon
 
 ---
 
-# Part one · the manual route
+# Part one · the guide route
 
 Everything here is something you do on screen yourself. There are no tool calls, and no agent roles to
 hold in your head.
@@ -509,7 +509,7 @@ is disabled for the moment.
 
 > **Beta**: these two entrances are experimental and their behaviour may still move. They **show by
 > default**; set "Handing conflicts and commits to an agent" to "hidden" in the plugin's settings to get
-> the purely manual route back. When something goes wrong, please report it at
+> the purely guide route back. When something goes wrong, please report it at
 > [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
 
 The finish dialog can open a DSH agent session and have it do two things for you:
@@ -615,7 +615,7 @@ the tools to create spaces, hand out work, follow progress, change its mind mid-
 and you press nothing on the panel.
 
 If you mean to click through it yourself, this part is background reading and can be skipped —
-[part one](#part-one--the-manual-route) is complete on its own.
+[part one](#part-one--the-guide-route) is complete on its own.
 
 > **This document is written for you, not as instructions to an agent.** What a session is to follow comes
 > from the skill the plugin ships (`assets/skill/worktree-space/SKILL.md`), which the agent reads once it
@@ -628,7 +628,7 @@ If you mean to click through it yourself, this part is background reading and ca
 | Create the space and hand out work | `create` does it in one call: directory, worktrees, branch, Workspace registration, and a session opened with its brief |
 | Follow progress | Reads the session's own activity clock rather than guessing. No polling |
 | Change your mind mid-flight | `steer` puts words into the turn that is running, delivered even inside long turns |
-| Pick up after a failure | An abnormal turn reports itself, and the session is put back on the work |
+| Pick up after a failure, and a missing report | The plugin tells the leader either way: an abnormal turn reports itself, and so does a normal turn that never delivered its final report |
 | Finish and merge | `done` does the merge, removes the worktrees and cleans up in one call; when it stops on a conflict or on uncommitted work, it points the session back at it and you call again |
 | Deploy and acceptance | For a task Deploy was ticked for, its own entry's `up` / `smoke` clears the smoke gate |
 
@@ -698,9 +698,12 @@ root, the branch name, that "git commands run in the per-repository subdirectori
 edited or committed in the source checkouts and `git merge` is never written by hand, that who finishes is
 your call (both routes support it), plus one line for a `docker` policy — "a passing smoke is this task's
 finish line", that the acceptance stack has to be this task's own, which file the delivery facts go into,
-that anything taking more than a minute belongs in the background, and **the channel to report on** (send
-to the leader's own session id with `wts_session_tool_send`, and anything time-sensitive must `steer`).
-So even when a brief forgets the rules, they are still in there.
+that anything taking more than a minute belongs in the background, and **the channel to report on**: send
+to the leader's own session id with `wts_session_tool_send` (the default `mode` is `steer`, so it arrives at
+once; name `mode: "queue"` only for something that may wait for a boundary), and **before stopping you must
+deliver one final report with `finalReport: true`**. Without it the leader is told the session ended without
+reporting and has to go back into that session's log for the conclusion himself, which leaves the matter
+with him. So even when a brief forgets the rules, they are still in there.
 
 ## 13. The three holds while it runs
 
@@ -713,23 +716,43 @@ and "stopped silently after an error".
 
 **Steering mid-flight.** The difference between `steer` and `queue` is a hard requirement in this setting:
 
-| mode | When it is read | What it is for |
+| mode | When it is read | Which one to use |
 | --- | --- | --- |
-| `queue` (default) | At the session's **turn boundary** | Things that can wait for the boundary |
-| `steer` | **Interrupts the running turn and injects a step** | Anything time-sensitive, and every correction |
+| `steer` (**default**) | **Interrupts the running turn and injects a step** | Nearly all traffic between sessions: time-sensitive corrections, and anything that has to arrive now, such as the leader answering a member |
+| `queue` | At the session's **turn boundary** | The few messages that can wait — "here is reference material, read it when you are done". Only an explicit `mode: "queue"` takes this route |
 
-A long task handed out is often **one long turn** from end to end, so a `queue`d message hangs in the
-pending queue and is never read — from outside, the session looks like it "ignored the request". To tell
-"never delivered" from "delivered and ignored", read the session's own record with
+A long task handed out is often **one long turn** from end to end, which is why the default has to be
+`steer`: a message that does not arrive at once is held back by the next boundary — and from outside, the
+session looks like it "ignored the request". To tell "never delivered" from "delivered and ignored", read
+the session's own record with
 `wts_session_tool_read`.
 
-**Picking up after failure.** A session may never get the chance to report: a model call fails, it hits the
-output ceiling, a pre-step refuses it, or the process dies and leaves an orphaned turn. The plugin watches
-how turns end, and four kinds — `error`, `interrupted`, `blocked`, `max-tokens` — are announced to the
-leader session on their own (naming the task, the member session id, the failure code and what to do next,
-and saying plainly that **the work is not finished, do not treat it as done**). `completed` is not
-announced, and neither is `aborted` (which you cancelled yourself). **Every abnormal turn is reported**,
-not only the last one.
+**Picking up after a failure, and a report that never came.** There are two cases here, and the plugin
+treats them differently.
+
+**One: the turn ended abnormally.** A session may never get the chance to report: a model call fails, it
+hits the output ceiling, a pre-step refuses it, or the process dies and leaves an orphaned turn. The plugin
+watches how turns end, and four kinds — `error`, `interrupted`, `blocked`, `max-tokens` — are announced to
+the leader session on their own (naming the task, the member session id, the failure code and what to do
+next, and saying plainly that **the work is not finished, do not treat it as done**). **Every abnormal turn
+is reported**, not only the last one.
+
+**Two: the turn ended normally, but no final report was delivered.** This watches the other way a report
+goes missing: the work is done, the session stops, and nothing was sent. Before stopping its work a member
+is required to call `wts_session_tool_send` with **`finalReport: true`**; when a turn ends `completed` the
+plugin looks for that mark in the record, and if it is absent the leader is told the session **ended
+normally without delivering a final report**. The notice also says that this is **not a failure** and that
+it is **not** a reason to wake the session — read its last output first.
+
+Both judgements rest on the task space's record: `finalReport: true` writes a `reportedAt` stamp (readable
+local time) on that session's entry, **an interim progress message does not write it**, and **neither does
+the finish (`done`)** — "finished but never reported" is exactly what is being reported, so the finish must
+never mark it as reported. `reportedAt` is the one witness to "who delivered a final report", which is also
+what you read when you look at the record on the panel.
+
+`aborted` is never announced: a turn was stopped on purpose (by the user, or by the leader with `cancel`),
+which is not "finished without reporting". A notice there would only send the leader to wake a session
+somebody had just deliberately stopped.
 
 The recovery chain is always: `status` to tell "running but stuck" from "gone" → `resume` to bring a
 departed session back → `create` to reopen one in **the same task space** when it is gone for good → and
@@ -838,7 +861,7 @@ only channel through.
 | `wts_session_tool_find` | Finds sessions by working directory / title / id, returning `sessionId`, whether it is online, its working directory and its title |
 | `wts_session_tool_status` | Progress: `running`, `openTurn`, `lastActivity`, `pendingWork`, `lastReply`, and the tail of its reasoning; offline sessions answer from their persisted log |
 | `wts_session_tool_read` | Reads messages (count, `role` filter, `sinceSeq` paging), online or offline alike |
-| `wts_session_tool_send` | Sends a message; `mode` is `queue` or `steer` |
+| `wts_session_tool_send` | Sends a message; `mode` is `queue` or `steer`, and `finalReport: true` says this message is the task's final report |
 | `wts_session_tool_create` | Opens a new session in a directory you name (the task space), optionally handing it a self-contained prompt |
 | `wts_session_tool_resume` | Brings an offline session back online, after which `send` / `read` / `wait` work directly |
 | `wts_session_tool_wait` | Waits for this output; on timeout it returns **the latest output that already exists** marked `stale`, never nothing |
@@ -851,11 +874,11 @@ only channel through.
 | `find` | `query`, `sessionId`, `title`, `cwd` (all substring matches), `liveOnly`, `limit` (10 by default, 50 at most) |
 | `status` | `sessionId` (required), `stalledMsThreshold` (60000 by default), `recent` (8 by default, 20 at most), `reasoning` (`none` / `last` / `live` / `tail`, `tail` by default) |
 | `read` | `sessionId` (required), `sinceSeq`, `limit` (20 by default, 100 at most), `role` (`user` / `assistant` / `both`), `includeReasoning` (true by default) |
-| `send` | `sessionId`, `message` (both required), `mode` (`queue` by default / `steer`), `timeoutMs` (180000 by default, 3600000 at most) |
+| `send` | `sessionId`, `message` (both required), `mode` (`steer` by **default** / an explicit `queue`), `timeoutMs` (180000 by default, 3600000 at most), `finalReport` (false by default; only `true` writes `reportedAt`) |
 | `create` | `cwd` (absolute path, the task space) or `workspaceId`, `prompt`, `timeoutMs` |
 | `resume` | `sessionId` (required) |
 | `wait` | `sessionId` (required), `sinceSeq` (`-1` counts every event), `timeoutMs`, `requireTurnEnd` |
-| `cancel` | `sessionId` (required), `keepInbox` (false by default, meaning queued work is cleared) |
+| `cancel` | `sessionId` (required), `reason` (**required**, free text; missing or blank is refused), `keepInbox` (false by default, meaning queued work is cleared), `cause` (an optional short label) |
 
 ### Which to use when
 

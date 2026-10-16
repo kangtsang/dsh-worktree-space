@@ -10,13 +10,16 @@
  * package, and nothing here pretends to cover it.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { execFileSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseGitArgv } from "../src/host/task/git.js"
 import { registerSessionTools, waitForReply } from "../src/host/session-tools.js"
 import { registerTaskTool } from "../src/host/task/tool.js"
-import { PLUGIN_ROOT, readTaskMetadata, renderTaskMetadata, taskMetadata, taskSessionsOf } from "../src/host/task/shared.js"
+import { PLUGIN_ROOT, readTaskMetadata, renderTaskMetadata, taskMetadata, taskSessionsOf, writeTaskMetadata } from "../src/host/task/shared.js"
+import { writeSourceTaskIndex } from "../src/host/task/source-index.js"
 
 /**
  * The switch that makes a record write carrying a `leader` entry fail.
@@ -29,7 +32,7 @@ import { PLUGIN_ROOT, readTaskMetadata, renderTaskMetadata, taskMetadata, taskSe
  * simulated rather than arranged. Off by default, so every other test in this file
  * still touches the real filesystem through the untouched calls.
  */
-const writeTaskMetadataControl = vi.hoisted(() => ({ refuseLeader: false }))
+const writeTaskMetadataControl = vi.hoisted(() => ({ refuseLeader: false, refuseRecord: false }))
 
 /**
  * `node:fs/promises` with the leader write made controllable, everything else passed
@@ -42,6 +45,11 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     writeFile: async (path, ...rest) => {
       const text = typeof rest[0] === "string" ? rest[0] : ""
       if (writeTaskMetadataControl.refuseLeader && `${path}`.endsWith("worktree-space.json") && text.includes(`"role": "leader"`)) {
+        throw new Error("EACCES: the record write was refused")
+      }
+      // Every record write refused, for the test that a report already delivered must not be
+      // turned into a failed send by bookkeeping that cannot be written.
+      if (writeTaskMetadataControl.refuseRecord && `${path}`.endsWith("worktree-space.json")) {
         throw new Error("EACCES: the record write was refused")
       }
       return actual.writeFile(path, ...rest)
@@ -301,7 +309,7 @@ describe("registerSessionTools", () => {
       ["wts_session_tool_create", { cwd: "/task/space" }],
       ["wts_session_tool_resume", { sessionId: "s-1" }],
       ["wts_session_tool_wait", { sessionId: "s-1" }],
-      ["wts_session_tool_cancel", { sessionId: "s-1" }],
+      ["wts_session_tool_cancel", { sessionId: "s-1", reason: "testing the refusal path" }],
     ]
     for (const [name, args] of calls) {
       const value = await tools[name].execute(args, {})
@@ -322,10 +330,20 @@ describe("registerSessionTools", () => {
     // A missing argument is refused by the declared schema, before the body runs;
     // an empty one passes the schema and is refused by the tool itself. Both are
     // clear about which argument is meant, which is the requirement.
-    for (const name of ["wts_session_tool_status", "wts_session_tool_read", "wts_session_tool_wait", "wts_session_tool_cancel", "wts_session_tool_resume"]) {
+    for (const name of ["wts_session_tool_status", "wts_session_tool_read", "wts_session_tool_wait", "wts_session_tool_resume"]) {
       await expect(tools[name].execute({}, {}), name).rejects.toThrow(/missing required property "sessionId"/)
       await expect(tools[name].execute({ sessionId: "   " }, {}), name).rejects.toThrow(/sessionId is required/)
     }
+    // Cancelling requires one argument more than the rest - a reason, because it
+    // destroys work in the target - so it is asserted on its own rather than in the
+    // loop above. The declared schema answers for an absent argument, and the tool
+    // answers for a blank one; both name the argument they mean.
+    await expect(tools.wts_session_tool_cancel.execute({}, {}))
+      .rejects.toThrow(/missing required property "sessionId"/)
+    await expect(tools.wts_session_tool_cancel.execute({ sessionId: "s-1" }, {}))
+      .rejects.toThrow(/missing required property "reason"/)
+    await expect(tools.wts_session_tool_cancel.execute({ sessionId: "s-1", reason: "   " }, {}))
+      .rejects.toThrow(/reason is required/)
     await expect(tools.wts_session_tool_send.execute({}, {})).rejects.toThrow(/missing required property "sessionId"/)
     await expect(tools.wts_session_tool_send.execute({ sessionId: "s-1" }, {})).rejects.toThrow(/missing required property "message"/)
     await expect(tools.wts_session_tool_send.execute({ sessionId: "s-1", message: "  " }, {})).rejects.toThrow(/message is required/)
@@ -594,25 +612,28 @@ describe("wts_session_tool_read", () => {
 })
 
 describe("wts_session_tool_send", () => {
-  it("passes the mode through, and queues by default", async () => {
+  it("steers by default, and queues only when it is named", async () => {
     const agent = fakeAgent({ id: "s-1" })
     const { services } = sessionServices({ "s-1": agent })
     const { ctx, byName } = toolContext(services)
     registerSessionTools(ctx)
     const send = byName().wts_session_tool_send
 
-    const queued = await send.execute({ sessionId: "s-1", message: "carry on" }, {})
-    expect(queued.accepted).toBe(true)
-    expect(queued.mode).toBe("queue")
+    const steered = await send.execute({ sessionId: "s-1", message: "stop now" }, {})
+    expect(steered.accepted).toBe(true)
+    expect(steered.mode).toBe("steer")
     // The anchor a caller passes to wait for THIS message specifically, rather than
     // for whatever happens to arrive next.
-    expect(queued.sinceSeq).toBe(-1)
-    expect(agent.calls.map((call) => call.kind)).toEqual(["followup"])
-    expect(agent.calls[0].message.content).toEqual([{ type: "text", text: "carry on" }])
+    expect(steered.sinceSeq).toBe(-1)
+    expect(agent.calls.map((call) => call.kind)).toEqual(["steer"])
+    expect(agent.calls[0].message.content).toEqual([{ type: "text", text: "stop now" }])
 
-    const steered = await send.execute({ sessionId: "s-1", message: "stop now", mode: "steer" }, {})
-    expect(steered.mode).toBe("steer")
-    expect(agent.calls.map((call) => call.kind)).toEqual(["followup", "steer"])
+    // `queue` is still there for a message that may wait for a turn boundary, and only
+    // an explicit request gets it: the default has to stay the one that reaches a long
+    // turn, which is where a correction would otherwise sit unread.
+    const queued = await send.execute({ sessionId: "s-1", message: "carry on", mode: "queue" }, {})
+    expect(queued.mode).toBe("queue")
+    expect(agent.calls.map((call) => call.kind)).toEqual(["steer", "followup"])
   })
 
   it("attributes the message to the sending session, so it renders as an agent report", async () => {
@@ -652,6 +673,128 @@ describe("wts_session_tool_send", () => {
     expect(agent.calls[0].message.content).toEqual([{ type: "text", text: "carry on" }])
   })
 
+  it("records nothing for a send that is not a final report", async () => {
+    // The default, and the half that keeps the field meaningful: a progress update or a question
+    // must not stamp it, or "reported" would mean "said anything at all" - and a member that says
+    // "halfway through" and then stops is exactly the session this feature has to notice.
+    const dir = await taskSpaceOnDisk({
+      sessions: [{ sessionId: "caller-1", at: "2026-01-01 00:00:00", role: "task" }],
+    })
+    try {
+      const { ctx, byName } = toolContext(sessionServices({ "s-1": fakeAgent({ id: "s-1" }) }).services)
+      registerSessionTools(ctx)
+      const caller = fakeAgent({ id: "caller-1", cwd: dir })
+
+      await byName().wts_session_tool_send.execute({ sessionId: "s-1", message: "halfway through" }, { agent: caller })
+      await byName().wts_session_tool_send.execute(
+        { sessionId: "s-1", message: "still halfway", finalReport: false },
+        { agent: caller },
+      )
+
+      const record = JSON.parse(await readFile(recordAt(dir), "utf8"))
+      expect(record.sessions).toHaveLength(1)
+      expect(record.sessions[0]).not.toHaveProperty("reportedAt")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("stamps the sender's own entry, and the index a finish will archive, for a final report", async () => {
+    const sourceRoot = await mkdtemp(join(tmpdir(), "wts-report-src-"))
+    const dir = await taskSpaceOnDisk({
+      sourceRoot,
+      sessions: [
+        { sessionId: "caller-1", at: "2026-01-01 00:00:00", role: "task" },
+        { sessionId: "s-2", at: "2026-01-01 00:00:01", role: "task" },
+      ],
+    })
+    try {
+      const { ctx, byName } = toolContext(sessionServices({ "s-1": fakeAgent({ id: "s-1" }) }).services)
+      registerSessionTools(ctx)
+      const caller = fakeAgent({ id: "caller-1", cwd: dir })
+
+      await byName().wts_session_tool_send.execute(
+        { sessionId: "s-1", message: "done, tests pass", finalReport: true },
+        { agent: caller },
+      )
+
+      const record = JSON.parse(await readFile(recordAt(dir), "utf8"))
+      const mine = record.sessions.find((entry) => entry.sessionId === "caller-1")
+      // The readable local stamp the whole repository uses for this kind of fact, not ISO: a
+      // reader of the record is a person, and the audit log's own clock is the one they compare it
+      // against.
+      expect(mine.reportedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+      // The report is the sender's own claim about itself: the entry beside it is untouched.
+      expect(record.sessions.find((entry) => entry.sessionId === "s-2")).not.toHaveProperty("reportedAt")
+
+      // And the source root's index carries it too. That copy is the one a `done` archives, so a
+      // report recorded only in the task's own record is a report the watcher loses one finish
+      // later - and would report as never delivered.
+      const index = JSON.parse(await readFile(
+        join(sourceRoot, PLUGIN_ROOT, "tasks", "kratos-admin", "space.json"),
+        "utf8",
+      ))
+      expect(index.sessions.find((entry) => entry.sessionId === "caller-1").reportedAt).toBe(mine.reportedAt)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      await rm(sourceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("delivers the report even when the record cannot be written", async () => {
+    // The record is a copy of a fact the report already carried, so a record that cannot be
+    // written must not fail the send that delivered it. The cost of the trade is bounded and one
+    // sided: the worst case is a notice about a report that did happen.
+    const dir = await taskSpaceOnDisk({
+      sessions: [{ sessionId: "caller-1", at: "2026-01-01 00:00:00", role: "task" }],
+    })
+    try {
+      const agent = fakeAgent({ id: "s-1" })
+      const { ctx, byName } = toolContext(sessionServices({ "s-1": agent }).services)
+      registerSessionTools(ctx)
+      const caller = fakeAgent({ id: "caller-1", cwd: dir })
+
+      writeTaskMetadataControl.refuseRecord = true
+      const value = await byName().wts_session_tool_send.execute(
+        { sessionId: "s-1", message: "done", finalReport: true },
+        { agent: caller },
+      )
+      writeTaskMetadataControl.refuseRecord = false
+
+      expect(value.accepted).toBe(true)
+      // The default mode is `steer`, so the message reaches the running turn.
+      expect(agent.calls.map((call) => call.kind)).toEqual(["steer"])
+      const record = JSON.parse(await readFile(recordAt(dir), "utf8"))
+      expect(record.sessions[0]).not.toHaveProperty("reportedAt")
+    } finally {
+      writeTaskMetadataControl.refuseRecord = false
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("records nothing for a final report sent from outside a task space", async () => {
+    // The sender's own record is the one to stamp, and a session working in a source checkout has
+    // none. Nothing is written, and nothing fails: the send is a send.
+    const dir = await mkdtemp(join(tmpdir(), "wts-report-plain-"))
+    try {
+      const agent = fakeAgent({ id: "s-1" })
+      const { ctx, byName } = toolContext(sessionServices({ "s-1": agent }).services)
+      registerSessionTools(ctx)
+      const caller = fakeAgent({ id: "caller-1", cwd: dir })
+
+      const value = await byName().wts_session_tool_send.execute(
+        { sessionId: "s-1", message: "done", finalReport: true },
+        { agent: caller },
+      )
+
+      expect(value.accepted).toBe(true)
+      expect(agent.calls).toHaveLength(1)
+      expect(existsSync(join(dir, PLUGIN_ROOT))).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it("opens the report with the readable facts, so the reader is not handed a uuid", async () => {
     // The interface can name the sender only as an opaque session id, so the report states where
     // it came from in its own text: task, workspace, task-space path, branch and session.
@@ -661,6 +804,10 @@ describe("wts_session_tool_send", () => {
       await writeFile(recordAt(dir), JSON.stringify({
         version: 1, task: "login", project: "kratos-admin", branch: "task/login", sourceRoot: "/src/kratos-admin",
         repositories: [], createdAt: "2026-01-01T00:00:00.000Z",
+        // The record names the sender, which is where the role line comes from: the
+        // judgement is metadata on both ends and nothing else, so a sender the record does
+        // not name reads `unknown` however its directory looks.
+        sessions: [{ sessionId: "caller-1", at: "2026-01-01T00:00:00.000Z", role: "task" }],
       }), "utf8")
       const agent = fakeAgent({ id: "s-1" })
       const { services } = sessionServices({ "s-1": agent })
@@ -683,8 +830,9 @@ describe("wts_session_tool_send", () => {
       expect(text).toContain("Workspace: kratos-admin/login")
       expect(text).toContain(`Task space: ${dir}`)
       expect(text).toContain("Branch: task/login")
-      // The sender works in the task space, so it is the member of this dispatch.
-      expect(text).toContain("Role: member")
+      // The sender works in the task space and its record names it as `task` - the same
+      // thing as a member of this dispatch, said in the words the record uses.
+      expect(text).toContain("Role: task")
       expect(text).toContain("Session: caller-1")
       // The body is introduced by a boundary the plugin generates for this report, not
       // by a fixed string: a fixed one is text a record field could also contain, and
@@ -819,97 +967,82 @@ describe("wts_session_tool_send", () => {
     expect(text).not.toContain("sent a message:")
   })
 
-  it("states which end of the dispatch the sender stands on, from where it works", async () => {
+  it("states which end of the dispatch the sender stands on, from the records on disk", async () => {
     // The identity half of the contract: every message this tool delivers carries both the
-    // sender's session id and its position, and the position is read off disk - the session's
-    // working directory, which the host writes - never from a field the sender could type.
+    // sender's session id and the role the plugin recorded for it, and both are read off
+    // disk - never from a field the sender could type.
     //
-    // The question asked is only "am I a member", and it is deliberate that nothing here
-    // answers `leader`: leadership is a fact about a conversation (the session that made the
-    // dispatch call), not about a path, so no directory can be read as claiming it. A sender
-    // these tests cannot place says `unknown` - which is what a source checkout, a workspace
-    // holding repositories and a bare directory all say.
+    // The judgement is metadata on both ends, and nothing else. A sender whose directory is
+    // in a task space is looked up in that space's record by id; the leader, which works
+    // outside every task space, is looked up in the task index under the source root. A
+    // sender neither file names answers `unknown` - which is what a mounted worktree, a
+    // source checkout, a workspace holding repositories, a container root and a bare
+    // directory all say, because none of them records who this session is.
     const root = await mkdtemp(join(tmpdir(), "wts-role-"))
     try {
-      // 1. A session whose directory holds a task-space record is the member.
-      const space = await taskSpaceOnDiskAt(join(root, "space"))
-      // 2. A session working at a task's source checkout: a repository, and not a member.
-      const sourceCheckout = join(root, "src", "kratos-admin")
-      await mkdir(join(sourceCheckout, ".git"), { recursive: true })
-      // 3. A plain directory: no record above it and no worktree anywhere in its chain, so
-      //    nothing on disk makes it a member.
-      const elsewhere = join(root, "elsewhere")
-      await mkdir(elsewhere, { recursive: true })
-
-      const asked = async (cwd) => {
-        const targetSpace = await taskSpaceOnDiskAt(join(root, "target"))
-        const agent = fakeAgent({ id: "s-member", cwd: targetSpace })
-        const { services } = sessionServices({ "s-member": agent })
-        const { ctx, byName } = toolContext(services)
-        registerSessionTools(ctx)
-        const sender = fakeAgent({ id: "s-sender", cwd })
-        await byName().wts_session_tool_send.execute({ sessionId: "s-member", message: "carry on" }, { agent: sender })
-        return agent.calls[0].message.content[0].text
-      }
-
-      const member = await asked(space)
-      expect(member).toContain("Role: member")
-      expect(member).toContain("Session: s-sender")
-      // A session opened on the task space's own worktree answers from the record too - the
-      // record is found walking upward, which is what the plain cwd check alone would miss.
-      const memberInWorktree = await asked(join(space, "alpha"))
-      expect(memberInWorktree).toContain("Role: member")
-
-      // A worktree whose record is gone: a finish removes the record and leaves the worktree
-      // mounted, and a session still working in it is still a member. This is the arm the
-      // record test cannot cover, and the reason the worktree shape is asked at all.
+      // A task space whose record names two sessions: the one that carried the work out,
+      // and the one that asked for it.
+      const space = await taskSpaceOnDiskAt(join(root, "space"), {
+        sessions: [
+          { sessionId: "s-sender", at: "2026-01-01T00:00:00.000Z", role: "task" },
+          { sessionId: "s-leader", at: "2026-01-01T00:00:01.000Z", role: "leader" },
+        ],
+      })
+      // A directory that looks like the middle of a dispatch and records nothing.
       const orphanSpace = join(root, "orphan")
       await mkdir(orphanSpace, { recursive: true })
       await writeFile(join(orphanSpace, ".git"), "gitdir: /elsewhere/.git/worktrees/orphan\n", "utf8")
-      expect(await asked(orphanSpace)).toContain("Role: member")
-      // And the space one level up from those worktrees: the worktrees are its children, so
-      // a session working at the space itself is a member of it.
+      const sourceCheckout = join(root, "src", "kratos-admin")
+      await mkdir(join(sourceCheckout, ".git"), { recursive: true })
+      const elsewhere = join(root, "elsewhere")
+      await mkdir(elsewhere, { recursive: true })
+
+      const asked = async (cwd, senderId = "s-sender") => {
+        // The target is built under a root of its own: the sender's directory is what the
+        // walk starts from, and a target parked above it would be found by that walk.
+        const other = await mkdtemp(join(tmpdir(), "wts-role-target-"))
+        try {
+          const target = await taskSpaceOnDiskAt(join(other, "target"))
+          const agent = fakeAgent({ id: "s-target", cwd: target })
+          const { services } = sessionServices({ "s-target": agent })
+          const { ctx, byName } = toolContext(services)
+          registerSessionTools(ctx)
+          const sender = fakeAgent({ id: senderId, cwd })
+          await byName().wts_session_tool_send.execute({ sessionId: "s-target", message: "carry on" }, { agent: sender })
+          return agent.calls[0].message.content[0].text
+        } finally {
+          await rm(other, { recursive: true, force: true })
+        }
+      }
+
+      // 1. In the task space: the record names it, as `task`. `member` and `task` are the
+      //    same thing here - the role line carries what the record actually says.
+      const member = await asked(space)
+      expect(member).toContain("Role: task")
+      expect(member).toContain("Session: s-sender")
+      // ...and the walk upward is what reaches a session opened one level below it.
+      expect(await asked(join(space, "alpha"))).toContain("Role: task")
+      // 2. Also named there, as the leader - the same record, read by id.
+      expect(await asked(space, "s-leader")).toContain("Role: leader")
+
+      // 3. None of these is named by anything, so each says `unknown`. The shapes are
+      //    chosen to be exactly what the old rule read as a member: a mounted worktree, and
+      //    a space whose worktrees sit inside it.
       const spaceAboveWorktrees = join(root, "space-above")
       await mkdir(join(spaceAboveWorktrees, "alpha"), { recursive: true })
       await writeFile(join(spaceAboveWorktrees, "alpha", ".git"), "gitdir: /elsewhere\n", "utf8")
-      expect(await asked(spaceAboveWorktrees)).toContain("Role: member")
-
-      // None of these is a member, and none of them claims to be the leader either.
-      const sourceCheckoutText = await asked(sourceCheckout)
-      expect(sourceCheckoutText).toContain("Role: unknown")
-      expect(sourceCheckoutText).toContain("Session: s-sender")
-
-      const neither = await asked(elsewhere)
-      expect(neither).toContain("Role: unknown")
-      expect(neither).toContain("Session: s-sender")
-
-      // The ordinary development layout - a repository with worktrees registered inside its
-      // own `.git/` - is still not a member, and the repository's presence says nothing about
-      // leadership. Reading a directory as "I dispatched this" is exactly the inference this
-      // rule refuses to make.
-      const repoRoot = join(root, "repo")
-      await mkdir(join(repoRoot, ".git"), { recursive: true })
-      await mkdir(join(repoRoot, "wt-feature"), { recursive: true })
-      await writeFile(join(repoRoot, "wt-feature", ".git"), "gitdir: /somewhere/.git/worktrees/wt-feature\n", "utf8")
-      expect(await asked(repoRoot)).toContain("Role: unknown")
-
-      // A workspace directory holding a repository, with none above it, is not a member
-      // either - registration and task-space creation work from such a directory, which is
-      // why it was worth pinning that the role line does not follow from that.
-      const workspaceRoot = join(root, "workspace")
-      await mkdir(join(workspaceRoot, "repo-two", ".git"), { recursive: true })
-      expect(await asked(workspaceRoot)).toContain("Role: unknown")
-
-      // A container root: its children are task spaces and worktrees. The worktrees below it
-      // are the tasks', not its own, so a session working at the container is not a member.
-      const container = join(root, "container")
-      await mkdir(join(container, "kratos-admin", "login", "alpha"), { recursive: true })
-      await writeFile(join(container, "kratos-admin", "login", "alpha", ".git"), "gitdir: /somewhere\n", "utf8")
-      expect(await asked(container)).toContain("Role: unknown")
+      for (const [label, cwd] of [
+        ["a worktree whose record is gone", orphanSpace],
+        ["a space whose children are worktrees", spaceAboveWorktrees],
+        ["a source checkout", sourceCheckout],
+        ["a bare directory", elsewhere],
+      ]) {
+        expect(await asked(cwd), label).toContain("Role: unknown")
+      }
 
       // The line is never absent: each answer carries it exactly once, so an identity a
       // caller could leave out is not one this tool offers.
-      for (const text of [member, memberInWorktree, sourceCheckoutText, neither]) {
+      for (const text of [member, await asked(elsewhere)]) {
         expect(text.match(/^Role: /gm)).toHaveLength(1)
       }
     } finally {
@@ -1409,21 +1542,25 @@ describe("wts_session_tool_wait", () => {
 })
 
 describe("wts_session_tool_cancel", () => {
-  it("passes keepInbox through, and clears the inbox by default", async () => {
+  it("passes keepInbox through, clears the inbox by default, and echoes the reason it was given", async () => {
     const agent = fakeAgent({ id: "s-1", status: "running" })
     const { services } = sessionServices({ "s-1": agent })
     const { ctx, byName } = toolContext(services)
     registerSessionTools(ctx)
     const cancel = byName().wts_session_tool_cancel
 
-    const cleared = await cancel.execute({ sessionId: "s-1" }, {})
+    const cleared = await cancel.execute({ sessionId: "s-1", reason: "the task has run away" }, {})
     expect(cleared.cancelled).toBe(true)
     expect(cleared.keepInbox).toBe(false)
+    // The caller's own words come back in the answer, so the record of what the
+    // cancellation was for is not only in the host's log.
+    expect(cleared.cancelReason).toBe("the task has run away")
     expect(agent.calls[0]).toMatchObject({ kind: "cancel", options: { keepInbox: false } })
     expect(agent.calls[0].cause).toEqual({ kind: "user" })
 
-    const kept = await cancel.execute({ sessionId: "s-1", keepInbox: true, cause: "runaway" }, {})
+    const kept = await cancel.execute({ sessionId: "s-1", keepInbox: true, cause: "runaway", reason: "no longer needed" }, {})
     expect(kept.keepInbox).toBe(true)
+    expect(kept.cancelReason).toBe("no longer needed")
     expect(agent.calls[1]).toMatchObject({ kind: "cancel", options: { keepInbox: true } })
     expect(agent.calls[1].cause).toEqual({ kind: "hook", reason: "runaway" })
   })
@@ -1432,7 +1569,7 @@ describe("wts_session_tool_cancel", () => {
     const { services } = sessionServices({})
     const { ctx, byName } = toolContext(services)
     registerSessionTools(ctx)
-    const value = await byName().wts_session_tool_cancel.execute({ sessionId: "gone" }, {})
+    const value = await byName().wts_session_tool_cancel.execute({ sessionId: "gone", reason: "cleaning up" }, {})
     expect(value.offered).toBe(true)
     expect(value.reason).toMatch(/is not live/)
   })
@@ -1876,7 +2013,9 @@ describe("the three by-id tools act only on a session this plugin owns", () => {
   const BY_ID_CALLS = (sessionId) => [
     ["wts_session_tool_read", { sessionId }],
     ["wts_session_tool_send", { sessionId, message: "hello" }],
-    ["wts_session_tool_cancel", { sessionId }],
+    // The cancellation carries its reason, because the tool refuses without one. That
+    // refusal is asserted on its own further down; here the point is the scope test.
+    ["wts_session_tool_cancel", { sessionId, reason: "the task has run away" }],
   ]
 
   it("reaches a session the caller's own task record names, and sends it for real", async () => {
@@ -1902,7 +2041,8 @@ describe("the three by-id tools act only on a session this plugin owns", () => {
       )
       expect(sent.offered).toBe(true)
       expect(sent.accepted).toBe(true)
-      expect(member.calls[0].kind).toBe("followup")
+      // No `mode` named, so it takes the default - `steer`, which reaches a long turn.
+      expect(member.calls[0].kind).toBe("steer")
     } finally {
       await rm(space, { recursive: true, force: true })
     }
@@ -1931,7 +2071,9 @@ describe("the three by-id tools act only on a session this plugin owns", () => {
       )
       expect(reported.offered).toBe(true)
       expect(reported.accepted).toBe(true)
-      expect(leader.calls[0].kind).toBe("followup")
+      // A report to the leader goes by the default mode too, so it reaches the leader
+      // even when the leader is mid-turn - which is where a report is wanted.
+      expect(leader.calls[0].kind).toBe("steer")
     } finally {
       await rm(space, { recursive: true, force: true })
     }
@@ -1974,8 +2116,109 @@ describe("the three by-id tools act only on a session this plugin owns", () => {
     }
   })
 
-  it("refuses a session in neither a task space nor any record, for all three tools", async () => {
-    // The finding this fixes: a stranger's id was enough to read its messages, steer
+  it("lets read and send reach the source checkout, but not cancel", async () => {
+    // The narrowing, and why it is safe. Arm 3 exists so a member can send its report
+    // back to a leader that works in the source checkout - a need to read and to send,
+    // not a need to stop. And arm 3 cannot tell that leader apart from a session the
+    // user opened by hand in the same checkout, because no path distinguishes them; so
+    // the tool that destroys work does not get it. The target here is exactly the shape
+    // that cannot be told apart: in the source checkout the record names, named by
+    // nothing the record holds.
+    const space = await taskSpaceOnDisk({
+      sessions: [{ sessionId: "s-member", at: "2026-01-01T00:00:00.000Z", role: "task" }],
+      repositories: [{ name: "kratos-admin", sourcePath: "/src/kratos-admin" }],
+    })
+    try {
+      const runner = fakeAgent({ id: "s-runner", status: "running", cwd: "/src/kratos-admin" })
+      const { services } = sessionServices({ "s-runner": runner })
+      const { ctx, byName } = toolContext(services)
+      registerSessionTools(ctx)
+      const member = fakeAgent({ id: "s-member", cwd: space })
+
+      const read = await byName().wts_session_tool_read.execute({ sessionId: "s-runner" }, { agent: member })
+      expect(read.offered).toBe(true)
+      expect(read.live).toBe(true)
+
+      const sent = await byName().wts_session_tool_send.execute(
+        { sessionId: "s-runner", message: "the task is done" },
+        { agent: member },
+      )
+      expect(sent.accepted).toBe(true)
+
+      const cancelled = await byName().wts_session_tool_cancel.execute(
+        { sessionId: "s-runner", reason: "stopping whatever this is" },
+        { agent: member },
+      )
+      expect(cancelled.offered).toBe(true)
+      expect(cancelled.reason).toMatch(/not one this plugin is responsible for/)
+      // Nothing was stopped: the refusal precedes the effect. `read` and `send` did run,
+      // which is the point of this test - the two calls above left a followup behind, and
+      // what must be absent is the cancel.
+      expect(runner.calls.filter((call) => call.kind === "cancel")).toEqual([])
+    } finally {
+      await rm(space, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a member cancelling the leader its own record names", async () => {
+    // Cancellation is directional. The record names both ends - the member under
+    // `role: "task"` and the leader under `role: "leader"` - so a member looking at its
+    // own record can see the leader's id. Reading it there is what makes a report able
+    // to say who it answers to; cancelling it is not the same permission. Allowed, the
+    // member would end the conversation that dispatched it, and the report with it.
+    const space = await taskSpaceOnDisk({
+      sessions: [
+        { sessionId: "s-member", at: "2026-01-01T00:00:00.000Z", role: "task" },
+        { sessionId: "s-leader", at: "2026-01-01T00:00:01.000Z", role: "leader" },
+      ],
+    })
+    try {
+      const leader = fakeAgent({ id: "s-leader", status: "running", cwd: "/src/kratos-admin" })
+      const { services } = sessionServices({ "s-leader": leader })
+      const { ctx, byName } = toolContext(services)
+      registerSessionTools(ctx)
+      const member = fakeAgent({ id: "s-member", cwd: space })
+
+      const cancelled = await byName().wts_session_tool_cancel.execute(
+        { sessionId: "s-leader", reason: "stopping the dispatcher" },
+        { agent: member },
+      )
+      expect(cancelled.offered).toBe(true)
+      expect(cancelled.reason).toMatch(/not one this plugin is responsible for/)
+      expect(leader.calls.filter((call) => call.kind === "cancel")).toEqual([])
+    } finally {
+      await rm(space, { recursive: true, force: true })
+    }
+  })
+
+  it("cancels a session its own record names even though that session is in no task space", async () => {
+    // The other half of the narrowing: dropping arm 3 must not break the leader's
+    // ability to stop a member, which is what the tool is for. This target is in a
+    // plain temporary directory and in no task space, so arms 1 and 3 both miss it,
+    // and the caller's record naming it is the only thing that reaches it.
+    const space = await taskSpaceOnDisk({
+      sessions: [{ sessionId: "s-member", at: "2026-01-01T00:00:00.000Z", role: "task" }],
+    })
+    try {
+      const member = fakeAgent({ id: "s-member", status: "running", cwd: join(tmpdir(), "wts-member-home") })
+      const { services } = sessionServices({ "s-member": member })
+      const { ctx, byName } = toolContext(services)
+      registerSessionTools(ctx)
+      const leader = fakeAgent({ id: "s-leader", cwd: space })
+
+      const cancelled = await byName().wts_session_tool_cancel.execute(
+        { sessionId: "s-member", reason: "the task has run away" },
+        { agent: leader },
+      )
+      expect(cancelled.cancelled).toBe(true)
+      expect(cancelled.cancelReason).toBe("the task has run away")
+      expect(member.calls[0].kind).toBe("cancel")
+    } finally {
+      await rm(space, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses a session in neither a task space nor any record, for all three tools", async () => {    // The finding this fixes: a stranger's id was enough to read its messages, steer
     // text into its running turn, or abort the conversation the user was having.
     const stranger = fakeAgent({ id: "s-stranger", cwd: join(tmpdir(), "wts-somewhere-else") })
     const { services } = sessionServices({ "s-stranger": stranger })
@@ -2057,6 +2300,117 @@ describe("the three by-id tools act only on a session this plugin owns", () => {
   })
 })
 
+describe("Role: leader, judged from the source root's own task index", () => {
+  /**
+   * A source root that is a repository, with a task index under it - the leader's view.
+   *
+   * A leader works in the source checkout, which is outside every task space, so nothing
+   * about its own directory says it dispatched anything. What does say it is the task
+   * index the plugin keeps under that root: the record names the session that asked for
+   * the work under `role: 'leader'`, and the index carries that fact to where the leader
+   * stands without it having to be told the task space's path.
+   * @param sessions - the sessions the task's record names, as `[id, role]` pairs.
+   * @returns the root, the repo the leader sits in, the index file and a cleanup.
+   */
+  async function leaderWorkspace(sessions) {
+    const root = await mkdtemp(join(tmpdir(), "wts-leader-"))
+    const sourceRoot = join(root, "workspace")
+    const repo = join(sourceRoot, "repo-a")
+    await mkdir(join(repo, ".git"), { recursive: true })
+    execFileSync("git", ["init", "-q", "."], { cwd: sourceRoot })
+    const taskPath = join(root, "tasks", "workspace", "login")
+    await mkdir(taskPath, { recursive: true })
+    const metadata = taskMetadata({
+      task: "login",
+      project: "workspace",
+      tasksRoot: join(root, "tasks"),
+      sourceRoot,
+      branch: "task/login",
+      repositories: [{ name: "repo-a", sourcePath: repo, branch: "task/login" }],
+      sessions: sessions.map(([sessionId, role]) => ({ sessionId, role })),
+    })
+    await writeTaskMetadata(taskPath, metadata)
+    await writeSourceTaskIndex(taskPath, metadata, metadata.sessions)
+    return { root, sourceRoot, repo, taskPath, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  /** What the Role line says when `senderCwd` sends a message to a session in a task space. */
+  async function roleOf(senderCwd, senderId = "s-leader") {
+    // The target is built under a root of its own, and not under the system temporary
+    // directory: the sender's own directory is what `senderRole` walks upward from, and a
+    // target parked anywhere above it would be found by the record arm first. That is the
+    // eager answer working as designed - and it would make this test measure the fixture
+    // instead of the arm it is about.
+    const other = await mkdtemp(join(tmpdir(), "wts-role-target-"))
+    const space = await taskSpaceOnDiskAt(join(other, "space"))
+    try {
+      const member = fakeAgent({ id: "s-member", cwd: space })
+      const { services } = sessionServices({ "s-member": member })
+      const { ctx, byName } = toolContext(services)
+      registerSessionTools(ctx)
+      const sender = fakeAgent({ id: senderId, cwd: senderCwd })
+      await byName().wts_session_tool_send.execute({ sessionId: "s-member", message: "carry on" }, { agent: sender })
+      const text = member.calls[0].message.content[0].text
+      const line = text.split("\n").find((row) => row.startsWith("Role:"))
+      return line ?? ""
+    } finally {
+      await rm(other, { recursive: true, force: true })
+    }
+  }
+
+  it("names the leader when the index above its checkout records it as one", async () => {
+    const f = await leaderWorkspace([["s-member", "task"], ["s-leader", "leader"]])
+    try {
+      // The leader stands in the repository, one level below the root that holds the
+      // index - the walk upward is what makes that work.
+      expect(await roleOf(f.repo)).toBe("Role: leader")
+      // And at the root itself.
+      expect(await roleOf(f.sourceRoot)).toBe("Role: leader")
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it("stays unknown when no index names the sender", async () => {
+    // The control: a checkout in a workspace that has tasks recorded, but none of them
+    // names this session. Nothing about the directory says it dispatched work, so the
+    // answer has to stay what the contract gives an unplaceable session.
+    const f = await leaderWorkspace([["s-member", "task"], ["s-other", "leader"]])
+    try {
+      expect(await roleOf(f.repo)).toBe("Role: unknown")
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it("answers with the recorded role, not only with leader", async () => {
+    // This arm reads the index by id and answers what the record says, so a session the
+    // index holds as `task` reads as `task` - the same fact the member reads from its own
+    // record, reached from the other end. Nothing is translated on the way out: `member`
+    // and `task` are the same thing, and the line carries the record's own word.
+    const f = await leaderWorkspace([["s-leader", "task"]])
+    try {
+      expect(await roleOf(f.repo)).toBe("Role: task")
+    } finally {
+      await f.cleanup()
+    }
+  })
+
+  it("stays unknown once the recorded task space is gone", async () => {
+    // The index is a cache of a record that a finish removes. A stale entry pointing at a
+    // directory that is not there any more must not keep handing out the role: the task
+    // it describes is over, and the name could belong to a different task by now.
+    const f = await leaderWorkspace([["s-member", "task"], ["s-leader", "leader"]])
+    try {
+      expect(await roleOf(f.repo)).toBe("Role: leader")
+      await rm(f.taskPath, { recursive: true, force: true })
+      expect(await roleOf(f.repo)).toBe("Role: unknown")
+    } finally {
+      await f.cleanup()
+    }
+  })
+})
+
 describe("wts_session_tool_cancel refuses to stop the session that is calling", () => {
   it("refuses when the target is the caller itself", async () => {
     // Killing itself ends the turn the call is in, and the report it was going to
@@ -2071,7 +2425,7 @@ describe("wts_session_tool_cancel refuses to stop the session that is calling", 
       const { ctx, byName } = toolContext(services)
       registerSessionTools(ctx)
 
-      const value = await byName().wts_session_tool_cancel.execute({ sessionId: "s-self" }, { agent: self })
+      const value = await byName().wts_session_tool_cancel.execute({ sessionId: "s-self", reason: "trying to stop myself" }, { agent: self })
       expect(value.offered).toBe(true)
       expect(value.reason).toMatch(/this is the session making the call/)
       // The refusal precedes the effect: nothing was cancelled.
@@ -2097,7 +2451,7 @@ describe("wts_session_tool_cancel refuses to stop the session that is calling", 
       registerSessionTools(ctx)
       const member = fakeAgent({ id: "s-member", cwd: space })
 
-      const value = await byName().wts_session_tool_cancel.execute({ sessionId: "s-runner" }, { agent: member })
+      const value = await byName().wts_session_tool_cancel.execute({ sessionId: "s-runner", reason: "cleaning up after the task" }, { agent: member })
       expect(value.cancelled).toBe(true)
       expect(runner.calls[0].kind).toBe("cancel")
     } finally {

@@ -31,7 +31,7 @@ const DESCRIPTION = [
   'When a task that already exists turns out to need another repository, add it with action "add" rather than creating a second task: name the container (tasksRoot or sourceRoot), the project and the task, and pass each repository as an absolute path. A repository added this way may sit anywhere on disk, on another volume included — nothing later depends on where it is — but it joins the branch the task is already on and starts from its own HEAD unless baseRef says otherwise. Nothing is removed from a task this way.',
   'done REQUIRES merge. Pass merge: true to land the task branches on their targets, or merge: false to leave the work where it is. There is no default, because this is the one decision a finish cannot take back: a merge that landed has to be reverted by hand, and a branch that was not merged keeps its commits where they are. Decide it from what the user asked for - do not guess, and do not call done without it (E7006).',
   'Dispatch to a session of its own when the work should carry on without you: action "dispatch" opens a session inside the task space - so it reads under that task in the workspace list, and can be followed there - and hands it one self-contained prompt. It is opened with the permission this session carries as its own sandbox override and nothing more, so it can never be wider than this one; pass permission danger-full-access only when the user asked for it, because that is the whole machine - and it is refused (E4012) unless the user has switched on the setting that grants it. The session id a create or a dispatch opened is written into the task\'s own record, and `list` reports it together with what each task\'s deploy recorded (the acceptance URL and the last smoke) - so neither has to be searched for or read out of a file.',
-  'Watch and correct that session through the session-control tools: wts_session_tool_find locates a session by directory, title or id; wts_session_tool_status reports running, openTurn, lastActivity, pendingWork and lastReply; wts_session_tool_read reads its messages; wts_session_tool_send says something to it; wts_session_tool_wait waits for one output; wts_session_tool_resume brings an offline session back; wts_session_tool_cancel stops it. A dispatched session is NOT this session\'s child, so send_message cannot reach it. Anything time-sensitive must be sent with mode "steer": mode "queue" is only read at a turn boundary, and a long task is often one long turn.',
+  'Watch and correct that session through the session-control tools: wts_session_tool_find locates a session by directory, title or id; wts_session_tool_status reports running, openTurn, lastActivity, pendingWork and lastReply; wts_session_tool_read reads its messages; wts_session_tool_send says something to it; wts_session_tool_wait waits for one output; wts_session_tool_resume brings an offline session back; wts_session_tool_cancel stops it. A dispatched session is NOT this session\'s child, so send_message cannot reach it. Send with the default mode "steer": it reaches a running turn at its next step, which is what a correction needs, because a long task is often one long turn. Name mode "queue" only for something that may wait for a turn boundary.',
   'You are told when that session dies mid-turn: unless watchSession is false, a turn that ends error, interrupted, blocked or max-tokens reports back to you with the session id and the failure, because a session that dies cannot report itself. A turn that completes, and one the user cancels, are never reported. Treat such a notice as the task NOT being done, and use the session-control tools to see where it stopped and put it back to work.',
   'This tool cannot do `force`, and asking for it is an error rather than a warning: discarding uncommitted work, and force-deleting a branch whose commits landed nowhere, are irreversible and have to be the user\'s own decision. Abandoning a task needs force too, so it is not available here either. When a task really has to be abandoned that way, say so and ask them to open the Worktree Space management page and finish it there, rather than retrying.',
   'Finishing commits nothing itself: a worktree still holding uncommitted work stops the finish and is named, and the commit is the caller\'s to make - an agent session opened in the task space writes a better message than a fixed one. force discards that work as the worktree goes.',
@@ -473,8 +473,9 @@ function taskBriefPreamble(facts) {
   if (typeof callerSessionId === 'string' && callerSessionId !== '') {
     lines.push(
       `- **Report back to \`${callerSessionId}\`** with \`wts_session_tool_send\`. It is not your parent`,
-      '  session, so `send_message` cannot reach it. Anything time-sensitive must use `mode: "steer"`;',
-      '  `mode: "queue"` is only read at a turn boundary, and a long task is often one long turn.',
+      '  session, so `send_message` cannot reach it. The default `mode` is `steer`, which is what a',
+      '  dispatched task needs - `mode: "queue"` is only read at a turn boundary, and a long task is',
+      '  often one long turn, so name it only for something that may wait.',
       '  Your report is delivered attributed to this session and shown to the caller as an agent\'s',
       '  report, and the tool puts a header on it - the task, the workspace, the task-space path, the',
       '  branch and your session id - so write the body only: a self-contained account of what you did',
@@ -482,13 +483,54 @@ function taskBriefPreamble(facts) {
     )
   } else {
     lines.push(
-      '- **Report progress with `wts_session_tool_send`.** Anything time-sensitive must use',
-      '  `mode: "steer"`; `mode: "queue"` is only read at a turn boundary.',
+      '- **Report with `wts_session_tool_send`.** Its default `mode` is `steer`; name',
+      '  `mode: "queue"` only for something that may wait for a turn boundary.',
     )
   }
+  // The reporting contract, as its own section rather than one line at the end of the standing
+  // instructions. It used to be a single sentence - "Report at each milestone and at the end" -
+  // sitting after the paragraph that says finishing is the user's decision, which read as though
+  // reporting were part of the optional half of that choice. It is not: the session that
+  // dispatched this work cannot see this session from the outside, so a turn that ends without a
+  // report ends in silence, and the caller has nothing to act on until it goes looking. Hence
+  // its own heading, the three moments named, and the one sentence that has to be here.
   lines.push(
-    '- Report at each milestone and at the end. A final report must state: the acceptance URL,',
-    '  where to look, the commit hash of each repository, and **what you did not verify**.',
+    '',
+    '# Reporting back is required',
+    '',
+    'The session that dispatched you cannot see this one from the outside: your commands, your',
+    'tests and your commits are invisible to it until you send it something. That is why the',
+    'channel above is not a courtesy. **The three moments below are never optional.** Nor does',
+    'finishing the work yourself replace reporting it: a session that calls `done` and then stops',
+    'still leaves the caller with nothing but a task space that changed underneath it.',
+    '',
+    '- **Every finished unit of delivery.** A unit is the smallest piece of the work that can be',
+    '  committed and handed over on its own. If this task is really several of those - a plan of',
+    '  independent steps, one repository done while another is still being written - report as each',
+    '  one lands, not once at the end: that is what lets the caller redirect the next one before',
+    '  it is built on an assumption nobody checked. A long stretch with no report is itself the',
+    '  problem, so if you are unsure whether a moment counts, report it.',
+    '- **The moment you are stuck.** A decision you cannot make alone, a question only the caller',
+    '  or the user can answer, or a wall you cannot get past - an environment this plugin will not',
+    '  give access to, a permission, a failing dependency, a design choice with a cost either way.',
+    '  Say what you tried and what the options are. Report this **immediately**, not after a',
+    '  second attempt and not only at the end: a session that silently grinds on a blocker wastes',
+    '  the caller\'s time twice - once while it tries, and again while the caller assumes it is',
+    '  working. "I am blocked on X, I think it needs Y" is a complete report.',
+    '- **When the task is finished.** Even if you finished it, even if you called `done`, and',
+    '  especially when it stopped short. A final report must state:',
+    '  - the commit hash of each repository, and the subject line of each commit;',
+    '  - the acceptance URL and where to look, when this task deployed something;',
+    '  - what passed and what the evidence was (the command, and its result - not "tests pass");',
+    '  - **what you did not verify**, and what a reader should not assume from your report;',
+    '  - anything still in the way, or a decision of yours the caller may want to revisit.',
+    '',
+    'Between those three, report when you judge a report helps the caller act: something landed',
+    'that changes what comes next, an assumption turned out false, or the shape of the work changed',
+    'enough that the brief the caller wrote no longer describes it. Outside the three, a report',
+    'that would only say nothing happened is one to skip.',
+  )
+  lines.push(
     '',
     '# The work',
     '',
@@ -639,7 +681,7 @@ async function dispatchToSession(ctx, exec, request, watcher) {
   // asked not to. Armed here rather than at either call site because this is the one place
   // every dispatch passes through, and armed *after* the prompt rather than before it: a watch
   // on a session whose work never arrived would report a failure that never happened.
-  if (request.watch !== false) watchDispatchedSession(watcher, sessionId, request.task, exec)
+  if (request.watch !== false) watchDispatchedSession(watcher, sessionId, request, exec)
   return { sessionId, reason }
 }
 
@@ -678,23 +720,34 @@ async function recordDispatchLeader(taskPath, memberSessionId, exec, warnings) {
 }
 
 /**
- * Start watching a dispatched session for the turns that end badly.
+ * Start watching a dispatched session for the turns that end badly or end quietly.
  *
  * The watcher is handed in by the entry rather than looked up, so a deployment that serves no
  * such service simply gets no interruption notices - reported, never thrown out of a dispatch
  * that otherwise succeeded.
+ *
+ * The task's path and the source root go in with the watch: the first is where the record is
+ * read while the task space exists, and the second is where the archive is read once a `done`
+ * has removed it. Both are facts this call has and a later turn end does not, because by then
+ * the directory being watched may be gone.
  * @param watcher - the plugin's session watcher, when the entry made one.
  * @param sessionId - the session the work was handed to.
- * @param task - the task name, for the notice.
+ * @param request - the dispatch request: its task name, task path and source root.
  * @param exec - the tool run context, for the dispatching session id.
  */
-function watchDispatchedSession(watcher, sessionId, task, exec) {
+function watchDispatchedSession(watcher, sessionId, request, exec) {
   if (sessionId === '') return
   if (watcher === undefined || watcher === null || typeof watcher.watch !== 'function') return
   // The dispatcher is the session that called this tool - the one a notice is addressed to.
   const senderSessionId = exec?.agent?.session?.id ?? exec?.agent?.id ?? ''
   try {
-    watcher.watch(sessionId, task, typeof senderSessionId === 'string' ? senderSessionId : '')
+    watcher.watch(
+      sessionId,
+      request.task,
+      typeof senderSessionId === 'string' ? senderSessionId : '',
+      request.taskPath,
+      request.sourceRoot,
+    )
   } catch {
     // A watch that cannot be armed must not fail the dispatch: the session is running.
   }

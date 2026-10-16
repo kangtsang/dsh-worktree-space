@@ -1,10 +1,10 @@
-# Worktree Space 使用手册
+# Worktree Space 使用指南
 
 一个任务从「新建」到「结束」要用到的全部操作，都写在这里。
 
 **插件是什么、有哪些功能、每个配置项怎么改，见 [README](README.md)。**
 
-手册分成**互相独立的两部分**：
+指南分成**互相独立的两部分**：
 
 - **第一部分（第 1–9 节）是面板手动流程**：全部操作都在界面上完成，一步一步点。
   README 里那一段是它的简写，这里是详细说明。
@@ -14,7 +14,7 @@
 两部分走的是**同一套流程**，差别只在谁来驱动，以及最后第 14 节那几件不可逆的事只能由人决定。
 只看你打算用的那一半即可；第 15 节的错误码两边通用。
 
-> **说法以插件当前实现为准。** 界面文案随 DSH 的语言设置切换，手册里写的是中文档案名。
+> **说法以插件当前实现为准。** 界面文案随 DSH 的语言设置切换，指南里写的是中文档案名。
 > 每一处行为都能在源码里核到：客户端在 `src/client/`（`CreateWorktreeDialog.tsx`、
 > `ArchiveTaskDialog.tsx`、`DeployCard.tsx`、`WorktreesSettings.tsx`），服务端在 `src/host/`
 > （`task/create.js`、`task/deploy.js`、`task/delivery.js`、`task/archive.js`、`task/tool.js`、
@@ -542,7 +542,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | 建空间 + 派活 | `create` 一次做完：目录、worktree、分支、注册工作区、开一个会话并把任务书交给它 |
 | 盯进度 | 看会话自己的活动时钟，而不是猜。不轮询 |
 | 中途改需求 | 用 `steer` 把话插进正在跑的回合，长回合里也送得到 |
-| 异常回接 | 会话异常中断时会主动回报，再把它拉回工作 |
+| 异常回接与漏报提醒 | 插件主动通知队长：回合异常结束时报，正常结束却没交完结报告也报 |
 | 收尾合并 | `done` 一次完成合并、移除 worktree、清理；停在冲突或未提交上时，把会话指回去处理后再调一次 |
 | 部署验收 | 勾了部署的任务，由任务空间自己的入口 `up` / `smoke` 过冒烟闸门 |
 
@@ -609,8 +609,10 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 「git 命令在各自仓库子目录里跑」、禁止在源码检出里改文件或提交、不得手写 `git merge`、
 谁收尾由你决定（两种流程都支持）、策略是 `docker` 时额外一句「冒烟是这个任务的完成线」、
 验收栈必须是本任务自己的、交付事实写进哪个文件、
-超过一分钟的动作转后台、以及**回报渠道**（用 `wts_session_tool_send` 发给队长会话 id，
-有时效性的必须 `steer`）。所以任务书就算漏写了纪律，那些也还在里面。
+超过一分钟的动作转后台、以及**回报渠道**：用 `wts_session_tool_send` 发给队长会话 id
+（默认 `steer`，立即送达；要它等回合边界的才显式传 `mode: "queue"`）；**停手之前必须带
+`finalReport: true` 交一次完结报告**——不交的话队长会收到「正常结束但没回报」的提醒，只能自己回到
+这个会话的日志里找结论，而这件事会一直留在他手上。所以任务书就算漏写了纪律，那些也还在里面。
 
 ## 13. 进行中的三个抓手
 
@@ -621,18 +623,32 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 
 **插话纠偏。** `steer` 与 `queue` 的区别在这个场景里是硬要求：
 
-| mode | 何时被读到 | 用在哪 |
+| mode | 何时被读到 | 什么时候该用哪个 |
 | --- | --- | --- |
-| `queue`（默认） | 该会话的**回合边界** | 到边界再看也无所谓的内容 |
-| `steer` | **打断当前回合，注入一步** | 任何有时效性的补话与纠正 |
+| `steer`（**默认**） | **打断当前回合，注入一步** | 几乎所有会话间通信都属于这一类：有时效的补话与纠正，以及"队长回复队员"这种必须立即送达的内容 |
+| `queue` | 该会话的**回合边界** | 少数可以等的消息，例如"这份参考材料你做完手上的再看"。显式传 `mode: "queue"` 才走这条路 |
 
-派出去的长任务常常整单就是**一个长回合**，于是 `queue` 的消息一直挂在待处理队列里不被读到 ——
-从外面看，就像会话「无视了要求」。要分辨「没送到」与「没照做」，用 `wts_session_tool_read` 读该会话的记录。
+派出去的长任务常常整单就是**一个长回合**，所以默认必须是 `steer`：通信不立即送达，就会被下一个边界一直挡住
+——而从外面看，就像会话「无视了要求」。要分辨「没送到」与「没照做」，用 `wts_session_tool_read` 读该会话的记录。
 
-**异常回接。** 会话也可能根本没机会回报：模型调用失败、撞输出上限、被 pre-step 拒绝，
+**异常回接与漏报提醒。** 这里有两种情况，插件的处理不同。
+
+**一、回合是异常结束的。** 会话可能根本没机会回报：模型调用失败、撞输出上限、被 pre-step 拒绝，
 或进程崩掉留下孤儿轮。插件监听回合是怎么结束的，`error` / `interrupted` / `blocked` / `max-tokens`
-四种会主动通知队长会话（内容是任务名、队员会话 id、失败码与下一步指引，并**明说「活没干完，别当任务已完成」**）；
-`completed` 不通知，`aborted`（你自己取消的）也不通知。**每一轮异常都报**，不是只在最后报。
+四种会主动通知队长会话（内容是任务名、队员会话 id、失败码与下一步指引，并**明说「活没干完，别当任务已完成」**）。
+**每一轮异常都报**，不是只在最后报。
+
+**二、回合正常结束，却没有交完结报告。** 这一条盯的是另一种漏法：活做完了、会话停了、报告没发。
+队员在停止工作之前应当调用 `wts_session_tool_send` 并**显式传 `finalReport: true`**；插件在回合
+以 `completed` 结束时去记录里查这一笔，查不到就通知队长一条「已正常结束、但没有交完结报告」，
+文案同时说明**这不是失败**、并提醒**不要据此去唤醒那个会话**——先读它最后的输出再决定。
+
+两条判据都落在任务空间的记录上：`finalReport: true` 会给该会话写下 `reportedAt`（可读本地时间），
+**中途的进展消息不写**，**收尾 `done` 也不写**——"收尾了但没回报"正是要报出来的情形，收尾绝不能
+把它标成已回报。队长若在面板上直接看记录，`reportedAt` 就是"谁交过完结报告"的唯一判据。
+
+`aborted` 一律不通知：那是被有意停下的（用户停的，或队长用 `cancel` 停的），不是"做完了没回报"。
+此时发通知只会让队长去唤醒一个别人刚有意停掉的会话。
 
 恢复链条总是：先 `status` 判「在跑但卡住」还是「已离线」→ 离线用 `resume` 拉回，丢了用 `create`
 在**同一个任务空间**重开 → **无论哪条都先读那个会话的最后状态再决定发什么**，不要盲发。
@@ -733,7 +749,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `wts_session_tool_find` | 按工作目录 / 标题 / id 找会话，返回 `sessionId`、是否在线、工作目录、标题 |
 | `wts_session_tool_status` | 看进度：`running`、`openTurn`、`lastActivity`、`pendingWork`、`lastReply`、推理尾巴；离线会话从持久化日志回答 |
 | `wts_session_tool_read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
-| `wts_session_tool_send` | 发消息，`mode` 取 `queue` 或 `steer` |
+| `wts_session_tool_send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告 |
 | `wts_session_tool_create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
 | `wts_session_tool_resume` | 把离线会话拉回在线，之后可直接 `send` / `read` / `wait` |
 | `wts_session_tool_wait` | 等这一次输出；超时返回**已经存在的**最近输出并标 `stale`，不是空 |
@@ -746,11 +762,11 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `find` | `query`、`sessionId`、`title`、`cwd`（都是子串匹配）、`liveOnly`、`limit`（默认 10，上限 50） |
 | `status` | `sessionId`（必填）、`stalledMsThreshold`（默认 60000）、`recent`（默认 8，上限 20）、`reasoning`（`none`/`last`/`live`/`tail`，默认 `tail`） |
 | `read` | `sessionId`（必填）、`sinceSeq`、`limit`（默认 20，上限 100）、`role`（`user`/`assistant`/`both`）、`includeReasoning`（默认 true） |
-| `send` | `sessionId`、`message`（必填）、`mode`（`queue` 默认 / `steer`）、`timeoutMs`（默认 180000，上限 3600000） |
+| `send` | `sessionId`、`message`（必填）、`mode`（**默认 `steer`** / 显式 `queue`）、`timeoutMs`（默认 180000，上限 3600000）、`finalReport`（默认 false；置 true 才写 `reportedAt`） |
 | `create` | `cwd`（绝对路径，任务空间）或 `workspaceId`、`prompt`、`timeoutMs` |
 | `resume` | `sessionId`（必填） |
 | `wait` | `sessionId`（必填）、`sinceSeq`（`-1` 计所有事件）、`timeoutMs`、`requireTurnEnd` |
-| `cancel` | `sessionId`（必填）、`keepInbox`（默认 false，即清掉排队的工作） |
+| `cancel` | `sessionId`（必填）、`reason`（**必填**，自由文本；缺失或空白即拒）、`keepInbox`（默认 false，即清掉排队的工作）、`cause`（可选简短标签） |
 
 ### 何时用哪个
 

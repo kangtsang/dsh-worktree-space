@@ -214,12 +214,12 @@ it — so `wts_session_tool_find` is the fallback for when it is not.
   `completed` (`error` / `interrupted` / `blocked` / `max-tokens`) — the one way to
   tell "the task finished" from "an error killed it into silence", since both look
   like idle with nothing queued.
-- **A correction that matters now must be a `steer`, never a `queue`.** `queue` is
-  read at the session's next **turn boundary**, and a long task is often one long
-  turn — so the message sits unread in the inbox while the session looks exactly like
-  one ignoring you. Use `wts_session_tool_send` with `mode: "steer"` for anything
-  time-sensitive ("stop, there are 23 uncommitted files and the finish needs it
-  clean"); reserve `queue` for what can genuinely wait for a boundary.
+- **`wts_session_tool_send` steers by default.** `mode` defaults to `steer`, so a
+  correction interrupts the running turn at its next step. That default is the point: a
+  long task is often one long turn, and a `queue`d message is read only at the session's
+  next **turn boundary** — so it sits unread in the inbox while the session looks exactly
+  like one ignoring you. Name `mode: "queue"` only for what can genuinely wait for a
+  boundary ("here is reference material, read it when you are done").
 - **To tell "never arrived" from "did not do it", read the log.**
   `wts_session_tool_read` returns the messages with their `seq`; a message you sent
   that is not there was not delivered, which is a different problem from one that

@@ -135,6 +135,7 @@ export const WARNING_CODES = {
   'deploy-cleanup-failed': 'archive.js - tearing the deployment down while finishing failed',
   'workspace-holds-links': 'create.js - a worktree holds links this machine will not recreate, so the finish will not be able to file them',
   'workspace-e2e-points-elsewhere': 'create.js - a repository\'s own e2e configuration names the host stack rather than this task\'s instance',
+  'task-index-left': 'archive.js - the task space was removed but its index could not be filed into the source root\'s archive, so a stale pointer is left behind',
 }
 
 /**

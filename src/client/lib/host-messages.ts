@@ -213,6 +213,8 @@ export function hostWarningText(t: Translate, warning: HostWarning | string): st
       return format(t("warnDeployNoLabelledContainers"), { envId: text(values.envId), label: text(values.label) })
     case "deploy-cleanup-failed":
       return format(t("warnDeployCleanupFailed"), { envId: text(values.envId), reason: text(values.reason) })
+    case "task-index-left":
+      return format(t("warnTaskIndexLeft"), { path: text(values.path) })
     default:
       return warning.message
   }

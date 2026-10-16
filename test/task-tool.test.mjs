@@ -1181,6 +1181,67 @@ describe("registerTaskTool", () => {
     }
   })
 
+  it("tells a dispatched session when it must report back, not only that it can", async () => {
+    // The channel alone was not enough. A dispatched session has no way to see what the
+    // caller knows, and the caller has no way to see this session - so a member that never
+    // reports is a task the caller cannot act on, and nothing in the brief used to make the
+    // obligation explicit: one sentence at the end of the standing section, sitting after
+    // the paragraph that says finishing is the user's decision, which read as though
+    // reporting were part of the optional half of it. What is pinned here is that all three
+    // moments survive into the prompt.
+    const fixture = await taskSpaceFixture()
+    try {
+      const prompts = []
+      const { ctx, captured } = toolContext(fixture.subprocess, {
+        sessionController: {
+          create: async () => ({ sessionId: "session-1" }),
+          prompt: async (request) => { prompts.push(request); return { accepted: true } },
+        },
+      })
+      registerTaskTool(ctx)
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      const brief = prompts[0].content[0].text
+
+      // Its own heading, not a clause inside another point: the reader has to see it as a
+      // requirement before it sees the work.
+      expect(brief).toContain("# Reporting back is required")
+      // The channel, and the caller it reaches. Without the id the session is told to
+      // report to something it cannot name.
+      expect(brief).toContain("wts_session_tool_send")
+      expect(brief).toContain("session-caller")
+      expect(brief).toContain("steer")
+      // The three moments, each stated as an obligation rather than as advice.
+      expect(brief).toMatch(/Every finished unit of delivery/)
+      expect(brief).toMatch(/the moment you are stuck/i)
+      expect(brief).toMatch(/When the task is finished/)
+      // The two lines that keep the contract from reading as optional: the three moments are
+      // never optional, and reporting a finish is not replaced by performing it. A member that
+      // calls `done` and stops leaves the caller holding a changed task space and no account
+      // of why.
+      expect(brief).toContain("The three moments below are never optional")
+      expect(brief).toMatch(/finishing the work yourself replace reporting it/)
+      // And the final report still has to carry the four facts, the acceptance URL among
+      // them - that requirement predates this section and must not have been lost to it.
+      expect(brief).toContain("commit hash of each repository")
+      expect(brief).toContain("the acceptance URL")
+      expect(brief).toContain("what you did not verify")
+      // The permission the contract cannot grant: a report that says nothing is worse
+      // than silence, so the judgement call is stated too - and it has to stay scoped to
+      // what lies *outside* the three moments. Without that scope a model reads the
+      // permission as covering the three, which is the one misreading this section exists
+      // to prevent (dropping "Outside the three," passed every other assertion here).
+      expect(brief).toMatch(/Outside the three, a report\s+that would only say nothing happened is one to skip/)
+      // The work itself is still after the contract, and still intact.
+      expect(brief.indexOf("# Reporting back is required")).toBeLessThan(brief.indexOf("# The work"))
+      expect(brief).toContain("go")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("starts watching the dispatched session, so an abnormal turn reaches the dispatcher", async () => {
     // The whole point of the watch: the dispatcher asked once and was told "started". Without
     // this, a session whose model call fails is a task that dies silently in a session nobody
@@ -1201,17 +1262,26 @@ describe("registerTaskTool", () => {
     const { ctx, captured } = toolContext(fixture.subprocess, services)
     try {
       registerTaskTool(ctx, {
-        sessionWatch: { watch: (sessionId, task, sender) => watched.push({ sessionId, task, sender }) },
+        sessionWatch: {
+          watch: (sessionId, task, sender, taskPath, sourceRoot) => watched.push({ sessionId, task, sender, taskPath, sourceRoot }),
+        },
       })
+      const sourceRoot = join(fixture.container, "src")
       const value = await captured[0].execute(
-        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, sourceRoot, prompt: "go" },
         { agent: { session: { id: "session-caller" } } },
       )
 
       expect(value.sessionId).toBe("session-1")
       // Watched by the session that was opened, named by the task, addressed to the caller -
       // and armed only after the work was actually handed over. Watching is the default.
-      expect(watched).toEqual([{ sessionId: "session-1", task: "login", sender: "session-caller" }])
+      expect(watched).toHaveLength(1)
+      expect(watched[0]).toMatchObject({ sessionId: "session-1", task: "login", sender: "session-caller" })
+      // The two coordinates a later "did it report?" is answered from, captured now because by
+      // then the task space may be gone: the live record is read from this path, and the archive
+      // it is filed into is found from this source root.
+      expect(watched[0].taskPath).toBe(join(fixture.container, PROJECT, "login"))
+      expect(watched[0].sourceRoot).toBe(sourceRoot)
     } finally {
       await fixture.cleanup()
     }

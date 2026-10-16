@@ -6,12 +6,14 @@
 
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { localStamp } from './audit-log.js'
 import { coded } from './codes.js'
 import { tryRunGit } from './git.js'
 import { coerceDeliveryPolicy } from './delivery.js'
 import { deploymentEnvIdFor, validateProjectName, validateTaskName } from './naming.js'
 import { assertTaskSpaceShape } from './paths.js'
 import { recommendTasksRoot } from './paths.js'
+import { writeSourceTaskIndex } from './source-index.js'
 
 /**
  * The one directory inside a task space this plugin owns.
@@ -388,7 +390,19 @@ export function normalizeSessions(value) {
     if (sessionId === '') continue
     const role = TASK_SESSION_ROLES.includes(entry.role) ? entry.role : 'task'
     const at = typeof entry.at === 'string' && entry.at !== '' ? entry.at : undefined
-    normalized.push({ sessionId, ...(at === undefined ? {} : { at }), role })
+    // `reportedAt` is carried through, and that is not a detail: this function *rebuilds*
+    // each entry, so a field it does not name is silently dropped when the record is read
+    // back. A `reportedAt` that cannot be read is the same as one that was never written -
+    // the watcher would then report a session that did hand its report over. Same shape
+    // rule as `at`: a non-empty string, and an absent one stays absent rather than becoming
+    // an empty string that reads as "reported at no time".
+    const reportedAt = typeof entry.reportedAt === 'string' && entry.reportedAt !== '' ? entry.reportedAt : undefined
+    normalized.push({
+      sessionId,
+      ...(at === undefined ? {} : { at }),
+      ...(reportedAt === undefined ? {} : { reportedAt }),
+      role,
+    })
   }
   return normalized
 }
@@ -440,10 +454,70 @@ export async function recordTaskSession(taskPath, metadata, sessionId, role = 't
   }
   try {
     await writeTaskMetadata(taskPath, written)
-    return true
   } catch {
     return false
   }
+  // The same fact, under the root the task was cut from, so a session working in the
+  // source checkout can find this task without knowing the container root. Written after
+  // the record and best-effort on purpose: the record is the authority, and a checkout
+  // that cannot be written to (read-only, gone, a source root nobody named) must not turn
+  // a recorded session into a failed dispatch. See `source-index.js`.
+  await writeSourceTaskIndex(taskPath, written, taskSessionsOf(written)).catch(() => false)
+  return true
+}
+
+/**
+ * Note that a session has handed over its final report, in the task's own record.
+ *
+ * `reportedAt` answers exactly one question - "did this session deliver a final report,
+ * and when" - and the answer is stored rather than inferred because nothing else can
+ * answer it. A session that stops after saying "I am halfway through" has said something
+ * without reporting; a session that stops after a full hand-over has reported. The two
+ * are the same shape on the event feed, and this field is what separates them.
+ *
+ * Two consequences of that meaning are load-bearing:
+ *
+ *   - **`done` never writes it.** Finishing a task without reporting is the case the
+ *     watcher exists to catch, so a finish that stamped this field would silence the one
+ *     notice this is for.
+ *   - **Only an entry the record already names is updated.** Appending one would be
+ *     {@link recordTaskSession}'s job with the opposite meaning, and a record that grew a
+ *     session because it reported would claim the plugin opened a session it never opened.
+ *
+ * Nothing here throws, and both writes are best-effort. The report itself already reached
+ * the dispatcher by the time this runs; a record that cannot be written is a fact this
+ * side failed to keep, not a reason to fail the delivery - the same trade
+ * {@link recordTaskSession} makes for the other direction.
+ *
+ * The source root's index is refreshed beside the record because the index is the copy
+ * that outlives the task space: a `done` archives it, and an index still showing the
+ * session as unreported would make the watcher report a report that did happen. The
+ * order matters for the same reason it does in `recordTaskSession` - the record is the
+ * authority, and the index is written after it.
+ * @param taskPath - the task space directory.
+ * @param sessionId - the session that reported.
+ * @returns whether the record now says a report was delivered.
+ */
+export async function markSessionReported(taskPath, sessionId) {
+  const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (id === '') return false
+  const metadata = await readTaskMetadata(taskPath).catch(() => undefined)
+  if (metadata === null || metadata === undefined || typeof metadata !== 'object') return false
+  const known = taskSessionsOf(metadata)
+  const target = known.findIndex((entry) => entry.sessionId === id)
+  if (target === -1) return false
+  const stamp = localStamp()
+  const written = {
+    ...metadata,
+    sessions: known.map((entry, index) => (index === target ? { ...entry, reportedAt: stamp } : entry)),
+  }
+  try {
+    await writeTaskMetadata(taskPath, written)
+  } catch {
+    return false
+  }
+  await writeSourceTaskIndex(taskPath, written, taskSessionsOf(written)).catch(() => false)
+  return true
 }
 
 /**
@@ -545,6 +619,11 @@ export function renderTaskMetadata(metadata) {
     // authorisation question it has no standing on, and a session that read the wrong side of
     // it would either strand a finished task or merge without the user having asked.
     '- **Who finishes is the user\'s decision, and both flows work.** Either you call `done` yourself once the work is complete, or you report back and the session that dispatched you - or the user - calls it. Ask which is wanted when the task brief does not say.',
+    // The reporting contract, in the note the session reads from disk. The dispatched session
+    // is handed the same requirement in its brief, and the two have to agree: a note that
+    // stayed quiet about it would leave the one artifact a later reader trusts saying less
+    // than the prompt that started the work.
+    '- **Report back as you go, and report when you stop.** The session that dispatched you is invisible to you in reverse: it sees nothing - not your commands, not your commits - until you send it something with `wts_session_tool_send` (`mode: "steer"` for anything time-sensitive). Report when each unit that can be committed and handed over on its own has landed, when you are stuck on something only the caller or the user can settle, and when the task is finished - including when you finished it yourself with `done`, which never replaces the report. A final report states the commit hash of each repository, the acceptance URL when there is one, what passed and the evidence for it, and **what you did not verify**. Between those moments, use your own judgement: report what changes what comes next, and skip the reports that would only say nothing happened.',
     '- Finishing is atomic: `done` merges, removes the worktrees and clears the task space in one call. `merge: true` lands the task branch on the target; `merge: false` leaves the branch alone - the commits are kept, but the worktree is removed, so a conflict left over would have to be resolved in the source repository instead of here.',
     '- A merge that lands is the one step a finish cannot take back, so `merge: true` is an authorisation rather than a formality: pass it when the user asked for the work to land, and not otherwise.',
     '',

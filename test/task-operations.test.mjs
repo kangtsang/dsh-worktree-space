@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -20,6 +20,8 @@ import {
 } from "../src/host/task/operations.js"
 import { readAudit } from "../src/host/task/audit-log.js"
 import { parseGitArgv } from "../src/host/task/git.js"
+import { recordTaskSession, writeTaskMetadata } from "../src/host/task/shared.js"
+import { SOURCE_TASKS_ARCHIVE_DIR, sourceTaskIndexPath, writeSourceTaskIndex } from "../src/host/task/source-index.js"
 
 /** The record, inside the plugin's own directory in the task space. */
 const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, TASK_METADATA)
@@ -1736,6 +1738,46 @@ describe("finishTask", () => {
     }
   })
 
+  // A member's final report can land after the index beside the source root was last refreshed -
+  // it is written at the very end of the work, which is when a finish is already running. The
+  // index is the only copy a `done` archives, so a finish that filed the stale one would leave the
+  // archive saying the session never reported, and the watcher would then report a report that
+  // happened. This pins the ordering: the index is refreshed from the record before it is filed.
+  it("files the record's final sessions into the source root's index before the space goes", async () => {
+    const source = await mkdtemp(join(tmpdir(), "multi-worktree-report-src-"))
+    const fixture = await taskFixture()
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
+      record.sourceRoot = source
+      const reported = { sessionId: "s-member", at: "2026-01-01 00:00:00", role: "task", reportedAt: "2026-01-02 03:04:05" }
+      record.sessions = [reported]
+      await writeFile(recordAt(fixture.taskPath), JSON.stringify(record, null, 2) + "\n")
+      // The stale index: the state a report arriving after the last refresh leaves behind.
+      const stale = [{ sessionId: "s-member", at: "2026-01-01 00:00:00", role: "task" }]
+      await writeSourceTaskIndex(fixture.taskPath, { ...record, sessions: stale }, stale)
+      expect(JSON.parse(await readFile(sourceTaskIndexPath(source, PROJECT, "login"), "utf8")).sessions[0])
+        .not.toHaveProperty("reportedAt")
+
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+      expect(result.containerRemoved).toBe(true)
+
+      const filed = await readdir(join(source, PLUGIN_ROOT, SOURCE_TASKS_ARCHIVE_DIR, PROJECT))
+      expect(filed).toHaveLength(1)
+      const archived = JSON.parse(await readFile(join(source, PLUGIN_ROOT, SOURCE_TASKS_ARCHIVE_DIR, PROJECT, filed[0]), "utf8"))
+      expect(archived.sessions[0].reportedAt).toBe("2026-01-02 03:04:05")
+    } finally {
+      await fixture.cleanup()
+      await rm(source, { recursive: true, force: true })
+    }
+  })
+
   it("refuses to finish a directory whose record names a different task", async () => {
     const fixture = await taskFixture()
     // The record is what makes the directory a task space, and it is what a finish
@@ -2611,6 +2653,44 @@ describe("finishTask", () => {
     }
   })
 
+  it("files the task's index into the source root's archive when it removes the task space", async () => {
+    // The index is written by `recordTaskSession` under the root the task was cut from,
+    // and a finish has to file it: a live entry pointing at a directory that is gone is
+    // worse than none, and a finished task should still leave a readable trace. Filed
+    // from the record's own facts rather than from the call's arguments, which is what
+    // makes it work for a member session finishing its own work - that flow passes no
+    // source root at all.
+    const fixture = await taskFixture()
+    const sourceRoot = await mkdtemp(join(tmpdir(), "multi-worktree-source-index-"))
+    const archiveDir = join(sourceRoot, PLUGIN_ROOT, SOURCE_TASKS_ARCHIVE_DIR, PROJECT)
+    const indexPath = sourceTaskIndexPath(sourceRoot, PROJECT, "login")
+    try {
+      await writeTaskMetadata(fixture.taskPath, {
+        ...(await readTaskMetadata(fixture.taskPath)),
+        sourceRoot,
+      })
+      await recordTaskSession(fixture.taskPath, await readTaskMetadata(fixture.taskPath), "s-member", "task")
+      expect(existsSync(indexPath)).toBe(true)
+
+      const { subprocess } = subprocessMock(fixture.handlers)
+      const result = await fixture.finish(subprocess, { task: "login" })
+
+      expect(result.containerRemoved).toBe(true)
+      expect(existsSync(fixture.taskPath)).toBe(false)
+      // The live entry is gone and the archived one is not, with both stamps on it.
+      expect(existsSync(indexPath)).toBe(false)
+      const archived = (await readdir(archiveDir)).filter((name) => name.endsWith(".json"))
+      expect(archived).toHaveLength(1)
+      const written = JSON.parse(await readFile(join(archiveDir, archived[0]), "utf8"))
+      expect(written.finishedAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+      expect(written.createdAt).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+      expect(written.sessions.map((entry) => entry.sessionId)).toEqual(["s-member"])
+    } finally {
+      await fixture.cleanup()
+      await rm(sourceRoot, { recursive: true, force: true })
+    }
+  })
+
   it("refuses an unknown task", async () => {
     const fixture = await taskFixture()
     const { subprocess } = subprocessMock(fixture.handlers)
@@ -2766,6 +2846,63 @@ describe("finishTask under its own lock", () => {
       // Nothing was merged or removed on the way to that refusal.
       expect(keys().filter((key) => key.startsWith("merge ") || key.startsWith("worktree remove"))).toEqual([])
       expect(existsSync(join(fixture.taskPath, "alpha"))).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("serialises two finishes of one task space, and the second finds nothing to remove", async () => {
+    // The shape a panel double-press makes: two finishes of the same task space, both
+    // in flight before either has finished. Without the lock each reads the directory,
+    // merges the branch and removes the worktree, and the loser then works on a space
+    // the other has already taken down - which is how a second run ends up deleting what
+    // the first is holding. With the lock the second runs after the first, by which time
+    // the space is gone, and E2003 is the answer that says so.
+    //
+    // The second call is the one that proves the first ran to completion: `branch -D`
+    // happens once, at the end of a finish that removed its worktree. Two of them would
+    // mean both finishes reached that point.
+    const fixture = await lockedTaskFixture()
+    const { subprocess, keys } = subprocessMock(fixture.handlers)
+    try {
+      const outcomes = await Promise.allSettled([
+        fixture.finish(subprocess, { task: "login" }),
+        fixture.finish(subprocess, { task: "login" }),
+      ])
+
+      // One finish, and not half of each: the winner's answer is a whole finish, with
+      // the worktree it removed.
+      const finished = outcomes.filter((outcome) => outcome.status === "fulfilled")
+      expect(finished).toHaveLength(1)
+      expect(finished[0].value.failed).toBe(false)
+      expect(finished[0].value.repositories.every((entry) => entry.removed)).toBe(true)
+
+      // The other was refused for the one reason that is deterministic here - there was
+      // no task space left to finish - rather than racing the winner for the same files.
+      const refused = outcomes.filter((outcome) => outcome.status === "rejected")
+      expect(refused).toHaveLength(1)
+      expect(refused[0].reason).toMatchObject({ code: "E2003" })
+      expect(refused[0].reason.message).toMatch(/no such task space/)
+
+      // The loser never touched the space. Its whole contribution to the git log is
+      // nothing: the winner's calls are all there is, and a second finish that had raced
+      // it would have added its own read of the directory at the very least. The loser's
+      // early refusal is a fact about the filesystem, so it asks git nothing - which is
+      // also why no error record is written for it further up: E2003 here is a refusal to
+      // start, not a failed operation with a repository to report.
+      expect(keys()).toEqual([
+        "rev-parse --abbrev-ref HEAD",
+        "worktree list --porcelain",
+        "rev-parse --verify --quiet MERGE_HEAD",
+        "status --short",
+        `worktree remove ${join(fixture.taskPath, "alpha")}`,
+      ])
+      // No merge: a finish without `merge: true` merges nothing, and this one is the
+      // default shape the panel's own call uses.
+      expect(keys().filter((key) => key.startsWith("merge "))).toEqual([])
+      // And the space really is gone, rather than kept by a second run that read its
+      // record after the first had removed it.
+      expect(existsSync(fixture.taskPath)).toBe(false)
     } finally {
       await fixture.cleanup()
     }

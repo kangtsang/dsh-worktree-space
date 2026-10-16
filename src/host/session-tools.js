@@ -30,13 +30,14 @@
  *     absent key rather than carrying `undefined`.
  */
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { isUsableBranchName, isUsableTaskName } from './task/naming.js'
 import { canonicalPath, isInside } from './task/paths.js'
-import { isSourceRepository } from './task/discover.js'
-import { isLinkedWorktree, readTaskMetadata, taskSessionsOf } from './task/shared.js'
+import { markSessionReported, readTaskMetadata, taskSessionsOf } from './task/shared.js'
+import { PLUGIN_ROOT, SOURCE_TASKS_DIR, readSourceTaskIndex } from './task/source-index.js'
 import { withSessionTurn } from './session-turn.js'
 
 /** How long a wait may block, and how long it blocks by default. */
@@ -202,33 +203,117 @@ function unavailable(sessionId, reason) {
  * code, because the caller's fix is to name a different session.
  *
  * On the user's own conversation: the brief asked for a check that refuses to cancel
- * the session the user is talking to. It is not here, because there is nothing to
- * check against - the host exposes no foreground or "current" session to a plugin.
- * The only session set it offers is the sessions working in a task space
- * (`sessionsWorkingIn`), which is a different question, and "what the interface has on
- * screen" is not readable from a plugin at all. Every available substitute would be a
- * guess - "a session in a source checkout is the user's", say - and that guess is
- * wrong in the case that matters most: the dispatcher is usually in a source checkout
- * itself, so the guess would refuse the leader its own tool call. What is left is the
- * arms above, which hold these tools to the sessions this plugin's work created, plus
- * the self-cancel refusal in `registerCancel`.
+ * the session the user is talking to. There is nothing to check against - the host
+ * exposes no foreground or "current" session to a plugin. The only session set it
+ * offers is the sessions working in a task space (`sessionsWorkingIn`), which is a
+ * different question, and "what the interface has on screen" is not readable from a
+ * plugin at all; the notion exists only in the client UI's own store. Every available
+ * substitute would be a guess - "a session in a source checkout is the user's", say -
+ * and that guess is wrong in the case that matters most: the dispatcher is usually in
+ * a source checkout itself, so the guess would refuse the leader its own tool call.
+ *
+ * What replaces the guess is a narrower arm set for the one tool that destroys work,
+ * read directionally, plus a required reason on that tool. See {@link reachOf} for the
+ * conditions: `read` and `send` keep all three arms, and `cancel` keeps arm 1 plus the
+ * members its caller's own record names - so a leader stops a member and a member does
+ * not stop the leader. The cancellation passes `destructive: true` itself rather than
+ * relying on the host to name the tool, so the narrow set cannot be lost by a caller
+ * that supplies no `exec`.
  * @param ctx - the host plugin context.
  * @param sessionId - the id the caller asked for.
  * @param agent - the live session, when the registry has one.
  * @param exec - the tool run, for the calling session's own directory.
+ * @param options - the tool's own declaration of what kind of call this is; only
+ *   `destructive` is read, and only the cancellation sets it.
  * @returns whether the tools may act on this session.
  */
-async function sessionInScope(ctx, sessionId, agent, exec) {
+async function sessionInScope(ctx, sessionId, agent, exec, options = {}) {
+  const reach = await reachOf(ctx, sessionId, agent, exec)
+  // `read` and `send` answer on all three arms. Arm 3 - the target works in a source
+  // checkout the caller's own record names - exists to keep the report-back channel
+  // alive, and that is a need to read and to send, not a need to stop. It is also the
+  // one arm that reaches a session this plugin never wrote down: the leader works in
+  // the source checkout, and so does a session the user opened by hand, and no path
+  // can tell those two apart.
+  //
+  // The destructive tool is therefore held to arm 1 and to arm 2, and arm 2 is read
+  // for its **direction**: the record names both ends, so a member finds a record in
+  // which the leader appears, and could otherwise stop the session that dispatched it.
+  // Only a target the record names as a `task` or `handoff` session is cancellable.
+  // Both ways of asking are honoured, because a caller can tell the truth either by
+  // naming its own tool or by saying so: `exec.name` is what the host hands every tool
+  // run, and `options.destructive` is what the cancellation passes for itself.
+  if (options.destructive === true || isCancel(exec)) return reach.inTaskSpace || reach.inRecordAsMember
+  return reach.inTaskSpace || reach.inRecordAsMember || reach.inRecordAsLeader || reach.inSourceCheckout
+}
+
+/**
+ * Which of the reach conditions hold for `sessionId`.
+ *
+ * Split out of {@link sessionInScope} because the tools do not all use the same set:
+ * read and send take all three, cancel takes the two that name a session the plugin
+ * wrote down. Returning the facts rather than one boolean keeps that difference in one
+ * place instead of leaving each tool to re-derive it.
+ *
+ *   - `inTaskSpace` - the target's own directory is at or under a task space this
+ *     plugin made. A fact about the target alone, so it needs no caller.
+ *   - `inRecordAsMember` - the id is named in the **caller's own** task record as a
+ *     `task` or `handoff` session: work this task handed out.
+ *   - `inRecordAsLeader` - the id is named there as the `leader`. The record names both
+ *     ends on purpose, so that a report can say who it answers to - which also means a
+ *     member can see the leader's id. Keeping the two roles apart is what makes
+ *     cancellation directional: a leader stops a member, and a member does not stop the
+ *     leader.
+ *   - `inSourceCheckout` - the target's directory is inside a `sourcePath` the
+ *     caller's own record names. This is what lets a member report back to a leader
+ *     that sits in the source checkout, outside every task space.
+ * @param ctx - the host plugin context.
+ * @param sessionId - the id the caller asked for.
+ * @param agent - the live session, when the registry has one.
+ * @param exec - the tool run, for the calling session's own directory.
+ * @returns which conditions hold.
+ */
+async function reachOf(ctx, sessionId, agent, exec) {
+  const none = { inTaskSpace: false, inRecordAsMember: false, inRecordAsLeader: false, inSourceCheckout: false }
   // The target's directory: the live header when there is one, and the persisted
   // header when the session is offline. `read` reaches an offline log, so a test that
   // only looked at live sessions would leave exactly that path ungated.
   const liveCwd = typeof agent?.session?.header?.cwd === 'string' ? agent.session.header.cwd : ''
   const targetCwd = liveCwd !== '' ? liveCwd : await persistedDirectory(ctx, sessionId)
-  if (targetCwd !== '' && (await taskSpaceAbove(targetCwd)) !== undefined) return true
+  const inTaskSpace = targetCwd !== '' && (await taskSpaceAbove(targetCwd)) !== undefined
   const callerSpace = await taskSpaceAbove(exec?.agent?.session?.header?.cwd)
-  if (callerSpace === undefined) return false
-  if (taskSessionsOf(callerSpace.metadata).some((entry) => entry.sessionId === sessionId)) return true
-  return isSourceCheckoutOf(callerSpace.metadata, targetCwd)
+  if (callerSpace === undefined) return { ...none, inTaskSpace }
+  const named = taskSessionsOf(callerSpace.metadata).filter((entry) => entry.sessionId === sessionId)
+  return {
+    inTaskSpace,
+    // The role is what separates the two directions. A record written before the role
+    // existed answers `task` for every entry (see `TASK_SESSION_ROLES`), so an older
+    // record keeps the older behaviour: the member it names is cancellable.
+    inRecordAsMember: named.some((entry) => entry.role === 'task' || entry.role === 'handoff'),
+    inRecordAsLeader: named.some((entry) => entry.role === 'leader'),
+    inSourceCheckout: isSourceCheckoutOf(callerSpace.metadata, targetCwd),
+  }
+}
+
+/**
+ * Whether this tool run is the destructive one.
+ *
+ * The host hands every tool the name it is running (`ToolRunContext extends
+ * ToolExecution`, whose `name` the harness itself reads), so this is a fact about the
+ * run rather than a value a model can name in the arguments. Worth being exact about
+ * rather than inferring from, say, which arguments arrived: a caller that could make
+ * the destructive tool look like a read would get the wider arm set.
+ *
+ * Two behaviours this deliberately keeps:
+ *   - no `exec` at all (a call outside a tool run, and every unit test that calls
+ *     `execute(args)` with no context) counts as **not** a cancel, so it takes the
+ *     wider set - the same direction as before this narrowing;
+ *   - any other name is not a cancel: only the exact registered name narrows.
+ * @param exec - the tool run, when the host supplied one.
+ * @returns whether this is a cancellation.
+ */
+function isCancel(exec) {
+  return typeof exec?.name === 'string' && exec.name === 'wts_session_tool_cancel'
 }
 
 /**
@@ -266,6 +351,34 @@ async function taskSpaceAbove(directory) {
     current = parent
   }
   return undefined
+}
+
+/**
+ * Note in the sender's own task record that it has delivered its final report.
+ *
+ * The record to stamp is the one the **sender's** directory belongs to, not the target's: this
+ * is a claim a session makes about itself, and the watcher that reads it is watching the sender.
+ * A sender outside every task space - the usual case for a leader working in a source checkout -
+ * has none, and nothing is written.
+ *
+ * Best-effort from end to end, on purpose. The message has already been handed to the target by
+ * the time this runs, so a record that cannot be written must not turn a delivered report into a
+ * failed send - the same trade a dispatch makes for the other direction (see
+ * `recordTaskSession`). The cost of the trade is bounded: the worst case is a notice about a
+ * report that did happen, and the alternative is failing the report itself.
+ * @param senderSessionId - the session that made the call.
+ * @param cwd - that session's working directory.
+ * @returns whether a record was stamped.
+ */
+async function markReportedBy(senderSessionId, cwd) {
+  try {
+    if (typeof senderSessionId !== 'string' || senderSessionId === '') return false
+    const space = await taskSpaceAbove(cwd)
+    if (space === undefined) return false
+    return await markSessionReported(space.path, senderSessionId)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -1019,14 +1132,15 @@ const REPORT_FIELDS = [
 ]
 
 /**
- * Which end of a dispatch a sending session stands on, from where it works.
+ * Which end of a dispatch a sending session stands on, from the records on disk.
  *
  * **What the line is for.** A session's identity in a dispatch is otherwise something it
  * only knows from the conversation that produced it - and a turn can be interrupted, its
  * context compacted or resumed, and that memory is gone. The role line is how the session
  * reads its own position back off disk after that happens, rather than re-deriving it or
- * guessing it: `leader:` says it is the end that dispatched the work and takes the
- * reports, `member:` says it is the session executing the task in a task space.
+ * guessing it: `leader` says it is the end that dispatched the work and takes the
+ * reports, `task` says it is the session executing the task in a task space, and
+ * `handoff` says it is one that took the task over from another.
  *
  * This is the fallback, and it is worth saying when it is not used: both ends normally
  * know their own position from the exchange itself - the session that dispatched made the
@@ -1042,61 +1156,105 @@ const REPORT_FIELDS = [
  * be reached is settled by {@link sessionInScope} alone, which does not read this value,
  * and a report whose role reads `unknown` is delivered exactly like any other.
  *
- * The question is narrow on purpose: **am I a member** - a session working in a task space
- * this plugin made. Two tests, the record first:
+ * The judgement is **metadata, on both ends**, and nothing else. Two files carry it, the
+ * same two the rest of this plugin is built around:
  *
- *  1. the directory holds the task-space record, or sits under one that does. This is the
- *     plainest positive evidence there is, and the walk upward is what covers a session
- *     opened on `<task space>/<repo>` as well as one opened on the space itself.
- *  2. no record answers, but a linked worktree is what the directory is - or what sits
- *     directly inside it, which is the worktree of the space one level up. This is the arm
- *     a finish leaves room for: taking a task apart removes the record while the worktree
- *     is still mounted, and a session working in it is still a member.
+ *  1. the task space's own record, when the sender's directory is in one - the walk upward
+ *     covers a session opened on `<task space>/<repo>` as well as one opened on the space
+ *     itself. It names every session that has worked there and what each one was, so it
+ *     answers with the recorded role: `task`, `handoff`, or `leader`.
+ *  2. the task index under the source root, reached by walking up from the sender's own
+ *     directory. This is the leader's half: it works outside every task space, so nothing
+ *     in its own directory names it, and the index is where the record's facts reach it.
  *
- * A repository is asked about its children only when it is not one itself. `git worktree
- * add` registers its worktrees inside a repository's own `.git/`, so a checkout routinely
- * holds worktree-shaped directories - and the session working at a checkout is the end that
- * dispatched the work, so reading it as a member because of what sits below it would be
- * exactly the inference from a directory this rule refuses to make.
+ * Neither file names the session → `unknown`. There is deliberately **no fallback that
+ * reads a directory**: a source checkout, a workspace holding repositories, a container
+ * root, a mounted worktree and an unrelated folder are all just places a session may be
+ * working, and none of them states that this session dispatched work or carried it out.
+ * Both ends of one exchange reading `unknown` is then a real outcome - the two are simply
+ * not in a workspace this plugin has a record of - and they answer from the conversation
+ * they are in.
  *
- * Anything else answers `unknown`, and that is the whole of it: this side does **not**
- * infer leadership from a directory. A source checkout, a workspace holding repositories,
- * a container root, an unrelated folder - none of them state "I dispatched this work",
- * because that is a fact about a conversation, not about a path. The value range keeps
- * `leader` for the ends that know it, and a reader can tell the far end is a member from
- * the line beside it. Both ends of one exchange reading `unknown` is not a case worth
- * designing for: with no task space left standing there is nothing here to report about,
- * and the session answers from the conversation it is in.
- *
- * The position is read from the filesystem, never asserted by the caller, and never
- * derived from a session id - the id travels on its own `Session:` line, as the contract's
- * other half, not as evidence for this one. It also does not consult the record's `leader`
- * entry: that one is an audit fact about who dispatched, written at dispatch, and a task
- * space whose record predates it still answers from position here.
+ * The id comes from the run (the host sets it) and never from a caller's argument, and the
+ * record's `leader` entry is read as the same kind of fact as the rest of the record: it
+ * was written by the plugin at dispatch, into a file, not asserted by the session that
+ * benefits from it.
  * @param cwd - the sending session's working directory, when it has one.
- * @returns 'member', or 'unknown' when the directory does not say a member works in it.
+ * @returns the recorded role - `task`, `handoff` or `leader` - or `unknown` when no
+ *   record or index names the session.
  */
-async function senderRole(cwd) {
-  if (typeof cwd !== 'string' || cwd === '') return 'unknown'
-  // 1. The record, at the directory or above it: the direct answer, and the only one that
-  // needs nothing from git. `taskSpaceAbove` is the same walk the scope gate uses.
-  if ((await taskSpaceAbove(cwd)) !== undefined) return 'member'
-  // 2. No record answers, so ask whether this is a worktree. The directory itself, or its
-  // children one level down - because a session is opened either on the task space, whose
-  // worktrees sit below it, or on one of those worktrees.
-  if (await isLinkedWorktree(cwd)) return 'member'
-  // A repository is asked about its children only when it is not one itself. `git worktree
-  // add` registers its worktrees *inside* the repository's own `.git/`, so a checkout
-  // routinely holds worktree-shaped directories - but the session working at a checkout is
-  // the end that dispatched the work, and calling it a member because of what sits below it
-  // would be exactly the inference from a directory this rule refuses to make.
-  if (await isSourceRepository(cwd)) return 'unknown'
-  const entries = await readdir(cwd, { withFileTypes: true }).catch(() => [])
-  for (const entry of entries) {
-    // A symlink is not followed: this asks what the workspace is, not what points into it
-    // from somewhere else on the machine.
-    if (!entry.isDirectory()) continue
-    if (await isLinkedWorktree(join(cwd, entry.name))) return 'member'
+async function senderRole(cwd, senderSessionId = '') {
+  if (typeof cwd !== 'string' || cwd === '' || typeof senderSessionId !== 'string' || senderSessionId === '') return 'unknown'
+  // 1. The record of the task space this directory is in, asked by **id**: it names every
+  //    session that has worked here and what each one was, and the id is what travels on
+  //    the header's own `Session:` line. This is the same file the scope gate reads.
+  const space = await taskSpaceAbove(cwd)
+  if (space !== undefined) {
+    const named = taskSessionsOf(space.metadata).find((entry) => entry.sessionId === senderSessionId)
+    if (named !== undefined) return named.role
+  }
+  // 2. Outside every task space - where the leader works. It is named in the record too,
+  //    but cannot read that record from its own directory, so it asks the index the plugin
+  //    keeps under the source root: `<source root>/.worktree-space/tasks/`, at its own
+  //    level or at the repository's level below it.
+  return await roleUnderSourceRoot(cwd, senderSessionId)
+}
+
+/**
+ * What the source root above this directory records this session as.
+ *
+ * ## Why the id, and not the directory
+ *
+ * Nothing about a path says which end of a dispatch a session stands on: a source
+ * checkout, a workspace holding repositories and a bare directory are all just places to
+ * work. The plugin **writes the fact down** instead. A task's record names the session
+ * that asked for the work under `role: 'leader'` and the session that carried it out as
+ * `task` or `handoff`; the member reads that from the task space it works in, and the
+ * index under the source root carries the same facts to where the leader stands, without
+ * the leader having to be told the task space's path.
+ *
+ * ## What it answers when nothing names the session
+ *
+ * `unknown`, and that is the whole of it. There is no fallback that reads a directory as
+ * one end or the other: a checkout is not evidence of having dispatched anything, and a
+ * worktree is not evidence of having been dispatched - both are shapes a session may be
+ * in for reasons this plugin knows nothing about. A session from outside this workspace,
+ * or one from before the plugin kept an index, is simply not placed.
+ *
+ * The index is a cache of the record, so an entry whose `taskPath` is gone is not read: a
+ * finished task's live entry is removed, and without that check a session that once led a
+ * task would keep claiming the role after the task was over and the name reused.
+ * @param cwd - the sending session's working directory.
+ * @param senderSessionId - the session sending the message.
+ * @returns the recorded role, or `unknown` when no index names it.
+ */
+async function roleUnderSourceRoot(cwd, senderSessionId) {
+  // The index sits inside the plugin's own directory, so the walk looks for `tasks` under
+  // a `.worktree-space` at each level - the same bound the record walk uses, for the same
+  // reason: a session works a level or two below the root, and an unbounded walk would
+  // read directories this has no business reading.
+  let current = cwd
+  for (let level = 0; level < TASK_SPACE_WALK_LIMIT; level += 1) {
+    const tasks = join(current, PLUGIN_ROOT, SOURCE_TASKS_DIR)
+    const projects = await readdir(tasks, { withFileTypes: true }).catch(() => [])
+    for (const project of projects) {
+      if (!project.isDirectory()) continue
+      const layer = join(tasks, project.name)
+      const files = await readdir(layer).catch(() => [])
+      for (const name of files) {
+        if (!name.endsWith('.json')) continue
+        const entry = await readSourceTaskIndex(join(layer, name))
+        if (entry === undefined) continue
+        if (typeof entry.taskPath !== 'string' || entry.taskPath === '') continue
+        if (!existsSync(entry.taskPath)) continue
+        const named = (Array.isArray(entry.sessions) ? entry.sessions : [])
+          .find((session) => session?.sessionId === senderSessionId)
+        if (named !== undefined) return typeof named.role === 'string' && named.role !== '' ? named.role : 'unknown'
+      }
+    }
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
   }
   return 'unknown'
 }
@@ -1211,7 +1369,7 @@ async function reportFacts(ctx, senderSessionId, cwd) {
     // stays the unattributed message it always was. A role beside no session id would
     // be a line about a sender this side cannot name, which is the one thing the
     // contract does not ask for.
-    facts.role = await senderRole(cwd)
+    facts.role = await senderRole(cwd, senderSessionId)
   }
   // The task's own record, read from the directory the session works in. It carries the task
   // name and the branch, and it is also what makes the directory a TASK SPACE rather than an
@@ -1860,26 +2018,32 @@ function registerRead(tools, ctx) {
  * `wts_session_tool_send` — say something to a session after the task was handed
  * over.
  *
- * `mode` is the whole point: `queue` is read at the session's next turn boundary,
- * which a long-running task may never reach, while `steer` is injected into the
- * turn that is running now. Anything time-sensitive — "stop, there are
- * uncommitted files" — has to be a steer.
+ * `mode` is the whole point, and the default is `steer`: the message is injected into the
+ * turn that is running now, because a dispatched task is often one long turn and a queued
+ * correction can sit unread until the work is over. `queue` is the deliberate choice for
+ * the minority of messages that may wait for the session's next turn boundary - reference
+ * material to read when it is done, say, where interrupting the turn buys nothing.
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
 function registerSend(tools, ctx) {
   return tools.register(defineTool({
     name: 'wts_session_tool_send',
-    description: 'Send a message to a session and let it start working. mode=queue (the default) appends a normal turn '
-      + 'and is only read at a turn boundary; mode=steer injects the message into the running turn and is caught at its '
-      + 'next step. Anything time-sensitive must be a steer: a dispatched task is often one long turn, so a queued '
-      + 'correction can sit unread until the work is over. The session must be live — call wts_session_tool_resume '
-      + 'first otherwise. With waitForReply=true the call blocks until that session produces its next assistant reply. '
-      + 'Without it the answer carries sinceSeq, the anchor to pass to wts_session_tool_wait.',
+    description: 'Send a message to a session and let it start working. mode=steer (the default) injects the message '
+      + 'into the running turn and is caught at its next step - which is what a dispatched task needs, since it is often '
+      + 'one long turn and a queued correction can sit unread until the work is over; mode=queue appends a normal turn '
+      + 'and is only read at a turn boundary, for the few messages that may wait. The session must be live — call '
+      + 'wts_session_tool_resume first otherwise. With waitForReply=true the call blocks until that session produces its '
+      + 'next assistant reply. '
+      + 'Without it the answer carries sinceSeq, the anchor to pass to wts_session_tool_wait. Set finalReport=true only '
+      + 'when this message IS your final report for the task — the one that hands the finished work over. It is recorded '
+      + 'against your own session in the task\'s record, and the session that dispatched you is told if you stop without '
+      + 'it. Progress updates and questions must leave it false; a report that says "halfway" is not the report.',
     parameters: {
       sessionId: { type: 'string', required: true, description: 'Target session id.' },
       message: { type: 'string', required: true, description: 'Message text, sent as a user turn.' },
-      mode: { type: 'string', enum: ['queue', 'steer'], description: 'queue (default) appends a turn; steer interrupts the running turn at its next step.' },
+      mode: { type: 'string', enum: ['queue', 'steer'], description: 'steer (default) interrupts the running turn at its next step; queue appends a turn and is read only at the next turn boundary.' },
+      finalReport: { type: 'boolean', description: 'Set true only when this message is your final report for the task, not a progress update or a question. Defaults to false. Recording it is best-effort and never blocks the send.' },
       waitForReply: { type: 'boolean', description: 'When true, wait for the next assistant reply before answering (default false).' },
       timeoutMs: { type: 'number', description: `Wait budget in milliseconds (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
     },
@@ -1911,7 +2075,9 @@ function registerSend(tools, ctx) {
       // session it dispatched, which is not its child - but the same reach would steer text
       // into any session on the machine. See {@link sessionInScope} for what is in.
       if (!(await sessionInScope(ctx, sessionId, agent, exec))) return unavailable(sessionId, outOfScopeReason(sessionId))
-      const mode = args.mode === 'steer' ? 'steer' : 'queue'
+      // Steer unless the caller explicitly asked to wait. The default used to be `queue`,
+      // which put every correction behind a turn boundary a long task may never reach.
+      const mode = args.mode === 'queue' ? 'queue' : 'steer'
       // Who is speaking: the session that called this tool. `exec.agent` is the caller the
       // harness sets on every tool run, so the report is attributed to the agent that wrote
       // it rather than to nobody.
@@ -1938,6 +2104,11 @@ function registerSend(tools, ctx) {
         const at = maxSeq(sessionEvents(agent.session))
         if (mode === 'steer') agent.steer(outbound)
         else agent.followup(outbound)
+        // The report has left this session now, so the claim it makes about itself is recorded
+        // here rather than after the reply: `waitForReply` can block for a long time, and a
+        // report that was delivered would sit unrecorded for exactly the window a watcher reads
+        // it in. Best-effort - see {@link markReportedBy}.
+        if (args.finalReport === true) await markReportedBy(senderSessionId, exec?.agent?.session?.header?.cwd)
         if (args.waitForReply !== true) return { baseline: at, reply: undefined }
         const waited = await waitForReply({
           session: agent.session,
@@ -2339,22 +2510,32 @@ function registerCancel(tools, ctx) {
       + 'steering work. Use it when a task has run away, is plainly off track, or has to be stopped before its task '
       + 'space is archived. Cancellation is asynchronous — the state in the answer is sampled immediately after the '
       + 'request, so running: true can be a turn still winding down; poll wts_session_tool_status until openTurn is '
-      + 'false to confirm. The session must be live.',
+      + 'false to confirm. The session must be live. **reason is required**: stopping a session destroys work in it, '
+      + 'so the call has to say why it is being stopped. State the actual reason in your own words ("the task has run '
+      + 'away", "the finish needs this session out of the task space") rather than a placeholder — the reason is '
+      + 'recorded with the cancellation and read by whoever comes to the session later. A call with no reason, or an '
+      + 'empty one, is refused. Be sure the session is yours to stop: these tools reach the sessions this plugin\'s '
+      + 'work created, and cancelling a session the user is talking to aborts their conversation.',
     parameters: {
       sessionId: { type: 'string', required: true, description: 'Session id to stop (must be live).' },
       keepInbox: { type: 'boolean', description: 'Preserve queued and steering input instead of clearing it (default false, i.e. clear the pending work).' },
-      cause: { type: 'string', description: 'Optional stable reason recorded with the cancellation.' },
+      cause: { type: 'string', description: 'Optional short label for the sort of stopping this is, recorded alongside reason. The free-text why belongs in reason.' },
+      reason: { type: 'string', required: true, description: 'Why this session is being stopped. Required: give the real reason, in your own words, because it is recorded with the cancellation.' },
     },
     output: {
       schema: OUTPUT_SCHEMA,
       render: (_args, value) => {
         if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        return [{ type: 'text', text: `cancelled ${value.sessionId} (${value.keepInbox === true ? 'queued work kept' : 'queued work cleared'}), still running: ${value.running}` }]
+        return [{ type: 'text', text: `cancelled ${value.sessionId} (${value.keepInbox === true ? 'queued work kept' : 'queued work cleared'}), still running: ${value.running} — reason: ${value.cancelReason}` }]
       },
       presentationMeta: (_args, value) => cardMeta(value),
     },
     async execute(args, exec) {
       const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      // Read before anything else, so a call that cannot say why it is stopping a
+      // session changes nothing at all - not even a look at the registry.
+      const cancelReason = requiredString(args.reason, 'reason',
+        'say why this session is being stopped; the reason is recorded with the cancellation')
       const agents = agentsOf(ctx)
       if (agents === undefined) return refusal(NO_AGENTS)
       const agent = safely(() => agents.get(sessionId))
@@ -2364,8 +2545,10 @@ function registerCancel(tools, ctx) {
       }
       // Cancelling is the one of these that destroys work: it aborts the turn that is
       // running and, by default, throws away everything queued behind it. So it is held
-      // to the scope test like the other two, and to two more of its own.
-      if (!(await sessionInScope(ctx, sessionId, agent, exec))) return unavailable(sessionId, outOfScopeReason(sessionId))
+      // to its own, narrower scope - `destructive: true` says which call this is, so the
+      // narrowing does not depend on the host naming the tool - and to two more refusals
+      // of its own below.
+      if (!(await sessionInScope(ctx, sessionId, agent, exec, { destructive: true }))) return unavailable(sessionId, outOfScopeReason(sessionId))
       const callerSessionId = sessionIdOf(exec?.agent)
       // Not itself. A session that cancels itself ends the turn it is in, and the report
       // it was going to send with it - so the answer to "stop me" is not available from
@@ -2387,6 +2570,9 @@ function registerCancel(tools, ctx) {
         cancelled: true,
         running: agent.status === 'running',
         keepInbox,
+        // The caller's own words, echoed back: the answer says what the cancellation
+        // was for, so the record of it is not only in the host's log.
+        cancelReason,
         openTurn: snapshot.openTurn,
         lastActivity: snapshot.lastActivityAt,
         summary: `cancelled ${sessionId} (${keepInbox ? 'queued work kept' : 'queued work cleared'}).`,

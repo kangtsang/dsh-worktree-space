@@ -406,6 +406,7 @@ const zh: Dict = {
   warnDeployContainersUncheckedAfter: "销毁之后无法确认环境 {envId} 的容器是否已清掉（{reason}），所以这次销毁可能只做了一半。",
   warnDeployNoLabelledContainers: "部署脚本成功退出，但没有容器带 {label} 标签，所以收尾时无法销毁这个环境；请确认脚本用 $DEPLOY_ENV_ID 给容器打标签，或自行清掉这些容器。",
   warnDeployCleanupFailed: "收尾时销毁部署环境失败（环境 {envId}）：{reason}",
+  warnTaskIndexLeft: "任务空间已删除，但源码根下那份任务索引没能归档（{path}）：它指向一个已经不存在的目录，需要时请手工删除。",
 }
 
 const en: Dict = {
@@ -796,6 +797,7 @@ const en: Dict = {
   warnDeployContainersUncheckedAfter: "Whether the containers of environment {envId} are gone could not be checked after the teardown ({reason}), so this teardown may be only half done.",
   warnDeployNoLabelledContainers: "The deploy script exited successfully but no container carries the {label} label, so the finish will not be able to tear this environment down; check that the script labels its containers with $DEPLOY_ENV_ID, or take them down yourself.",
   warnDeployCleanupFailed: "Destroying the deployment environment while finishing failed (environment {envId}): {reason}",
+  warnTaskIndexLeft: "The task space was removed but its index could not be filed into the source root's archive ({path}): it points at a directory that is gone, so delete it by hand when the stale entry matters.",
 }
 let localeService: any = null
 let boundT: ((key: string) => string) | null = null

@@ -9,6 +9,7 @@ The two routes differ in emphasis and you can read only one of them: **clicking 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
 
+<img src="docs/img/isolation-model.png" alt="Worktree Space Isolation Model" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
 
 > [!IMPORTANT]

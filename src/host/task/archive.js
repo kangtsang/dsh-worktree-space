@@ -18,7 +18,8 @@ import { assertIsolated, isInside, refuseDelete, samePathLocation } from './path
 import { refuseWhileSessionsWork } from './session-guard.js'
 import { withTaskLock } from './task-lock.js'
 
-import { BREADCRUMB, PLUGIN_ROOT, TASK_METADATA, TASK_OWNED_ENTRIES, isLinkedWorktree, pluginRootPath, readTaskMetadata, taskMetadataPath, taskSpacePath } from './shared.js'
+import { BREADCRUMB, PLUGIN_ROOT, TASK_METADATA, TASK_OWNED_ENTRIES, isLinkedWorktree, pluginRootPath, readTaskMetadata, taskMetadataPath, taskSessionsOf, taskSpacePath } from './shared.js'
+import { archiveSourceTaskIndex, sourceTaskIndexPath, writeSourceTaskIndex } from './source-index.js'
 
 /**
  * Whether a merge is waiting to be concluded in a checkout.
@@ -1430,6 +1431,17 @@ async function finishTaskLocked(subprocess, options) {
     // and therefore the only thing a later finish could recognise them by.
     if (strandedByRemoval.has(entry.name) || await isLinkedWorktree(join(taskPath, entry.name))) { stillOpen = true; break }
   }
+  // The source root's index is a snapshot of this record, and the record can be written
+  // after the index last was. The case that matters is a member's final report: it arrives
+  // at the end, often while a finish is already running, and it is written beside a record
+  // that is about to be removed. Taken again here - the last moment before the record goes -
+  // so what this finish files into the archive is the state the task actually ended in,
+  // rather than one an earlier write happened to capture. Best-effort, exactly like every
+  // other write to that index: nothing below depends on it.
+  const latest = await readTaskMetadata(taskPath).catch(() => undefined)
+  if (latest !== undefined && latest !== null && typeof latest === 'object') {
+    await writeSourceTaskIndex(taskPath, latest, taskSessionsOf(latest)).catch(() => false)
+  }
   if (!stillOpen && strayCleanStray) {
     await rm(pluginRootPath(taskPath), { recursive: true, force: true })
     await rm(join(taskPath, BREADCRUMB), { force: true })
@@ -1599,6 +1611,37 @@ async function finishTaskLocked(subprocess, options) {
       await rmdir(taskPath)
     } catch {
       containerRemoved = false
+    }
+  }
+
+  // The task's index, under the root it was cut from, is filed into that root's archive
+  // and the live entry dropped. Filed rather than deleted because a finished task should
+  // leave a trace: the archived copy keeps the task's basics, every session that worked
+  // in it, when it was created and when it was finished. The facts come from the record
+  // read above rather than from a caller's arguments - a member finishing its own work
+  // passes no source root at all, and the record is where both flows agree. Best-effort:
+  // the space is already gone, so a file that cannot be filed is a pointer left behind,
+  // not a failed finish. Left alone when the space is still standing (documented files, a
+  // stray kept), because then the task is still there and the live index is still true.
+  if (containerRemoved) {
+    const recordedSourceRoot = typeof recorded?.sourceRoot === 'string' ? recorded.sourceRoot : ''
+    const recordedProject = typeof recorded?.project === 'string' && recorded.project !== '' ? recorded.project : projectName
+    const recordedTask = typeof recorded?.task === 'string' && recorded.task !== '' ? recorded.task : task
+    const indexFile = sourceTaskIndexPath(recordedSourceRoot, recordedProject, recordedTask)
+    try {
+      await archiveSourceTaskIndex(taskPath, {
+        ...recorded,
+        sourceRoot: recordedSourceRoot,
+        project: recordedProject,
+        task: recordedTask,
+      })
+    } catch {
+      // `path` is the live index file, not the task space: the message is that this file
+      // is still there pointing at a directory that is not, and a reader who wants to act
+      // on it needs the file's own location.
+      warnings.push(warned('task-index-left',
+        `the task space was removed but its index could not be filed into the archive: ${indexFile} still points at a directory that is gone`,
+        { path: indexFile, sourceRoot: recordedSourceRoot }))
     }
   }
 
