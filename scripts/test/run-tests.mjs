@@ -34,9 +34,9 @@
 // Nothing runs at import time, so the timeout test can import `stopTree` without
 // starting a suite from inside a suite. Two environment variables back that up:
 // `DSH_TEST_VITEST` points the runner at a fixture instead of real vitest, and
-// `DSH_TEST_BUDGET_MS` shortens the budget. Both are opt-in and unset in normal
+// `DSH_TEST_BUDGET_MS` overrides the budget. Both are opt-in and unset in normal
 // use; without them a hung process tree cannot be produced on demand, and testing
-// the thing that stops a runaway by waiting out the real 60s budget is not a test
+// the thing that stops a runaway by waiting out the real budget is not a test
 // anybody runs twice.
 
 import { execFile, spawn } from "node:child_process"
@@ -82,11 +82,28 @@ function requested() {
  * How long one project may take before it is stopped and named.
  *
  * A minute is chosen so that every project fits inside it with room to spare -
- * the slowest measures about twenty seconds - which means crossing it is a real
- * signal rather than ordinary machine noise. Raising this to accommodate a slow
- * test is exactly the thing it exists to notice.
+ * the slowest measures about twenty seconds on this checkout's machine - which
+ * means crossing it is a real signal rather than ordinary machine noise. Raising
+ * this to accommodate a slow test is exactly the thing it exists to notice.
+ *
+ * The machine matters, though, and a GitHub Actions runner is a different one: it
+ * has two cores where this machine has many, and the unit layer takes about twice
+ * as long there. Pinned to two cores here it is 46 seconds; on the runner the layer
+ * was stopped at 60 while still finishing. A budget that reports a healthy suite as
+ * a runaway is detecting nothing, so GitHub gets three minutes - about twice the
+ * slowest measured run, and still something that names a runaway rather than
+ * waiting on one - while a developer's machine keeps the tight minute.
+ *
+ * Three minutes are for GitHub Actions specifically: `GITHUB_ACTIONS` is set by that
+ * runner and by nothing else. Another CI's machine has its own speed, and handing a
+ * budget to whatever set a generic `CI` would be a number nobody measured.
+ * `DSH_TEST_BUDGET_MS` overrides either.
  */
-const BUDGET_MS = Number(process.env.DSH_TEST_BUDGET_MS) > 0 ? Number(process.env.DSH_TEST_BUDGET_MS) : 60_000
+const BUDGET_MS = Number(process.env.DSH_TEST_BUDGET_MS) > 0
+  ? Number(process.env.DSH_TEST_BUDGET_MS)
+  : process.env.GITHUB_ACTIONS === "true"
+    ? 180_000
+    : 60_000
 
 /**
  * How long a stopped tree gets to actually be gone before the runner says it was

@@ -4,6 +4,154 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.3.0 — 2026-10-16
+
+Everything that changed since 1.2.1. This is what a user or an agent can observe; how it was
+arrived at is not here.
+
+### Breaking
+
+- **The tool is renamed `wts_worktree_space`** (it was `task_worktree_space`). Eight
+  `wts_session_tool_*` session tools arrive in the same release, and the names now sit in one
+  `wts_` family.
+
+  **What to do**: call the tool by its new name. The actions and the other parameter names are
+  unchanged, except for the two entries below.
+
+- **`done` now requires `merge`.** It used to be optional and to default to `false`; a call that
+  does not pass a boolean is refused outright (E7006).
+
+  **Why**: merging is the one irreversible step in this tool - a merge that landed has to be
+  reverted by hand, while a branch that was not merged keeps its work where it is, and the two
+  cost different things. A default would take that decision away from the user.
+
+  **What to do**: pass `merge: true` (merge into the target branch) or `merge: false` (leave the
+  work on the task branch).
+
+- **The finish's "files git never tracked" parameter is now `strays`.** `cleanStray` (a boolean
+  that decided whether build output was cleared) and `keep` (the entry names to leave alone) are
+  one parameter now: `strays` is `archive` (the default when omitted), `keep` or `discard`, and
+  the names to leave alone are passed as `keepEntries`.
+
+  **The default behaviour changed with it**: `archive` files the leftovers into the archive
+  directory and clears build output, so **a finish that omits `strays` removes the task space from
+  disk**; 1.2.1 left the task space standing by default.
+
+  **`discard` is not accepted from a tool call** (E7007): discarding is irreversible and belongs
+  to the user, so it is reachable only from the management page. Pass `strays: "keep"` to leave
+  the content where it is.
+
+- **The plugin's own files move into `.worktree-space/`.** The record used to be
+  `<task space>/worktree-space.json` and the note `<task space>/worktree-space.md`, both at the
+  top of the task space; both live in `<task space>/.worktree-space/` now, and a deploy root
+  appears beside them at `<task space>/.worktree-space/deploy/`. **The old locations are no longer
+  read.** The operation log is unchanged at `<container root>/worktree-space-log.jsonl`.
+
+- **The bundled skill is renamed**: `task-worktree-space` to `worktree-space`, so its path is now
+  `assets/skill/worktree-space/SKILL.md`. The body names the new tool and gains the deployment
+  and acceptance material.
+
+### Added
+
+- **Deployment and acceptance, end to end.**
+  - Creating a task space can declare `deployTarget: docker`; the workspace's
+    `.worktree-space/deploy/` is then **copied whole** to the same place in the task space. The
+    entry script is `.worktree-space/deploy/deploy.sh` by default and can be named with
+    `deployScript` (it must sit under that directory, or the create is refused with E4014), and it
+    implements the `up`, `smoke` and `destroy` subcommands.
+  - `up` writes the acceptance URL into the state file (by default
+    `.worktree-space/deploy/.state.json`) when it ends, and `smoke` merges
+    `lastSmoke: { result, at }` into it.
+  - **The acceptance fence**: for a task that declared `deployTarget: docker`, a `done` with
+    `merge: true` is refused (E5006) until a smoke has recorded `pass`.
+  - The panel offers the "deploy to Docker" checkbox and the deploy-script field in the create
+    dialog, and gains a deploy card (up / smoke / destroy, showing the state and the acceptance
+    URL).
+  - Declaring a deployment with nothing to deploy with (no script named, no `deploy.sh` in the
+    workspace, none in the selected repositories either) refuses the create (E4015) rather than
+    making a task space that has no fence.
+- **Eight session-control tools**: `wts_session_tool_find`, `status`, `read`, `send`, `create`,
+  `resume`, `wait` and `cancel`. An agent can now see how far a session has got, send it a
+  correction, wait for its answer, state the facts when it stops mid-turn, and bring it back.
+- **A new `dispatch` action**: create a task space and hand a complete job to a session in it
+  (`prompt`). The call may name that session's write access (`permission`; inherited from the
+  caller by default) and whether to watch it (`watchSession`, watched by default). A watched
+  session reports back to the dispatcher when a turn ends abnormally - an ending it cannot report
+  itself.
+- **A task space can be registered as a DSH Workspace**: `create` takes `registerWorkspace`
+  (registers by default, as the panel does) and `done` takes `unregisterWorkspace` (unregisters
+  with the finish by default; pass `false` to keep the group).
+- **The task record is kept a second time under the source root**:
+  `<source root>/.worktree-space/tasks/<project>/<task>.json`, with archives under
+  `<source root>/.worktree-space/tasks-archive/`. 1.2.1 wrote nothing under the source root.
+- **Session access can be widened**: a new setting, `handoffFullAccess` (off by default). With it
+  on, a dispatcher may pass `permission: "danger-full-access"` for the session it opens; a request
+  to widen access without naming a session is refused (E4011), and asking for full access with the
+  setting off is refused (E4012). A widened session records its access level in its session log.
+- **A finish has two more guards**: it is refused while sessions are still working in the task
+  space (E5012), and the panel asks the same question once more; two finishes never run at once.
+- **Failures and warnings are told apart more finely**: a finish reports `conflict`,
+  `needsCommit` and `dirtyCheckout` per repository, keeps "failed outright" apart from "really
+  conflicted", and returns a table of warning codes (a branch left alone, a branch not deleted,
+  and so on).
+- **The panel says the Host's codes and warnings in the reader's own language**: 20 error-code
+  texts and 30 warning texts joined the panel's bilingual copy; in 1.2.1 these were the Host's own
+  words.
+
+### Changed
+
+- **A tool failure carries its error code**, as in `E7006: ...`; 1.2.1 carried the message alone.
+- **`maxScanDirectories` has a ceiling of 10000** (1.2.1 had none; the default is still 2000).
+- **The built-in skip list goes from 23 entries to 25**, adding `worktree-space` and
+  `dsh-worktree-space`; the default scan depth is still 3.
+- **`E4006` now means what it is actually thrown for**: a request that names nothing it can act on
+  (no usable Workspace path, or a repository outside the source root). 1.2.1's table described it
+  as the scan hitting its directory cap.
+
+### Fixed
+
+- **The delete fence compared text prefixes, so one link in the parent chain could reach outside
+  the container.** The check now asks whether the path is a link and judges it by where it really
+  points, and refuses anything outside.
+- **`add` rewrote the task record's `baseRef`.** Passing `baseRef` moved the recorded start point,
+  so one task had two different starting points after two `add` calls; the recorded point is no
+  longer rewritten.
+- **A multi-repository `add` did not take back the branches it had already created when it rolled
+  back.** The branch stayed on disk and the task name was unusable from then on, with no path that
+  could clear it; the rollback takes it back now.
+- **A `worktree add` that failed halfway left that worktree outside the rollback.** The result was
+  a task space with no record, and E2001 on every later call; it is inside the rollback's scope
+  now.
+- **Repository discovery's directory cap defaulted to no bound** (`Infinity`). It falls back to
+  2000 now.
+- **A `git` subprocess had no deadline.** A stuck `git` held the call forever; it is cut off after
+  30 seconds now.
+- **A finish that had a repository fail still opened with `Task 'x' finished.`** A finish that
+  stopped halfway is reported separately and is no longer read as done.
+- **Conflicted paths were read by splitting on newlines.** A file name carrying a newline was read
+  wrong; the paths are now read with `-z`, as they are written.
+- **The scan cache key did not carry the depth or the ignore set**, so changing the scan depth
+  looked like it had no effect; both bounds are part of the key now.
+
+### Docs
+
+- **A new [`USAGE.en.md`](USAGE.en.md) is one manual for the whole lifecycle**, in two parts: **the
+  manual route** (sections 1-9: the management page, creating a task space, working in it, adding
+  repositories, deploy and acceptance, finishing, conflicts and "stopping on the work",
+  troubleshooting) and **agent orchestration end to end** (sections 10-14: when it applies and when
+  it does not, the leader and the member, the tools and the interface, and the few things only a
+  person can do), plus an error-code reference and a session-control appendix. 1.2.1 had no manual.
+  The Chinese edition is [`USAGE.md`](USAGE.md), section for section.
+- **The README gains "deploy and acceptance" and "advanced: an agent orchestrating end to end"**,
+  and the agent material is laid out again around them.
+- **[`PERMISSIONS.en.md`](PERMISSIONS.en.md) / [`PERMISSIONS.md`](PERMISSIONS.md) pick up the
+  runtime behaviour this release adds**: deployment and `.state.json`, session creation and access
+  levels, the eight session tools, and the two failure boundaries E4011 and E4012.
+- **An isolation-model diagram is added and wired into both READMEs**, showing where a task space,
+  the container root and the source root sit relative to one another.
+- **The bundled skill's body is rewritten**: it gains deployment and acceptance, and its role
+  words become the leader agent and the member agent.
+
 ## 1.2.1 — 2026-10-06
 
 ### Added

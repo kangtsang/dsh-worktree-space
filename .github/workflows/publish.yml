@@ -21,6 +21,11 @@ concurrency:
 jobs:
   publish:
     name: Publish to npm
+    # Only the public repository publishes. This same file travels into a mirror
+    # of it, and a tag pushed to a mirror would otherwise start a publish there:
+    # npm's trusted publisher is registered for one repository, so the exchange
+    # would fail, but the run has no business starting at all.
+    if: github.repository == 'kangtsang/dsh-worktree-space'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
