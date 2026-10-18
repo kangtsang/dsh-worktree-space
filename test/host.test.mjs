@@ -319,7 +319,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access",
+      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access", "task.handoff-open",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -1094,7 +1094,73 @@ describe("the request that widens a handed-on session", () => {
     expect(await handler("task.handoff-access", {}))
       .toMatchObject({ ok: false, error: { code: "E4011" } })
   })
+})
 
+describe("the request that files a handed-on session under its Workspace", () => {
+  /** A registry that resolves one directory and records what it was asked to attach. */
+  function registryFor(cwd) {
+    const attached = []
+    return {
+      attached,
+      workspaceRegistry: {
+        resolveByPath: async (path) => (path === cwd
+          ? { id: "workspace-coupon", attachSession: (id) => { attached.push(id); return true } }
+          : undefined),
+      },
+    }
+  }
+
+  it("files the session under the Workspace that claims its directory", async () => {
+    // The gap this closes: a session opened on a directory that is *already* a Workspace
+    // does not join it by itself. The task space was registered when it was created, so a
+    // hand-off session opened on it later landed in Ungrouped - working in the right
+    // directory and filed nowhere.
+    const { workspaceRegistry, attached } = registryFor("D:/ws/docker/coupon")
+    const handler = handleFor({}, {}, undefined, { workspaceRegistry })
+
+    expect(await handler("task.handoff-open", { sessionId: "session-1", cwd: "D:/ws/docker/coupon" }))
+      .toEqual({ ok: true, value: { attached: true, workspaceId: "workspace-coupon" } })
+    expect(attached).toEqual(["session-1"])
+  })
+
+  it("answers rather than raising when no Workspace claims that directory", async () => {
+    // The ordinary case with the setting off: the boundary is some directory above the
+    // task space, and nothing registers that. The session is already open and working, so
+    // this is an answer about grouping rather than a failed hand-off.
+    const { workspaceRegistry, attached } = registryFor("D:/ws/docker/coupon")
+    const handler = handleFor({}, {}, undefined, { workspaceRegistry })
+
+    expect(await handler("task.handoff-open", { sessionId: "session-1", cwd: "D:/ws" }))
+      .toEqual({ ok: true, value: { attached: false, reason: "no-workspace" } })
+    expect(attached).toEqual([])
+  })
+
+  it("answers rather than raising on a deployment with no Workspace registry", async () => {
+    const handler = handleFor({}, {}, undefined, {})
+    expect(await handler("task.handoff-open", { sessionId: "session-1", cwd: "D:/ws" }))
+      .toEqual({ ok: true, value: { attached: false, reason: "no-workspace-registry" } })
+  })
+
+  it("reports a registry that swallowed the attach rather than claiming success", async () => {
+    // Whether the session is in the group is the thing the panel shows, so it is read back
+    // rather than assumed from a call that returned nothing.
+    const handler = handleFor({}, {}, undefined, {
+      workspaceRegistry: {
+        resolveByPath: async () => ({ id: "workspace-coupon", attachSession: () => undefined }),
+      },
+    })
+    expect(await handler("task.handoff-open", { sessionId: "session-1", cwd: "D:/ws" }))
+      .toEqual({ ok: true, value: { attached: false, reason: "attach-failed" } })
+  })
+
+  it("refuses a request that names no session", async () => {
+    const handler = handleFor({}, {}, undefined, {})
+    expect(await handler("task.handoff-open", { cwd: "D:/ws" }))
+      .toMatchObject({ ok: false, error: { code: "E4011" } })
+  })
+})
+
+describe("the request that widens a handed-on session, and the guard around a finish", () => {
   it("refuses task.done while a session works in that task space, and carries the sessions", async () => {
     // The panel is the other door to `finishTask`, and the guard has to hold here too: a guard
     // on the tool alone would let the person-driven path do what the model is refused, which is

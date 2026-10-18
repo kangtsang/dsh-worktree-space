@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { deployEnvironment, smokeEnvironment } from '../src/host/task/deploy.js'
+import { isWindowsBashStub, bashInterpreter } from '../src/host/task/bash-interpreter.js'
 import { PLUGIN_ROOT, writeTaskMetadata, taskMetadata } from '../src/host/task/shared.js'
 const STATE = { url: 'http://localhost:1', services: ['web'], lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' } }
 
@@ -242,6 +243,65 @@ describe('a recorded deploy script is confined to the deploy root at run time', 
     } finally {
       await rm(top, { recursive: true, force: true })
       await rm(deep, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('the interpreter the entry is run by', () => {
+  it('is not the WSL forwarding stub, on either subcommand', async () => {
+    // The defect this pins: `['bash', entry, 'up']` handed the entry to a Linux
+    // distribution, which cannot read a native Windows path, and answered exit 127
+    // with `No such file or directory` naming a script that was right there. The
+    // assertion is about the interpreter, not about the entry - the entry's position
+    // is already pinned by the tests above.
+    const dir = await taskSpaceWith(`${PLUGIN_ROOT}/deploy/deploy.sh`)
+    try {
+      const { subprocess, envs } = spawnRecorder()
+      await deployEnvironment(subprocess, dir)
+      // Found by shape, not by position: a deploy is followed by docker queries, so
+      // the last spawn is not the entry's.
+      const entry = envs.map((e) => e.argv).find((argv) => argv[2] === 'up' || argv[2] === 'smoke')
+      expect(entry).toBeDefined()
+      expect(isWindowsBashStub(entry[0])).toBe(false)
+
+      envs.length = 0
+      await smokeEnvironment(subprocess, dir)
+      const smoke = envs.map((e) => e.argv).find((argv) => argv[2] === 'smoke')
+      expect(smoke).toBeDefined()
+      expect(isWindowsBashStub(smoke[0])).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('hands the entry a PATH its own shell tools are on', async () => {
+    // The second defect, which the first one was hiding: with the WSL stub the entry
+    // never started, so nothing ever reached the line that runs `dirname`. Once it
+    // does start, a shell named by absolute path cannot find `dirname`, `basename` or
+    // `sed` - they are separate executables beside it, and neither the harness's own
+    // shell nor Git for Windows is on the PATH the Host gives a child. The entry then
+    // died on `dirname: command not found`, exit 1.
+    const dir = await taskSpaceWith(`${PLUGIN_ROOT}/deploy/deploy.sh`)
+    try {
+      const { subprocess, envs } = spawnRecorder()
+      await deployEnvironment(subprocess, dir)
+      const entry = envs.map((e) => e).find((e) => e.argv[2] === 'up' || e.argv[2] === 'smoke')
+      expect(entry).toBeDefined()
+      // The two hand-declared variables must survive the PATH fix, or the state file
+      // and the environment id go missing instead - which is the trade this must not
+      // make.
+      expect(entry.env.DEPLOY_STATE_FILE).toBe(join(deployRoot(dir), '.state.json'))
+      expect(entry.env.DEPLOY_ENV_ID).toBe('dsh-public-login')
+      // And the shell's own directory leads the PATH, so its tools win over a
+      // same-named one further along it. Split on the separator alone: a drive
+      // letter's colon is part of the first entry, not another break.
+      const bash = bashInterpreter()
+      if (bash.toolDir !== undefined) {
+        const separator = entry.env.PATH.includes(';') ? ';' : ':'
+        expect(entry.env.PATH.split(separator)[0]).toBe(bash.toolDir)
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 })

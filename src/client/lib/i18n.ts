@@ -255,7 +255,7 @@ const zh: Dict = {
 
   // ── D · 插件设置 ──────────────────────────────────────────────
   handoffFullAccess: "交由 agent 处理冲突和提交的会话使用完全权限",
-  handoffFullAccessHint: "处理未提交变更与冲突时，插件会在容器根目录开一个会话，默认只能写容器根以内，写到容器根以外（例如源仓库的 git 元数据）每次都要手动授权。打开后这些会话以完全权限开启，不再询问授权。",
+  handoffFullAccessHint: "处理未提交变更与冲突时，插件会在任务空间目录开一个会话，默认只能写该目录以内，写到它以外（例如源仓库的 git 元数据）每次都要手动授权。打开后这些会话以完全权限开启，不再询问授权。",
   tasksRootStrategy: "Worktree Space 容器根目录",
   tasksRootStrategyDefault: "默认",
   tasksRootStrategyCustom: "指定目录",
@@ -648,7 +648,7 @@ const en: Dict = {
 
   // ── D · 插件设置 ──────────────────────────────────────────────
   handoffFullAccess: "Full access for the sessions handed to the agent for conflicts and commits",
-  handoffFullAccessHint: "Handling uncommitted changes and conflicts opens a session at the container root, which by default may write inside that root only: writing outside it — a source repository's git metadata, for instance — asks you to authorize it by hand every time. With this on, those sessions start with full access and never ask.",
+  handoffFullAccessHint: "Handling uncommitted changes and conflicts opens a session in the task space, which by default may write inside that directory only: writing outside it — a source repository's git metadata, for instance — asks you to authorize it by hand every time. With this on, those sessions start with full access and never ask.",
   tasksRootStrategy: "Worktree Space container root",
   tasksRootStrategyDefault: "Default",
   tasksRootStrategyCustom: "Custom directory",

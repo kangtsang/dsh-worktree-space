@@ -56,7 +56,35 @@ jobs:
           echo "tag=$tag version=$version"
           test "$tag" = "$version"
 
+      # Has this version already been published?
+      #
+      # Moving a tag that was published before is a real operation - it happens when
+      # the public line is rebuilt so its history is whole again - and GitHub treats a
+      # forced tag push as a new event, so this workflow starts and walks all the way to
+      # `npm publish` before npm refuses. The refusal is correct and the version on
+      # npm is untouched, but it leaves a red run that reads like a failed release.
+      #
+      # So the question is asked here instead, where answering it is cheap: the registry
+      # is the authority on what exists, not this repository. Finding it is not a
+      # problem - it is what a re-publish would look like from the start, and npm would
+      # refuse it anyway.
+      #
+      # A found version exits 0 and publishes nothing. That is deliberate: the tag move
+      # was made on purpose, the version is already out, and the run records what it
+      # found rather than failing over something that is not wrong.
+      - name: Check that this version is not already on npm
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-worktree-space@$version" version >/dev/null 2>&1; then
+            echo "::notice::dsh-worktree-space@$version is already published; nothing to do."
+            echo "ALREADY_PUBLISHED=1" >> "$GITHUB_ENV"
+          else
+            echo "dsh-worktree-space@$version is not on npm yet."
+            echo "ALREADY_PUBLISHED=0" >> "$GITHUB_ENV"
+          fi
+
       # The package's prepublishOnly script runs the project gate, so a failing
       # test or a stale bundle stops the publish here.
       - name: Publish
+        if: env.ALREADY_PUBLISHED == '0'
         run: npm publish

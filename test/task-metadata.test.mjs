@@ -105,6 +105,22 @@ describe('task metadata', () => {
       // delivery policy renders beside it, so a session reads both from one note.
       expect(note).toContain('## Deployment')
       expect(note).toContain('DEPLOY_ENV_ID=dsh-public-login')
+      // The commands printed in that section carry the id themselves. A note that
+      // says "pass it to every deploy command" and then prints one without it is
+      // the contradiction that cost a task its containers once: the session copied
+      // the command, the entry fell back to its own default id, the panel found no
+      // `dsh.env-id` label and offered deploy instead of smoke and destroy. The
+      // instruction and the copyable string have to agree.
+      expect(note).toContain('deploy.sh up dsh-public-login')
+      expect(note).toContain('deploy.sh smoke dsh-public-login')
+      // And the consequence is stated, because "pass it" alone does not tell a
+      // session what goes wrong when it does not.
+      expect(note).toContain('the smoke and destroy buttons disappear')
+      // Every printed deploy command in the section names this task's own id - no
+      // command may be left to default, whichever line it came from.
+      for (const line of note.split('\n').filter((l) => l.includes('deploy.sh up') || l.includes('deploy.sh smoke'))) {
+        expect(line).toContain('dsh-public-login')
+      }
       // The delivery section is one line now, because the policy behind it is one
       // field: whether this task expects a deployment. Everything else a finish
       // decides is passed on the `done` call, so the note does not record it.

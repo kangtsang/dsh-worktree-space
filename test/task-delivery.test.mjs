@@ -30,6 +30,15 @@ const STATE = {
   services: [],
 }
 
+/**
+ * Whether a spawn is the deploy entry being run, told by its shape rather than by
+ * the interpreter it was resolved to: `[<bash>, <entry path>, 'up'|'smoke', ...]`.
+ * Matching on `argv[0] === 'bash'` is the assertion that broke when the interpreter
+ * became a real path, and it was also the reason nothing caught that: the one
+ * spelling this plugin no longer uses was pinned by tests on both platforms.
+ */
+const isDeployEntry = (argv) => argv.length >= 3 && (argv[2] === 'up' || argv[2] === 'smoke')
+
 /** A task space directory carrying a metadata record and, when asked, a deploy root's state file. */
 async function taskFixture({ state, metadataDelivery } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-delivery-'))
@@ -347,7 +356,7 @@ describe('deployment state reads and writes', () => {
       calls.push(argv.join(' '))
       const text = argv[1] === 'ps'
         ? 'gw-1\trunning'
-        : argv[0] === 'bash' ? 'up dsh-public-login\nacceptance http://localhost:51666' : ''
+        : isDeployEntry(argv) ? 'up dsh-public-login\nacceptance http://localhost:51666' : ''
       return {
         done: Promise.resolve({ exitCode: 0, signal: null }),
         collected: { stdout: { readFrom: () => ({ text }) }, stderr: { readFrom: () => ({ text: '' }) } },
@@ -517,7 +526,7 @@ describe('deployment state reads and writes', () => {
     const subprocess = { spawn: ({ argv }) => ({
       done: Promise.resolve({ exitCode: 0, signal: null }),
       // Docker answers, and matches nothing.
-      collected: { stdout: { readFrom: () => ({ text: argv[0] === 'bash' ? 'acceptance http://localhost:1\n' : '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      collected: { stdout: { readFrom: () => ({ text: isDeployEntry(argv) ? 'acceptance http://localhost:1\n' : '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
     }) }
 
     const outcome = await deployEnvironment(subprocess, root)
@@ -544,14 +553,14 @@ describe('deployment state reads and writes', () => {
 
     const labelled = { spawn: ({ argv }) => ({
       done: Promise.resolve({ exitCode: 0, signal: null }),
-      collected: { stdout: { readFrom: () => ({ text: argv[0] === 'bash' ? '' : 'abc123' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      collected: { stdout: { readFrom: () => ({ text: isDeployEntry(argv) ? '' : 'abc123' }) }, stderr: { readFrom: () => ({ text: '' }) } },
     }) }
     expect((await deployEnvironment(labelled, root)).warning).toBeUndefined()
 
     // The script itself runs; only the docker lookup throws, which is what a machine with
     // no docker on the PATH looks like from here.
     const noDocker = { spawn: ({ argv }) => {
-      if (argv[0] === 'bash') {
+      if (isDeployEntry(argv)) {
         return {
           done: Promise.resolve({ exitCode: 0, signal: null }),
           collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },

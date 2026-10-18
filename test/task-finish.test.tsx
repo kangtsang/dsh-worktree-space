@@ -84,6 +84,11 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     // `sandbox/mode` event, reported as done. A case that needs the other answer - a Host
     // with no session service, or one that refuses - passes its own.
     widenHandoffSession: vi.fn(widen ?? (async () => ({ widened: true, mode: "danger-full-access" }))),
+    // What the Host does with a session the dialog has just opened: file it under the
+    // Workspace that claims its directory. Only the Host can - `attachSession` is not in
+    // the client's `IWorkspaces` face - which is why it is one call here rather than an
+    // attach the panel follows the open with.
+    fileHandoffSession: vi.fn(async () => ({ attached: true, workspaceId: "ws-1" })),
     // The archive dialog asks the host what archiving would do, and shows the
     // answer: branch, merge target, the branches it could merge into instead,
     // commits and uncommitted files per repository. A chosen target comes back
@@ -1442,7 +1447,7 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(t("finishCommitTitle"))).toBeTruthy())
   }
 
-  it("opens the handoff session at the container root, with full access, when the setting is on", async () => {
+  it("opens the handoff session in the task space, with full access, when the setting is on", async () => {
     const user = userEvent.setup()
     const next = setup({ changedFiles: 1, fullAccess: "on", config: configForm() })
     await openCommitPhase(user)
@@ -1452,18 +1457,26 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
 
     await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
-    // The container root instead of the repositories' common ancestor: that is the directory
-    // the sessions collect under, and the whole reason for the setting.
-    expect(next.created[0].cwd).toBe("E:/worktree-space")
-    // A group needs a Workspace to be a group, so the root is registered before the session
-    // is opened on it - through the same call the panel registers a task space with.
-    expect(next.workspaces.create).toHaveBeenCalledWith({ path: "E:/worktree-space" })
+    // The task space rather than the repositories' common ancestor: the directory the setting
+    // names is the one the session collects under, and the whole reason for the setting. It is
+    // the task space and not the container root above it, so the workspace-list entry is named
+    // after this task and the finish drops it with the directory.
+    expect(next.created[0].cwd).toBe("E:/worktree-space/kratos-admin/antest")
+    // A group needs a Workspace to be a group, so the task space is registered before the
+    // session is opened on it - through the same call the panel registers a task space with.
+    expect(next.workspaces.create).toHaveBeenCalledWith({ path: "E:/worktree-space/kratos-admin/antest" })
+    // And the session is filed under the Workspace that claims it. Registering the task
+    // space is not the same as joining it: a session opened on a directory that is already
+    // a Workspace does not join by itself, which is what left a hand-off working in the
+    // task space and sitting in Ungrouped.
+    await waitFor(() => expect(next.api.fileHandoffSession)
+      .toHaveBeenCalledWith("session-1", "E:/worktree-space/kratos-admin/antest"))
     // Widened after the session exists, because the mode is an event on that session's log.
     await waitFor(() => expect(next.api.widenHandoffSession).toHaveBeenCalledWith("session-1"))
     await waitFor(() => expect(next.prompts).toHaveLength(1))
     // The agent is told which access it has, rather than being told to ask for an elevation
     // it will never need - and the whole batch still rides in the one turn.
-    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeFullAccess"), { boundary: "E:/worktree-space" }))
+    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeFullAccess"), { boundary: "E:/worktree-space/kratos-admin/antest" }))
     expect(next.prompts[0].text).toContain("E:/worktree-space/kratos-admin/antest/kratos-vue-admin")
     expect(next.prompts[0].text).not.toMatch(/\{[a-z]+\}/)
     // And the panel says which access the session actually got, in the line that names its
@@ -1502,13 +1515,13 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishAuthorizeCommit") }))
 
     await waitFor(() => expect(next.sessions.create).toHaveBeenCalledTimes(1))
-    expect(next.created[0].cwd).toBe("E:/worktree-space")
+    expect(next.created[0].cwd).toBe("E:/worktree-space/kratos-admin/antest")
     // The session is real and the handoff stands; what did not happen is the widening, and
     // the panel says so rather than letting the reader discover it when a commit is refused.
     await waitFor(() => expect(screen.getByText(format(t("handoffAccessWidenFailed"), { reason: t("handoffAccessReasonNoSession") }))).toBeTruthy())
     expect(screen.getAllByTitle(t("finishHandoffScopeTight"))).toHaveLength(1)
     await waitFor(() => expect(next.prompts).toHaveLength(1))
-    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeTight"), { boundary: "E:/worktree-space" }))
+    expect(next.prompts[0].text).toContain(format(t("finishPromptScopeTight"), { boundary: "E:/worktree-space/kratos-admin/antest" }))
   })
 
   it("turns the setting on from the panel, and keeps it when the Host accepts", async () => {

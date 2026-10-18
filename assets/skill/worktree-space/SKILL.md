@@ -405,10 +405,16 @@ anyway.
 Retrofitting it into a running stack means the log directory gains a reparse point; if one
 is already there, the user removes that single file and finishes the task again.
 
+- A container engine has to be reachable for any of this to work: the `docker` command on PATH
+  with its daemon running. Docker Desktop, Podman, colima and a native Linux engine all count.
+  Nothing here checks that for you, so when a deploy fails on
+  `docker` itself rather than on the entry, read it as the engine and say so plainly rather than
+  retrying: `The command 'docker' could not be found in this WSL 2 distro` is Docker Desktop's
+  WSL integration being off for that distribution, not a missing docker.
 - Take the environment id from `.worktree-space/worktree-space.md` (`DEPLOY_ENV_ID=...`) and pass it
   to **every** deploy command. It is what keeps this task's containers, images and
   acceptance URL apart from every other task's — never guess one, and never reuse
-  another task's.
+  another's.
 - Run the task's own deploy entry — `<entry>` below is the path the note names, run from
   `.worktree-space/`, and `.worktree-space/deploy/deploy.sh` when it names none. `<entry> up`
   builds and starts the environment
@@ -556,15 +562,22 @@ Confirm each destructive step with the user before passing it:
 
    **Where the setting is on, both of these sessions are opened differently.** The
    profile setting **Full access for the sessions handed to the agent for conflicts and
-   commits** (`handoffFullAccess`) opens each of them on the **container root** instead of the
-   common ancestor — so they collect under the plugin's own Workspace in the workspace
-   list rather than in Ungrouped — and gives each one `danger-full-access` right after
+   commits** (`handoffFullAccess`) opens each of them in the **task space** instead of the
+   common ancestor — so the workspace list carries one entry named after this task, which
+   the finish drops when it removes the task space, rather than a row shared by every
+   project — and gives each one `danger-full-access` right after
    it exists. That is what replaces the elevation above: nothing will be refused, and
    there is nothing to ask the user to approve, because the whole machine is writable
    rather than just the directory the metadata sits in. Read what the first message
    says about the working directory instead of assuming either arrangement: it names
    the directory and says which access the session was given. Off — the default, and
    what a Host that does not have the setting does — everything above holds.
+
+   A session of your own already working in the task space is **not** handed this work:
+   these buttons open a session of their own, and widening yours to finish a merge is the
+   user's decision rather than a side effect of a button. If you were dispatched here to
+   resolve a conflict and you find yourself in a fresh conversation, that is the arrangement
+   working — read what the first message says about the working directory and work there.
 3. **A conflict?** The answer for a repository left on a conflict is flagged
    **`mergeInProgress: true`**, and reports `mergeSite` — the checkout the conflict
    stands in, inside the task space — and `conflictedFiles`. The panel opens it with

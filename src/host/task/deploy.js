@@ -37,6 +37,7 @@ import { existsSync, statSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { coded, warned } from './codes.js'
+import { bashInterpreter, pathForShell } from './bash-interpreter.js'
 import { deliveryPolicyOf } from './delivery.js'
 import { isInside } from './paths.js'
 import { DEPLOY_DIR, DEPLOY_ROOT, PLUGIN_ROOT, readTaskMetadata, taskDeployRootPath } from './shared.js'
@@ -155,6 +156,45 @@ async function runDocker(subprocess, args, { signal } = {}) {
     timeoutMs: DOCKER_TIMEOUT_MS,
     ...(signal === undefined ? {} : { signal }),
   })
+}
+
+/**
+ * The command a deploy entry is run by, or the error naming what is missing.
+ *
+ * Every deploy call goes through here rather than spelling `bash` into its own
+ * argv, because the bare word is the bug: on Windows it resolves to the WSL
+ * forwarding stub, which starts a Linux distribution and cannot read a native
+ * `D:\...` path, so the entry is reported as `No such file or directory` while
+ * sitting right there on disk. {@link bash-interpreter.js} has the whole account;
+ * what matters here is that the interpreter is *chosen*, and that a machine with
+ * no usable shell says so by name here instead of surfacing exit 127 from a stub.
+ *
+ * The environment is returned alongside the argv for one reason: a shell named by
+ * absolute path cannot find `dirname`, `basename`, `sed` or `tr` — they are separate
+ * executables sitting beside it, reached by PATH lookup, and neither the harness's
+ * own shell nor Git for Windows is on the PATH the Host's scrubbed base gives the
+ * child. Without this every deploy entry dies on `dirname: command not found` as
+ * soon as it runs.
+ * @returns `{ argv, env }` to hand to {@link runProcess}.
+ * @throws Error carrying E5008 when this machine has no bash that can run the entry.
+ */
+function deployEntryCommand(script, subcommand, envId) {
+  const bash = bashInterpreter()
+  if (bash === undefined) {
+    throw coded(
+      'E5008',
+      'no usable bash was found to run this task space\'s deploy entry with, so it was not started.\n'
+      + '  Deploy entries are shell scripts, and on Windows the `bash.exe` in System32 (and the one in WindowsApps) '
+      + 'is a forwarding stub for WSL rather than a shell: it starts a Linux distribution, which cannot read a '
+      + `Windows path such as \`${script}\`, and reports the entry as missing.\n`
+      + '  Install Git for Windows, or restart DSH after installing it; the shell is searched for on every call.',
+      { path: script, reason: 'no-bash' },
+    )
+  }
+  return {
+    argv: [bash.command, script, subcommand, ...(envId === '' ? [] : [envId])],
+    env: { PATH: pathForShell(bash.toolDir, process.env.PATH) },
+  }
 }
 
 /**
@@ -865,9 +905,14 @@ export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
   if (found === undefined) {
     throw coded('E5008', `no deploy script exists in this task space, so there is nothing to smoke: ${taskPath}`)
   }
+  // Resolved before the try on purpose: a machine with no usable bash is a fact about
+  // this machine, and it must keep its own name. Left inside, the catch below would
+  // re-wrap it as "could not be started ... bash must be on the PATH the server runs
+  // with" - the very wording that sent the original hunt towards a missing file.
+  const command = deployEntryCommand(found.script, 'smoke', envId)
   let out
   try {
-    out = await runProcess(subprocess, ['bash', found.script, 'smoke', ...(envId === '' ? [] : [envId])], {
+    out = await runProcess(subprocess, command.argv, {
       cwd: found.dir,
       maxBytes: 2 * 1024 * 1024,
       // A smoke runs a test suite, so it is allowed minutes - but not forever. Without
@@ -875,7 +920,7 @@ export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
       timeoutMs: DEPLOY_SMOKE_TIMEOUT_MS,
       // Where the script must merge `lastSmoke`. Handed over rather than left to a
       // convention, so a script in a subdirectory writes the same file as one at the top.
-      env: deployEnvironmentFor(taskPath, envId),
+      env: { ...deployEnvironmentFor(taskPath, envId), ...command.env },
       ...(signal === undefined ? {} : { signal }),
     })
   } catch (error) {
@@ -918,9 +963,11 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
   if (found === undefined) {
     throw coded('E5008', `no deploy script exists in this task space, so there is nothing to deploy: ${taskPath}`)
   }
+  // Before the try, for the reason given at the `smoke` call site above.
+  const command = deployEntryCommand(found.script, 'up', envId)
   let out
   try {
-    out = await runProcess(subprocess, ['bash', found.script, 'up', ...(envId === '' ? [] : [envId])], {
+    out = await runProcess(subprocess, command.argv, {
       cwd: found.dir,
       maxBytes: 2 * 1024 * 1024,
       // A rebuild pulls images and starts services, so this is the longest deadline here
@@ -929,7 +976,7 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
       timeoutMs: DEPLOY_UP_TIMEOUT_MS,
       // Where the script must write `url`. Handed over rather than left to a convention, so
       // a script in a subdirectory writes the same file as one at the top.
-      env: deployEnvironmentFor(taskPath, envId),
+      env: { ...deployEnvironmentFor(taskPath, envId), ...command.env },
       ...(signal === undefined ? {} : { signal }),
     })
   } catch (error) {

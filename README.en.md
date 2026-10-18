@@ -109,8 +109,10 @@ top right.
   all switch with DSH's language setting; the plugin registers `zh` and `en` with the host (351 strings
   each at this release) and carries no language switch of its own. The plugin list's name, description
   and icon are English only.
-- **No extra service needed.** The entries, the scan depth and the directory limit all
-  live in the plugin's own configuration (see Configuration). It follows DSH themes.
+- **No extra service needed for the panel itself.** The entries, the scan depth and the directory limit all
+  live in the plugin's own configuration (see Configuration). It follows DSH themes. A task
+  ticked **Deploy to Docker** has one prerequisite of its own — a container engine this machine
+  can reach; see [Deploy and acceptance](#-deploy-and-acceptance).
 - **An operation log, on by default and switchable.** `worktree-space-log.jsonl` at the container root
   records what this task space did; reading it is how a report gets reproduced. See
   [The operation log](#-the-operation-log).
@@ -271,7 +273,7 @@ data directory, which needs a DSH restart.
 | Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
 | Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
-| Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened on the **container root** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters |
+| Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened in the **task space** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters. |
 | Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
 | Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, the scan stops and says what it did not reach |
@@ -371,7 +373,7 @@ the gate is raising the environment and running the smoke.
 
 ### 🏁 Finish a Worktree Space
 
-<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="960">
+<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="720">
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu. The
 dialog reads the **plan** once more when it opens — it does not trust the row that opened it — and
@@ -514,11 +516,15 @@ session.
 The working directory is chosen by the layout, not by the plugin, so those sessions land in whichever
 Workspace happens to sit there, and fall into Ungrouped where none does. The configuration's **Full
 access for the sessions handed to the agent for conflicts and commits** (off by default) changes that:
-turned on, both sessions are opened on the **container root** and widened to `danger-full-access`,
-because the container root cannot reach a source repository's `.git`. **The cost is that such a
+turned on, both sessions are opened in the **task space** and widened to `danger-full-access`,
+because the task space cannot reach a source repository's `.git`. **The cost is that such a
 session can afterwards write anywhere the DSH process can**, without asking again, and the grant is a
 session-log event that survives a restart. It governs **only the sessions opened after it**, and the
-finish dialog switches it where the choice is made.
+finish dialog switches it where the choice is made. Opening them in the task space rather than above it
+has one more benefit: the entry in the workspace list is named after this task, and the finish that
+removes the task space drops that entry with it, instead of leaving a row shared by every project.
+Once opened, each session is also filed under that group — a session started on a directory that is
+already a Workspace does not join it by itself, so the plugin does that step explicitly.
 
 The steps are short: press the button → the session works (once it stops, the plan is read again and
 the headline turns green with "you can continue finishing") → you press **Finish task** or **Continue

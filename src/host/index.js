@@ -14,7 +14,7 @@ import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { taskSpacePath } from './task/shared.js'
 import { registerTaskTool, refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from './task/tool.js'
-import { registerSessionTools } from './session-tools.js'
+import { fileSessionUnderWorkspace, registerSessionTools } from './session-tools.js'
 import { SessionWatch } from './session-watch.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
@@ -23,7 +23,7 @@ export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './tas
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -692,19 +692,27 @@ export const Config = z.object({
    * two share a directory - so those sessions land in whatever Workspace sits there, or
    * in Ungrouped where nothing does.
    *
-   * On, the session is opened on the container root instead. It collects under one
-   * Workspace that way, and it is given `danger-full-access`, because the metadata a
-   * commit writes now lies outside it. That is the whole disk rather than the
-   * repositories involved, and the grant is a session-log event: it is durable, and it
-   * survives a restart by replay. So this is off by default and stays off unless the
-   * user says otherwise - and the endpoint below checks it again before widening
-   * anything, because it is the authorisation for that write.
+   * On, the session is opened on **the task space** instead, and given
+   * `danger-full-access`, because the metadata a commit writes lies outside it. Two
+   * things follow from that directory rather than from the container root it used to be:
+   * the entry registered in the workspace list is named after this task rather than after
+   * a directory holding every project's task spaces, and the finish that removes the task
+   * space drops that registration with it, so the row does not outlive the work. The grant
+   * itself is the whole disk rather than the repositories involved, and it is a
+   * session-log event: it is durable, and it survives a restart by replay. So this is off
+   * by default and stays off unless the user says otherwise - and the endpoint below
+   * checks it again before widening anything, because it is the authorisation for that
+   * write.
+   *
+   * Either way, each hand-off opens a session of its own rather than reaching for a session
+   * the task space already has working in it: that conversation is the user's own, and
+   * widening it to finish a merge is a decision about it rather than about this button.
    *
    * Read through `task.preference`, so the dialog that offers the handoff can say which
    * of the two it is about to do without reaching for the configuration form.
    */
   handoffFullAccess: z.union(['off', 'on']).default('off').loose().volatile()
-    .description('Open the sessions that commit uncommitted work, and the sessions that resolve a merge conflict, at the container root with full access, so they never ask to write a source repository\'s git metadata. Off, each is opened on the directory that reaches that metadata, and asks when it has to write outside it.'),
+    .description('Open the sessions that commit uncommitted work, and the sessions that resolve a merge conflict, in the task space itself with full access, so they never ask to write a source repository\'s git metadata. Off, each is opened on the directory that reaches that metadata, and asks when it has to write outside it.'),
   /**
    * Whether the audit log is written.
    *
@@ -1260,6 +1268,25 @@ export function apply(ctx, config = {}) {
      * an error: the handoff did happen, and the answer says the widening did not, so the
      * panel can say so and leave the user to switch that session with `/permission`.
      */
+    if (endpoint === 'task.handoff-open') return recover(async () => {
+      // Opening the hand-off session and filing it under the right Workspace are one
+      // call, not two. The attachment needs a session id, so a separate round trip would
+      // mean opening it here and going back to the client to have it attached - and the
+      // client cannot: `attachSession` lives on the Host's registry and is not in the
+      // client's `IWorkspaces` face. Asking for the whole hand-off in one request is what
+      // lets the plugin do the part only it can.
+      //
+      // Which is the second thing this fixes. A session opened on a directory that is
+      // already a Workspace does not join it by itself: the Workspace existed when the
+      // create dialog registered the task space, and a session that comes along later
+      // lands in Ungrouped. That is why a conflict hand-off had a working directory of
+      // the task space and still did not appear under it.
+      const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+      if (sessionId === '') throw coded('E4011', 'A session id is required.')
+      const cwd = typeof payload.cwd === 'string' ? payload.cwd.trim() : ''
+      return fileSessionUnderWorkspace(ctx, sessionId, cwd)
+    })
+
     if (endpoint === 'task.handoff-access') return recover(async () => {
       const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
       if (sessionId === '') throw coded('E4011', 'A session id is required.')

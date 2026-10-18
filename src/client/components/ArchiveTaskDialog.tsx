@@ -640,11 +640,15 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   /**
    * Put an agent on the repositories that need one.
    *
-   * A repository already spoken for keeps its session: the agent has this worktree in its
-   * context - it made the commit that came before the merge - so a conflict is handed to
-   * the same conversation rather than explained again to a new one. Only a repository with
-   * no session gets one, which is what keeps this idempotent when the user comes back to a
-   * dialog whose sessions are still there.
+   * Two steps, in this order: a repository this dialog has already handed on keeps that
+   * session, and a repository with none gets one opened for it - which is what keeps this
+   * idempotent when the user comes back to a dialog whose sessions are still there.
+   *
+   * Note what that reuse does *not* reach: a session the task space already has working in
+   * it. That conversation is the user's own - it may be mid-turn, and widening it to finish
+   * a merge is a decision about that conversation rather than about this button. So the work
+   * goes to a session of this dialog's own, opened where the setting says, and the task's own
+   * session is left as it is.
    *
    * What is not spoken for is handed on together whatever its directories look like: one
    * session for the whole batch, opened on their common ancestor where they have one and on
@@ -657,25 +661,36 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
    * start and works through it.
    */
   /**
-   * Make the container root a Workspace, so the sessions opened on it collect there.
+   * Make the task space a Workspace, so the sessions opened on it collect there.
    *
    * Registration is this side's to do - `ctx.workspaces.create`, which is the Host's
    * registry over the wire, the same half the create dialog registers a task space from -
-   * and it resolves an existing record idempotently, so a root that is already a Workspace
-   * needs no check first. It is attempted only when the setting asks for these sessions to
-   * be opened there: registering a directory nobody is going to use is a row in the user's
-   * workspace list they never asked for.
+   * and it resolves an existing record idempotently, so a task space that is already a
+   * Workspace needs no check first.
+   *
+   * **The task space, not the container root.** Both are one directory above where the work
+   * is, and the container root used to be the one registered - which put a row in the user's
+   * workspace list that they never asked for, named after a directory holding every project's
+   * task spaces rather than after this task. Registering the task space instead means the row
+   * is the task itself, and it is dropped again by the finish that removes the directory
+   * (`tool.js` unregisters with the container), so nothing is left behind: the entry follows
+   * the task space rather than outliving it.
+   *
+   * It is attempted only when the setting asks for these sessions to be opened there:
+   * registering a directory nobody is going to use is a row in the user's workspace list they
+   * never asked for.
    *
    * Answers the directory to open on, or an empty string when it could not be arranged. A
-   * root that cannot be registered is not a reason to refuse the handoff: the batch falls
-   * back to the boundary that reaches the git metadata - which is where the sandbox asks -
-   * and the panel says that is what happened rather than claiming the setting took effect.
+   * task space that cannot be registered is not a reason to refuse the handoff: the batch
+   * falls back to the boundary that reaches the git metadata - which is where the sandbox
+   * asks - and the panel says that is what happened rather than claiming the setting took
+   * effect.
    */
-  const claimContainerRoot = async (): Promise<string> => {
+  const claimTaskSpace = async (): Promise<string> => {
     // Slashed, the way the boundary the setting replaces is spelled: the two are the same
     // kind of value - a working directory for a session - and a Host that takes either
     // separator should not have to see both styles from one dialog.
-    const root = slashPath(containerRootOf(path))
+    const root = slashPath(path)
     if (root === "") return ""
     try {
       await workspaces.create({ path: root })
@@ -749,13 +764,14 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     const fresh = wanted.filter((entry) => !handoff.some((one) => one.name === entry.name))
     const scoped = fresh.map((entry) => ({ entry, ...scopeFor(entry.site, entry.mainRepo) }))
     const shared = commonBoundary(scoped.map((one) => one.boundary))
-    // Where these sessions are opened, when the setting says so: the container root, which
-    // is where they collect under one Workspace rather than in Ungrouped. Empty means the
-    // boundary that reaches the git metadata is used instead - what the setting being off
-    // asks for, and what a root that could not be registered falls back to. Asked for only
-    // when something is left to hand on: a batch that reuses a session keeps the access
-    // that session was opened with, so nothing here reaches into a conversation under way.
-    const accessRoot = fullAccess && scoped.length > 0 ? await claimContainerRoot() : ""
+    // Where these sessions are opened, when the setting says so: the task space, which is
+    // where they collect under one Workspace that the finish then removes with the
+    // directory. Empty means the boundary that reaches the git metadata is used instead -
+    // what the setting being off asks for, and what a task space that could not be
+    // registered falls back to. Asked for only when something is left to hand on: a batch
+    // carried on from an earlier step of this same dialog keeps the access it was given
+    // then, so nothing here reaches into a conversation under way.
+    const accessRoot = fullAccess && scoped.length > 0 ? await claimTaskSpace() : ""
     const batches: Array<{ boundary: string; wide: boolean; fullAccess: boolean; sessionId?: FinishSceneSession["sessionId"]; entries: HandoffTarget[] }> = [
       ...spokenFor.map((entry) => {
         const previous = handoff.find((one) => one.name === entry.name)!
@@ -766,17 +782,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // have one, and the task space where they share nothing but a volume root, which reaches
       // every worktree the Host named even though the git metadata a commit writes may lie
       // outside it. A single repository keeps its own boundary, which is the one that reaches
-      // its metadata. With full access on and a container root to open on, all of that is
+      // its metadata. With full access on and a task space to open on, all of that is
       // replaced by the one directory the setting names: it does not reach the metadata, and
       // it does not have to, because the session is widened instead.
       ...(scoped.length === 0 ? [] : [accessRoot !== ""
         ? { boundary: accessRoot, wide: false, fullAccess: true, entries: scoped.map((one) => one.entry) }
-        : {
-          boundary: shared ?? (scoped.length === 1 ? scoped[0].boundary : path),
-          wide: scoped.length === 1 ? scoped[0].reaches : shared !== undefined,
-          fullAccess: false,
-          entries: scoped.map((one) => one.entry),
-        }]),
+          : {
+            boundary: shared ?? (scoped.length === 1 ? scoped[0].boundary : path),
+            wide: scoped.length === 1 ? scoped[0].reaches : shared !== undefined,
+            fullAccess: false,
+            entries: scoped.map((one) => one.entry),
+          }]),
     ]
     for (const batch of batches) {
       let sessionId: FinishSceneSession["sessionId"]
@@ -790,6 +806,15 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
           failures.push(`${entry.name}: ${errorText(t, reason)}`)
         }
         continue
+      }
+      // Filed under the Workspace its directory belongs to, right after it opens and in
+      // the same request as nothing else: a session opened on a directory that is already
+      // a Workspace does not join it by itself, so without this the hand-off works in the
+      // right directory and still sits in Ungrouped. Best effort — a deployment with no
+      // Workspace registry, or a directory none claims, leaves the session working where
+      // it is, which is what the setting being off asks for anyway.
+      if (!reused) {
+        await api.fileHandoffSession(String(sessionId), batch.boundary).catch(() => undefined)
       }
       // Widened after the session exists rather than before it: the mode is an event on the
       // session's own log, so there is nothing to widen until there is a session. A session

@@ -1017,6 +1017,47 @@ async function attachToWorkspace(ctx, sessionId, cwd) {
 }
 
 /**
+ * File a session under the Workspace that claims its working directory.
+ *
+ * Exported for the endpoint that opens a hand-off session: opening it and filing it are
+ * one request from the panel, because the attachment needs the id that opening produces
+ * and the client cannot do it - `attachSession` is on the Host's registry, not in the
+ * client's `IWorkspaces` face.
+ *
+ * The reason this is needed at all: a session opened on a directory that is *already* a
+ * Workspace does not join it by itself. The task space was registered when it was
+ * created, and a session opened on it later - a hand-off for a conflict, say - lands in
+ * Ungrouped unless it is filed. Same helper the session tools use, so both paths agree.
+ *
+ * Every failure answers rather than raises. The session is open and working by the time
+ * this runs, so a deployment with no registry, a directory no Workspace claims, and a
+ * registry that refuses are three answers about grouping - not a broken hand-off.
+ * @param ctx - the host plugin context.
+ * @param sessionId - the session to file.
+ * @param cwd - its working directory.
+ * @returns `{ attached, workspaceId?, reason? }`.
+ */
+export async function fileSessionUnderWorkspace(ctx, sessionId, cwd) {
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+    return { attached: false, reason: 'no-session' }
+  }
+  if (typeof cwd !== 'string' || cwd.trim() === '') return { attached: false, reason: 'no-cwd' }
+  const registry = service(ctx, 'workspaceRegistry')
+  if (registry === undefined || typeof registry.resolveByPath !== 'function') {
+    return { attached: false, reason: 'no-workspace-registry' }
+  }
+  const workspace = await safelyAsync(() => registry.resolveByPath(cwd))
+  if (workspace === undefined || workspace === null || typeof workspace.attachSession !== 'function') {
+    return { attached: false, reason: 'no-workspace' }
+  }
+  const attached = await safelyAsync(() => workspace.attachSession(sessionId))
+  // A registry that swallowed the call is read back rather than assumed: whether the
+  // session is in the group is the thing the panel shows, so it is asked.
+  if (attached === undefined) return { attached: false, reason: 'attach-failed' }
+  return { attached: true, workspaceId: String(workspace.id) }
+}
+
+/**
  * The session id an agent is addressed by, or undefined when there is none.
  *
  * A tool run's `exec.agent` is the caller the harness set, and `agent.id` is its session id -

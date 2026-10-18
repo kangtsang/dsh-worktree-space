@@ -265,6 +265,22 @@ a second task space, and do not run `git worktree add` by hand.
 
 Only for tasks **Deploy to Docker** was ticked for at creation.
 
+**Prerequisite: a container engine this machine can reach** — the `docker` command on PATH, with
+its daemon running. Docker Desktop, Podman, colima, a native Linux engine: any of them will do.
+The plugin neither checks nor stands in for that layer: it calls docker to find and remove
+containers by their `dsh.env-id` label, and leaves
+building, starting and the smoke to the entry script, so an engine that is not there fails as the
+script's error rather than as the plugin's.
+
+Two that catch people:
+
+- **When the containers live in WSL**, Docker Desktop's WSL integration has to be on for that
+  distribution. With it off, `docker` inside WSL reports `The command 'docker' could not be found
+  in this WSL 2 distro` — a sentence pointing at docker rather than at the switch that is off.
+  Installing docker inside the distribution, or using the Windows-side docker, sidesteps this.
+- **The acceptance URL is reachable on localhost only**, because the dynamic port is published by
+  the engine. From another machine, or from outside the engine, it will not answer.
+
 ### 6.1 The contract: one entry script
 
 The whole deploy contract is one entry script answering two subcommands:
@@ -528,7 +544,7 @@ The switch sits in the middle of the dialog:
 | State | Where the session opens | Permission |
 | --- | --- | --- |
 | **Grant as it goes** (default) | The narrowest directory covering both the worktree and the source repository's `.git` | Writing metadata outside that asks you once, in the session |
-| **Full access** | The container root (and so filed under the Workspace group the plugin registered), set to full access the moment it opens | Nothing asks again — **and the price is that this session can afterwards write anywhere the DSH process can write on this machine** |
+| **Full access** | The task space (so the workspace list carries one entry named after this task, which the finish drops when it removes the task space), set to full access the moment it opens | Nothing asks again — **and the price is that this session can afterwards write anywhere the DSH process can write on this machine** |
 
 The matching setting is called "Sessions handed to an agent for conflicts and commits use full access"
 (off by default), and it can be changed from the dialog. It **affects sessions opened afterwards only**;

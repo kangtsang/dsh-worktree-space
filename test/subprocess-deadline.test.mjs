@@ -306,7 +306,7 @@ describe("the deadlines the deploy side hands to runProcess", () => {
       // test is about the script's deadline rather than about a second one behind it.
       const { subprocess, spawns, waitForSpawn } = hangingSubprocess({ answers: (argv) => argv[0] === "docker" })
       const call = smokeEnvironment(subprocess, dir)
-      await waitForSpawn((options) => options.argv[0] === "bash", "the `smoke` script to spawn")
+      await waitForSpawn((options) => options.argv[2] === "smoke", "the `smoke` script to spawn")
       await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
       const outcome = await call
       expect(outcome.timedOut).toBe(true)

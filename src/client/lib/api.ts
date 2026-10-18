@@ -174,6 +174,20 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     widenHandoffSession: (sessionId: string) => call<{ widened: boolean; reason?: string; mode?: string }>("task.handoff-access", { sessionId }),
     /**
+     * File a freshly opened hand-off session under the Workspace its directory belongs to.
+     *
+     * One call with the attachment folded in, rather than an attach after the open: the
+     * attachment needs the session id that opening produced, and `attachSession` is not in
+     * the client's `IWorkspaces` face at all — it lives on the Host's registry. A session
+     * opened on a directory that is already a Workspace does not join it by itself, so
+     * without this the hand-off works in the right directory and still sits in Ungrouped.
+     *
+     * Best effort, like the widening beside it: a deployment with no Workspace registry,
+     * or a directory none claims, answers `attached: false` and the session stands.
+     */
+    fileHandoffSession: (sessionId: string, cwd: string) =>
+      call<{ attached: boolean; workspaceId?: string; reason?: string }>("task.handoff-open", { sessionId, cwd }),
+    /**
      * A task's deployment, read live: docker by the `dsh.env-id` label for what runs
      * right now, the deploy's state file for the URL, the smoke and the human ack.
      * A dynamic port changes with every deploy, so this is asked, never remembered.
