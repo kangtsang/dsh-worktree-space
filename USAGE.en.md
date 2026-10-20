@@ -286,8 +286,8 @@ Two that catch people:
 The whole deploy contract is one entry script answering two subcommands:
 
 ```sh
-bash <task space>/.worktree-space/<entry> up    <envId>   # build and raise it, write the acceptance URL into the state file
-bash <task space>/.worktree-space/<entry> smoke <envId>   # run the smoke, merge the result into the state file
+bash <task space>/.worktree-space/<entry> up     <envId>   # build and raise it, write the acceptance URL into the state file
+bash <task space>/.worktree-space/<entry> smoke  <envId>   # run the smoke, merge the result into the state file
 ```
 
 `<entry>` is `.worktree-space/deploy/deploy.sh` by default; if **Deploy script** named something else at
@@ -297,6 +297,26 @@ a script may reference files sitting beside it.
 A `destroy` subcommand is **optional, and the plugin never calls it** — the card's destroy button takes
 the containers down by their `dsh.env-id` label, with no help from a script. **An entry that implements
 `up` and `smoke` alone is complete.**
+
+#### Optional: `timeouts` for the wait
+
+The plugin waits at most **10 minutes** for `up` and **5 minutes** for `smoke`, and stops the script at
+that point — which is not a verdict on the step. When a step genuinely needs longer, give the entry a
+third subcommand that prints one line of JSON:
+
+```sh
+bash <task space>/.worktree-space/<entry> timeouts <envId>
+# {"upSeconds":1200,"smokeSeconds":900}
+```
+
+The plugin asks once **before** each step and runs it under the numbers it printed, in seconds. Either
+key may be omitted, and an omitted one keeps its default — so a task with a slow smoke only needs
+`smokeSeconds`.
+
+**Nothing here has to be got right for the step to run.** An entry that does not implement the
+subcommand, exits non-zero, prints something that is not JSON, or names a value outside 1–3600 seconds,
+is read as having no opinion and the default deadlines stand. The reason is the same as for `destroy`: it
+changes how long the plugin waits, never whether the work runs.
 
 ### 6.2 The deploy root and the copy
 

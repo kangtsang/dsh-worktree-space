@@ -48,11 +48,14 @@ const fakeDeadlineClock = () => vi.useFakeTimers({ toFake: ["setTimeout", "clear
  * it was handed fires - which is what the real seam does when a deadline stops it.
  * `answers` names the calls that should instead come back immediately, so a test whose
  * subject is one hanging command can still let the ordinary reads around it finish.
+ * `stdout` may be a function of the argv, for a path where two answering calls have to
+ * say different things - the `timeouts` lookup and the script it is configuring, say.
  * @param options - `stdout` for a call that answers, and `answers` to pick which do.
  * @returns the service and the spawn options each call was given.
  */
 function hangingSubprocess({ stdout = "", answers = () => false } = {}) {
   const spawns = []
+  const outputFor = typeof stdout === "function" ? stdout : () => stdout
   // A test waits on these rather than on a number of event-loop turns, so the wait
   // lasts as long as this machine needs instead of as long as a fast one needed.
   const waiting = new Set()
@@ -81,7 +84,7 @@ function hangingSubprocess({ stdout = "", answers = () => false } = {}) {
       return {
         done,
         collected: {
-          stdout: { readFrom: () => ({ text: answers(options.argv) ? stdout : "" }) },
+          stdout: { readFrom: () => ({ text: answers(options.argv) ? outputFor(options.argv) : "" }) },
           stderr: { readFrom: () => ({ text: "" }) },
         },
       }
@@ -278,18 +281,23 @@ describe("the deadlines the deploy side hands to runProcess", () => {
     fakeDeadlineClock()
     const dir = await deployableTaskSpace()
     try {
-      const { subprocess, spawns, waitForSpawn } = hangingSubprocess()
+      // The `timeouts` lookup answers nothing and exits non-zero, which is what an entry
+      // written before that subcommand existed does - so the built-in deadlines are the
+      // ones under test here. Matched on the script, not on "the first spawn": the lookup
+      // runs first now, and waiting for that would advance the clock past a deadline this
+      // test is trying to read.
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({ answers: (argv) => argv[2] === "timeouts" })
       const call = outcomeOf(deployEnvironment(subprocess, dir))
       // The record and the script are read from disk before anything spawns, and that
       // read is real I/O: wait for the spawn, then advance the deadline it armed.
-      await waitForSpawn(() => true, "the `up` script to spawn")
+      await waitForSpawn((options) => options.argv[2] === "up", "the `up` script to spawn")
       await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
       const { ok, error } = await call
       expect(ok).toBe(false)
       expect(error.code).toBe("E5008")
       expect(error.message).toMatch(/did not finish within 10 minutes/)
       // A deadline really was handed over, which is the half that was missing.
-      expect(spawns[0].signal).toBeDefined()
+      expect(spawns[spawns.length - 1].signal).toBeDefined()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -302,9 +310,10 @@ describe("the deadlines the deploy side hands to runProcess", () => {
     fakeDeadlineClock()
     const dir = await deployableTaskSpace()
     try {
-      // The smoke script hangs; the docker status read that follows it answers, so the
-      // test is about the script's deadline rather than about a second one behind it.
-      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({ answers: (argv) => argv[0] === "docker" })
+      // The smoke script hangs; the docker status read that follows it answers, and so does
+      // the `timeouts` lookup (printing nothing), so the test is about the script's own
+      // deadline rather than about the lookup that configures it.
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({ answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts" })
       const call = smokeEnvironment(subprocess, dir)
       await waitForSpawn((options) => options.argv[2] === "smoke", "the `smoke` script to spawn")
       await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
@@ -367,6 +376,195 @@ describe("the deadlines the deploy side hands to runProcess", () => {
       await vi.advanceTimersByTimeAsync(60_000)
       await call
       expect(spawns.every((options) => options.signal !== undefined)).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * The deadlines a deploy script asks for through its own `timeouts` subcommand.
+ *
+ * The property under test is not that a number is honoured but that the *default*
+ * survives everything: this lookup is new, and it is asked of scripts that were written
+ * before it existed and have never heard of it. So the fallback is the common case and
+ * has to hold for an entry that exits non-zero, one that prints prose, one that prints
+ * a JSON array, and one that asks for a budget outside the range - each of which has to
+ * leave the built-in deadline in force rather than either raising or waiting on a
+ * number nobody vouched for.
+ */
+describe("the budgets a deploy script asks for", () => {
+  /**
+   * Run one smoke whose `timeouts` lookup answers `answer`, and report whether the smoke
+   * itself was still running once the built-in five minutes had gone by.
+   *
+   * The clock is the assertion, because the deadline is invisible on the spawn: what the
+   * seam gets is a signal, and nothing on it says when that signal fires. So the smoke is
+   * made to hang and the test asks whether past five minutes it is still going. A budget
+   * that took effect fails that; the built-in one passes it.
+   *
+   * A signal being present at all is asserted too, and that is not redundant: the bug this
+   * helper was written after left `timeoutMs` undefined on exactly the fallback path, so
+   * no signal was armed, and "still running after five minutes" was just as true of a
+   * smoke that could never have been stopped. Without this line the helper passes on the
+   * defect it exists to catch.
+   * @param answer - what the `timeouts` lookup prints, or null for an entry that never
+   *   implements it and simply exits non-zero.
+   * @returns whether the smoke survived past the built-in deadline.
+   */
+  async function smokeSurvivesBuiltInDeadline(answer) {
+    fakeDeadlineClock()
+    const dir = await deployableTaskSpace()
+    try {
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({
+        // The lookup answers; the smoke never does, which is the only way to read a
+        // deadline off it.
+        answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts",
+        stdout: (argv) => (argv[2] === "timeouts" ? answer : ""),
+      })
+      const call = outcomeOf(smokeEnvironment(subprocess, dir))
+      await waitForSpawn((options) => options.argv[2] === "smoke", "the `smoke` script to spawn")
+      // Armed at all: without this, a fallback that handed over no deadline at all reads
+      // as "the built-in budget was in force" because nothing ever stopped it.
+      expect(spawns.find((options) => options.argv[2] === "smoke").signal).toBeDefined()
+      // A second short of the built-in five minutes rather than exactly five: advancing
+      // onto the boundary fires the deadline, which would read as a budget that had taken
+      // effect when what is under test is the opposite. Inside the boundary is the claim.
+      await vi.advanceTimersByTimeAsync((5 * 60 * 1000) - 1000)
+      const survived = spawns.find((options) => options.argv[2] === "smoke").signal?.aborted !== true
+      // Finish the call either way, so nothing is left hanging when the test ends.
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+      await call
+      return survived
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it("keeps the built-in deadlines for an entry that never heard of the subcommand", async () => {
+    // The common case, and the one that must not regress: every entry written before this
+    // existed. Exits non-zero and prints nothing, which is exactly what a `case` with no
+    // matching arm produces.
+    expect(await smokeSurvivesBuiltInDeadline(null)).toBe(true)
+  })
+
+  it.each([
+    ["output that is not JSON", "building...\ndone"],
+    ["a JSON array", "[900]"],
+    ["a budget below the floor", '{"smokeSeconds":0}'],
+    ["a budget above the ceiling", '{"smokeSeconds":999999}'],
+    ["a budget named as a string", '{"smokeSeconds":"900"}'],
+    ["a budget that is null", '{"smokeSeconds":null}'],
+    // A script written against the millisecond spelling this used to take. The key is
+    // not one the plugin reads, so the budget is the built-in one rather than an error -
+    // asserted because "I renamed the key" is exactly the change that must not quietly
+    // read as a request for 900 milliseconds instead of 900 seconds.
+    ["a budget in milliseconds, under the old key", '{"smokeMs":900000}'],
+  ])("keeps the built-in deadlines for %s", async (_what, answer) => {
+    // Each of these is a script that answered rather than stayed silent, so what is being
+    // tested is that its answer is ignored. Surviving past five minutes is what "the
+    // built-in deadline is still the one in force" looks like from outside.
+    expect(await smokeSurvivesBuiltInDeadline(answer)).toBe(true)
+  })
+
+  it("still honours a budget that sits beside a rejected one", async () => {
+    // A script whose `upSeconds` is out of range has not lost its say about `smokeSeconds`: the two
+    // are read independently, and the smoke that asked for fifteen minutes gets them even
+    // though the number next to it was ignored. Asserted as the pair together so a future
+    // "one bad key, both defaults" would fail here rather than pass by accident.
+    fakeDeadlineClock()
+    const dir = await deployableTaskSpace()
+    try {
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({
+        answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts",
+        stdout: (argv) => (argv[2] === "timeouts" ? '{"upSeconds":0,"smokeSeconds":900}' : ""),
+      })
+      const call = outcomeOf(smokeEnvironment(subprocess, dir))
+      await waitForSpawn((options) => options.argv[2] === "smoke", "the `smoke` script to spawn")
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+      expect(spawns.find((options) => options.argv[2] === "smoke").signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+      const outcome = await call
+      expect(outcome.value.timedOut).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("runs a smoke under the budget its script asked for", async () => {
+    // The point of the subcommand: a task whose smoke is a slow suite needs longer than
+    // the built-in five minutes, and the only way to say so is the entry itself.
+    fakeDeadlineClock()
+    const dir = await deployableTaskSpace()
+    try {
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({
+        answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts",
+        stdout: (argv) => (argv[2] === "timeouts" ? '{"smokeSeconds":900}' : "done\n"),
+      })
+      const call = smokeEnvironment(subprocess, dir)
+      await waitForSpawn((options) => options.argv[2] === "smoke", "the `smoke` script to spawn")
+      // A budget of 15 minutes, so advancing past the built-in five must not stop it,
+      // and advancing to fifteen must.
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+      expect(spawns.find((options) => options.argv[2] === "smoke").signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+      const outcome = await call
+      expect(outcome.timedOut).toBe(true)
+      // Asked before the step, not after: an answer that arrived once the smoke had
+      // already been stopped would be a number nothing could use.
+      expect(spawns.findIndex((options) => options.argv[2] === "timeouts"))
+        .toBeLessThan(spawns.findIndex((options) => options.argv[2] === "smoke"))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("names the budget in force when a deploy runs out of time", async () => {
+    // The message said "10 minutes" because the constant was ten minutes. With a script
+    // able to set it, a rounded-to-the-minute phrase would report "0 minutes" for a
+    // sub-minute budget - so the wording has to follow the number actually in force.
+    fakeDeadlineClock()
+    const dir = await deployableTaskSpace()
+    try {
+      const { subprocess, waitForSpawn } = hangingSubprocess({
+        answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts",
+        stdout: (argv) => (argv[2] === "timeouts" ? '{"upSeconds":90}' : ""),
+      })
+      const call = outcomeOf(deployEnvironment(subprocess, dir))
+      await waitForSpawn((options) => options.argv[2] === "up", "the `up` script to spawn")
+      await vi.advanceTimersByTimeAsync(90_000)
+      const { ok, error } = await call
+      expect(ok).toBe(false)
+      expect(error.message).toMatch(/did not finish within 1 minutes 30 seconds/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+
+  it("lets one budget change without disturbing the other", async () => {
+    // A slow smoke in a task whose build is quick is the ordinary reason to want this:
+    // naming `smokeSeconds` must not silently move `up` off its built-in ten minutes.
+    fakeDeadlineClock()
+    const dir = await deployableTaskSpace()
+    try {
+      const { subprocess, spawns, waitForSpawn } = hangingSubprocess({
+        answers: (argv) => argv[0] === "docker" || argv[2] === "timeouts",
+        stdout: (argv) => (argv[2] === "timeouts" ? '{"smokeSeconds":900}' : "done\n"),
+      })
+      const call = outcomeOf(deployEnvironment(subprocess, dir))
+      await waitForSpawn((options) => options.argv[2] === "up", "the `up` script to spawn")
+      // Past six minutes - well beyond a script's raised smoke budget, and short of the
+      // built-in ten. An `up` still running here is one still on its own default.
+      await vi.advanceTimersByTimeAsync(6 * 60 * 1000)
+      expect(spawns.find((options) => options.argv[2] === "up").signal?.aborted).toBe(false)
+      // Advancing onto the built-in ten stops it, which is what "its own default was still
+      // in force" means from outside; the call is captured so the refusal is not left
+      // unobserved as an unhandled rejection.
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000)
+      const { ok, error } = await call
+      expect(ok).toBe(false)
+      expect(error.message).toMatch(/did not finish within 10 minutes/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

@@ -10,10 +10,15 @@
  * scripts own that file while the task runs - it is rewritten on every deploy - so
  * this side reads it and deletes it on teardown, but never establishes it.
  *
- * The deploy root is a single script, called as `<entry> up|smoke <envId>`. A `destroy`
+ * The deploy root is a single script, called as `<entry> up|smoke|timeouts <envId>`. A `destroy`
  * subcommand is optional and this side never calls one: teardown finds the containers by
  * their `dsh.env-id` label and takes them down itself, so an entry that implements only
- * `up` and `smoke` is complete. The entry is `.worktree-space/deploy/deploy.sh` unless the
+ * `up` and `smoke` is complete. `timeouts` is a third one, and it is the only one that is
+ * itself optional: the plugin asks it how long it may wait for `up` and `smoke`, and an entry
+ * that does not implement it - every entry written before this existed, and most of them still
+ * - simply keeps the built-in deadlines. It changes how long this side waits, never whether
+ * the work runs, so an entry that answers it wrongly is no worse off than one that never
+ * implements it. The entry is `.worktree-space/deploy/deploy.sh` unless the
  * task's record names another file under that deploy root - a create may, because two tasks
  * in one project can hold different repositories and so need different deploy and smoke
  * scripts. Both the entry and the state file live inside the plugin's own directory
@@ -82,6 +87,38 @@ const DEPLOY_UP_TIMEOUT_MS = 10 * 60 * 1000
 const DEPLOY_SMOKE_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
+ * The ceiling a script may ask for, and the floor it may not go below.
+ *
+ * Both ends exist, and for opposite reasons. The ceiling is the difference between a
+ * deadline and an unbounded wait: a script that answers `timeouts` with a day-long
+ * smoke budget has removed the only thing that keeps a hung script from pinning an
+ * HTTP handler forever, which is the whole defect the deadlines above were added for.
+ * The floor is the other shape of the same mistake - a zero budget stops `up` before
+ * it starts, and a failure of a quick lookup then looks like a deployment that will
+ * not run. Neither is a refusal of the request: an out-of-range answer falls back to
+ * the built-in default, so a script with a bad expression still deploys and smokes,
+ * just under the numbers this side ships.
+ *
+ * Seconds, because that is the unit the answer is given in and the unit one script
+ * configuring a slow suite writes down; the milliseconds these are compared against
+ * never leave this file.
+ */
+const DEPLOY_TIMEOUT_MAX_SECONDS = 3600
+const DEPLOY_TIMEOUT_MIN_SECONDS = 1
+
+/**
+ * How long the `timeouts` lookup may take: ten seconds.
+ *
+ * It is a lookup rather than a step - the answer is two numbers - so it gets the same
+ * shape of deadline as a docker query and nothing like the budget of the calls it is
+ * configuring. The floor matters more than the ceiling here: a script that answers
+ * this subcommand by building, or that falls through a `case "$1"` into the `up` arm,
+ * has to be cut off, because the alternative is a hang introduced by the very feature
+ * meant to remove hangs.
+ */
+const DEPLOY_TIMEOUTS_QUERY_MS = 10_000
+
+/**
  * Run one command, as {@link `git.js`} runs git: one spawn seam, one shape of answer.
  *
  * Its own module rather than a sibling in `git.js`, for the same reason that file
@@ -146,6 +183,99 @@ async function runProcess(subprocess, argv, { cwd, maxBytes = DOCKER_MAX_BYTES, 
   } finally {
     if (timer !== undefined) clearTimeout(timer)
     if (controller !== undefined && signal !== undefined) signal.removeEventListener('abort', forward)
+  }
+}
+
+/**
+ * The deadlines this task's deploy script asks for, or the built-in ones.
+ *
+ * A third subcommand on the same entry, beside `up` and `smoke`: the plugin runs
+ * `<entry> timeouts <envId>` and reads JSON off stdout, with `upSeconds` and
+ * `smokeSeconds` as whole seconds. Seconds rather than milliseconds because the
+ * smallest budget anyone asks for is a second and the largest is an hour, and a
+ * writer spelling that out should not have to carry three zeroes to say so - nor
+ * risk a missed zero turning fifteen minutes into fifteen hundred. Both are optional
+ * and both are independently overridable - a script that names one keeps the built-in
+ * number for the other - which is what makes this worth a subcommand rather than a
+ * file to copy into every deploy root.
+ *
+ * Everything about how lenient it is follows from the one rule that matters: the
+ * answer changes how long this side waits, and never whether the work runs. So a
+ * script that does not implement the subcommand (the whole of every entry written
+ * before this existed, and most of them still), one that exits non-zero, one that
+ * prints nothing, one that prints prose, one that prints a JSON array, and one that
+ * names a number outside the range all read as "no opinion" and leave the built-in
+ * deadlines in force. None of them raises, and none of them costs the caller a
+ * second: the script is asked once per deploy or smoke, under a short deadline of
+ * its own, because a script that hangs on an unknown subcommand must not hang here
+ * either - that would put the hang this subcommand exists to configure back on the
+ * path that configures it.
+ *
+ * The subcommand is asked under the same environment `up` and `smoke` get, so a
+ * script can compute its budgets from the environment id or from anything else the
+ * deploy knows. It is asked before either of them runs, which is the only moment the
+ * answer can still be used.
+ * @param subprocess - the profile's subprocess service.
+ * @param found - the entry {@link findDeployScript} resolved.
+ * @param taskPath - the task space directory.
+ * @param envId - the environment id the entry is called with.
+ * @param signal - the caller's signal, so a cancelled panel press stops this too.
+ * @returns `{ upMs, smokeMs }` in milliseconds, each a positive integer - seconds on
+ *   the way in, because that is what a script can be asked in, and milliseconds on the
+ *   way out, because that is what the only consumer of this answers.
+ */
+async function deployTimeouts(subprocess, found, taskPath, envId, { signal } = {}) {
+  // Milliseconds, because that is the unit `timeoutMs` consumes and the one every return
+  // path below has to answer in. The seconds a script writes are converted once, at the
+  // edge, rather than carried inward under a second set of names - which is how the
+  // fallbacks below came to return values the caller could not read, leaving every
+  // script that never implemented `timeouts` on no deadline at all.
+  const defaults = { upMs: DEPLOY_UP_TIMEOUT_MS, smokeMs: DEPLOY_SMOKE_TIMEOUT_MS }
+  let command
+  try {
+    command = deployEntryCommand(found.script, 'timeouts', envId)
+  } catch {
+    // A machine with no usable bash cannot ask the question either; the built-in
+    // deadlines answer it without asking, and the call that follows raises with the
+    // name of the machine's problem rather than with anything about `timeouts`.
+    return defaults
+  }
+  let out
+  try {
+    out = await runProcess(subprocess, command.argv, {
+      cwd: found.dir,
+      // Short on purpose: this is a lookup, and a script that treats an unknown
+      // subcommand by starting a build would otherwise hold up the build it is being
+      // asked about. One tenth of the `up` budget it can raise is enough for a
+      // subcommand that is meant to print two numbers and nothing else.
+      timeoutMs: DEPLOY_TIMEOUTS_QUERY_MS,
+      env: { ...deployEnvironmentFor(taskPath, envId), ...command.env },
+      ...(signal === undefined ? {} : { signal }),
+    })
+  } catch {
+    return defaults
+  }
+  if (!out.ok) return defaults
+  const budget = (value, fallback) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+    const seconds = Math.trunc(value)
+    return seconds >= DEPLOY_TIMEOUT_MIN_SECONDS && seconds <= DEPLOY_TIMEOUT_MAX_SECONDS
+      ? seconds * 1000
+      : fallback
+  }
+  // Parsed as one document rather than pattern-matched, because either key may carry a
+  // number, and a regex for digits would also match the digits inside a version string
+  // or a log line the script printed before its answer.
+  let parsed
+  try {
+    parsed = JSON.parse(out.stdout)
+  } catch {
+    return defaults
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return defaults
+  return {
+    upMs: budget(parsed.upSeconds, defaults.upMs),
+    smokeMs: budget(parsed.smokeSeconds, defaults.smokeMs),
   }
 }
 
@@ -775,6 +905,24 @@ function outputTail(...streams) {
 }
 
 /**
+ * A deadline in the words the person reading a timeout can act on.
+ *
+ * Whole minutes while that is what it says - so the built-in ten reads as "10 minutes",
+ * which is how it has always been phrased - and a spelled-out remainder below an hour,
+ * because the budget is a script's answer now and a script that asks for 900 seconds
+ * would otherwise be reported as "0 minutes" by a rounding that was only ever correct
+ * for the constants this used to be. Below a minute the milliseconds are the only unit
+ * that does not round to something untrue.
+ * @param ms - the deadline in force.
+ * @returns the phrase for it, without a unit of its own appended twice.
+ */
+function describeBudget(ms) {
+  if (ms >= 60_000 && ms % 60_000 === 0) return `${Math.round(ms / 60_000)} minutes`
+  if (ms >= 60_000) return `${Math.floor(ms / 60_000)} minutes ${Math.round((ms % 60_000) / 1000)} seconds`
+  return `${ms}ms`
+}
+
+/**
  * Why a candidate entry may not be run, or '' when it may.
  *
  * Two questions, both asked against the path this side is about to hand to `bash`, and
@@ -910,14 +1058,19 @@ export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
   // re-wrap it as "could not be started ... bash must be on the PATH the server runs
   // with" - the very wording that sent the original hunt towards a missing file.
   const command = deployEntryCommand(found.script, 'smoke', envId)
+  // Asked before the smoke runs, because that is the only moment its answer can still
+  // be used: the deadline it sets is the one this call runs under.
+  const timeouts = await deployTimeouts(subprocess, found, taskPath, envId, { signal })
   let out
   try {
     out = await runProcess(subprocess, command.argv, {
       cwd: found.dir,
       maxBytes: 2 * 1024 * 1024,
       // A smoke runs a test suite, so it is allowed minutes - but not forever. Without
-      // this the handler that asked for it waits on a script that may never exit.
-      timeoutMs: DEPLOY_SMOKE_TIMEOUT_MS,
+      // this the handler that asked for it waits on a script that may never exit. The
+      // script's own `timeouts` may raise or lower it; the point past which this side
+      // stops waiting is a fact about the machine either way.
+      timeoutMs: timeouts.smokeMs,
       // Where the script must merge `lastSmoke`. Handed over rather than left to a
       // convention, so a script in a subdirectory writes the same file as one at the top.
       env: { ...deployEnvironmentFor(taskPath, envId), ...command.env },
@@ -965,6 +1118,8 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
   }
   // Before the try, for the reason given at the `smoke` call site above.
   const command = deployEntryCommand(found.script, 'up', envId)
+  // Before the deploy runs, for the same reason: this call's deadline is the answer.
+  const timeouts = await deployTimeouts(subprocess, found, taskPath, envId, { signal })
   let out
   try {
     out = await runProcess(subprocess, command.argv, {
@@ -972,8 +1127,9 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
       maxBytes: 2 * 1024 * 1024,
       // A rebuild pulls images and starts services, so this is the longest deadline here
       // - and still a deadline. A build that has not answered in ten minutes is one that
-      // is not going to, and the person who pressed the button is owed the answer.
-      timeoutMs: DEPLOY_UP_TIMEOUT_MS,
+      // is not going to, and the person who pressed the button is owed the answer. A
+      // script that knows its build is slower than that says so through `timeouts`.
+      timeoutMs: timeouts.upMs,
       // Where the script must write `url`. Handed over rather than left to a convention, so
       // a script in a subdirectory writes the same file as one at the top.
       env: { ...deployEnvironmentFor(taskPath, envId), ...command.env },
@@ -989,7 +1145,7 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
     // the only account of where it got to.
     throw coded(
       'E5008',
-      `the deploy script did not finish within ${Math.round(DEPLOY_UP_TIMEOUT_MS / 60000)} minutes and was stopped:\n${outputTail(out.stderr, out.stdout)}`,
+      `the deploy script did not finish within ${describeBudget(timeouts.upMs)} and was stopped:\n${outputTail(out.stderr, out.stdout)}`,
     )
   }
   if (!out.ok) {

@@ -12,6 +12,8 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 <img src="docs/img/isolation-model.png" alt="Worktree Space隔离模型" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
 
+📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV17Mn56dECu)
+
 > [!IMPORTANT]
 > **Beta（实验性）**：把提交和合并冲突交给 agent 处理的功能处于实验性验证阶段，行为可能继续调整；它**默认
 > 显示**，如需隐藏这两个入口，将插件配置里的「交由 agent 解决冲突入口」设为「隐藏」（见[实验性一节](#-实验性把提交与冲突交给-agent)）；

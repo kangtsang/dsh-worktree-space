@@ -244,8 +244,8 @@ Podman、colima、原生 Linux 引擎都可以。插件不检查也不代替这�
 部署契约就是一个入口脚本实现两个子命令：
 
 ```sh
-bash <任务空间>/.worktree-space/<entry> up    <envId>   # 构建并启动，把验收地址写进状态文件
-bash <任务空间>/.worktree-space/<entry> smoke <envId>   # 跑冒烟，把结果合并进状态文件
+bash <任务空间>/.worktree-space/<entry> up     <envId>   # 构建并启动，把验收地址写进状态文件
+bash <任务空间>/.worktree-space/<entry> smoke  <envId>   # 跑冒烟，把结果合并进状态文件
 ```
 
 `<entry>` 默认是 `.worktree-space/deploy/deploy.sh`；创建时用「部署脚本」指定了别的就叫那个名字。
@@ -253,6 +253,22 @@ bash <任务空间>/.worktree-space/<entry> smoke <envId>   # 跑冒烟，把结
 
 `destroy` 子命令**可选，插件从不调用它** —— 面板的销毁按钮按容器的 `dsh.env-id` 标签直接拆，
 不需要脚本参与。**只实现 `up` 和 `smoke` 的入口就是完整的。**
+
+#### 可选：`timeouts` 调整等待时限
+
+插件等 `up` 最多 **10 分钟**、等 `smoke` 最多 **5 分钟**，到点就把脚本停掉（不是判它失败）。
+真的需要更久时，给入口加第三个子命令，打印一行 JSON：
+
+```sh
+bash <任务空间>/.worktree-space/<entry> timeouts <envId>
+# {"upSeconds":1200,"smokeSeconds":900}
+```
+
+插件在跑每一步**之前**先问一次，用它给的秒数当那一步的时限。两个键都可以省略，省略的那一步
+沿用默认值 —— 一个冒烟慢的任务只写 `smokeSeconds` 就够。
+
+**这一步没有得做对才有**：脚本没实现这个子命令、非零退出、输出不是 JSON、值不在 1 到 3600 秒之间
+—— 任何一种都当作没回答，沿用默认时限。理由和 `destroy` 一样：它只改插件等多久，不改这一步跑不跑。
 
 ### 6.2 部署根与复制
 
