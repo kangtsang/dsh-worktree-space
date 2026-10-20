@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "version": "1.3.1",
+  "version": "1.3.2",
   "baseline": {
-    "package": "dsh-worktree-space@1.3.1",
-    "commit": "3dfd34d (the release tree; the public release line carries this version as one commit)",
+    "package": "dsh-worktree-space@1.3.2",
+    "commit": "52c0e89 (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
     "note": "The manifest state, the acceptance procedure, the acceptance results and the boundary cases below all describe this version only; no other version is referenced.",
     "procedure": "docs/store-evidence.md"
   },
@@ -13,14 +13,14 @@
     "powershell": "$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) (\"dsh-evidence-\" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null"
   },
   "manifest": {
-    "version": "1.3.1",
+    "version": "1.3.2",
     "enginesNode": ">=22.19.0",
-    "enginesDsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "enginesDsh": ">=0.2.0-rc.1 <0.3.0-0",
     "peers": {
-      "@deepseek-ai/dsh-client-connection": ">=0.1.7-rc.1 <0.3.0-0",
-      "@deepseek-ai/dsh-tools": ">=0.1.7-rc.1 <0.3.0-0"
+      "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.1 <0.3.0-0",
+      "@deepseek-ai/dsh-tools": ">=0.2.0-rc.1 <0.3.0-0"
     },
-    "compatibilityDsh": ">=0.1.7-rc.1 <0.3.0-0",
+    "compatibilityDsh": ">=0.2.0-rc.1 <0.3.0-0",
     "compatibilityNode": ">=22.19.0",
     "profiles": [
       "web",
@@ -28,26 +28,12 @@
     ],
     "clientPlatform": "web",
     "dshReleases": {
-      "0.1.7-rc.1": "compatible",
-      "0.1.7-rc.2": "compatible",
       "0.2.0-rc.1": "compatible",
       "0.2.0-rc.2": "compatible",
       "0.2.1-rc.1": "compatible",
       "0.2.1-rc.2": "compatible"
     },
     "dshOperations": {
-      "0.1.7-rc.1": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.1.7-rc.2": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
       "0.2.0-rc.1": {
         "install": "passed",
         "start": "passed",
@@ -76,7 +62,7 @@
     "rangeShape": {
       "oneString": "engines.dsh, both DSH peers and dsh.compatibility.dsh deliberately read the same string: from DSH 0.2.0 on install and startup enforce the peer range while the other two are declarative, so a manifest whose three disagree is a manifest whose gate is not the one it documents",
       "upperBound": "<0.3.0-0 rather than <0.3.0: under the semver.satisfies(..., { includePrerelease: true }) call DSH makes, <0.3.0 would also admit 0.3.0-alpha.1, while the -0 prerelease floor excludes the 0.3.0 line's prereleases as well",
-      "lowerBound": ">=0.1.7-rc.1: support starts at the first release candidate of the 0.1.7 line"
+      "lowerBound": ">=0.2.0-rc.1: support starts at the first release candidate of the 0.2.0 line; the 0.1.7 line is no longer declared supported as of 1.3.2"
     },
     "platformShape": "dsh.client.platform stays \"web\" because the desktop client runs the same web client and the same client/client.js build; the two clients are declared as profiles, not as platforms"
   },
@@ -93,27 +79,25 @@
     "status": "run",
     "note": "the store contract's clause 8 requires install -> configuration -> visible -> uninstall/rollback in a disposable profile, and unit tests do not substitute for it. Each row below comes from an actual run on that release's own DSH CLI, per docs/store-evidence.md sections 1 and 2.",
     "web": {
-      "ranOn": "2026-10-18",
-      "artifact": "dsh-worktree-space-1.3.1.tgz",
+      "ranOn": "2026-10-20",
+      "artifact": "dsh-worktree-space-1.3.2.tgz",
       "artifactFiles": 22,
-      "artifactBytes": 1077891,
-      "artifactSha256": "e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C",
-      "artifactCommit": "3dfd34d",
-      "artifactNote": "this is the release artifact, not a separate test build: the bundles were rebuilt into a scratch directory before packing and compared byte-for-byte with the committed client/client.js (55E1074F...495E9) and lib/index.js (45B745F1...B5A9), and unpacking the tested tarball gives the same two hashes",
+      "artifactBytes": 1081425,
+      "artifactSha256": "B7ACF45E4C01E126DB6254487127C4A4F9841C70E3F25BE584DEC5A5B1EC6643",
+      "artifactCommit": "52c0e89",
+      "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (55E1074F...495E9, 320063 bytes) and lib/index.js (A638674C...DA0C8, 390506 bytes), and unpacking the tested tarball gives those same two hashes",
       "ports": {
         "0.2.1-rc.2": 34800,
         "0.2.1-rc.1": 34801,
         "0.2.0-rc.2": 34802,
-        "0.2.0-rc.1": 34803,
-        "0.1.7-rc.2": 34804,
-        "0.1.7-rc.1": 34805
+        "0.2.0-rc.1": 34803
       },
       "node": "v24.18.0",
       "pnpm": "12.6.0",
-      "totalSeconds": 43,
-      "verdict": "PASS (6 passed, 0 failed)",
+      "totalSeconds": 29,
+      "verdict": "PASS (4 passed, 0 failed)",
       "report": "D:\\dsh-acceptance\\dsh-worktree-space\\matrix\\logs\\matrix-report.md",
-      "reportNote": "no JSON twin of this run exists: pnpm acceptance:matrix does not pass -Json, so the matrix-report.json sitting beside the markdown is from the 1.3.0 run of 2026-10-16 (pluginVersion 1.3.0, commit b80680e, 4 versions) and must not be quoted as this release's evidence"
+      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.3.2, commit 52c0e89, 4 versions); the 1.3.1 evidence had to warn that the file sitting there was left over from 1.3.0"
     },
     "desktop": "confirmed by the author outside this run; the desktop lifecycle does not go through the command line",
     "rows": [
@@ -125,12 +109,12 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
+          "installedVersion": "1.3.2"
         },
         "compose": {
           "result": "passed",
           "exit": 0,
-          "lines": 1229,
+          "lines": 1232,
           "worktreeSpaceMentions": 3,
           "nameMentions": 1
         },
@@ -138,11 +122,13 @@
           "result": "passed",
           "pageStatus": 200,
           "pageMentions": 5,
+          "pageBytes": 38033,
           "bundleStatus": 200,
           "bundleBytes": 320139,
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
+          "bundleRev": "a3249bae8815",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -155,24 +141,24 @@
         "rollback": {
           "result": "passed",
           "exit": 0,
-          "lines": 1226,
+          "lines": 1229,
           "worktreeSpaceMentions": 0
         }
       },
       {
         "dsh": "0.2.1-rc.1",
         "node": "v24.18.0",
-        "seconds": 9,
+        "seconds": 8,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
+          "installedVersion": "1.3.2"
         },
         "compose": {
           "result": "passed",
           "exit": 0,
-          "lines": 1223,
+          "lines": 1226,
           "worktreeSpaceMentions": 3,
           "nameMentions": 1
         },
@@ -180,11 +166,13 @@
           "result": "passed",
           "pageStatus": 200,
           "pageMentions": 5,
+          "pageBytes": 37544,
           "bundleStatus": 200,
           "bundleBytes": 320139,
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
+          "bundleRev": "a05ec88aca97",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -197,19 +185,19 @@
         "rollback": {
           "result": "passed",
           "exit": 0,
-          "lines": 1220,
+          "lines": 1223,
           "worktreeSpaceMentions": 0
         }
       },
       {
         "dsh": "0.2.0-rc.2",
         "node": "v24.18.0",
-        "seconds": 6,
+        "seconds": 5,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
+          "installedVersion": "1.3.2"
         },
         "compose": {
           "result": "passed",
@@ -222,11 +210,13 @@
           "result": "passed",
           "pageStatus": 200,
           "pageMentions": 5,
+          "pageBytes": 35367,
           "bundleStatus": 200,
           "bundleBytes": 320139,
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
+          "bundleRev": "8548a4abffa3",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -251,7 +241,7 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
+          "installedVersion": "1.3.2"
         },
         "compose": {
           "result": "passed",
@@ -264,11 +254,13 @@
           "result": "passed",
           "pageStatus": 200,
           "pageMentions": 5,
+          "pageBytes": 35333,
           "bundleStatus": 200,
           "bundleBytes": 320139,
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
+          "bundleRev": "3ae3f1aeea7e",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -282,90 +274,6 @@
           "result": "passed",
           "exit": 0,
           "lines": 1259,
-          "worktreeSpaceMentions": 0
-        }
-      },
-      {
-        "dsh": "0.1.7-rc.2",
-        "node": "v24.18.0",
-        "seconds": 6,
-        "install": {
-          "result": "passed",
-          "exit": 0,
-          "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
-        },
-        "compose": {
-          "result": "passed",
-          "exit": 0,
-          "lines": 1249,
-          "worktreeSpaceMentions": 3,
-          "nameMentions": 1
-        },
-        "visible": {
-          "result": "passed",
-          "pageStatus": 200,
-          "pageMentions": 5,
-          "bundleStatus": 200,
-          "bundleBytes": 320139,
-          "bundleType": "text/javascript; charset=utf-8",
-          "bundleRegisters": 1,
-          "bundleEndpoints": 1,
-          "rpcOk": "HTTP 200 {\"ok\":true}",
-          "rpcInventedEndpoint": "HTTP 404"
-        },
-        "uninstall": {
-          "result": "passed",
-          "exit": 0,
-          "nodeModulesGone": true,
-          "patchMentions": 0
-        },
-        "rollback": {
-          "result": "passed",
-          "exit": 0,
-          "lines": 1246,
-          "worktreeSpaceMentions": 0
-        }
-      },
-      {
-        "dsh": "0.1.7-rc.1",
-        "node": "v24.18.0",
-        "seconds": 6,
-        "install": {
-          "result": "passed",
-          "exit": 0,
-          "incompatibleWarning": false,
-          "installedVersion": "1.3.1"
-        },
-        "compose": {
-          "result": "passed",
-          "exit": 0,
-          "lines": 1237,
-          "worktreeSpaceMentions": 3,
-          "nameMentions": 1
-        },
-        "visible": {
-          "result": "passed",
-          "pageStatus": 200,
-          "pageMentions": 5,
-          "bundleStatus": 200,
-          "bundleBytes": 320139,
-          "bundleType": "text/javascript; charset=utf-8",
-          "bundleRegisters": 1,
-          "bundleEndpoints": 1,
-          "rpcOk": "HTTP 200 {\"ok\":true}",
-          "rpcInventedEndpoint": "HTTP 404"
-        },
-        "uninstall": {
-          "result": "passed",
-          "exit": 0,
-          "nodeModulesGone": true,
-          "patchMentions": 0
-        },
-        "rollback": {
-          "result": "passed",
-          "exit": 0,
-          "lines": 1234,
           "worktreeSpaceMentions": 0
         }
       }
@@ -382,11 +290,11 @@
     "missing-authority-503": "not applicable: same",
     "post-not-replayed": "not applicable: same",
     "crash-recovery": "not applicable: the plugin keeps no durable operation journal; each route call is one git pass, and a stopped finish is re-read from the repository's own state",
-    "windows-file-lock": "did not trigger: in all six runs the start, the probes and the stop left no holder behind, and node_modules was removable",
-    "rollback-failure": "did not trigger: in all six runs node_modules disappeared, cordis.patch.yml went back to 0 mentions, and --dump-config returned to its pre-install line count",
+    "windows-file-lock": "did not trigger: in all four runs the start, the probes and the stop left no holder behind, and node_modules was removable",
+    "rollback-failure": "did not trigger: in all four runs node_modules disappeared, cordis.patch.yml went back to 0 mentions, and --dump-config returned to its pre-install line count",
     "pnpm-10": "not tested: only the host-bundled pnpm was present",
     "pnpm-11": "not tested: only the host-bundled pnpm was present",
-    "pnpm-12": "tested: 12.6.0, the version the host bundles; all six installs used it",
+    "pnpm-12": "tested: 12.6.0, the version the host bundles; all four installs used it",
     "monorepo-subpath": "not applicable: this plugin installs as a single package, not from a monorepo subpath"
   },
   "notCovered": [
@@ -394,7 +302,7 @@
     "UI-level visibility was not checked item by item: this round established the three machine-readable criteria (page reachable, bundle actually served, host RPC route registered), while the name, description and icon.svg in the plugin list, the nine configuration fields taking effect immediately, and the sidebar entry still need the walkthrough in section 2.3",
     "only pnpm 12.6.0 was exercised; 10 and 11 were not installed and not tested",
     "--dump-config line counts are host-version dependent and do not carry across DSH versions or across changes to the config fields",
-    "the window is the currently published releases, not a fixed set: it covers 0.1.7-rc.1, 0.1.7-rc.2, 0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-rc.1 and 0.2.1-rc.2, and does not follow a new upstream release automatically",
+    "the window is the currently published releases, not a fixed set: as of 1.3.2 it covers 0.2.0-rc.1, 0.2.0-rc.2, 0.2.1-rc.1 and 0.2.1-rc.2 - four, because support for the 0.1.7 line was dropped rather than because upstream published something new - and it does not follow a new upstream release automatically",
     "the desktop lifecycle was confirmed by the author outside this run; this matrix carries command-line evidence for the web client only"
   ]
 }
