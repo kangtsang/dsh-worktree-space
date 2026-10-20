@@ -4,6 +4,36 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.3.2 — 2026-10-20
+
+An adjustable wait for the two deploy-for-acceptance steps, and the host compatibility window
+narrowed to 0.2.0.
+
+### Added
+
+- **A deploy entry can set its own wait.** The plugin waited ten minutes for `up` and five for
+  `smoke` and stopped the script past that, with nowhere to change either. A task whose smoke
+  genuinely needed longer had to shorten the smoke or edit the plugin. An entry may now answer a
+  third subcommand, `timeouts`, printing one line of JSON with two second counts:
+  `{"upSeconds":1200,"smokeSeconds":900}`. The plugin asks once before each step and runs that
+  step under the number it printed; either key may be omitted and keeps its default.
+
+  The subcommand may be left out forever. An entry that does not implement it, exits non-zero,
+  prints something that is not JSON, or names a value outside 1–3600 seconds is read as having no
+  opinion, and the built-in deadlines stand — **it changes how long the plugin waits, never
+  whether the step runs**.
+
+### Compatibility
+
+- **The 0.1.7 line is no longer supported.** The lower bound moves from `0.1.7-rc.1` to
+  `0.2.0-rc.1` across all four declarations (`engines.dsh`, both peer dependencies —
+  `dsh-client-connection` and `dsh-tools` — and `dsh.compatibility.dsh`), and the verified window
+  becomes four releases. A host still on 0.1.7 should stay on 1.3.1.
+
+### Documentation
+
+- The Chinese README now links the plugin's Bilibili introduction.
+
 ## 1.3.1 — 2026-10-18
 
 Fixes on the Docker deploy-for-acceptance and conflict hand-off paths, plus two documentation

@@ -194,12 +194,12 @@ branch back first and removes the worktree afterwards.
 - [Node.js](https://nodejs.org) `>=22.19.0`
 - [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
   plugin, and has to be on `PATH`
-- DSH `>=0.1.7-rc.1 <0.3.0-0`, the 0.1.7 line without its `0.1.7-alpha.x` prereleases, and 0.2.x
+- DSH `>=0.2.0-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.0-rc.1`, excluding the 0.3.0 line's prereleases)
 - Clients: **both the web client and the desktop client work**; the desktop client was verified by
   hand, the command-line matrix does not cover it
 
-**All four official releases were verified one by one** — `0.1.7-rc.1`, `0.1.7-rc.2`, `0.2.0-rc.1`
-and `0.2.0-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
+**All four official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`
+and `0.2.1-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
 install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
 the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
 matrix. The per-release record is in

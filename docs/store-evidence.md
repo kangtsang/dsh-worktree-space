@@ -4,7 +4,7 @@
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
 [`PERMISSIONS.md`](../PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
 
-声明基线：`dsh-worktree-space@1.3.1`，对应本仓库默认分支上的固定提交 `3dfd34d`。下面的清单现状、验收方法、
+声明基线：`dsh-worktree-space@1.3.2`，被测树是本仓库默认分支上的固定提交 `52c0e89`；最终发版提交与它只差这两份证据文档自己（见第 5 节循环性一条）。下面的清单现状、验收方法、
 验收结果与边界情形都以它为准，不引用其它版本。
 
 ---
@@ -116,24 +116,24 @@ dsh --profile evidence --dump-config
 
 | 字段 | 值 |
 | --- | --- |
-| `version` | `1.3.1` |
+| `version` | `1.3.2` |
 | `engines.node` | `>=22.19.0` |
-| `engines.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
-| `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.1.7-rc.1 <0.3.0-0` |
-| `peerDependencies["@deepseek-ai/dsh-tools"]` | `>=0.1.7-rc.1 <0.3.0-0` |
-| `dsh.compatibility.dsh` | `>=0.1.7-rc.1 <0.3.0-0` |
+| `engines.dsh` | `>=0.2.0-rc.1 <0.3.0-0` |
+| `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.2.0-rc.1 <0.3.0-0` |
+| `peerDependencies["@deepseek-ai/dsh-tools"]` | `>=0.2.0-rc.1 <0.3.0-0` |
+| `dsh.compatibility.dsh` | `>=0.2.0-rc.1 <0.3.0-0` |
 | `dsh.compatibility.node` | `>=22.19.0` |
 | `dsh.compatibility.profiles` | `["web", "desktop"]` |
 | `dsh.client.platform` | `web` |
-| `dsh.compatibility.dshReleases` | `0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`，均为 `compatible` |
-| `dsh.compatibility.dshOperations` | 上述六个版本，`install` / `start` / `uninstall` / `rollback` 均为 `passed` |
+| `dsh.compatibility.dshReleases` | `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`，均为 `compatible` |
+| `dsh.compatibility.dshOperations` | 上述四个版本，`install` / `start` / `uninstall` / `rollback` 均为 `passed` |
 
 三处 DSH 范围（`engines.dsh`、两个 peer、`dsh.compatibility.dsh`）刻意写成同一个字符串：DSH 0.2.0 起
 安装与启动会强制校验 peer，另两处只是声明；三处不一致时，真正被闸住的那一处说了算，清单却会自相矛盾。
 
 上界 `<0.3.0-0` 而不是 `<0.3.0`：在 DSH 用的 `semver.satisfies(..., { includePrerelease: true })`
 下，`<0.3.0` 会把 `0.3.0-alpha.1` 一并放进来，`-0` 这个预发布下界把 0.3.0 整条线的预发布也排除在外。
-下界取 `>=0.1.7-rc.1`，即支持范围从 0.1.7 的首个 release candidate 起算。
+下界取 `>=0.2.0-rc.1`，即支持范围从 0.2.0 的首个 release candidate 起算（1.3.2 起不再声明支持 0.1.7 线）。
 
 **`dsh.client.platform` 仍是 `web`**：桌面端跑的是同一份 web 客户端，构建产物同为 `client/client.js`，
 所以端声明写在 `dsh.compatibility.profiles`（两个 profile），平台声明保持一个值。
@@ -152,17 +152,19 @@ dsh --profile evidence --dump-config
 
 ## 5. 生命周期实测矩阵
 
-六个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口。端口按**从新到旧**分配
+四个版本各跑一遍第 1、2 节的流程，`web` 端、一次性数据目录、固定高位端口。端口按**从新到旧**分配
 （`run-all.ps1` 依版本顺序取号）：`0.2.1-rc.2` → 34800、`0.2.1-rc.1` → 34801、`0.2.0-rc.2` → 34802、
-`0.2.0-rc.1` → 34803、`0.1.7-rc.2` → 34804、`0.1.7-rc.1` → 34805，避开宿主默认的 3080。
-被测产物是 `dsh-worktree-space-1.3.1.tgz`，由本仓库 `npm pack` 产出，含 22 个文件，
-sha256 `e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C`（1077891 字节）。
-运行时间 2026-10-18 11:54:59 +08:00，判定 `PASS`（6 通过 0 失败），总耗时 43 秒，退出码 0。矩阵报告写在
-`D:\dsh-acceptance\dsh-worktree-space\matrix\logs\matrix-report.md`（本轮未带 `-Json`，没有同名
-`.json`），报告里带着 `Commit: 3dfd34d`——**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
-这一轮的被测产物**就是发布产物**，与该提交逐字节一致：打包前另行只读重建过一次 esbuild
-产物，`client/client.js`（`55E1074F…495E9`，320063 字节）与 `lib/index.js`（`45B745F1…B5A9`，
-387557 字节）与提交里的两份 `cmp` 完全相同；解包被测 tarball 再比，两份仍是这两个哈希。
+`0.2.0-rc.1` → 34803，避开宿主默认的 3080。**1.3.2 起不再声明支持 0.1.7 系列**，窗口因此从六个减到四个
+（那四个版本上一轮的实测结果见 git 历史里的本文档）。
+被测产物是 `dsh-worktree-space-1.3.2.tgz`，由本仓库 `npm pack` 产出，含 22 个文件，
+sha256 `B7ACF45E4C01E126DB6254487127C4A4F9841C70E3F25BE584DEC5A5B1EC6643`（1081425 字节）。
+运行时间 2026-10-20 23:16:32 +08:00，判定 `PASS`（4 通过 0 失败），总耗时 29 秒，退出码 0。矩阵报告写在
+`D:\dsh-acceptance\dsh-worktree-space\matrix\logs\matrix-report.md`；**本轮加了 `-Json`**，同名
+`.json` 因此也是本轮的（上一轮 1.3.1 落在那里的 `.json` 是 1.3.0 的旧文件，正是这一个开关消掉的坑），
+报告里带着 `Commit: 52c0e89`——**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
+被测产物与那个提交逐字节一致，两处各自核过：`pnpm test` 的 `check:tracked-bundle` 重新构建后与提交里的
+`client/client.js`（`55E1074F…495E9`，320063 字节）与 `lib/index.js`（`A638674C…DA0C8`，390506 字节）
+逐字节相同；解包被测 tarball 再比，两份仍是这两个哈希。
 所以报告里的 commit 与被测的包是同一棵树，不存在「报告早于功能改动」那种情况。
 
 > **提交 sha 会随历史重整消失，产物哈希不会。**
@@ -172,18 +174,16 @@ sha256 `e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C`（1077
 
 | DSH | Node | 安装 | 配置组合 | 启动与可见性 | 卸载 | 回滚 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `0.2.1-rc.2` | `v24.18.0` | 通过 | 通过（1229 行 / 3 处命中） | 通过 | 通过 | 通过（1226 行 / 0 处命中） |
-| `0.2.1-rc.1` | `v24.18.0` | 通过 | 通过（1223 行 / 3 处命中） | 通过 | 通过 | 通过（1220 行 / 0 处命中） |
+| `0.2.1-rc.2` | `v24.18.0` | 通过 | 通过（1232 行 / 3 处命中） | 通过 | 通过 | 通过（1229 行 / 0 处命中） |
+| `0.2.1-rc.1` | `v24.18.0` | 通过 | 通过（1226 行 / 3 处命中） | 通过 | 通过 | 通过（1223 行 / 0 处命中） |
 | `0.2.0-rc.2` | `v24.18.0` | 通过 | 通过（1262 行 / 3 处命中） | 通过 | 通过 | 通过（1259 行 / 0 处命中） |
 | `0.2.0-rc.1` | `v24.18.0` | 通过 | 通过（1262 行 / 3 处命中） | 通过 | 通过 | 通过（1259 行 / 0 处命中） |
-| `0.1.7-rc.2` | `v24.18.0` | 通过 | 通过（1249 行 / 3 处命中） | 通过 | 通过 | 通过（1246 行 / 0 处命中） |
-| `0.1.7-rc.1` | `v24.18.0` | 通过 | 通过（1237 行 / 3 处命中） | 通过 | 通过 | 通过（1234 行 / 0 处命中） |
 
-六个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
-`version` 均为 `1.3.1`，`engines.dsh` 均为 `>=0.1.7-rc.1 <0.3.0-0`。
+四个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
+`version` 均为 `1.3.2`，`engines.dsh` 均为 `>=0.2.0-rc.1 <0.3.0-0`。
 
 回滚是**逐字节**回到安装前，不是"看起来干净"：每个版本的 `06-dump-after-remove.txt` 与
-`01-create.txt` 行数完全相同（1259/1259、1259/1259、1246/1246、1234/1234），
+`01-create.txt` 行数完全相同（1229/1229、1223/1223、1259/1259、1259/1259，本轮逐对核过），
 `cordis.patch.yml` 提及数为 0，`node_modules` 已删除。
 
 ### 宿主在 bundle 末尾追加 76 字节——自动化比对必须先剥掉它
@@ -203,16 +203,18 @@ sha256 `e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C`（1077
 一次吻合是猜测，两次吻合是巧合，三次才是规律。仓库重构、改文案、换排版都会让产物变，
 但那 76 字节的差一直没变——这才是把它写成规则的理由。
 
-本轮（1.3.1）矩阵**自己就记下了这个差**：六个 `summary.txt` 都是 `bundle_bytes: 320139`，
+本轮（1.3.2）矩阵**自己就记下了这个差**：四个 `summary.txt` 都是 `bundle_bytes: 320139`，
 而仓库那份 `client/client.js` 是 320063 字节 / `55E1074F…495E9`，320139 − 320063 = 76，
-不需要再事后补采。tarball 内的那一份与仓库工作区逐字节同哈希（打包后当场比对，
-`lib/index.js` 同样一致：`45B745F1…B5A9`；Linux 上重建的同一份也是这两个哈希）。
+不需要再事后补采。本轮客户端源码一行未改，所以这个哈希与 1.3.1 那份**完全相同**；
+而宿主侧改了（部署入口的 `timeouts` 子命令），`lib/index.js` 因此从 387557 字节变为
+390506 字节 / `A638674C…DA0C8`。tarball 内的两份与仓库工作区逐字节同哈希（解包后当场比对；
+Linux 上重建的同一份也是这两个哈希）。
 
 **两路数据互证，但来源不同，要分清：**
 
 | 来源 | 数据 | 性质 |
 | --- | --- | --- |
-| 矩阵运行 | 六个 `summary.txt` 各记 `bundle_status: 200`、`bundle_bytes: 320139` | 来自矩阵，但**只有字节数、没有哈希** |
+| 矩阵运行 | 四个 `summary.txt` 各记 `bundle_status: 200`、`bundle_bytes: 320139` | 来自矩阵，但**只有字节数、没有哈希** |
 | 打包核对 | tarball 内 `client/client.js`、`lib/index.js` 与仓库产物的 sha256 比对（含翻字节阴性对照） | **不是**矩阵运行的数据 |
 
 上一轮（1.2.0）字节级的前缀 / 后缀 / 前缀哈希是矩阵跑完之后**另起同一批宿主、同一份 tarball**
@@ -237,7 +239,13 @@ sha256 `e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C`（1077
 判断包对不对，看 `lib\index.js` 和 `client\client.js` 的哈希，不看 tarball 的——
 那两个是构建产物，改文档不会动它们。
 
-`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。**1.3.1 的桌面端尚无实测记录**，
+1.3.2 把这条循环完整走过了一次：`E1300685…9472`（装着旧文档）→ 文档按那一轮数字重写 →
+`B7ACF45E…6643`（重打、重测；本文档写的是它，而它里面装的文档还写着前一个）。再跑一轮只会把
+滞后推后一轮，所以此处收敛：本节记录的 sha256 指向**最后一次实跑的包**，它内含的文档是本文档的
+上一版；两份 bundle 哈希（`55E1074F…495E9` / `A638674C…DA0C8`）才是描述发布内容的东西，
+它们在两个版本里逐字节相同。
+
+`desktop` 端由作者实测确认，命令行走不通、也不需要重跑。**1.3.2 的桌面端尚无实测记录**，
 上面这一行说的是 1.1.0；本轮的浏览器验收走的是 `web` 端命令行起的实例。
 
 ### 汇总列曾经恒为假
@@ -248,20 +256,31 @@ sha256 `e57523C0415B36DE4831C6ADC6E0452790AD3E734326C2BC0966F56C2AF94F5C`（1077
 那一种：全绿时它报失败，真有失败时它也报失败，只是没人分得清。
 
 现在改为读每个版本的 `logs\log-<版本>\summary.txt`——那是 `Emit` 同一批调用写进磁盘的副本，
-而日志目录每轮开头会被清空，不会读到上一轮的残留。修复后本轮六个版本均输出 `True`。
+而日志目录每轮开头会被清空，不会读到上一轮的残留。修复后本轮四个版本均输出 `True`。
 逐版本的权威记录始终是 `summary.txt`，不是控制台汇总。
 
 ### 逐条对照
 
+**本轮先把 `bundle_type` 那一格从假的改成真的。** 1.3.1 与 1.3.2 第一轮矩阵的 `summary.txt` 里，它都写着
+`System.String[]`：`run-one.ps1` 传的是 `$b.Headers['Content-Type']`，而 PowerShell 7 里那个 header 是
+**字符串数组**，脚本自己那个 `Emit` 用 `-f` 格式化，数组于是被 `ToString()` 成那句字面量。一格看着记了
+content-type、实际上什么都没记，而它旁边就是 `bundle_status: 200`。改成 `(@(...) -join ', ')` 后重跑，
+四份都是 `text/javascript; charset=utf-8`。修脚本本身不需要重打包（脚本属私有路径，不进包）；
+但随后证据文档按这一轮数字重写——**文档在包里**，所以上面那个 sha256 描述的是文档重写前最后一次
+重打的包，即装着本文档上一版的包。这是下一节循环性那条的现场，不是疏漏。
+
+这个的形状与本节开头那条「汇总列曾经恒为假」是同一类：**一格有值、且那个值读起来像答案，但不回答问题**。
+它不会让任何一步失败，只会在有人照抄进证据文档时把一句假话写进去。
+
 | 判据（第 2 节） | 实测 | 说明 |
 | --- | --- | --- |
-| 2.1 安装以 0 退出、无 `incompatible` | 六个版本均满足 | pnpm 12.6.0，`Packages: +1` |
-| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 六个版本均为 `1.3.1` | |
+| 2.1 安装以 0 退出、无 `incompatible` | 四个版本均满足 | pnpm 12.6.0，`Packages: +1` |
+| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 四个版本均为 `1.3.2` | |
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 四次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
 | 2.3 进程正常启动 | 四次均 `boot_alive: True`，stderr 文件均 0 字节，`boot_stopped: True` | |
-| 2.3 页面可达 | 四次均 HTTP 200（35367 / 35333 / 34825 / 33544 字节，按 0.2.0-rc.2 到 0.1.7-rc.1），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 六次均 HTTP 200、`text/javascript`，内容含 `id: "dsh-worktree-space"` | 服务端比仓库的 `client\client.js`（320063）多 **76**；矩阵自记 `bundle_bytes: 320139`，见上节 |
-| 2.3 bundle 的 rev 逐版本不同 | `d8b29ec60e60` / `4ae375893fbd` / `99bc2a64b2d5` / `d31a9f367e3c` | 内容寻址，四份不同的宿主缓存各自一份 |
+| 2.3 页面可达 | 四次均 HTTP 200（38033 / 37544 / 35367 / 35333 字节，按 0.2.1-rc.2 到 0.2.0-rc.1），页面中出现插件 5 次 | |
+| 2.3 客户端 bundle 地址可取回 | 四次均 HTTP 200、`text/javascript; charset=utf-8`，内容含 `id: "dsh-worktree-space"` | 服务端比仓库的 `client\client.js`（320063）多 **76**；矩阵自记 `bundle_bytes: 320139`，见上节 |
+| 2.3 bundle 的 rev 逐版本不同 | `a3249bae8815` / `a05ec88aca97` / `8548a4abffa3` / `3ae3f1aeea7e` | 内容寻址，四份不同的宿主缓存各自一份 |
 | 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffEntry":"show","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 四次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 四次均 0 处提及 | |
@@ -274,8 +293,11 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
 `RPC method does not match endpoint.`。
 
 **bundle 地址是页面相对的**：`plugins/??dsh-worktree-space/client.js&rev=<rev>`，`rev` 每个版本各不相同
-（`d8b29ec60e60` / `4ae375893fbd` / `99bc2a64b2d5` / `d31a9f367e3c`，按 0.2.0-rc.2 到 0.1.7-rc.1），
-字节数六个版本一致。
+（`a3249bae8815` / `a05ec88aca97` / `8548a4abffa3` / `3ae3f1aeea7e`，按 0.2.1-rc.2 到 0.2.0-rc.1），
+字节数四个版本一致（均 `bundle_bytes: 320139`）。
+
+> 那行里的 `??` 是脚本写日志时的编码痕迹，`bundle_status: 200` 与 `bundle_registers: 1` 说明请求实际
+> 成功——两轮矩阵表现一致。它不足以当作 URL 原文引用，但足以说明「取到了包」。
 
 ## 6. 必须逐条回应的边界情形
 
@@ -286,7 +308,7 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
 | 缺少 authority 503 | 同上 |
 | POST 不被重放 | 同上 |
 | 崩溃恢复 | 不适用：插件不留持久化的操作日志，每次路由调用就是一遍 git；被中断的结束任务从仓库自身状态重新读取 |
-| Windows 文件锁 | 未触发：四次运行的启动、探测与停止都没有留下占用，`node_modules` 可正常删除 |
+| Windows 文件锁 | 未触发：四个版本的启动、探测与停止都没有留下占用，`node_modules` 可正常删除 |
 | 回滚失败 | 未触发：四次卸载后 `node_modules` 消失、`cordis.patch.yml` 回到 0 处提及、`--dump-config` 回到安装前行数 |
 | pnpm 10 / 11 / 12 | 仅实测到 **pnpm 12.6.0**（宿主随附版本）；10 与 11 未装、未验 |
 | monorepo 子路径 | 不适用：本插件以单个包安装，不是从 monorepo 子路径装 |
@@ -301,6 +323,7 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
   侧边栏底部入口，仍需按第 2.3 节逐项点一遍。
 - **pnpm 只验到 12.6.0。** 10 与 11 未验，见第 6 节。
 - **`--dump-config` 的行数与宿主版本相关，不能跨版本顺延。** 换 DSH 版本或再改配置字段都要重量。
-- **窗口是「当前已发布版本」，不是固定集合。** 本版覆盖 `0.1.7-rc.1`、`0.1.7-rc.2`、`0.2.0-rc.1`、
-  `0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2` 六个；官方一发新版，窗口就不再是这六个，本文件的结论不自动顺延。
+- **窗口是「当前已发布版本」，不是固定集合。** 本版覆盖 `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、
+  `0.2.1-rc.2` 四个（1.3.2 起不再声明支持 0.1.7 系列，因此窗口从六个减到四个，而不是官方发了新版）；
+  官方一发新版，本文件的结论不自动顺延。
 - **桌面端由作者实测确认**，本轮矩阵只有 `web` 端的命令行证据。
