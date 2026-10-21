@@ -41,7 +41,7 @@
  * that is never coming - and the four abnormal kinds above do not cover it, because nothing
  * went wrong with the session.
  *
- * That is what `reportedAt` answers. `wts_session_tool_send` stamps it on the sending session's
+ * That is what `reportedAt` answers. `wts_session_tool send` stamps it on the sending session's
  * own entry when the call passes `finalReport: true`, and this module reads it when a watched
  * session's turn ends as `completed`:
  *
@@ -54,7 +54,7 @@
  *     is a session nobody hears about.
  *
  * `aborted` is deliberately **not** one of them. It is a turn something stopped on purpose - the
- * user from the interface, or a dispatcher through `wts_session_tool_cancel` - so the session did
+ * user from the interface, or a dispatcher through `wts_session_tool cancel` - so the session did
  * not "finish without reporting", it was made to stop. Telling the dispatcher that a session it
  * cancelled never reported would be worse than noise: it invites exactly the wrong next step, to
  * wake a session the user has just decided to stop. There is also nothing to distinguish the two
@@ -163,8 +163,8 @@ export function interruptionNotice(task, sessionId, kind, detail) {
   return `${subject} ${phraseFor(kind)}.`
     + `\n\nSession id: ${sessionId}`
     + `${detailLine}`
-    + '\n\nIt is still there — `wts_session_tool_status` says what it is doing now, `wts_session_tool_read` shows the'
-    + ' last messages, and `wts_session_tool_send` can put it back to work. The work was NOT finished, so do not treat'
+    + '\n\nIt is still there — `wts_session_tool status` says what it is doing now, `wts_session_tool read` shows the'
+    + ' last messages, and `wts_session_tool send` can put it back to work. The work was NOT finished, so do not treat'
     + ' this task as done.'
 }
 
@@ -186,11 +186,11 @@ export function missingReportNotice(task, sessionId) {
   const subject = task === '' ? 'The dispatched session' : `The dispatched session for "${task}"`
   return `${subject} ended its last turn normally, but it never sent a final report.`
     + '\n\nThis is not a failure of the turn: nothing here says the work stopped wrongly. What is missing is the report —'
-    + ' the session has not called `wts_session_tool_send` with `finalReport: true`, so nothing tells you whether the work'
+    + ' the session has not called `wts_session_tool send` with `finalReport: true`, so nothing tells you whether the work'
     + ' finished, what it did, or what it left unverified.'
     + `\n\nSession id: ${sessionId}`
-    + '\n\nRead what it did before deciding anything: `wts_session_tool_read` shows its last messages and'
-    + ' `wts_session_tool_status` says where it stopped. Treat this notice as a report that is missing, **not** as a reason'
+    + '\n\nRead what it did before deciding anything: `wts_session_tool read` shows its last messages and'
+    + ' `wts_session_tool status` says where it stopped. Treat this notice as a report that is missing, **not** as a reason'
     + ' to resume or wake the session — a session that has stopped may have been stopped on purpose, and its own last'
     + ' output is the first thing to read.'
 }
@@ -451,7 +451,7 @@ export class SessionWatch {
    *
    * The report is sent as the watching session's own agent, so the receiving interface
    * attributes it and presents it as an agent's report rather than as the user typing - the
-   * same channel `wts_session_tool_send` uses.
+   * same channel `wts_session_tool send` uses.
    * @param entry - the watch record.
    * @param sessionId - the dispatched session's id.
    * @param kind - the turn-end kind.

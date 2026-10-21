@@ -135,8 +135,8 @@ export function refuseWhileSessionsWork(ctx, taskPath, callerSessionId = '') {
     'E5012',
     `a session is still working in this task space: ${described}. Finishing removes the worktrees and the `
       + 'task space, so a session that is mid-turn would lose the directory it is writing into and the work '
-      + 'it has not committed. Stop those sessions first - `wts_session_tool_cancel` stops one, and '
-      + '`wts_session_tool_status` says what each is doing - then call done again. If the work is not meant to '
+      + 'it has not committed. Stop those sessions first - `wts_session_tool cancel` stops one, and '
+      + '`wts_session_tool status` says what each is doing - then call done again. If the work is not meant to '
       + 'stop, leave the task space standing: it is still there, and nothing has been removed.',
     // Structured as well as spoken, so the panel can say it in the reader's language the way it
     // already does for E5011. The English above is the model's and the log's copy.

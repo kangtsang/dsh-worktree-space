@@ -1,5 +1,6 @@
 /**
- * The session-control tools: the eight `wts_session_tool_*` registrations.
+ * The session-control tool: one `wts_session_tool` registration serving eight
+ * actions.
  *
  * What a unit test can honestly check here is the contract, not the sessions:
  * the arguments each tool refuses, the shape it answers with, the filters it
@@ -135,16 +136,22 @@ afterAll(async () => {
   await rm(TASK_SPACE, { recursive: true, force: true })
 })
 
-/** The eight tools, by name, as the plugin registers them. */
-const TOOL_NAMES = [
-  "wts_session_tool_find",
-  "wts_session_tool_status",
-  "wts_session_tool_read",
-  "wts_session_tool_send",
-  "wts_session_tool_create",
-  "wts_session_tool_resume",
-  "wts_session_tool_wait",
-  "wts_session_tool_cancel",
+/**
+ * The eight actions the session tool serves.
+ *
+ * They used to be eight registrations and are one tool now, so this is a list of
+ * actions rather than of names: what the plugin registers is `wts_session_tool`,
+ * and `action` is what tells it which of these to run.
+ */
+const ACTIONS = [
+  "find",
+  "status",
+  "read",
+  "send",
+  "create",
+  "resume",
+  "wait",
+  "cancel",
 ]
 
 /**
@@ -154,6 +161,12 @@ const TOOL_NAMES = [
  * `services` is read per lookup rather than copied, so a test can hand in a
  * partial deployment — a tool runtime and nothing else — which is exactly the
  * degradation path under test.
+ *
+ * `byName` also serves one entry per action, named as that action used to be
+ * registered, each a view that fills `action` in for the caller. The eight
+ * registrations are the one `wts_session_tool`, and the tests below read as they
+ * did before it: `byName().wts_session_tool_send` means the tool called to send,
+ * not a tool of its own.
  * @param services - the services this context serves, by name.
  * @returns the context and the captured definitions, by name.
  */
@@ -164,7 +177,21 @@ function toolContext(services = {}) {
       ? { register: (definition) => { captured.push(definition); return () => {} } }
       : services[name]),
   }
-  return { ctx, captured, byName: () => Object.fromEntries(captured.map((entry) => [entry.name, entry])) }
+  const byName = () => {
+    const entries = Object.fromEntries(captured.map((entry) => [entry.name, entry]))
+    const tool = entries.wts_session_tool
+    if (tool === undefined) return entries
+    for (const action of ACTIONS) {
+      entries[`wts_session_tool_${action}`] = {
+        ...tool,
+        name: `wts_session_tool_${action}`,
+        execute: (args, exec) => tool.execute({ action, ...args }, exec),
+        output: { ...tool.output, render: (args, value) => tool.output.render({ action, ...args }, value) },
+      }
+    }
+    return entries
+  }
+  return { ctx, captured, byName }
 }
 
 /** A user message event, as a session log carries one. */
@@ -270,7 +297,7 @@ describe("registerSessionTools", () => {
   it("registers exactly the eight session tools, and returns one disposer for them", () => {
     const { ctx, captured } = toolContext()
     const dispose = registerSessionTools(ctx)
-    expect(captured.map((entry) => entry.name)).toEqual(TOOL_NAMES)
+    expect(captured.map((entry) => entry.name)).toEqual(["wts_session_tool"])
     expect(typeof dispose).toBe("function")
   })
 
@@ -290,7 +317,7 @@ describe("registerSessionTools", () => {
     // plugin not being installed.
     const { ctx, captured } = toolContext()
     registerSessionTools(ctx)
-    expect(captured.map((entry) => entry.name)).toEqual(TOOL_NAMES)
+    expect(captured.map((entry) => entry.name)).toEqual(["wts_session_tool"])
     for (const tool of captured) {
       expect(typeof tool.execute).toBe("function")
       expect(typeof tool.output.render).toBe("function")
@@ -330,22 +357,26 @@ describe("registerSessionTools", () => {
     // A missing argument is refused by the declared schema, before the body runs;
     // an empty one passes the schema and is refused by the tool itself. Both are
     // clear about which argument is meant, which is the requirement.
+    //
+    // `sessionId` is the one exception the merge makes: the schema cannot mark it
+    // required, because find and create take none, so an absent one is refused by
+    // the tool rather than by the declared schema. The message it answers with is
+    // the tool's own either way, and that is what is asserted.
     for (const name of ["wts_session_tool_status", "wts_session_tool_read", "wts_session_tool_wait", "wts_session_tool_resume"]) {
-      await expect(tools[name].execute({}, {}), name).rejects.toThrow(/missing required property "sessionId"/)
+      await expect(tools[name].execute({}, {}), name).rejects.toThrow(/sessionId is required/)
       await expect(tools[name].execute({ sessionId: "   " }, {}), name).rejects.toThrow(/sessionId is required/)
     }
     // Cancelling requires one argument more than the rest - a reason, because it
     // destroys work in the target - so it is asserted on its own rather than in the
-    // loop above. The declared schema answers for an absent argument, and the tool
-    // answers for a blank one; both name the argument they mean.
+    // loop above. Both are refused by the tool, and both name the argument they mean.
     await expect(tools.wts_session_tool_cancel.execute({}, {}))
-      .rejects.toThrow(/missing required property "sessionId"/)
+      .rejects.toThrow(/sessionId is required/)
     await expect(tools.wts_session_tool_cancel.execute({ sessionId: "s-1" }, {}))
-      .rejects.toThrow(/missing required property "reason"/)
+      .rejects.toThrow(/reason is required/)
     await expect(tools.wts_session_tool_cancel.execute({ sessionId: "s-1", reason: "   " }, {}))
       .rejects.toThrow(/reason is required/)
-    await expect(tools.wts_session_tool_send.execute({}, {})).rejects.toThrow(/missing required property "sessionId"/)
-    await expect(tools.wts_session_tool_send.execute({ sessionId: "s-1" }, {})).rejects.toThrow(/missing required property "message"/)
+    await expect(tools.wts_session_tool_send.execute({}, {})).rejects.toThrow(/sessionId is required/)
+    await expect(tools.wts_session_tool_send.execute({ sessionId: "s-1" }, {})).rejects.toThrow(/message is required/)
     await expect(tools.wts_session_tool_send.execute({ sessionId: "s-1", message: "  " }, {})).rejects.toThrow(/message is required/)
     // A create has no session to read a directory from: one of cwd or workspaceId
     // has to be named, and the refusal says which.
@@ -384,19 +415,19 @@ describe("wts_session_tool_find", () => {
     // Live first: a live session is always the more current answer.
     expect(all.items[0]).toMatchObject({ sessionId: "s-live", live: true, running: true, workspaceId: "ws-1" })
 
-    const byCwd = await find.execute({ cwd: "login" }, {})
+    const byCwd = await find.execute({ cwdMatch: "login" }, {})
     expect(byCwd.items.map((item) => item.sessionId).sort()).toEqual(["s-live", "s-third"])
 
-    const byTitle = await find.execute({ title: "fix the build" }, {})
+    const byTitle = await find.execute({ titleMatch: "fix the build" }, {})
     expect(byTitle.items.map((item) => item.sessionId)).toEqual(["s-live"])
 
-    const byId = await find.execute({ sessionId: "offline" }, {})
+    const byId = await find.execute({ sessionIdMatch: "offline" }, {})
     expect(byId.items.map((item) => item.sessionId)).toEqual(["s-offline"])
 
     const liveOnly = await find.execute({ liveOnly: true }, {})
     expect(liveOnly.items.map((item) => item.sessionId)).toEqual(["s-live"])
 
-    const limited = await find.execute({ limit: 1 }, {})
+    const limited = await find.execute({ resultLimit: 1 }, {})
     expect(limited.items).toHaveLength(1)
     expect(limited.truncated).toBe(true)
   })
@@ -568,7 +599,7 @@ describe("wts_session_tool_read", () => {
     expect(page.messages.map((row) => row.seq)).toEqual([2, 3])
     expect(page.nextSeq).toBe(3)
 
-    const limited = await read.execute({ sessionId: "s-1", limit: 1 }, {})
+    const limited = await read.execute({ sessionId: "s-1", messageLimit: 1 }, {})
     expect(limited.messages.map((row) => row.seq)).toEqual([3])
     expect(limited.truncated).toBe(true)
   })
@@ -1092,7 +1123,7 @@ describe("wts_session_tool_send", () => {
     expect(value.offered).toBe(true)
     expect(value.sessionId).toBe("gone")
     expect(value.reason).toMatch(/is not live/)
-    expect(value.reason).toMatch(/wts_session_tool_resume/)
+    expect(value.reason).toMatch(/wts_session_tool resume/)
     expect(byName().wts_session_tool_send.output.render({}, value)[0].text).toMatch(/is not live/)
   })
 })

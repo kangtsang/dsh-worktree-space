@@ -587,7 +587,7 @@ export function renderTaskMetadata(metadata) {
   // which is what a create produces whenever the caller names none.
   const deployEntry = typeof deployScript === 'string' && deployScript.trim() !== '' ? deployScript.trim() : DEFAULT_DEPLOY_ENTRY
   // The sessions this task was dispatched to, rendered so a reader of the note can
-  // name one without searching: `wts_session_tool_status` takes exactly this id.
+  // name one without searching: `wts_session_tool status` takes exactly this id.
   // The newest is named first, because that is the one still working.
   const sessions = [...taskSessionsOf(metadata)].reverse()
   const lines = [
@@ -605,7 +605,7 @@ export function renderTaskMetadata(metadata) {
     ...(sessions.length === 0 ? [] : [
       '## Sessions',
       '- The sessions above were opened for this task; the newest is the one that was working most recently.',
-      '- Watch one with `wts_session_tool_status` (its `lastActivity` tells "stuck" from "busy with a long step"), read it with `wts_session_tool_read`, and correct it with `wts_session_tool_send` — pass `mode: "steer"` for anything time-sensitive, because `queue` is only read at a turn boundary.',
+      '- Watch one with `wts_session_tool status` (its `lastActivity` tells "stuck" from "busy with a long step"), read it with `wts_session_tool read`, and correct it with `wts_session_tool send` — pass `mode: "steer"` for anything time-sensitive, because `queue` is only read at a turn boundary.',
       '',
     ]),
     '## Repositories',
@@ -623,7 +623,7 @@ export function renderTaskMetadata(metadata) {
     // is handed the same requirement in its brief, and the two have to agree: a note that
     // stayed quiet about it would leave the one artifact a later reader trusts saying less
     // than the prompt that started the work.
-    '- **Report back as you go, and report when you stop.** The session that dispatched you is invisible to you in reverse: it sees nothing - not your commands, not your commits - until you send it something with `wts_session_tool_send` (`mode: "steer"` for anything time-sensitive). Report when each unit that can be committed and handed over on its own has landed, when you are stuck on something only the caller or the user can settle, and when the task is finished - including when you finished it yourself with `done`, which never replaces the report. A final report states the commit hash of each repository, the acceptance URL when there is one, what passed and the evidence for it, and **what you did not verify**. Between those moments, use your own judgement: report what changes what comes next, and skip the reports that would only say nothing happened.',
+    '- **Report back as you go, and report when you stop.** The session that dispatched you is invisible to you in reverse: it sees nothing - not your commands, not your commits - until you send it something with `wts_session_tool send` (`mode: "steer"` for anything time-sensitive). Report when each unit that can be committed and handed over on its own has landed, when you are stuck on something only the caller or the user can settle, and when the task is finished - including when you finished it yourself with `done`, which never replaces the report. A final report states the commit hash of each repository, the acceptance URL when there is one, what passed and the evidence for it, and **what you did not verify**. Between those moments, use your own judgement: report what changes what comes next, and skip the reports that would only say nothing happened.',
     '- Finishing is atomic: `done` merges, removes the worktrees and clears the task space in one call. `merge: true` lands the task branch on the target; `merge: false` leaves the branch alone - the commits are kept, but the worktree is removed, so a conflict left over would have to be resolved in the source repository instead of here.',
     '- A merge that lands is the one step a finish cannot take back, so `merge: true` is an authorisation rather than a formality: pass it when the user asked for the work to land, and not otherwise.',
     '',

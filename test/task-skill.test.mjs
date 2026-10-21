@@ -63,21 +63,8 @@ describe("registerTaskSkill", () => {
     expect(loaded.content.startsWith("---")).toBe(false)
     expect(loaded.content).toContain("# Task Worktree Space")
     expect(loaded.content).toContain("wts_worktree_space")
-    // The workflow rules the model must apply live in the body.
-    expect(loaded.content).toContain("Never create a workspace with a guessed location")
-    // Hand-merging in a source checkout stays forbidden; finishing through `done` is the
-    // user's decision between two supported flows, and the body has to say both.
-    expect(loaded.content).toContain("never hand-merge there")
-    expect(loaded.content).toContain("Who finishes is the user's decision")
-    expect(loaded.content).toContain("both flows are supported")
-    expect(loaded.content).toContain("DEPLOY_ENV_ID")
-    // The acceptance fence is the one delivery decision a create makes, and it cannot be
-    // added afterwards - so the body has to make asking for it a step of its own rather
-    // than something to do when the user happens to volunteer the answer, and it has to
-    // say what a deploying task's finish line is.
-    expect(loaded.content).toContain("Ask about the acceptance fence")
-    expect(loaded.content).toContain("Do not answer it for the user")
-    expect(loaded.content).toContain("not finished until its fence has passed")
+    // Asking the user before anything is made is a creating-stage rule now, so it is
+    // pinned in `creating.md` rather than here - see the reference block below.
     // The two roles the body is written in. It addresses its reader as the leader, and
     // names the session it dispatches the member; the member session and the task
     // session are one session under two names, chosen by context. Dropping either
@@ -94,6 +81,40 @@ describe("registerTaskSkill", () => {
     expect(loaded.content).not.toContain("dispatching agent")
     expect(loaded.content).not.toContain("dispatched session")
     expect(loaded.content).not.toContain("dispatcher")
+    // What the body delegates, and the rule each file has to keep. The body is only the
+    // map now: a stage's rules live in the file for that stage, read when the stage is
+    // reached rather than on every start - and a section that moved is still a rule this
+    // skill owes, which is why each is pinned in the file that carries it now.
+    const reference = (name) => readFileSync(join(candidate.resourceBase.path, "references", name), "utf8")
+    const creating = reference("creating.md")
+    const working = reference("working.md")
+    const finishing = reference("finishing.md")
+    const conflicts = reference("conflicts.md")
+    const deploying = reference("deploying.md")
+    // Creating is where the user is asked before anything is made: no guessed location,
+    // and the acceptance fence as a question put to them rather than answered for them.
+    expect(creating).toContain("Never create a workspace with a guessed location")
+    expect(creating).toContain("Ask about the acceptance fence")
+    expect(creating).toContain("Do not answer it for the user")
+    // Hand-merging in a source checkout stays forbidden, and finishing through `done`
+    // is the user's decision between two flows.
+    expect(working).toContain("never hand-merge there")
+    expect(working).toContain("Who finishes is the user's decision")
+    expect(finishing).toContain("both flows are supported")
+    // A deploying task's finish line is its own smoke, not the fact that the code is
+    // written, and it is the fence the body sends the reader here for.
+    expect(finishing).toContain("not finished until its fence has passed")
+    expect(deploying).toContain("DEPLOY_ENV_ID")
+    // The conflict layer is the one branch of a finish that is not routine, so it sits
+    // one level below `finishing.md` rather than in it.
+    expect(conflicts).toContain("mergeInProgress")
+    expect(conflicts).toContain("dirtyCheckout")
+    // The body has to point at every file it hands the reader over to: an index that
+    // leaves one out would strand the rule it carries.
+    for (const name of ["creating.md", "working.md", "finishing.md", "conflicts.md", "deploying.md", "failures.md"]) {
+      expect(loaded.content, name).toContain(`references/${name}`)
+      expect(existsSync(join(candidate.resourceBase.path, "references", name)), name).toBe(true)
+    }
   })
 
   it("reads the file on every load, so an edited asset is served", async () => {

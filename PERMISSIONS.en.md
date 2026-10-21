@@ -95,7 +95,7 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
     not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
     fails**: the tool answers that no session was opened, and says to open one from the panel.
-  - The session-control tools (`wts_session_tool_*`): **reading** any session's event log (a live one through the
+  - The session-control tool (`wts_session_tool`): **reading** any session's event log (a live one through the
     host's session service, an offline one through session persistence — the same records the panel reads),
     **sending** a message to a session (`steer` injects into the running turn, `queue` appends a turn),
     **opening** and **resuming** sessions, and **aborting** a session's active turn. What is written is **DSH's

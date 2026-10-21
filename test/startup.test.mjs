@@ -66,24 +66,16 @@ describe.each([
           expect(envelope.type).toBe("server-response")
           expect(envelope.rpcId).toBe("startup-test")
         }
-        // Nine tools: the task-space workflow, and the eight session-control tools
-        // that watch, correct and recover the session it dispatches to.
-        expect(registered.length).toBe(before + 9)
+        // Two tools: the task-space workflow, and the one session-control tool that
+        // watches, corrects and recovers the session it dispatches to. Its eight
+        // actions used to be eight registrations and are one `action` enum now.
+        expect(registered.length).toBe(before + 2)
         const tool = registered[before]
         expect(tool.name).toBe("wts_worktree_space")
         expect(tool.parameters.properties.action.enum).toEqual(["suggest-root", "create", "add", "list", "dispatch", "done"])
         expect(tool.description).toContain("worktree workspace")
         const sessionTools = registered.slice(before + 1).map((entry) => entry.name).sort()
-        expect(sessionTools).toEqual([
-          "wts_session_tool_cancel",
-          "wts_session_tool_create",
-          "wts_session_tool_find",
-          "wts_session_tool_read",
-          "wts_session_tool_resume",
-          "wts_session_tool_send",
-          "wts_session_tool_status",
-          "wts_session_tool_wait",
-        ])
+        expect(sessionTools).toEqual(["wts_session_tool"])
         expect(providers.length).toBe(skillBefore + 1)
         const candidates = await providers[skillBefore].list({})
         expect(candidates.map(({ name }) => name)).toEqual(["worktree-space"])
@@ -99,9 +91,9 @@ describe.each([
         for (const endpoint of endpoints) {
           expect((await carrier.fetch(requestFor(endpoint))).status).toBe(404)
         }
-        // Every registration is disposed with the plugin: the task tool, the eight
-        // session tools, and the skill provider.
-        expect(toolDispose).toHaveBeenCalledTimes((before + 9))
+        // Every registration is disposed with the plugin: the task tool, the one
+        // session tool, and the skill provider.
+        expect(toolDispose).toHaveBeenCalledTimes((before + 2))
         expect(skillDispose).toHaveBeenCalledTimes(skillBefore + 1)
       }
       // Routes stay under Connection's shared /api authentication fence; the
