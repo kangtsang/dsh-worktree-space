@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "version": "1.3.2",
+  "version": "1.3.3",
   "baseline": {
-    "package": "dsh-worktree-space@1.3.2",
-    "commit": "52c0e89 (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
+    "package": "dsh-worktree-space@1.3.3",
+    "commit": "64b38f8 (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
     "note": "The manifest state, the acceptance procedure, the acceptance results and the boundary cases below all describe this version only; no other version is referenced.",
     "procedure": "docs/store-evidence.md"
   },
@@ -13,7 +13,7 @@
     "powershell": "$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) (\"dsh-evidence-\" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null"
   },
   "manifest": {
-    "version": "1.3.2",
+    "version": "1.3.3",
     "enginesNode": ">=22.19.0",
     "enginesDsh": ">=0.2.0-rc.1 <0.3.0-0",
     "peers": {
@@ -79,13 +79,13 @@
     "status": "run",
     "note": "the store contract's clause 8 requires install -> configuration -> visible -> uninstall/rollback in a disposable profile, and unit tests do not substitute for it. Each row below comes from an actual run on that release's own DSH CLI, per docs/store-evidence.md sections 1 and 2.",
     "web": {
-      "ranOn": "2026-10-20",
-      "artifact": "dsh-worktree-space-1.3.2.tgz",
-      "artifactFiles": 22,
-      "artifactBytes": 1081425,
-      "artifactSha256": "B7ACF45E4C01E126DB6254487127C4A4F9841C70E3F25BE584DEC5A5B1EC6643",
-      "artifactCommit": "52c0e89",
-      "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (55E1074F...495E9, 320063 bytes) and lib/index.js (A638674C...DA0C8, 390506 bytes), and unpacking the tested tarball gives those same two hashes",
+      "ranOn": "2026-10-22",
+      "artifact": "dsh-worktree-space-1.3.3.tgz",
+      "artifactFiles": 28,
+      "artifactBytes": 1078364,
+      "artifactSha256": "B773AB011E53AA08E524F8725E73CFE22DF0D07076EFF929FFF393F4DB7099A5",
+      "artifactCommit": "64b38f8",
+      "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (55E1074F...495E9, 320063 bytes) and lib/index.js (C5B6C0D3...4A0CE, 375204 bytes), and unpacking the tested tarball gives those same two hashes",
       "ports": {
         "0.2.1-rc.2": 34800,
         "0.2.1-rc.1": 34801,
@@ -94,10 +94,10 @@
       },
       "node": "v24.18.0",
       "pnpm": "12.6.0",
-      "totalSeconds": 29,
+      "totalSeconds": 28,
       "verdict": "PASS (4 passed, 0 failed)",
       "report": "D:\\dsh-acceptance\\dsh-worktree-space\\matrix\\logs\\matrix-report.md",
-      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.3.2, commit 52c0e89, 4 versions); the 1.3.1 evidence had to warn that the file sitting there was left over from 1.3.0"
+      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.3.3, commit 64b38f8, 4 versions)"
     },
     "desktop": "confirmed by the author outside this run; the desktop lifecycle does not go through the command line",
     "rows": [
@@ -109,7 +109,7 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.2"
+          "installedVersion": "1.3.3"
         },
         "compose": {
           "result": "passed",
@@ -128,7 +128,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "a3249bae8815",
+          "bundleRev": "3e48b7f1afba",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -153,7 +153,7 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.2"
+          "installedVersion": "1.3.3"
         },
         "compose": {
           "result": "passed",
@@ -172,7 +172,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "a05ec88aca97",
+          "bundleRev": "d5d8465fa723",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -197,7 +197,7 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.2"
+          "installedVersion": "1.3.3"
         },
         "compose": {
           "result": "passed",
@@ -216,7 +216,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "8548a4abffa3",
+          "bundleRev": "f04f33296ecf",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -241,7 +241,7 @@
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.2"
+          "installedVersion": "1.3.3"
         },
         "compose": {
           "result": "passed",
@@ -260,7 +260,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "3ae3f1aeea7e",
+          "bundleRev": "285b73d3e5e6",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
