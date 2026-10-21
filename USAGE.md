@@ -589,7 +589,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | **任务会话** | 同一个会话的另一种叫法：「队员会话 = 任务会话」 |
 
 **两者之间没有父子关系**：队员是任务空间下的会话，不是队长的子会话，所以既有的父子通道
-（`send_message`）够不到它 —— 队长只能用 `wts_session_tool_*` 这八个工具（见
+（`send_message`）够不到它 —— 队长只能用 `wts_session_tool` 这一个工具的八个 action（见
 [附录](#附录会话控制工具参考)）。
 
 ## 12. 整条链怎么跑
@@ -601,11 +601,11 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
    → 返回 { container, branch, sessionId }
 
 ② 盯进度（不轮询，有理由时才看一眼）
-   wts_session_tool_status({ sessionId })           ← lastActivity 判「卡住」还是「在跑长步骤」
-   wts_session_tool_read({ sessionId })             ← 分「没送到」与「没照做」
+   wts_session_tool status({ sessionId })           ← lastActivity 判「卡住」还是「在跑长步骤」
+   wts_session_tool read({ sessionId })             ← 分「没送到」与「没照做」
 
 ③ 中途改需求 / 纠偏
-   wts_session_tool_send({ sessionId, mode: "steer", message })
+   wts_session_tool send({ sessionId, mode: "steer", message })
 
 ④ 异常回合会被主动告知（默认开）
    收到通知 = 活没干完 → status 看停在哪 → send 把会话拉回工作
@@ -631,20 +631,20 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `done` | 收尾：合并、移除 worktree、处理遗留内容、清理 |
 
 **别对同一个任务空间连着 `dispatch` 两次** —— `dispatch` 每次都是新开一个会话，两个都以为自己该干活的
-会话会改同一批文件、互相打断提交。要给已经在跑的会话补话，用 `wts_session_tool_send`。
+会话会改同一批文件、互相打断提交。要给已经在跑的会话补话，用 `wts_session_tool send`。
 
 **派出去的每一句话都会被前面一段标准前言兜住**：前言写清任务名、容器根、分支名、
 「git 命令在各自仓库子目录里跑」、禁止在源码检出里改文件或提交、不得手写 `git merge`、
 谁收尾由你决定（两种流程都支持）、策略是 `docker` 时额外一句「冒烟是这个任务的完成线」、
 验收栈必须是本任务自己的、交付事实写进哪个文件、
-超过一分钟的动作转后台、以及**回报渠道**：用 `wts_session_tool_send` 发给队长会话 id
+超过一分钟的动作转后台、以及**回报渠道**：用 `wts_session_tool send` 发给队长会话 id
 （默认 `steer`，立即送达；要它等回合边界的才显式传 `mode: "queue"`）；**停手之前必须带
 `finalReport: true` 交一次完结报告**——不交的话队长会收到「正常结束但没回报」的提醒，只能自己回到
 这个会话的日志里找结论，而这件事会一直留在他手上。所以任务书就算漏写了纪律，那些也还在里面。
 
 ## 13. 进行中的三个抓手
 
-**盯进度。** `wts_session_tool_status` 的 **`lastActivity` 是唯一可靠信号** —— 文件时间、mtime、
+**盯进度。** `wts_session_tool status` 的 **`lastActivity` 是唯一可靠信号** —— 文件时间、mtime、
 日志尾部在构建期间都可能长时间不动，而会话自己的时钟不会。传 `stalledMsThreshold` 后，
 **只有在跑的会话**会被标 `stalled`；空闲会话「很久没事件」是正常状态。`lastReply` 回答
 「它此刻以为自己在做什么」；`lastTurnEnd` 是「做完了」与「被错误打断后静默停摆」的唯一判据。
@@ -657,7 +657,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `queue` | 该会话的**回合边界** | 少数可以等的消息，例如"这份参考材料你做完手上的再看"。显式传 `mode: "queue"` 才走这条路 |
 
 派出去的长任务常常整单就是**一个长回合**，所以默认必须是 `steer`：通信不立即送达，就会被下一个边界一直挡住
-——而从外面看，就像会话「无视了要求」。要分辨「没送到」与「没照做」，用 `wts_session_tool_read` 读该会话的记录。
+——而从外面看，就像会话「无视了要求」。要分辨「没送到」与「没照做」，用 `wts_session_tool read` 读该会话的记录。
 
 **异常回接与漏报提醒。** 这里有两种情况，插件的处理不同。
 
@@ -667,7 +667,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 **每一轮异常都报**，不是只在最后报。
 
 **二、回合正常结束，却没有交完结报告。** 这一条盯的是另一种漏法：活做完了、会话停了、报告没发。
-队员在停止工作之前应当调用 `wts_session_tool_send` 并**显式传 `finalReport: true`**；插件在回合
+队员在停止工作之前应当调用 `wts_session_tool send` 并**显式传 `finalReport: true`**；插件在回合
 以 `completed` 结束时去记录里查这一笔，查不到就通知队长一条「已正常结束、但没有交完结报告」，
 文案同时说明**这不是失败**、并提醒**不要据此去唤醒那个会话**——先读它最后的输出再决定。
 
@@ -768,28 +768,28 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 
 任务空间里的活交给一个**独立会话**（队员）：它有自己的上下文、自己的审批门、自己的工作目录。
 队长会话**不是**它的父会话，所以既有的父子通道会直接拒绝（`belongs to another parent session`）。
-这八个工具是唯一的通道。
+这一个工具的八个 action 是唯一的通道。
 
-### 八个工具
+### 八个 action
 
-| 工具 | 做什么 |
+| action | 做什么 |
 | --- | --- |
-| `wts_session_tool_find` | 按工作目录 / 标题 / id 找会话，返回 `sessionId`、是否在线、工作目录、标题 |
-| `wts_session_tool_status` | 看进度：`running`、`openTurn`、`lastActivity`、`pendingWork`、`lastReply`、推理尾巴；离线会话从持久化日志回答 |
-| `wts_session_tool_read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
-| `wts_session_tool_send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告 |
-| `wts_session_tool_create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
-| `wts_session_tool_resume` | 把离线会话拉回在线，之后可直接 `send` / `read` / `wait` |
-| `wts_session_tool_wait` | 等这一次输出；超时返回**已经存在的**最近输出并标 `stale`，不是空 |
-| `wts_session_tool_cancel` | 中止当前回合，可选是否保留排队中的工作 |
+| `wts_session_tool find` | 按工作目录 / 标题 / id 找会话，返回 `sessionId`、是否在线、工作目录、标题 |
+| `wts_session_tool status` | 看进度：`running`、`openTurn`、`lastActivity`、`pendingWork`、`lastReply`、推理尾巴；离线会话从持久化日志回答 |
+| `wts_session_tool read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
+| `wts_session_tool send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告 |
+| `wts_session_tool create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
+| `wts_session_tool resume` | 把离线会话拉回在线，之后可直接 `send` / `read` / `wait` |
+| `wts_session_tool wait` | 等这一次输出；超时返回**已经存在的**最近输出并标 `stale`，不是空 |
+| `wts_session_tool cancel` | 中止当前回合，可选是否保留排队中的工作 |
 
 ### 主要参数
 
-| 工具 | 参数 |
+| action | 参数 |
 | --- | --- |
-| `find` | `query`、`sessionId`、`title`、`cwd`（都是子串匹配）、`liveOnly`、`limit`（默认 10，上限 50） |
+| `find` | `query`、`sessionIdMatch`、`titleMatch`、`cwdMatch`（都是子串匹配）、`liveOnly`、`resultLimit`（默认 10，上限 50） |
 | `status` | `sessionId`（必填）、`stalledMsThreshold`（默认 60000）、`recent`（默认 8，上限 20）、`reasoning`（`none`/`last`/`live`/`tail`，默认 `tail`） |
-| `read` | `sessionId`（必填）、`sinceSeq`、`limit`（默认 20，上限 100）、`role`（`user`/`assistant`/`both`）、`includeReasoning`（默认 true） |
+| `read` | `sessionId`（必填）、`sinceSeq`、`messageLimit`（默认 20，上限 100）、`role`（`user`/`assistant`/`both`）、`includeReasoning`（默认 true） |
 | `send` | `sessionId`、`message`（必填）、`mode`（**默认 `steer`** / 显式 `queue`）、`timeoutMs`（默认 180000，上限 3600000）、`finalReport`（默认 false；置 true 才写 `reportedAt`） |
 | `create` | `cwd`（绝对路径，任务空间）或 `workspaceId`、`prompt`、`timeoutMs` |
 | `resume` | `sessionId`（必填） |

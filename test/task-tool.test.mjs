@@ -1115,7 +1115,7 @@ describe("registerTaskTool", () => {
       expect(brief.indexOf("build it, then smoke it")).toBeGreaterThan(0)
       expect(brief).toContain("session-caller")
       expect(brief).toContain("task/login")
-      expect(brief).toContain("wts_session_tool_send")
+      expect(brief).toContain("wts_session_tool send")
       expect(brief).toContain("steer")
       expect(typeof prompts[0].clientTimeZone).toBe("string")
       // The signal the contract names as well: declared required and dereferenced unguarded, so a
@@ -1210,18 +1210,22 @@ describe("registerTaskTool", () => {
       expect(brief).toContain("# Reporting back is required")
       // The channel, and the caller it reaches. Without the id the session is told to
       // report to something it cannot name.
-      expect(brief).toContain("wts_session_tool_send")
+      expect(brief).toContain("wts_session_tool send")
       expect(brief).toContain("session-caller")
       expect(brief).toContain("steer")
-      // The three moments, each stated as an obligation rather than as advice.
+      // The four moments, each stated as an obligation rather than as advice. The first is
+      // the one that makes the other three cheap: an aim confirmed before any code exists is
+      // a correction of one message, where the same misreading found at the finish is a
+      // finished change nobody asked for.
+      expect(brief).toMatch(/Before you start work, once you understand the task/)
       expect(brief).toMatch(/Every finished unit of delivery/)
       expect(brief).toMatch(/the moment you are stuck/i)
       expect(brief).toMatch(/When the task is finished/)
-      // The two lines that keep the contract from reading as optional: the three moments are
+      // The two lines that keep the contract from reading as optional: the four moments are
       // never optional, and reporting a finish is not replaced by performing it. A member that
       // calls `done` and stops leaves the caller holding a changed task space and no account
       // of why.
-      expect(brief).toContain("The three moments below are never optional")
+      expect(brief).toContain("The four moments below are never optional")
       expect(brief).toMatch(/finishing the work yourself replace reporting it/)
       // And the final report still has to carry the four facts, the acceptance URL among
       // them - that requirement predates this section and must not have been lost to it.
@@ -1233,7 +1237,7 @@ describe("registerTaskTool", () => {
       // what lies *outside* the three moments. Without that scope a model reads the
       // permission as covering the three, which is the one misreading this section exists
       // to prevent (dropping "Outside the three," passed every other assertion here).
-      expect(brief).toMatch(/Outside the three, a report\s+that would only say nothing happened is one to skip/)
+      expect(brief).toMatch(/Outside the four, a report\s+that would only say nothing happened is one to skip/)
       // The work itself is still after the contract, and still intact.
       expect(brief.indexOf("# Reporting back is required")).toBeLessThan(brief.indexOf("# The work"))
       expect(brief).toContain("go")
@@ -1841,7 +1845,7 @@ describe("registerTaskTool", () => {
       // The summary routes it, and it names the session the task space was worked in.
       expect(value.summary).toContain("a merge is waiting to be resolved")
       expect(value.summary).toContain("src/a.ts")
-      expect(value.summary).toContain("wts_session_tool_send")
+      expect(value.summary).toContain("wts_session_tool send")
       expect(value.summary).toContain("sess-task")
       expect(value.summary).toContain("call done again")
     } finally {
@@ -1866,7 +1870,7 @@ describe("registerTaskTool", () => {
       expect(row.dirtyCheckout).toBe(false)
       // The summary hands it on rather than describing it as a failure to retry.
       expect(value.summary).toContain("Uncommitted work is waiting")
-      expect(value.summary).toContain("wts_session_tool_send")
+      expect(value.summary).toContain("wts_session_tool send")
       expect(value.summary).toContain("call done again")
       // The tool did not commit anything on its own: the message has to come from whoever
       // read the changes.

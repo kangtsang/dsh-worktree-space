@@ -165,7 +165,7 @@ function unavailable(sessionId, reason) {
  * way to talk to it - that is why these tools are here. But the same reach can abort
  * the session the user is talking to right now (cancel defaults to clearing the
  * queued work), steer arbitrary text into any running turn, or read any session's
- * messages and reasoning outright, and `wts_session_tool_find` is exactly the global
+ * messages and reasoning outright, and `wts_session_tool find` is exactly the global
  * lookup that hands out any id.
  *
  * So the reach is bounded to the sessions this plugin's own work puts on the other
@@ -240,10 +240,12 @@ async function sessionInScope(ctx, sessionId, agent, exec, options = {}) {
   // for its **direction**: the record names both ends, so a member finds a record in
   // which the leader appears, and could otherwise stop the session that dispatched it.
   // Only a target the record names as a `task` or `handoff` session is cancellable.
-  // Both ways of asking are honoured, because a caller can tell the truth either by
-  // naming its own tool or by saying so: `exec.name` is what the host hands every tool
-  // run, and `options.destructive` is what the cancellation passes for itself.
-  if (options.destructive === true || isCancel(exec)) return reach.inTaskSpace || reach.inRecordAsMember
+  // `options.destructive` is what says which call this is: it is passed by the
+  // cancellation's own code, not by its arguments, so a caller cannot widen its reach
+  // by naming an action. That is the only way left to ask, now that the eight session
+  // tools are one `wts_session_tool` and `exec.name` is the same string for every
+  // action - which is also why the flag was never a fallback on the name.
+  if (options.destructive === true) return reach.inTaskSpace || reach.inRecordAsMember
   return reach.inTaskSpace || reach.inRecordAsMember || reach.inRecordAsLeader || reach.inSourceCheckout
 }
 
@@ -293,27 +295,6 @@ async function reachOf(ctx, sessionId, agent, exec) {
     inRecordAsLeader: named.some((entry) => entry.role === 'leader'),
     inSourceCheckout: isSourceCheckoutOf(callerSpace.metadata, targetCwd),
   }
-}
-
-/**
- * Whether this tool run is the destructive one.
- *
- * The host hands every tool the name it is running (`ToolRunContext extends
- * ToolExecution`, whose `name` the harness itself reads), so this is a fact about the
- * run rather than a value a model can name in the arguments. Worth being exact about
- * rather than inferring from, say, which arguments arrived: a caller that could make
- * the destructive tool look like a read would get the wider arm set.
- *
- * Two behaviours this deliberately keeps:
- *   - no `exec` at all (a call outside a tool run, and every unit test that calls
- *     `execute(args)` with no context) counts as **not** a cancel, so it takes the
- *     wider set - the same direction as before this narrowing;
- *   - any other name is not a cancel: only the exact registered name narrows.
- * @param exec - the tool run, when the host supplied one.
- * @returns whether this is a cancellation.
- */
-function isCancel(exec) {
-  return typeof exec?.name === 'string' && exec.name === 'wts_session_tool_cancel'
 }
 
 /**
@@ -449,7 +430,7 @@ function outOfScopeReason(sessionId) {
     + 'sessions a task space this plugin made runs in, the ones a caller\'s own task record names, and the sessions '
     + 'working in that task\'s source checkouts. A session elsewhere - one the user opened by hand - is out of reach '
     + 'on purpose: cancelling it would abort the conversation they are having, and reading it would hand over messages '
-    + 'nobody asked this plugin to hold. Use wts_session_tool_find with a cwd inside a task space to list the ones '
+    + 'nobody asked this plugin to hold. Use wts_session_tool find with a cwd inside a task space to list the ones '
     + 'that are in scope.'
 }
 
@@ -1061,7 +1042,7 @@ export async function fileSessionUnderWorkspace(ctx, sessionId, cwd) {
  * The session id an agent is addressed by, or undefined when there is none.
  *
  * A tool run's `exec.agent` is the caller the harness set, and `agent.id` is its session id -
- * the same id `wts_session_tool_find` answers with and the same one a reader names to reach it.
+ * the same id `wts_session_tool find` answers with and the same one a reader names to reach it.
  * Probed rather than assumed: a run with no agent (an anonymous caller, a scheduled job) must
  * leave the message unattributed rather than throw out of a property read.
  * @param agent - the tool run's caller agent, when it has one.
@@ -1710,7 +1691,7 @@ function cardMeta(value) {
 }
 
 /**
- * `wts_session_tool_find` — locate a session by directory, title or id.
+ * `wts_session_tool find` — locate a session by directory, title or id.
  *
  * The one a parent needs when it did not write the id down: a task space's record
  * carries its sessions (see `recordTaskSession`), so this is the fallback, not the
@@ -1718,45 +1699,26 @@ function cardMeta(value) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerFind(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_find',
-    description: 'Find sessions by directory, title or id, across every workspace. Live sessions are always current; '
-      + 'offline ones come from the durable session store. A plain query matches the session id, its title and its '
-      + 'working directory as a case-insensitive substring. Returns the session id, whether it is live and running, '
-      + 'its working directory and its title — ready to pass to wts_session_tool_status / _read / _send / _resume. '
-      + 'A task space\'s own record already carries the session ids it opened (see `.worktree-space/worktree-space.json` and the '
-      + 'wts_worktree_space list action), so search only when that id is not to hand.',
-    parameters: {
-      query: { type: 'string', description: 'Substring matched against the session id, title and working directory (case-insensitive).' },
-      sessionId: { type: 'string', description: 'Only sessions whose id contains this substring.' },
-      title: { type: 'string', description: 'Only sessions whose title contains this substring.' },
-      cwd: { type: 'string', description: 'Only sessions whose working directory contains this substring (path or directory name).' },
-      liveOnly: { type: 'boolean', description: 'When true, only live sessions are returned (default false).' },
-      limit: { type: 'number', description: `Maximum items (default ${DEFAULT_FIND_LIMIT}, max ${MAX_FIND_LIMIT}).` },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const items = Array.isArray(value.items) ? value.items : []
-        if (items.length === 0) return [{ type: 'text', text: 'no sessions found' }]
-        return [{ type: 'text', text: items.map((item) => {
-          const state = item.live === true ? (item.running === true ? 'running' : 'idle') : 'offline'
-          const cwd = typeof item.cwd === 'string' ? ` @ ${item.cwd}` : ''
-          return `${state} ${item.sessionId} (${item.title ?? '(untitled)'})${cwd}`
-        }).join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionFind(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const items = Array.isArray(value.items) ? value.items : []
+      if (items.length === 0) return [{ type: 'text', text: 'no sessions found' }]
+      return [{ type: 'text', text: items.map((item) => {
+        const state = item.live === true ? (item.running === true ? 'running' : 'idle') : 'offline'
+        const cwd = typeof item.cwd === 'string' ? ` @ ${item.cwd}` : ''
+        return `${state} ${item.sessionId} (${item.title ?? '(untitled)'})${cwd}`
+      }).join('\n') }]
     },
     async execute(args) {
-      const limit = clampLimit(args.limit, DEFAULT_FIND_LIMIT, MAX_FIND_LIMIT)
+      const limit = clampLimit(args.resultLimit, DEFAULT_FIND_LIMIT, MAX_FIND_LIMIT)
       const items = await knownSessions(ctx)
       if (items === undefined) return refusal(NO_SESSION_LISTING)
       const query = typeof args.query === 'string' ? args.query.trim().toLowerCase() : ''
-      const idFilter = typeof args.sessionId === 'string' ? args.sessionId.trim().toLowerCase() : ''
-      const titleFilter = typeof args.title === 'string' ? args.title.trim().toLowerCase() : ''
-      const cwdFilter = typeof args.cwd === 'string' ? args.cwd.trim().toLowerCase() : ''
+      const idFilter = typeof args.sessionIdMatch === 'string' ? args.sessionIdMatch.trim().toLowerCase() : ''
+      const titleFilter = typeof args.titleMatch === 'string' ? args.titleMatch.trim().toLowerCase() : ''
+      const cwdFilter = typeof args.cwdMatch === 'string' ? args.cwdMatch.trim().toLowerCase() : ''
       // An offline session's title lives only in its log, so it is read for the
       // sessions the filter actually asks about — and only up to a bounded number,
       // because that read is a file per session.
@@ -1796,11 +1758,11 @@ function registerFind(tools, ctx) {
         summary: `${filtered.length} session${filtered.length === 1 ? '' : 's'} match${filtered.length === 1 ? 'es' : ''}${filtered.length > page.length ? `, showing ${page.length}` : ''}.`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_status` — is it moving, and what does it think it is doing?
+ * `wts_session_tool status` — is it moving, and what does it think it is doing?
  *
  * Answers for an offline session too, from its persisted log: "it is not live" is
  * itself the answer a recovering parent is after, and it is not the same as
@@ -1808,46 +1770,27 @@ function registerFind(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerStatus(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_status',
-    description: 'Inspect a session\'s progress: running, whether a turn is open, when it last did anything, whether '
-      + 'work is queued, its last text reply, and its reasoning tail. lastActivity is the reliable answer to "stuck or '
-      + 'busy": a build leaves files, mtimes and logs still for minutes while the session keeps working, so only the '
-      + 'session\'s own clock tells the two apart — pass stalledMsThreshold to have a RUNNING session marked stalled '
-      + 'once it has been quiet for longer than that (an idle session is never marked). lastTurnEnd names a turn that '
-      + 'did not end `completed` (error / interrupted / blocked / max-tokens), which is the one way to tell a task '
-      + 'that finished from one an error killed into silence. A session that is not live is answered from its '
-      + 'persisted log with live: false.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Session id to inspect.' },
-      stalledMsThreshold: { type: 'number', description: 'Mark a RUNNING session stalled once it has been quiet for more than this many milliseconds (default 60000).' },
-      recent: { type: 'number', description: `How many recent messages to include (default ${DEFAULT_RECENT}, max ${MAX_RECENT}).` },
-      reasoning: { type: 'string', enum: ['none', 'last', 'live', 'tail'], description: 'Which chain-of-thought fields to include: tail (default) keeps all three, last keeps only the finalized reasoning, live only the in-flight one, none drops them.' },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const named = typeof value.title === 'string' && value.title !== '' ? ` ("${value.title}")` : ''
-        const lines = [`${value.running === true ? 'running' : (value.live === true ? 'idle' : 'offline')} ${value.sessionId}${named}`]
-        if (value.live !== true) lines.push(`lastActivity: ${value.lastActivityAgoMs === null ? 'unknown' : `now-${value.lastActivityAgoMs}ms`}`)
-        else {
-          lines.push(`openTurn: ${value.openTurn === true ? `yes (turn #${value.lastTurn})` : `no (last turn #${value.lastTurn})`}`)
-          lines.push(`lastActivity: ${value.lastActivityAgoMs === null ? 'never' : `now-${value.lastActivityAgoMs}ms`}${value.stalled === true ? ' [STALLED]' : ''}`)
-        }
-        if (value.pendingWork === true) lines.push(`pendingWork: ${value.nextTurnCount} turn + ${value.nextStepCount} step`)
-        if (value.lastTurnEnd !== undefined && value.lastTurnEnd.kind !== 'completed') {
-          lines.push(`lastTurnEnd: ${value.lastTurnEnd.kind} (turn #${value.lastTurnEnd.turn})${value.lastTurnEnd.failure === undefined ? '' : ` — ${value.lastTurnEnd.failure.code}: ${value.lastTurnEnd.failure.message}`}`)
-        }
-        if (typeof value.lastReply === 'string' && value.lastReply !== '') lines.push(`lastReply: ${value.lastReply}`)
-        if (typeof value.reasoningTail === 'string' && value.reasoningTail !== '') lines.push(`reasoning: ${value.reasoningTail.length > 160 ? `${value.reasoningTail.slice(0, 160)}…` : value.reasoningTail}`)
-        return [{ type: 'text', text: lines.join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionStatus(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const named = typeof value.title === 'string' && value.title !== '' ? ` ("${value.title}")` : ''
+      const lines = [`${value.running === true ? 'running' : (value.live === true ? 'idle' : 'offline')} ${value.sessionId}${named}`]
+      if (value.live !== true) lines.push(`lastActivity: ${value.lastActivityAgoMs === null ? 'unknown' : `now-${value.lastActivityAgoMs}ms`}`)
+      else {
+        lines.push(`openTurn: ${value.openTurn === true ? `yes (turn #${value.lastTurn})` : `no (last turn #${value.lastTurn})`}`)
+        lines.push(`lastActivity: ${value.lastActivityAgoMs === null ? 'never' : `now-${value.lastActivityAgoMs}ms`}${value.stalled === true ? ' [STALLED]' : ''}`)
+      }
+      if (value.pendingWork === true) lines.push(`pendingWork: ${value.nextTurnCount} turn + ${value.nextStepCount} step`)
+      if (value.lastTurnEnd !== undefined && value.lastTurnEnd.kind !== 'completed') {
+        lines.push(`lastTurnEnd: ${value.lastTurnEnd.kind} (turn #${value.lastTurnEnd.turn})${value.lastTurnEnd.failure === undefined ? '' : ` — ${value.lastTurnEnd.failure.code}: ${value.lastTurnEnd.failure.message}`}`)
+      }
+      if (typeof value.lastReply === 'string' && value.lastReply !== '') lines.push(`lastReply: ${value.lastReply}`)
+      if (typeof value.reasoningTail === 'string' && value.reasoningTail !== '') lines.push(`reasoning: ${value.reasoningTail.length > 160 ? `${value.reasoningTail.slice(0, 160)}…` : value.reasoningTail}`)
+      return [{ type: 'text', text: lines.join('\n') }]
     },
     async execute(args) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       const threshold = typeof args.stalledMsThreshold === 'number' && Number.isFinite(args.stalledMsThreshold) && args.stalledMsThreshold >= 0
         ? args.stalledMsThreshold
         : 60_000
@@ -1899,9 +1842,9 @@ function registerStatus(tools, ctx) {
         // from. The sentence says which, because only one of them is worth retrying.
         const reason = service(ctx, 'sessionPersistence') === undefined
           ? `session ${JSON.stringify(sessionId)} is not live, and this deployment serves no session persistence, so `
-            + 'its log cannot be read — call wts_session_tool_resume if it should come back online'
+            + 'its log cannot be read — call wts_session_tool resume if it should come back online'
           : `session ${JSON.stringify(sessionId)} is not live and has no persisted log to read — `
-            + 'use wts_session_tool_find to locate the session that is still there'
+            + 'use wts_session_tool find to locate the session that is still there'
         return asJson({
           offered: true,
           sessionId,
@@ -1940,14 +1883,14 @@ function registerStatus(tools, ctx) {
         reasoningTail: reasoningMode === 'none' ? '' : (offline.reasoningTail ?? ''),
       }
       value.summary = `offline (last activity ${value.lastActivityAgoMs === null ? 'unknown' : `${value.lastActivityAgoMs}ms ago`}); `
-        + 'call wts_session_tool_resume to bring it back online.'
+        + 'call wts_session_tool resume to bring it back online.'
       return asJson(value)
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_read` — what was actually said, so "did not do it" can be told
+ * `wts_session_tool read` — what was actually said, so "did not do it" can be told
  * from "never arrived".
  *
  * This is the tool that answers the one failure a sender cannot see: a `queue`
@@ -1957,33 +1900,16 @@ function registerStatus(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerRead(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_read',
-    description: 'Read messages from any session — live or persisted (offline) — folding its event log into user and '
-      + 'assistant rows. Returns the most recent 20 by default; pass limit for more (max 100) and sinceSeq to page '
-      + 'forward from an event seq. role filters the rows, includeReasoning false drops reasoning blocks. Use it to '
-      + 'check whether an instruction was actually delivered: a queue message is read at a turn boundary, so on a '
-      + 'long-running task it can sit unread in the inbox and look exactly like a session ignoring it.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Session id to read (live or offline).' },
-      sinceSeq: { type: 'integer', description: 'Only return messages with a seq greater than this (paging cursor).' },
-      limit: { type: 'number', description: `How many of the most recent messages to return (default ${DEFAULT_READ_LIMIT}, max ${MAX_READ_LIMIT}).` },
-      role: { type: 'string', enum: ['user', 'assistant', 'both'], description: 'Which rows to return (default both).' },
-      includeReasoning: { type: 'boolean', description: 'Include assistant reasoning blocks (default true).' },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const messages = Array.isArray(value.messages) ? value.messages : []
-        if (messages.length === 0) return [{ type: 'text', text: `no messages in ${value.sessionId}` }]
-        return [{ type: 'text', text: messages.map((row) => `${row.role} #${row.seq}: ${typeof row.text === 'string' ? row.text : '(no text)'}`).join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionRead(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const messages = Array.isArray(value.messages) ? value.messages : []
+      if (messages.length === 0) return [{ type: 'text', text: `no messages in ${value.sessionId}` }]
+      return [{ type: 'text', text: messages.map((row) => `${row.role} #${row.seq}: ${typeof row.text === 'string' ? row.text : '(no text)'}`).join('\n') }]
     },
     async execute(args, exec) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       const agents = agentsOf(ctx)
       const agent = agents === undefined ? undefined : safely(() => agents.get(sessionId))
       let events
@@ -2010,9 +1936,9 @@ function registerRead(tools, ctx) {
           // does not exist, the other a log this deployment cannot open at all.
           return unavailable(sessionId, service(ctx, 'sessionPersistence') === undefined
             ? `session ${JSON.stringify(sessionId)} is not live, and this deployment serves no session persistence, so `
-              + 'its log cannot be read — call wts_session_tool_resume if it should come back online'
+              + 'its log cannot be read — call wts_session_tool resume if it should come back online'
             : `session ${JSON.stringify(sessionId)} is not live and has no persisted log to read — `
-              + 'use wts_session_tool_find to locate the session that is still there')
+              + 'use wts_session_tool find to locate the session that is still there')
         }
         // Existence had to be settled first, because the two refusals above are the
         // more useful answer when the deployment, not the session, is the problem.
@@ -2028,7 +1954,7 @@ function registerRead(tools, ctx) {
       if (args.includeReasoning === false) rows = rows.map((row) => ({ ...row, reasoning: undefined }))
       const sinceSeq = typeof args.sinceSeq === 'number' && Number.isInteger(args.sinceSeq) && args.sinceSeq >= 0 ? args.sinceSeq : undefined
       if (sinceSeq !== undefined) rows = rows.filter((row) => row.seq > sinceSeq)
-      const limit = clampLimit(args.limit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT)
+      const limit = clampLimit(args.messageLimit, DEFAULT_READ_LIMIT, MAX_READ_LIMIT)
       const page = rows.slice(-limit)
       return asJson({
         offered: true,
@@ -2052,11 +1978,11 @@ function registerRead(tools, ctx) {
         summary: `${page.length} of ${rows.length} message${rows.length === 1 ? '' : 's'} from ${sessionId} (${live ? 'live' : 'offline'}).`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_send` — say something to a session after the task was handed
+ * `wts_session_tool send` — say something to a session after the task was handed
  * over.
  *
  * `mode` is the whole point, and the default is `steer`: the message is injected into the
@@ -2067,50 +1993,27 @@ function registerRead(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerSend(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_send',
-    description: 'Send a message to a session and let it start working. mode=steer (the default) injects the message '
-      + 'into the running turn and is caught at its next step - which is what a dispatched task needs, since it is often '
-      + 'one long turn and a queued correction can sit unread until the work is over; mode=queue appends a normal turn '
-      + 'and is only read at a turn boundary, for the few messages that may wait. The session must be live — call '
-      + 'wts_session_tool_resume first otherwise. With waitForReply=true the call blocks until that session produces its '
-      + 'next assistant reply. '
-      + 'Without it the answer carries sinceSeq, the anchor to pass to wts_session_tool_wait. Set finalReport=true only '
-      + 'when this message IS your final report for the task — the one that hands the finished work over. It is recorded '
-      + 'against your own session in the task\'s record, and the session that dispatched you is told if you stop without '
-      + 'it. Progress updates and questions must leave it false; a report that says "halfway" is not the report.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Target session id.' },
-      message: { type: 'string', required: true, description: 'Message text, sent as a user turn.' },
-      mode: { type: 'string', enum: ['queue', 'steer'], description: 'steer (default) interrupts the running turn at its next step; queue appends a turn and is read only at the next turn boundary.' },
-      finalReport: { type: 'boolean', description: 'Set true only when this message is your final report for the task, not a progress update or a question. Defaults to false. Recording it is best-effort and never blocks the send.' },
-      waitForReply: { type: 'boolean', description: 'When true, wait for the next assistant reply before answering (default false).' },
-      timeoutMs: { type: 'number', description: `Wait budget in milliseconds (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const lines = [`sent to ${value.sessionId} (${value.mode})`]
-        if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool_wait)`)
-        if (value.reply !== undefined) {
-          lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
-          lines.push(...waitNotes(value.reply))
-        }
-        return [{ type: 'text', text: lines.join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionSend(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const lines = [`sent to ${value.sessionId} (${value.mode})`]
+      if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool wait)`)
+      if (value.reply !== undefined) {
+        lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
+        lines.push(...waitNotes(value.reply))
+      }
+      return [{ type: 'text', text: lines.join('\n') }]
     },
     async execute(args, exec) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       const message = requiredString(args.message, 'message', 'the text to send')
       const agents = agentsOf(ctx)
       if (agents === undefined) return refusal(NO_AGENTS)
       const agent = safely(() => agents.get(sessionId))
       if (agent === undefined || agent === null) {
-        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool_resume to bring it `
-          + 'online first, or wts_session_tool_find to locate the session that is still there')
+        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool resume to bring it `
+          + 'online first, or wts_session_tool find to locate the session that is still there')
       }
       // Scope, asked before anything is sent. These tools exist so a leader can reach the
       // session it dispatched, which is not its child - but the same reach would steer text
@@ -2172,11 +2075,11 @@ function registerSend(tools, ctx) {
         summary: `sent to ${sessionId} with mode=${mode}.`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_create` — open a session in a directory, which is how a lost
+ * `wts_session_tool create` — open a session in a directory, which is how a lost
  * task is picked back up.
  *
  * The session service is preferred over the agent registry because it is what
@@ -2185,38 +2088,18 @@ function registerSend(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerCreate(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_create',
-    description: 'Open a NEW top-level session and optionally hand it one job. Pass cwd as the ABSOLUTE path the '
-      + 'session must work in — a task space, so the new session can see the task record, the deploy root and the '
-      + 'worktrees — or a workspaceId. This is the recovery route when a task\'s session was lost and the work has to '
-      + 'carry on in the same task space; the prompt must stand alone, because the new session does not share this '
-      + 'conversation. The session is attached to the Workspace its directory belongs to. Answers with the new '
-      + 'session id and, when a prompt was handed over, the delivery result.',
-    parameters: {
-      cwd: { type: 'string', description: 'Absolute working directory for the new session — the task space. One of cwd or workspaceId is required.' },
-      workspaceId: { type: 'string', description: 'Workspace to open the session in; takes precedence over cwd.' },
-      title: { type: 'string', description: 'Optional title, applied to the session itself so the interface shows it and automatic title generation stops overwriting it.' },
-      prompt: { type: 'string', description: 'Optional first job, handed to the session as its first turn. It must be self-contained.' },
-      agentPreset: { type: 'string', description: 'Optional agent preset id to compose the new session from.' },
-      waitForReply: { type: 'boolean', description: 'When true and a prompt was given, wait for the first assistant reply (default false).' },
-      timeoutMs: { type: 'number', description: `Wait budget in milliseconds (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const lines = [`created session ${value.sessionId}${value.cwd === '' ? '' : ` in ${value.cwd}`}`]
-        if (value.titleNote !== undefined) lines.push(value.titleNote)
-        if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool_wait)`)
-        if (value.reply !== undefined) {
-          lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
-          lines.push(...waitNotes(value.reply))
-        }
-        return [{ type: 'text', text: lines.join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionCreate(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const lines = [`created session ${value.sessionId}${value.cwd === '' ? '' : ` in ${value.cwd}`}`]
+      if (value.titleNote !== undefined) lines.push(value.titleNote)
+      if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool wait)`)
+      if (value.reply !== undefined) {
+        lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
+        lines.push(...waitNotes(value.reply))
+      }
+      return [{ type: 'text', text: lines.join('\n') }]
     },
     async execute(args, exec) {
       const requestedCwd = typeof args.cwd === 'string' ? args.cwd.trim() : ''
@@ -2355,11 +2238,11 @@ function registerCreate(tools, ctx) {
         summary: `session ${sessionId} opened in ${cwd}${prompt === '' ? '' : ' and handed the job'}.`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_resume` — bring an offline session back online.
+ * `wts_session_tool resume` — bring an offline session back online.
  *
  * A host restart puts every session offline, and a task that was mid-turn is then
  * neither reachable nor readable through the live registry. Resuming keeps the
@@ -2368,27 +2251,15 @@ function registerCreate(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerResume(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_resume',
-    description: 'Bring a persisted (offline) session back online so wts_session_tool_send / _wait / _read can work on '
-      + 'it. A host restart puts every session offline, so this is how a task keeps its continuity instead of being '
-      + 'dispatched again from scratch. Resuming keeps the session id and its context; if it is already live this is a '
-      + 'no-op that says so. Read the session\'s last state with wts_session_tool_status before deciding what to send.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Session id to resume (its persisted log must exist).' },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        if (value.alreadyLive === true) return [{ type: 'text', text: `session ${value.sessionId} is already live` }]
-        return [{ type: 'text', text: `resumed session ${value.sessionId}${value.cwd === '' ? '' : ` (cwd: ${value.cwd})`}` }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionResume(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      if (value.alreadyLive === true) return [{ type: 'text', text: `session ${value.sessionId} is already live` }]
+      return [{ type: 'text', text: `resumed session ${value.sessionId}${value.cwd === '' ? '' : ` (cwd: ${value.cwd})`}` }]
     },
     async execute(args) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       const agents = agentsOf(ctx)
       const existing = agents === undefined ? undefined : safely(() => agents.get(sessionId))
       if (existing !== undefined && existing !== null) {
@@ -2412,7 +2283,7 @@ function registerResume(tools, ctx) {
         .find((header) => header !== null && typeof header === 'object' && header.id === sessionId)
       if (record === undefined) {
         return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is unknown here (no live agent and no persisted log) — `
-          + 'use wts_session_tool_find to locate the sessions that do exist')
+          + 'use wts_session_tool find to locate the sessions that do exist')
       }
       const handle = await safelyAsync(() => agents.resume({ resumeSessionId: sessionId }))
       if (handle === undefined || handle.agent === undefined) {
@@ -2430,11 +2301,11 @@ function registerResume(tools, ctx) {
         summary: `session ${sessionId} is online again.`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_wait` — wait for the output a send or a create produced.
+ * `wts_session_tool wait` — wait for the output a send or a create produced.
  *
  * The orchestration primitive: send, then wait for that one message to be
  * answered. A timeout is not an empty answer — the newest output that already
@@ -2443,40 +2314,23 @@ function registerResume(tools, ctx) {
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerWait(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_wait',
-    description: 'Wait for a session\'s next assistant output. By default the wait starts from the newest event at '
-      + 'call time, so pass the sinceSeq anchor that wts_session_tool_send / _create returned to wait for THAT message '
-      + 'specifically (-1 counts every event, which is what a brand-new session needs). It returns as soon as a new '
-      + 'assistant text reply is readable, without waiting for the whole turn, and with requireTurnEnd it waits for the '
-      + 'turn to settle first. A wait that runs out of budget is not an empty answer: the newest output that already '
-      + 'existed is returned with stale=true. The session must be live — resume it first otherwise.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Session id to wait on (must be live).' },
-      sinceSeq: { type: 'integer', description: 'Only output after this event seq counts (default: the newest seq at call time; -1 counts every event).' },
-      timeoutMs: { type: 'number', description: `Wait budget in milliseconds (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
-      requireTurnEnd: { type: 'boolean', description: 'When true, wait for the turn to settle before returning (default false: return as soon as the reply text is readable).' },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        const reply = value.reply
-        if (reply === undefined || reply.message === null) {
-          return [{ type: 'text', text: `no assistant text in ${value.sessionId} within ${reply === undefined ? '?' : reply.waitedMs}ms` }]
-        }
-        return [{ type: 'text', text: [`reply seq ${reply.seq}: ${reply.message.text ?? '(no text)'}`, ...waitNotes(reply)].join('\n') }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionWait(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const reply = value.reply
+      if (reply === undefined || reply.message === null) {
+        return [{ type: 'text', text: `no assistant text in ${value.sessionId} within ${reply === undefined ? '?' : reply.waitedMs}ms` }]
+      }
+      return [{ type: 'text', text: [`reply seq ${reply.seq}: ${reply.message.text ?? '(no text)'}`, ...waitNotes(reply)].join('\n') }]
     },
     async execute(args, exec) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       const agents = agentsOf(ctx)
       if (agents === undefined) return refusal(NO_AGENTS)
       const agent = safely(() => agents.get(sessionId))
       if (agent === undefined || agent === null) {
-        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool_resume first, because `
+        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool resume first, because `
           + 'waiting needs a live session')
       }
       // The baseline, the whole wait, and the reply it settles on are held under this
@@ -2530,49 +2384,28 @@ function registerWait(tools, ctx) {
           : `reply seq ${reply.seq} after ${reply.waitedMs}ms.`,
       })
     },
-  }))
+  }
 }
 
 /**
- * `wts_session_tool_cancel` — the brake.
+ * `wts_session_tool cancel` — the brake.
  *
  * For a session that has run away, is plainly off track, or has to be stopped
  * before its task space is archived. Cancellation is asynchronous: the state in
  * the answer is sampled right after the request, so a `running: true` here can be
- * a turn still winding down — poll `wts_session_tool_status` for `openTurn: false`
+ * a turn still winding down — poll `wts_session_tool status` for `openTurn: false`
  * to see it settle.
  * @param ctx - the host plugin context.
  * @returns the registration disposer.
  */
-function registerCancel(tools, ctx) {
-  return tools.register(defineTool({
-    name: 'wts_session_tool_cancel',
-    description: 'Stop a session: abort the active turn, and unless keepInbox is true also clear the queued and '
-      + 'steering work. Use it when a task has run away, is plainly off track, or has to be stopped before its task '
-      + 'space is archived. Cancellation is asynchronous — the state in the answer is sampled immediately after the '
-      + 'request, so running: true can be a turn still winding down; poll wts_session_tool_status until openTurn is '
-      + 'false to confirm. The session must be live. **reason is required**: stopping a session destroys work in it, '
-      + 'so the call has to say why it is being stopped. State the actual reason in your own words ("the task has run '
-      + 'away", "the finish needs this session out of the task space") rather than a placeholder — the reason is '
-      + 'recorded with the cancellation and read by whoever comes to the session later. A call with no reason, or an '
-      + 'empty one, is refused. Be sure the session is yours to stop: these tools reach the sessions this plugin\'s '
-      + 'work created, and cancelling a session the user is talking to aborts their conversation.',
-    parameters: {
-      sessionId: { type: 'string', required: true, description: 'Session id to stop (must be live).' },
-      keepInbox: { type: 'boolean', description: 'Preserve queued and steering input instead of clearing it (default false, i.e. clear the pending work).' },
-      cause: { type: 'string', description: 'Optional short label for the sort of stopping this is, recorded alongside reason. The free-text why belongs in reason.' },
-      reason: { type: 'string', required: true, description: 'Why this session is being stopped. Required: give the real reason, in your own words, because it is recorded with the cancellation.' },
-    },
-    output: {
-      schema: OUTPUT_SCHEMA,
-      render: (_args, value) => {
-        if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-        return [{ type: 'text', text: `cancelled ${value.sessionId} (${value.keepInbox === true ? 'queued work kept' : 'queued work cleared'}), still running: ${value.running} — reason: ${value.cancelReason}` }]
-      },
-      presentationMeta: (_args, value) => cardMeta(value),
+function sessionCancel(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      return [{ type: 'text', text: `cancelled ${value.sessionId} (${value.keepInbox === true ? 'queued work kept' : 'queued work cleared'}), still running: ${value.running} — reason: ${value.cancelReason}` }]
     },
     async execute(args, exec) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool_find answered with')
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
       // Read before anything else, so a call that cannot say why it is stopping a
       // session changes nothing at all - not even a look at the registry.
       const cancelReason = requiredString(args.reason, 'reason',
@@ -2581,7 +2414,7 @@ function registerCancel(tools, ctx) {
       if (agents === undefined) return refusal(NO_AGENTS)
       const agent = safely(() => agents.get(sessionId))
       if (agent === undefined || agent === null) {
-        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool_resume first, because `
+        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool resume first, because `
           + 'stopping needs a live session')
       }
       // Cancelling is the one of these that destroys work: it aborts the turn that is
@@ -2619,38 +2452,163 @@ function registerCancel(tools, ctx) {
         summary: `cancelled ${sessionId} (${keepInbox ? 'queued work kept' : 'queued work cleared'}).`,
       })
     },
-  }))
+  }
+}
+
+/** The one name the eight session actions are served under. */
+export const SESSION_TOOL_NAME = 'wts_session_tool'
+
+/**
+ * Model-facing description for the merged session tool.
+ *
+ * The eight actions were eight registrations, each carrying its own description;
+ * what they repeated was not the action but the ground rules around it - where an
+ * id comes from, which actions need a live session, what a `sinceSeq` is for. One
+ * description says those once. What it does not carry is the workflow that chooses
+ * between the actions, which is the bundled skill's to say.
+ */
+const SESSION_DESCRIPTION = [
+  'Watch and steer the sessions a task runs in: find, status, read, send, create, resume, wait or cancel, chosen by action. '
+    + 'The session id is in the task\'s own record - wts_worktree_space list reports it, and so does '
+    + '.worktree-space/worktree-space.json - so take it from there; find is the fallback for an id nobody wrote down. '
+    + 'A dispatched session is NOT this session\'s child, so send_message cannot reach it.',
+
+  'send, wait and cancel need a live session: call resume first when the answer says it is offline, which is what a host '
+    + 'restart does to every session. status and read answer for an offline one too, from its persisted log - so "not live" '
+    + 'is itself the answer, not a failure.',
+
+  'send defaults to mode steer, which reaches a running turn at its next step - what a correction needs, because a '
+    + 'dispatched task is often one long turn. mode queue appends a turn that is read only at a turn boundary, for the few '
+    + 'messages that may wait. Set finalReport true only when this message IS the finished work being handed over, never '
+    + 'for a progress update or a question.',
+
+  'wait blocks for the session\'s next assistant output. Pass the sinceSeq a send or a create answered with to wait for '
+    + 'that message specifically; -1 counts every event, which a brand-new session needs. A wait that runs out of budget is '
+    + 'not an empty answer: the output that already existed comes back marked stale.',
+
+  'cancel aborts the turn and, unless keepInbox is true, clears the work queued behind it. reason is required and is '
+    + 'recorded with the cancellation - say why in your own words. Be sure the session is yours to stop: cancelling one the '
+    + 'user is talking to aborts their conversation. Cancellation is asynchronous, so poll status until openTurn is false.',
+
+  'create opens a NEW session, for when a task\'s session was lost and the work has to carry on in the same task space: '
+    + 'pass cwd as the ABSOLUTE path of the task space, or a workspaceId. Its prompt must stand alone, because the new '
+    + 'session shares none of this conversation.',
+
+  'status answers "stuck or busy" with lastActivity: a build leaves files, mtimes and logs still for minutes while a '
+    + 'session keeps working, so only the session\'s own clock tells the two apart - pass stalledMsThreshold to have a quiet '
+    + 'RUNNING session marked stalled. read folds the event log into rows and is how you confirm an instruction was actually '
+    + 'delivered: a queued message sits unread in the inbox for as long as the turn runs, which looks exactly like a session '
+    + 'ignoring it.',
+
+  'find matches a plain query against the id, the title and the working directory, or narrows to one field with titleMatch '
+    + 'or cwdMatch.',
+].join('\n')
+
+/**
+ * The merged tool's arguments.
+ *
+ * One flat object for eight actions, which is the shape `wts_worktree_space` already
+ * uses, so the prefix in each description names the action it belongs to. Three pairs
+ * collided when the eight were joined - find's `title` / `cwd` / `limit` are filters
+ * where create's are values to set, and read's `limit` caps messages where find's caps
+ * results - so the filters were renamed rather than left to mean two things.
+ */
+const SESSION_PARAMETERS = {
+  action: {
+    type: 'string',
+    required: true,
+    enum: ['find', 'status', 'read', 'send', 'create', 'resume', 'wait', 'cancel'],
+    description: 'find, status, read, send, create, resume, wait or cancel.',
+  },
+  sessionId: { type: 'string', description: 'Target session id. Required for every action except find and create.' },
+  query: { type: 'string', description: '(find) Substring matched against the id, title and working directory (case-insensitive).' },
+  sessionIdMatch: { type: 'string', description: '(find) Only sessions whose id contains this.' },
+  titleMatch: { type: 'string', description: '(find) Only sessions whose title contains this.' },
+  cwdMatch: { type: 'string', description: '(find) Only sessions whose working directory contains this.' },
+  liveOnly: { type: 'boolean', description: '(find) Only live sessions (default false).' },
+  resultLimit: { type: 'number', description: `(find) Maximum items (default ${DEFAULT_FIND_LIMIT}, max ${MAX_FIND_LIMIT}).` },
+  stalledMsThreshold: { type: 'number', description: '(status) Mark a quiet RUNNING session stalled after this many ms (default 60000).' },
+  recent: { type: 'number', description: `(status) Recent messages to include (default ${DEFAULT_RECENT}, max ${MAX_RECENT}).` },
+  reasoning: { type: 'string', enum: ['none', 'last', 'live', 'tail'], description: '(status) Which chain-of-thought fields to include (default tail).' },
+  sinceSeq: { type: 'integer', description: '(read, wait) Paging cursor: only a seq greater than this counts; -1 counts every event.' },
+  messageLimit: { type: 'number', description: `(read) Most recent messages to return (default ${DEFAULT_READ_LIMIT}, max ${MAX_READ_LIMIT}).` },
+  role: { type: 'string', enum: ['user', 'assistant', 'both'], description: '(read) Which rows to return (default both).' },
+  includeReasoning: { type: 'boolean', description: '(read) Include assistant reasoning blocks (default true).' },
+  message: { type: 'string', description: '(send) Message text, sent as a user turn.' },
+  mode: { type: 'string', enum: ['queue', 'steer'], description: '(send) steer (default) interrupts the running turn at its next step; queue waits for a turn boundary.' },
+  finalReport: { type: 'boolean', description: '(send) True only when this message IS the finished work being handed over. Defaults to false.' },
+  waitForReply: { type: 'boolean', description: '(send, create) Block for the next assistant reply (default false).' },
+  timeoutMs: { type: 'number', description: `(send, create, wait) Wait budget in ms (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
+  cwd: { type: 'string', description: '(create) ABSOLUTE working directory - the task space. One of cwd or workspaceId is required.' },
+  workspaceId: { type: 'string', description: '(create) Workspace to open in; takes precedence over cwd.' },
+  title: { type: 'string', description: '(create) Title shown in the interface; stops automatic title generation.' },
+  prompt: { type: 'string', description: "(create) The session's first job. It must stand alone: it shares no context with this conversation." },
+  agentPreset: { type: 'string', description: '(create) Agent preset id to compose the session from.' },
+  requireTurnEnd: { type: 'boolean', description: '(wait) Wait for the turn to settle, not just for readable reply text (default false).' },
+  keepInbox: { type: 'boolean', description: '(cancel) Keep queued and steering input instead of clearing it (default false).' },
+  cause: { type: 'string', description: '(cancel) Short label for the kind of stopping this is; the why belongs in reason.' },
+  reason: { type: 'string', description: '(cancel) REQUIRED: why this session is being stopped, in your own words.' },
 }
 
 /**
- * Register the eight session-control tools.
+ * The registered tool, with one handler per action.
  *
- * Only `tools` is required to mount them; every session service is probed per
+ * Each handler is its own closure over `ctx`, built once at registration and holding
+ * nothing between calls; the merged definition supplies the name, the description and
+ * the arguments, and only forwards. An `action` outside the enum cannot reach a
+ * handler - the schema refuses it first, and this answers rather than falling through.
+ * @param ctx - the host plugin context.
+ * @returns the definition to register.
+ */
+function sessionToolDefinition(ctx) {
+  const handlers = {
+    find: sessionFind(ctx),
+    status: sessionStatus(ctx),
+    read: sessionRead(ctx),
+    send: sessionSend(ctx),
+    create: sessionCreate(ctx),
+    resume: sessionResume(ctx),
+    wait: sessionWait(ctx),
+    cancel: sessionCancel(ctx),
+  }
+  return {
+    name: SESSION_TOOL_NAME,
+    description: SESSION_DESCRIPTION,
+    parameters: SESSION_PARAMETERS,
+    output: {
+      schema: OUTPUT_SCHEMA,
+      render: (args, value) => {
+        const handler = handlers[args?.action]
+        return handler === undefined ? [{ type: 'text', text: value.summary }] : handler.render(args, value)
+      },
+      presentationMeta: (_args, value) => cardMeta(value),
+    },
+    async execute(args, exec) {
+      const handler = handlers[args?.action]
+      if (handler === undefined) {
+        return refusal(`${SESSION_TOOL_NAME}: no action named ${JSON.stringify(args?.action ?? '')}; `
+          + 'the action is one of find, status, read, send, create, resume, wait or cancel')
+      }
+      return handler.execute(args, exec)
+    },
+  }
+}
+
+/**
+ * Register the session-control tool.
+ *
+ * Only `tools` is required to mount it; every session service is probed per
  * call instead. That is deliberate and it is the difference between two failures:
  * demanding the services here would leave a deployment without them with **no
  * tools at all** — silent, and indistinguishable from the plugin not being
  * installed — where probing answers "this deployment does not offer X", which is
  * something a caller can act on.
  * @param ctx - the host plugin context.
- * @returns the registration disposers, or undefined when tools are not served.
+ * @returns the registration disposer, or undefined when tools are not served.
  */
 export function registerSessionTools(ctx) {
   if (ctx === null || ctx === undefined || typeof ctx.get !== 'function') return undefined
   const tools = ctx.get('tools')
   if (tools === undefined || tools === null || typeof tools.register !== 'function') return undefined
-  const registered = [
-    registerFind(tools, ctx),
-    registerStatus(tools, ctx),
-    registerRead(tools, ctx),
-    registerSend(tools, ctx),
-    registerCreate(tools, ctx),
-    registerResume(tools, ctx),
-    registerWait(tools, ctx),
-    registerCancel(tools, ctx),
-  ]
-  return () => {
-    for (const dispose of registered) {
-      if (typeof dispose === 'function') dispose()
-    }
-  }
+  return tools.register(defineTool(sessionToolDefinition(ctx)))
 }

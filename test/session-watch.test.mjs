@@ -266,13 +266,13 @@ describe('the dispatched-session watcher', () => {
   })
 
   // `aborted` is not the gap. It is a turn something stopped on purpose - the user from the
-  // interface, or a dispatcher through `wts_session_tool_cancel` - so a session that says nothing
+  // interface, or a dispatcher through `wts_session_tool cancel` - so a session that says nothing
   // after one was not left unfinished, it was stopped. Reporting it would invite the dispatcher
   // to wake a session the user has just decided to stop. There is also nothing to distinguish the
   // two cancellers with: the host's reason is `{ kind: 'aborted', reason: TurnEndCancelCause }`
   // and `TurnEndCancelCause = AgentCancelCause | { kind: 'legacy' }` with `AgentCancelCause` =
   // user | parent | hook{reason} | disposed - no session id anywhere, and the plugin's own
-  // `wts_session_tool_cancel` passes no caller either. Since neither cancellation is reported,
+  // `wts_session_tool cancel` passes no caller either. Since neither cancellation is reported,
   // nothing needs distinguishing, and the test is one case rather than three.
   it('stays silent for an aborted turn, whoever stopped it', async () => {
     for (const extra of [{ reason: { kind: 'user' } }, { reason: { kind: 'hook', reason: 'stop' } }, { reason: { kind: 'legacy' } }, {}]) {
@@ -368,7 +368,7 @@ describe('the dispatched-session watcher', () => {
 
     feed(listeners, sessionOf('child-1'), turnEnd(1, 'error'))
 
-    // The same source the subagent channel and wts_session_tool_send use, so the receiving
+    // The same source the subagent channel and wts_session_tool send use, so the receiving
     // interface presents it as an agent's report rather than as the user typing.
     expect(steered[0].source).toEqual({
       kind: 'agent-message',
@@ -503,8 +503,8 @@ describe('the interruption notice', () => {
     expect(text).toContain('child-1')
     expect(text).toContain('PI_AI_ERROR: boom')
     expect(text).toMatch(/NOT finished/)
-    expect(text).toContain('wts_session_tool_status')
-    expect(text).toContain('wts_session_tool_send')
+    expect(text).toContain('wts_session_tool status')
+    expect(text).toContain('wts_session_tool send')
   })
 
   it('reads sensibly with no task name and no failure detail', () => {
@@ -540,8 +540,8 @@ describe('the missing-report notice', () => {
     // have been stopped on purpose, so the notice sends the dispatcher to what the session
     // already produced and says in as many words that this is not a reason to wake it.
     const text = missingReportNotice('login', 'child-1')
-    expect(text).toContain('wts_session_tool_read')
-    expect(text).toContain('wts_session_tool_status')
+    expect(text).toContain('wts_session_tool read')
+    expect(text).toContain('wts_session_tool status')
     expect(text).toMatch(/not\*\* as a reason to resume or wake the session/)
   })
 

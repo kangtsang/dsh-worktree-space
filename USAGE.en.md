@@ -684,7 +684,7 @@ If you mean to click through it yourself, this part is background reading and ca
 
 **The two are not parent and child**: the member is a session under the task space, not a child of the
 leader, so the existing parent-child channel (`send_message`) cannot reach it — it answers
-"belongs to another parent session". The leader's only channel is the eight `wts_session_tool_*` tools
+"belongs to another parent session". The leader's only channel is the eight actions of `wts_session_tool`
 ([the appendix](#appendix-the-session-control-tools)).
 
 ## 12. How the chain runs
@@ -696,11 +696,11 @@ leader, so the existing parent-child channel (`send_message`) cannot reach it �
    → returns { container, branch, sessionId }
 
 ② Follow progress (no polling; look when there is a reason)
-   wts_session_tool_status({ sessionId })           ← lastActivity tells "stuck" from "in a long step"
-   wts_session_tool_read({ sessionId })             ← tells "never delivered" from "ignored"
+   wts_session_tool status({ sessionId })           ← lastActivity tells "stuck" from "in a long step"
+   wts_session_tool read({ sessionId })             ← tells "never delivered" from "ignored"
 
 ③ Change the requirement / correct course
-   wts_session_tool_send({ sessionId, mode: "steer", message })
+   wts_session_tool send({ sessionId, mode: "steer", message })
 
 ④ Abnormal turns announce themselves (on by default)
    A notice arrives = the work is not done → status says where it stopped → send puts it back on it
@@ -727,7 +727,7 @@ leader, so the existing parent-child channel (`send_message`) cannot reach it �
 
 **Do not `dispatch` into the same task space twice in a row** — a `dispatch` opens a session every time,
 and two sessions that each believe they own the work edit the same files and interrupt each other's
-commits. To add something for a session that is already running, use `wts_session_tool_send`.
+commits. To add something for a session that is already running, use `wts_session_tool send`.
 
 **Everything handed out is prefaced by a standard preamble**, which states the task name, the container
 root, the branch name, that "git commands run in the per-repository subdirectories", that nothing may be
@@ -735,7 +735,7 @@ edited or committed in the source checkouts and `git merge` is never written by 
 your call (both routes support it), plus one line for a `docker` policy — "a passing smoke is this task's
 finish line", that the acceptance stack has to be this task's own, which file the delivery facts go into,
 that anything taking more than a minute belongs in the background, and **the channel to report on**: send
-to the leader's own session id with `wts_session_tool_send` (the default `mode` is `steer`, so it arrives at
+to the leader's own session id with `wts_session_tool send` (the default `mode` is `steer`, so it arrives at
 once; name `mode: "queue"` only for something that may wait for a boundary), and **before stopping you must
 deliver one final report with `finalReport: true`**. Without it the leader is told the session ended without
 reporting and has to go back into that session's log for the conclusion himself, which leaves the matter
@@ -743,7 +743,7 @@ with him. So even when a brief forgets the rules, they are still in there.
 
 ## 13. The three holds while it runs
 
-**Following progress.** `wts_session_tool_status`'s **`lastActivity` is the one reliable signal** — file
+**Following progress.** `wts_session_tool status`'s **`lastActivity` is the one reliable signal** — file
 times, mtimes and the tail of a log can all sit still for minutes during a build, while the session's own
 clock does not. With `stalledMsThreshold` passed, **only a session that is running** is marked `stalled`;
 for an idle session, "no events for a long while" is the normal state. `lastReply` answers "what it
@@ -761,7 +761,7 @@ A long task handed out is often **one long turn** from end to end, which is why 
 `steer`: a message that does not arrive at once is held back by the next boundary — and from outside, the
 session looks like it "ignored the request". To tell "never delivered" from "delivered and ignored", read
 the session's own record with
-`wts_session_tool_read`.
+`wts_session_tool read`.
 
 **Picking up after a failure, and a report that never came.** There are two cases here, and the plugin
 treats them differently.
@@ -775,7 +775,7 @@ is reported**, not only the last one.
 
 **Two: the turn ended normally, but no final report was delivered.** This watches the other way a report
 goes missing: the work is done, the session stops, and nothing was sent. Before stopping its work a member
-is required to call `wts_session_tool_send` with **`finalReport: true`**; when a turn ends `completed` the
+is required to call `wts_session_tool send` with **`finalReport: true`**; when a turn ends `completed` the
 plugin looks for that mark in the record, and if it is absent the leader is told the session **ended
 normally without delivering a final report**. The notice also says that this is **not a failure** and that
 it is **not** a reason to wake the session — read its last output first.
@@ -887,29 +887,29 @@ above.
 
 Work inside a task space goes to a **session of its own** (the member): it has its own context, its own
 approval gate, its own working directory. The leader session is **not** its parent, so the existing
-parent-child channel refuses outright (`belongs to another parent session`). These eight tools are the
+parent-child channel refuses outright (`belongs to another parent session`). Its eight actions are the
 only channel through.
 
-### The eight tools
+### The eight actions
 
-| Tool | What it does |
+| action | What it does |
 | --- | --- |
-| `wts_session_tool_find` | Finds sessions by working directory / title / id, returning `sessionId`, whether it is online, its working directory and its title |
-| `wts_session_tool_status` | Progress: `running`, `openTurn`, `lastActivity`, `pendingWork`, `lastReply`, and the tail of its reasoning; offline sessions answer from their persisted log |
-| `wts_session_tool_read` | Reads messages (count, `role` filter, `sinceSeq` paging), online or offline alike |
-| `wts_session_tool_send` | Sends a message; `mode` is `queue` or `steer`, and `finalReport: true` says this message is the task's final report |
-| `wts_session_tool_create` | Opens a new session in a directory you name (the task space), optionally handing it a self-contained prompt |
-| `wts_session_tool_resume` | Brings an offline session back online, after which `send` / `read` / `wait` work directly |
-| `wts_session_tool_wait` | Waits for this output; on timeout it returns **the latest output that already exists** marked `stale`, never nothing |
-| `wts_session_tool_cancel` | Aborts the running turn, optionally keeping whatever work is queued |
+| `wts_session_tool find` | Finds sessions by working directory / title / id, returning `sessionId`, whether it is online, its working directory and its title |
+| `wts_session_tool status` | Progress: `running`, `openTurn`, `lastActivity`, `pendingWork`, `lastReply`, and the tail of its reasoning; offline sessions answer from their persisted log |
+| `wts_session_tool read` | Reads messages (count, `role` filter, `sinceSeq` paging), online or offline alike |
+| `wts_session_tool send` | Sends a message; `mode` is `queue` or `steer`, and `finalReport: true` says this message is the task's final report |
+| `wts_session_tool create` | Opens a new session in a directory you name (the task space), optionally handing it a self-contained prompt |
+| `wts_session_tool resume` | Brings an offline session back online, after which `send` / `read` / `wait` work directly |
+| `wts_session_tool wait` | Waits for this output; on timeout it returns **the latest output that already exists** marked `stale`, never nothing |
+| `wts_session_tool cancel` | Aborts the running turn, optionally keeping whatever work is queued |
 
 ### Their parameters
 
-| Tool | Parameters |
+| action | Parameters |
 | --- | --- |
-| `find` | `query`, `sessionId`, `title`, `cwd` (all substring matches), `liveOnly`, `limit` (10 by default, 50 at most) |
+| `find` | `query`, `sessionIdMatch`, `titleMatch`, `cwdMatch` (all substring matches), `liveOnly`, `resultLimit` (10 by default, 50 at most) |
 | `status` | `sessionId` (required), `stalledMsThreshold` (60000 by default), `recent` (8 by default, 20 at most), `reasoning` (`none` / `last` / `live` / `tail`, `tail` by default) |
-| `read` | `sessionId` (required), `sinceSeq`, `limit` (20 by default, 100 at most), `role` (`user` / `assistant` / `both`), `includeReasoning` (true by default) |
+| `read` | `sessionId` (required), `sinceSeq`, `messageLimit` (20 by default, 100 at most), `role` (`user` / `assistant` / `both`), `includeReasoning` (true by default) |
 | `send` | `sessionId`, `message` (both required), `mode` (`steer` by **default** / an explicit `queue`), `timeoutMs` (180000 by default, 3600000 at most), `finalReport` (false by default; only `true` writes `reportedAt`) |
 | `create` | `cwd` (absolute path, the task space) or `workspaceId`, `prompt`, `timeoutMs` |
 | `resume` | `sessionId` (required) |

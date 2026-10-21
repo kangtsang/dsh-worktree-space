@@ -464,7 +464,7 @@ uncommitted files or a branch still holds unmerged commits.
 ## 🤖 Advanced: letting an agent orchestrate end to end
 
 Beyond driving the panel by hand, a second equally supported route exists: give one agent the
-`wts_worktree_space` and `wts_session_tool_*` tools and it can run the whole chain itself — create the
+`wts_worktree_space` and `wts_session_tool` tools and it can run the whole chain itself — create the
 space, dispatch, watch progress, steer mid-flight, deploy and accept, merge at the finish — with no
 press in the panel at any point.
 
@@ -478,14 +478,14 @@ Two roles on that route: the **leader** is the orchestrating one, the one you ar
 | Create + first dispatch | `create` does it in one call: make the directory and the worktrees, register the Workspace, open a member session and hand it the brief |
 | Dispatch the work after that | `dispatch` opens another session in that task space — **never dispatch the same piece of work twice**, as two sessions editing the same files interrupt each other's commits |
 | Add a repository mid-task | `add` gives an existing task one more worktree |
-| Watch progress | `lastActivity` from `wts_session_tool_status` tells "stuck" from "busy with a long step" - no polling |
-| Change the requirement | `wts_session_tool_send` with `mode: "steer"`, which lands even inside one long turn |
+| Watch progress | `lastActivity` from `wts_session_tool status` tells "stuck" from "busy with a long step" - no polling |
+| Change the requirement | `wts_session_tool send` with `mode: "steer"`, which lands even inside one long turn |
 | Recover a failure | an abnormal turn reports itself; the notice names the member session id to pull back to work |
 | Finish and merge | `done` with `merge` merges, removes the worktrees and files what was left in one call; a conflict or uncommitted work is handed back to the member, then `done` again |
 | Deploy and accept | for a deploying task, the space's own entry runs `up` / `smoke` to pass the smoke gate |
 
-Keeping a hold on one session is the work of eight tools: `wts_session_tool_find` / `_status` /
-`_read` / `_send` / `_create` / `_resume` / `_wait` / `_cancel`. Their arguments and "which one when"
+Keeping a hold on one session is the work of `wts_session_tool`'s eight actions: `find` / `status` /
+`read` / `send` / `create` / `resume` / `wait` / `cancel`. Their arguments and "which one when"
 are in the [manual's appendix](USAGE.en.md#appendix-the-session-control-tools).
 
 Both routes run **the same flow**; only the driver differs. The full chain, and **which steps still
