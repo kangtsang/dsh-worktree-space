@@ -4,6 +4,47 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.3.3 — 2026-10-21
+
+Nine tools become two, the skill splits into stages that load on demand, and a routine deploy no
+longer needs the skill at all.
+
+### Changed
+
+- **The eight session-control tools are now one.** `wts_session_tool_find` / `_status` / `_read` /
+  `_send` / `_create` / `_resume` / `_wait` / `_cancel` are eight actions of
+  `wts_session_tool`, chosen by an `action` argument. What each of the eight descriptions repeated
+  — where a session id comes from, which actions need a live session, what a `sinceSeq` is for —
+  is now stated once, and none of the eight capabilities is gone.
+
+  Three argument names changed so that no word means two things: `find`'s `title` / `cwd` /
+  `limit` became `titleMatch` / `cwdMatch` / `resultLimit`. They carry a different meaning from
+  `create`'s `title` and `cwd` and `read`'s `limit`, and one tool holding both spellings would
+  leave the caller guessing.
+
+### Added
+
+- **The skill loads by stage.** `SKILL.md` is a routing table now, and the body is split across six
+  files under `references/` — creating, working, finishing, conflicts, deploying, failures — read
+  when you reach that stage rather than all at once. A session that only needs a task space and a
+  dispatched job no longer reads a whole skill first.
+
+- **A routine deploy needs no skill.** The task's own `.worktree-space/worktree-space.md` already
+  names its deploy entry, its `DEPLOY_ENV_ID` and the state file the gate reads, and the tool
+  description now points at it. A task whose deploy script is written and has run before is
+  deployed by copying those commands — **`references/deploying.md` is for writing or fixing an
+  entry, not for running one that already works.**
+
+- **A dispatched session reports before it starts work.** Before writing any code, it says what it
+  takes the job to be and which repositories and files it expects to touch. An aim that was
+  misread costs one message there, and a finished change nobody asked for at the end.
+
+### Fixed
+
+- The packaging allowlist was missing the six new `references/` files. They were already shipping
+  (`files` declares the whole `assets/` directory), but that list is the guard against unrelated
+  files riding along, and an unlisted path is a hole rather than a redundant entry.
+
 ## 1.3.2 — 2026-10-20
 
 An adjustable wait for the two deploy-for-acceptance steps, and the host compatibility window
