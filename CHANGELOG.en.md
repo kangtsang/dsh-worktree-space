@@ -4,6 +4,29 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.3.4 — 2026-10-22
+
+The ability to wait on a session is gone.
+
+### Changed
+
+- **`wts_session_tool` has no `wait` action, and `send` and `create` no longer take
+  `waitForReply`.** A leader that blocks on a session can neither take the user's next
+  instruction nor act on the report that arrives while it waits — and a dispatched session
+  reports its own progress, while a turn that ends badly is pushed to the dispatcher by the
+  watcher. There was nothing for the wait to do.
+
+  `timeoutMs` and `requireTurnEnd` go with them: they existed only to bound a block.
+
+  The non-blocking half covers the same ground. `status` tells "stuck" from "busy" off the
+  session's own clock, `read` shows what it has actually said, and `send` steers it.
+  `read` keeps `sinceSeq`, which is a paging cursor there and was never only a wait
+  argument.
+
+  **This is a breaking change for a caller**: one still passing `waitForReply`, or calling
+  `wait`, gets an argument-validation error. Send, then look once with `status` / `read`
+  when you have a reason to — do not block.
+
 ## 1.3.3 — 2026-10-21
 
 Nine tools become two, the skill splits into stages that load on demand, and a routine deploy no
