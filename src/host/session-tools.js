@@ -40,21 +40,6 @@ import { markSessionReported, readTaskMetadata, taskSessionsOf } from './task/sh
 import { PLUGIN_ROOT, SOURCE_TASKS_DIR, readSourceTaskIndex } from './task/source-index.js'
 import { withSessionTurn } from './session-turn.js'
 
-/** How long a wait may block, and how long it blocks by default. */
-const MAX_WAIT_MS = 3_600_000
-const DEFAULT_WAIT_MS = 180_000
-
-/**
- * How often a wait looks again, and how far that interval is allowed to grow.
- *
- * Doubling from 100ms to a second: the first passes stay fast enough that a reply which
- * arrives immediately is seen immediately, and a wait measured in minutes stops waking
- * ten times a second to find that nothing has changed. The old fixed 100ms made an
- * hour-long budget 36000 passes, each one a call into another service.
- */
-const WAIT_POLL_MIN_MS = 100
-const WAIT_POLL_MAX_MS = 1000
-
 /** How many messages a read returns by default, and at most. */
 const DEFAULT_READ_LIMIT = 20
 const MAX_READ_LIMIT = 100
@@ -112,7 +97,7 @@ function agentsOf(ctx) {
 
 /** The sentence a tool answers with when the live-agent registry is not served. */
 const NO_AGENTS = 'this deployment does not offer the session registry (the `agents` service), '
-  + 'so no live session can be inspected, messaged, waited on or stopped'
+  + 'so no live session can be inspected, messaged or stopped'
 
 /** The sentence a tool answers with when nothing can enumerate sessions at all. */
 const NO_SESSION_LISTING = 'this deployment does not offer the session registry or session persistence, '
@@ -1461,154 +1446,6 @@ function renameSession(ctx, session, title) {
   return applied !== undefined
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/**
- * Wait for a session's next assistant output.
- *
- * The wait ends when a new text reply is readable — not when the turn ends, which
- * a `followup`-driven turn does not always produce. When nothing new arrives
- * within the budget, the newest output that already existed is returned with
- * `stale: true` rather than an empty answer: a caller that timed out needs to know
- * what the session last said, not that the wait expired.
- * @param options - the session, the baseline seq, the budget and the caller's signal.
- * @param options.liveCheck - asked between passes whether the session can still answer, when
- *   the caller has a way to know. See below for what a `false` means to the caller.
- * @returns the observed output, the baseline, and how the wait ended.
- *
- * ## A session that cannot answer ends the wait early
- *
- * This is a behaviour change, not a cost one, and it is the second half of the review's
- * item 12. A wait whose session went offline or was cancelled used to keep polling until
- * the budget ran out - up to an hour, on the documented maximum - because nothing in the
- * loop knew the session could no longer produce a reply. The tool's own `execute` holds
- * the live agent, so it can answer that question between passes, and a `false` from
- * `liveCheck` breaks the wait.
- *
- * What the caller sees, exactly: `timedOut` stays true (nothing arrived), `stale` is true
- * when an older reply exists to fall back on and false when there is none, `aborted` stays
- * false because the caller's own signal did not fire, and `waitedMs` is small rather than
- * the budget. A caller that wants to tell this apart from an exhausted budget reads
- * `waitedMs` against the `timeoutMs` it sent. That is the whole of the change; no field was
- * added and none was removed, so a caller that ignores `waitedMs` sees exactly what it saw
- * before, only sooner.
- *
- * Exported for the test that has to observe the reading being incremental. That cannot be
- * done through the tool: the saving is invisible in every field it returns - a frozen
- * cursor answers identically - so the test drives this function with `reportFolded` and
- * asserts on the count. Everything else about it is internal.
- */
-export async function waitForReply(options) {
-  const started = Date.now()
-  const deadline = started + options.timeoutMs
-  // The highest event seq already folded. The log is append-only, so a pass only has to
-  // look at what was appended since the last one - see the note above for what is
-  // deliberately still read in full.
-  let cursor = options.baselineSeq
-  // The highest seq any folded event has carried. Written as a maximum, not as "the last
-  // event's seq": the guard above already skips anything at or below the cursor, so within
-  // one pass the two spellings are equivalent - which is exactly why the maximum is the
-  // one to write. It stays correct if the guard is ever relaxed, it states the invariant
-  // the pass depends on, and it cannot be read as depending on an order that
-  // `sessionEvents` does not promise: it hands back the host's array unsorted, and the
-  // whole-log fold this replaced was order-independent (`row.seq > latest.seq`).
-  const advance = (seq) => { if (seq > cursor) cursor = seq }
-  // The highest `turn/end` seq seen so far, tracked across passes rather than compared
-  // against `events` each time: a turn end that arrived in an earlier pass still answers
-  // the question, because the question is "did one land after the newest assistant row".
-  let turnEndedAfter = -1
-  let latest = null
-  let textReply = null
-  let turnEnded = false
-  let interval = WAIT_POLL_MIN_MS
-  // How much the wait folded, reported to a caller that asks for it.
-  //
-  // This exists because the saving is invisible in the answer: a wait whose cursor never
-  // moves returns exactly the same fields as one whose cursor works, which is what makes
-  // this the single part of the change an equivalence test cannot reach. The count is the
-  // only thing that can hold it. No tool passes this, so no tool output changes.
-  let folded = 0
-  for (;;) {
-    if (options.signal !== undefined && options.signal.aborted) break
-    const events = sessionEvents(options.session)
-    for (const event of events) {
-      if (typeof event.seq !== 'number' || event.seq <= cursor) continue
-      folded += 1
-      // Folded one event at a time, so `latest` means "the newest assistant row past the
-      // baseline" whether this pass saw it or an earlier one did. Folding the window in
-      // one call would keep only the newest row *within the window*, which is the same
-      // answer only while the window is the whole log - the thing being changed.
-      //
-      // Changing this line to `foldMessages(events)` looks equivalent and is not: it folds
-      // the whole log once per event, which is O(n^2) rather than O(n) a pass. No test
-      // catches it - the answers are identical and the `folded` count measures events
-      // admitted rather than arguments passed - so this comment is the only warning there
-      // is. Holding it would take a second counter in production code for a
-      // constant-factor regression, which is not worth the seam.
-      for (const row of foldMessages([event])) {
-        if (row.role !== 'assistant') continue
-        if (latest === null || row.seq > latest.seq) latest = row
-        if (row.text !== undefined && (textReply === null || row.seq > textReply.seq)) textReply = row
-      }
-      if (event.type === 'turn/end' && event.seq > turnEndedAfter) turnEndedAfter = event.seq
-      advance(event.seq)
-    }
-    if (options.requireTurnEnd === true && latest !== null && turnEndedAfter > latest.seq) turnEnded = true
-    const done = options.requireTurnEnd === true ? latest !== null && turnEnded : textReply !== null
-    if (done) break
-    // Asked after a full pass, so a session that answered and then stopped is still
-    // answered for: the reply is already in hand by the time this can break anything.
-    if (typeof options.liveCheck === 'function' && options.liveCheck() === false) break
-    const remaining = deadline - Date.now()
-    if (remaining <= 0) break
-    // Clamped to what is left, so a wait never overshoots its own budget by an interval:
-    // with the interval growing to a second, an unclamped sleep could return up to that
-    // much after the deadline, and a caller timing the call would see it.
-    await sleep(Math.min(interval, remaining))
-    interval = Math.min(interval * 2, WAIT_POLL_MAX_MS)
-  }
-  let observedNew = textReply !== null
-  let stale = false
-  if (textReply === null) {
-    // The whole log, and it should be: this runs at most once, only when nothing new
-    // arrived, and it is looking for the newest reply at or *before* the baseline - the
-    // one question a cursor pointing forward cannot answer.
-    const rows = foldMessages(sessionEvents(options.session))
-    for (let index = rows.length - 1; index >= 0; index -= 1) {
-      const row = rows[index]
-      if (row.role === 'assistant' && row.text !== undefined && row.seq <= options.baselineSeq) { textReply = row; stale = true; break }
-    }
-  }
-  return {
-    message: textReply,
-    seq: textReply === null ? options.baselineSeq : textReply.seq,
-    // Carried through so `renderWait` can decide whether `turnEnded` means anything for
-    // this wait: in the default mode the field is never examined, and reporting it as
-    // `false` would be an answer to a question nobody asked.
-    requireTurnEnd: options.requireTurnEnd === true,
-    turnEnded,
-    timedOut: options.requireTurnEnd === true ? !(latest !== null && turnEnded) : !observedNew,
-    stale,
-    aborted: options.signal !== undefined && options.signal.aborted,
-    waitedMs: Date.now() - started,
-    // Reported only to a caller that asked for it. `renderWait` does not copy it, so the
-    // tool's answer is unchanged; it exists for the test that has to observe the reading
-    // being incremental, which no returned field can show.
-    ...(options.reportFolded === true ? { folded } : {}),
-  }
-}
-
-/** Clamp a wait budget, refusing a value that is not a positive number. */
-function clampTimeout(value) {
-  if (value === undefined) return DEFAULT_WAIT_MS
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`invalid timeoutMs: expected a positive number of milliseconds, got ${JSON.stringify(value)}`)
-  }
-  return Math.min(value, MAX_WAIT_MS)
-}
-
 /** Clamp a count, refusing a value that is not a positive integer. */
 function clampLimit(value, fallback, max) {
   if (value === undefined) return fallback
@@ -1625,41 +1462,6 @@ function requiredString(value, name, hint) {
   return text
 }
 
-/** The line a wait's ending adds to a rendered result. */
-function waitNotes(reply) {
-  const notes = []
-  if (reply.timedOut === true) notes.push('[timed out]')
-  if (reply.stale === true) notes.push('[stale] this is the output that already existed; nothing new arrived')
-  if (reply.aborted === true) notes.push('[aborted]')
-  return notes
-}
-
-/** Render a wait result as the row the model reads. */
-function renderWait(wait) {
-  const row = wait.message
-  return {
-    message: row === null ? null : {
-      seq: row.seq,
-      role: row.role,
-      ...(row.text === undefined ? {} : { text: row.text }),
-      ...(row.reasoning === undefined ? {} : { reasoning: row.reasoning }),
-      images: row.images,
-      toolCalls: row.toolCalls ?? [],
-    },
-    seq: wait.seq,
-    // Present only when the caller asked for it. `turnEnded` used to be returned as
-    // `false` in the default mode, where the wait does not look at turn ends at all -
-    // so a `false` there read as "the turn has not ended", which is a claim this side
-    // never checked and, for a `followup`-driven session, a claim that can be false
-    // while the reply is right there. An absent field says "not asked", and the tool's
-    // description already tells a caller to pass `requireTurnEnd` for that answer.
-    ...(wait.requireTurnEnd === true ? { turnEnded: wait.turnEnded } : {}),
-    timedOut: wait.timedOut,
-    ...(wait.stale === true ? { stale: true } : {}),
-    aborted: wait.aborted,
-    waitedMs: wait.waitedMs,
-  }
-}
 
 /**
  * The output shape every session tool shares.
@@ -1998,11 +1800,6 @@ function sessionSend(ctx) {
     render: (_args, value) => {
       if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
       const lines = [`sent to ${value.sessionId} (${value.mode})`]
-      if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool wait)`)
-      if (value.reply !== undefined) {
-        lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
-        lines.push(...waitNotes(value.reply))
-      }
       return [{ type: 'text', text: lines.join('\n') }]
     },
     async execute(args, exec) {
@@ -2032,7 +1829,7 @@ function sessionSend(ctx) {
       // bodies while doing nothing about the work that already happened outside it. A
       // serialisation covering part of an operation is the shape this item is about, so the
       // header is built inside too rather than before.
-      const { baseline, reply } = await withSessionTurn(sessionId, async () => {
+      const { baseline } = await withSessionTurn(sessionId, async () => {
         // The readable facts above the body. The interface can name the sender only as a
         // session id, so the report states where it came from in its own text.
         const facts = await reportFacts(ctx, senderSessionId, exec?.agent?.session?.header?.cwd)
@@ -2043,24 +1840,17 @@ function sessionSend(ctx) {
         // attribution there is.
         const framed = header === '' ? framedForModel(message, senderSessionId) : message
         const outbound = userMessage(header + framed, senderSessionId)
-        // The baseline is read here rather than outside for the same reason: a value read
-        // before the turn began would describe a log a `wait` behind it had already moved.
+        // The baseline is read here rather than outside, so the number handed back describes
+        // the log as it stood at the moment the message left.
         const at = maxSeq(sessionEvents(agent.session))
         if (mode === 'steer') agent.steer(outbound)
         else agent.followup(outbound)
         // The report has left this session now, so the claim it makes about itself is recorded
-        // here rather than after the reply: `waitForReply` can block for a long time, and a
-        // report that was delivered would sit unrecorded for exactly the window a watcher reads
-        // it in. Best-effort - see {@link markReportedBy}.
+        // before this returns - a watcher reads the record from another turn, and a report that
+        // was delivered sits unrecorded for exactly the window it looks in.
+        // Best-effort - see {@link markReportedBy}.
         if (args.finalReport === true) await markReportedBy(senderSessionId, exec?.agent?.session?.header?.cwd)
-        if (args.waitForReply !== true) return { baseline: at, reply: undefined }
-        const waited = await waitForReply({
-          session: agent.session,
-          baselineSeq: at,
-          timeoutMs: clampTimeout(args.timeoutMs),
-          signal: exec?.signal,
-        })
-        return { baseline: at, reply: renderWait(waited) }
+        return { baseline: at }
       })
       const cwd = agent.session?.header?.cwd
       await attachToWorkspace(ctx, sessionId, cwd)
@@ -2071,7 +1861,6 @@ function sessionSend(ctx) {
         accepted: true,
         mode,
         sinceSeq: baseline,
-        ...(reply === undefined ? {} : { reply }),
         summary: `sent to ${sessionId} with mode=${mode}.`,
       })
     },
@@ -2094,11 +1883,6 @@ function sessionCreate(ctx) {
       if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
       const lines = [`created session ${value.sessionId}${value.cwd === '' ? '' : ` in ${value.cwd}`}`]
       if (value.titleNote !== undefined) lines.push(value.titleNote)
-      if (typeof value.sinceSeq === 'number') lines.push(`sinceSeq: ${value.sinceSeq} (pass to wts_session_tool wait)`)
-      if (value.reply !== undefined) {
-        lines.push(`reply: ${value.reply.message === null ? '(no text)' : (value.reply.message.text ?? '(no text)')}`)
-        lines.push(...waitNotes(value.reply))
-      }
       return [{ type: 'text', text: lines.join('\n') }]
     },
     async execute(args, exec) {
@@ -2165,22 +1949,12 @@ function sessionCreate(ctx) {
         titleApplied = renameSession(ctx, liveAgent.session, wantedTitle)
       }
 
-      let reply
       let baseline
       const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
       if (prompt !== '') {
         if (liveAgent !== undefined && liveAgent !== null) {
           baseline = maxSeq(sessionEvents(liveAgent.session))
           liveAgent.followup(userMessage(prompt))
-          if (args.waitForReply === true) {
-            const waited = await waitForReply({
-              session: liveAgent.session,
-              baselineSeq: baseline,
-              timeoutMs: clampTimeout(args.timeoutMs),
-              signal: exec?.signal,
-            })
-            reply = renderWait(waited)
-          }
         } else if (viaController && typeof controller.prompt === 'function') {
           // The Host's prompt request is a typed shape with required fields, and its
           // own client (`Session.prompt` in the session controller) is the reference
@@ -2233,8 +2007,7 @@ function sessionCreate(ctx) {
         ...(wantedTitle !== '' && !titleApplied
           ? { titleNote: 'the title could not be applied: this deployment serves no sessionTitle service, or the session was not live' }
           : {}),
-        ...(reply === undefined && baseline !== undefined ? { sinceSeq: baseline } : {}),
-        ...(reply === undefined ? {} : { reply }),
+        ...(baseline === undefined ? {} : { sinceSeq: baseline }),
         summary: `session ${sessionId} opened in ${cwd}${prompt === '' ? '' : ' and handed the job'}.`,
       })
     },
@@ -2304,88 +2077,6 @@ function sessionResume(ctx) {
   }
 }
 
-/**
- * `wts_session_tool wait` — wait for the output a send or a create produced.
- *
- * The orchestration primitive: send, then wait for that one message to be
- * answered. A timeout is not an empty answer — the newest output that already
- * existed comes back marked `stale`, because a caller whose wait expired still
- * needs to know what the session last said.
- * @param ctx - the host plugin context.
- * @returns the registration disposer.
- */
-function sessionWait(ctx) {
-  return {
-    render: (_args, value) => {
-      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
-      const reply = value.reply
-      if (reply === undefined || reply.message === null) {
-        return [{ type: 'text', text: `no assistant text in ${value.sessionId} within ${reply === undefined ? '?' : reply.waitedMs}ms` }]
-      }
-      return [{ type: 'text', text: [`reply seq ${reply.seq}: ${reply.message.text ?? '(no text)'}`, ...waitNotes(reply)].join('\n') }]
-    },
-    async execute(args, exec) {
-      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
-      const agents = agentsOf(ctx)
-      if (agents === undefined) return refusal(NO_AGENTS)
-      const agent = safely(() => agents.get(sessionId))
-      if (agent === undefined || agent === null) {
-        return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is not live — call wts_session_tool resume first, because `
-          + 'waiting needs a live session')
-      }
-      // The baseline, the whole wait, and the reply it settles on are held under this
-      // session's turn, so a `send` to the same session cannot land while this is watching.
-      // Without that, the reply to somebody else's message arrives past this baseline and is
-      // returned as the answer to this call - a well-formed answer to a question nobody
-      // asked, which is worse than a refusal, because nothing in it says it is not the one
-      // that was waited for.
-      //
-      // The baseline is read inside the lock for the same reason the `send` side reads its
-      // own inside one: a value read before the turn began would describe a log the send
-      // behind it had already changed.
-      const { waited, baseline } = await withSessionTurn(sessionId, async () => {
-        const at = typeof args.sinceSeq === 'number' && Number.isInteger(args.sinceSeq) && args.sinceSeq >= -1
-          ? args.sinceSeq
-          : maxSeq(sessionEvents(agent.session))
-        const result = await waitForReply({
-          session: agent.session,
-          baselineSeq: at,
-          timeoutMs: clampTimeout(args.timeoutMs),
-          signal: exec?.signal,
-          requireTurnEnd: args.requireTurnEnd === true,
-          // The session this call is holding can stop being live while it waits, and the
-          // registry is where that shows: a cancelled or disposed session is no longer a
-          // running agent, and nothing it does afterwards can produce the reply being waited
-          // for. Asked between passes so the wait ends then rather than at the budget's end,
-          // which on the documented maximum is an hour.
-          //
-          // Asked of the registry rather than of the `agent` captured above, because that is
-          // a snapshot: reading it again would answer about the moment the call started, and
-          // would never change. A registry that cannot be asked is not an answer either way,
-          // so it leaves the wait alone - the check only ever shortens a wait it can prove is
-          // pointless.
-          liveCheck: () => {
-            const current = safely(() => agents.get(sessionId))
-            return current !== undefined && current !== null
-          },
-        })
-        return { waited: result, baseline: at }
-      })
-      const reply = renderWait(waited)
-      return asJson({
-        offered: true,
-        sessionId,
-        reason: '',
-        sinceSeq: baseline,
-        running: agent.status === 'running',
-        reply,
-        summary: reply.timedOut === true
-          ? `timed out after ${reply.waitedMs}ms; ${reply.stale === true ? 'returning the output that already existed' : 'no output at all yet'}`
-          : `reply seq ${reply.seq} after ${reply.waitedMs}ms.`,
-      })
-    },
-  }
-}
 
 /**
  * `wts_session_tool cancel` — the brake.
@@ -2468,31 +2159,42 @@ export const SESSION_TOOL_NAME = 'wts_session_tool'
  * between the actions, which is the bundled skill's to say.
  */
 const SESSION_DESCRIPTION = [
-  'Watch and steer the sessions a task runs in: find, status, read, send, create, resume, wait or cancel, chosen by action. '
+  'Watch and steer the sessions a task runs in: find, status, read, send, create, resume or cancel, chosen by action. '
     + 'The session id is in the task\'s own record - wts_worktree_space list reports it, and so does '
     + '.worktree-space/worktree-space.json - so take it from there; find is the fallback for an id nobody wrote down. '
     + 'A dispatched session is NOT this session\'s child, so send_message cannot reach it.',
 
-  'send, wait and cancel need a live session: call resume first when the answer says it is offline, which is what a host '
+  // The one rule this tool cannot enforce by refusing an argument, because the way to
+  // break it is to stop calling the tool and start watching for a change. It is stated
+  // where a caller reads before choosing an action, and it names the two things that
+  // make the waiting unnecessary: the session reports back by itself, and an abnormal
+  // turn end is pushed to the dispatcher. Nothing here offers a way to wait.
+  'Never block waiting for a session to finish. A session tells you when there is something to know: it reports '
+    + 'its own progress, and a turn that ends badly is reported to you without being asked for. So call status or read '
+    + 'when you have a reason to look, act on what you find, and return to your own work - do not poll in a loop, and do '
+    + 'not sit on a call until the session answers, because a caller that is blocked cannot do either of those things.',
+
+  'send, resume and cancel need a live session: call resume first when the answer says it is offline, which is what a host '
     + 'restart does to every session. status and read answer for an offline one too, from its persisted log - so "not live" '
     + 'is itself the answer, not a failure.',
 
   'send defaults to mode steer, which reaches a running turn at its next step - what a correction needs, because a '
     + 'dispatched task is often one long turn. mode queue appends a turn that is read only at a turn boundary, for the few '
-    + 'messages that may wait. Set finalReport true only when this message IS the finished work being handed over, never '
-    + 'for a progress update or a question.',
+    + 'messages that may wait. It returns as soon as the message is handed over; there is no way to wait for the reply, '
+    + 'and send does not need one. Set finalReport true only when this message IS the finished work being handed over, '
+    + 'never for a progress update or a question.',
 
-  'wait blocks for the session\'s next assistant output. Pass the sinceSeq a send or a create answered with to wait for '
-    + 'that message specifically; -1 counts every event, which a brand-new session needs. A wait that runs out of budget is '
-    + 'not an empty answer: the output that already existed comes back marked stale.',
+  'read is how you see what a session has said, including whether a message you sent was delivered at all: it takes '
+    + 'sinceSeq as a paging cursor, where -1 counts every event, which a brand-new session needs.',
 
   'cancel aborts the turn and, unless keepInbox is true, clears the work queued behind it. reason is required and is '
     + 'recorded with the cancellation - say why in your own words. Be sure the session is yours to stop: cancelling one the '
-    + 'user is talking to aborts their conversation. Cancellation is asynchronous, so poll status until openTurn is false.',
+    + 'user is talking to aborts their conversation. Cancellation is asynchronous, so look at status once more rather than '
+    + 'assuming the turn is already gone.',
 
   'create opens a NEW session, for when a task\'s session was lost and the work has to carry on in the same task space: '
     + 'pass cwd as the ABSOLUTE path of the task space, or a workspaceId. Its prompt must stand alone, because the new '
-    + 'session shares none of this conversation.',
+    + 'session shares none of this conversation. It answers as soon as the session exists and the job is handed over.',
 
   'status answers "stuck or busy" with lastActivity: a build leaves files, mtimes and logs still for minutes while a '
     + 'session keeps working, so only the session\'s own clock tells the two apart - pass stalledMsThreshold to have a quiet '
@@ -2517,8 +2219,8 @@ const SESSION_PARAMETERS = {
   action: {
     type: 'string',
     required: true,
-    enum: ['find', 'status', 'read', 'send', 'create', 'resume', 'wait', 'cancel'],
-    description: 'find, status, read, send, create, resume, wait or cancel.',
+    enum: ['find', 'status', 'read', 'send', 'create', 'resume', 'cancel'],
+    description: 'find, status, read, send, create, resume or cancel.',
   },
   sessionId: { type: 'string', description: 'Target session id. Required for every action except find and create.' },
   query: { type: 'string', description: '(find) Substring matched against the id, title and working directory (case-insensitive).' },
@@ -2530,21 +2232,18 @@ const SESSION_PARAMETERS = {
   stalledMsThreshold: { type: 'number', description: '(status) Mark a quiet RUNNING session stalled after this many ms (default 60000).' },
   recent: { type: 'number', description: `(status) Recent messages to include (default ${DEFAULT_RECENT}, max ${MAX_RECENT}).` },
   reasoning: { type: 'string', enum: ['none', 'last', 'live', 'tail'], description: '(status) Which chain-of-thought fields to include (default tail).' },
-  sinceSeq: { type: 'integer', description: '(read, wait) Paging cursor: only a seq greater than this counts; -1 counts every event.' },
+  sinceSeq: { type: 'integer', description: '(read) Paging cursor: only a seq greater than this counts; -1 counts every event.' },
   messageLimit: { type: 'number', description: `(read) Most recent messages to return (default ${DEFAULT_READ_LIMIT}, max ${MAX_READ_LIMIT}).` },
   role: { type: 'string', enum: ['user', 'assistant', 'both'], description: '(read) Which rows to return (default both).' },
   includeReasoning: { type: 'boolean', description: '(read) Include assistant reasoning blocks (default true).' },
   message: { type: 'string', description: '(send) Message text, sent as a user turn.' },
   mode: { type: 'string', enum: ['queue', 'steer'], description: '(send) steer (default) interrupts the running turn at its next step; queue waits for a turn boundary.' },
   finalReport: { type: 'boolean', description: '(send) True only when this message IS the finished work being handed over. Defaults to false.' },
-  waitForReply: { type: 'boolean', description: '(send, create) Block for the next assistant reply (default false).' },
-  timeoutMs: { type: 'number', description: `(send, create, wait) Wait budget in ms (default ${DEFAULT_WAIT_MS}, max ${MAX_WAIT_MS}).` },
   cwd: { type: 'string', description: '(create) ABSOLUTE working directory - the task space. One of cwd or workspaceId is required.' },
   workspaceId: { type: 'string', description: '(create) Workspace to open in; takes precedence over cwd.' },
   title: { type: 'string', description: '(create) Title shown in the interface; stops automatic title generation.' },
   prompt: { type: 'string', description: "(create) The session's first job. It must stand alone: it shares no context with this conversation." },
   agentPreset: { type: 'string', description: '(create) Agent preset id to compose the session from.' },
-  requireTurnEnd: { type: 'boolean', description: '(wait) Wait for the turn to settle, not just for readable reply text (default false).' },
   keepInbox: { type: 'boolean', description: '(cancel) Keep queued and steering input instead of clearing it (default false).' },
   cause: { type: 'string', description: '(cancel) Short label for the kind of stopping this is; the why belongs in reason.' },
   reason: { type: 'string', description: '(cancel) REQUIRED: why this session is being stopped, in your own words.' },
@@ -2568,7 +2267,6 @@ function sessionToolDefinition(ctx) {
     send: sessionSend(ctx),
     create: sessionCreate(ctx),
     resume: sessionResume(ctx),
-    wait: sessionWait(ctx),
     cancel: sessionCancel(ctx),
   }
   return {
@@ -2587,7 +2285,7 @@ function sessionToolDefinition(ctx) {
       const handler = handlers[args?.action]
       if (handler === undefined) {
         return refusal(`${SESSION_TOOL_NAME}: no action named ${JSON.stringify(args?.action ?? '')}; `
-          + 'the action is one of find, status, read, send, create, resume, wait or cancel')
+          + 'the action is one of find, status, read, send, create, resume or cancel')
       }
       return handler.execute(args, exec)
     },

@@ -779,8 +779,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `wts_session_tool read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
 | `wts_session_tool send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告 |
 | `wts_session_tool create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
-| `wts_session_tool resume` | 把离线会话拉回在线，之后可直接 `send` / `read` / `wait` |
-| `wts_session_tool wait` | 等这一次输出；超时返回**已经存在的**最近输出并标 `stale`，不是空 |
+| `wts_session_tool resume` | 把离线会话拉回在线，之后可直接 `send` / `read` |
 | `wts_session_tool cancel` | 中止当前回合，可选是否保留排队中的工作 |
 
 ### 主要参数
@@ -790,10 +789,9 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `find` | `query`、`sessionIdMatch`、`titleMatch`、`cwdMatch`（都是子串匹配）、`liveOnly`、`resultLimit`（默认 10，上限 50） |
 | `status` | `sessionId`（必填）、`stalledMsThreshold`（默认 60000）、`recent`（默认 8，上限 20）、`reasoning`（`none`/`last`/`live`/`tail`，默认 `tail`） |
 | `read` | `sessionId`（必填）、`sinceSeq`、`messageLimit`（默认 20，上限 100）、`role`（`user`/`assistant`/`both`）、`includeReasoning`（默认 true） |
-| `send` | `sessionId`、`message`（必填）、`mode`（**默认 `steer`** / 显式 `queue`）、`timeoutMs`（默认 180000，上限 3600000）、`finalReport`（默认 false；置 true 才写 `reportedAt`） |
-| `create` | `cwd`（绝对路径，任务空间）或 `workspaceId`、`prompt`、`timeoutMs` |
+| `send` | `sessionId`、`message`（必填）、`mode`（**默认 `steer`** / 显式 `queue`）、`finalReport`（默认 false；置 true 才写 `reportedAt`） |
+| `create` | `cwd`（绝对路径，任务空间）或 `workspaceId`、`prompt` |
 | `resume` | `sessionId`（必填） |
-| `wait` | `sessionId`（必填）、`sinceSeq`（`-1` 计所有事件）、`timeoutMs`、`requireTurnEnd` |
 | `cancel` | `sessionId`（必填）、`reason`（**必填**，自由文本；缺失或空白即拒）、`keepInbox`（默认 false，即清掉排队的工作）、`cause`（可选简短标签） |
 
 ### 何时用哪个
@@ -802,7 +800,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 - **有时效性的一律 `steer`**，`queue` 只用于「到回合边界再看」的内容。
 - **`find` 通常不必用**：`create` / `dispatch` 已经把会话 id 写进任务记录，`list` 也会报出来，
   `find` 只是那个 id 不在手时的兜底。
-- **超时不是空答案**：`wait` 预算跑完时返回已存在的最近输出并标 `stale`，所以总能知道它最后说了什么。
+- **没有等待能力，也不需要**：任务会话自己回报进展，异常回合由监听器主动通知，所以`status` / `read` 看过之后就去干自己的活，不要阻塞在会话上。
 
 ---
 
