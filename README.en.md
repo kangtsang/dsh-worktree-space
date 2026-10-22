@@ -485,7 +485,7 @@ Two roles on that route: the **leader** is the orchestrating one, the one you ar
 | Deploy and accept | for a deploying task, the space's own entry runs `up` / `smoke` to pass the smoke gate |
 
 Keeping a hold on one session is the work of `wts_session_tool`'s eight actions: `find` / `status` /
-`read` / `send` / `create` / `resume` / `wait` / `cancel`. Their arguments and "which one when"
+`read` / `send` / `create` / `resume` / `cancel`. Their arguments and "which one when"
 are in the [manual's appendix](USAGE.en.md#appendix-the-session-control-tools).
 
 Both routes run **the same flow**; only the driver differs. The full chain, and **which steps still

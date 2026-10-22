@@ -71,9 +71,10 @@ it — so `wts_session_tool find` is the fallback for when it is not.
   the second is the user stopping it on purpose. When a notice arrives, use
   `wts_session_tool status` to see where it stopped and `wts_session_tool send` to put
   it back to work.
-- **A timeout is not an empty answer.** `wts_session_tool wait` returns the output
-  that already existed, marked `stale`, when its budget runs out — so you always
-  learn what the session last said.
+- **There is no way to wait, and none is needed.** A session reports its own progress, and
+  a turn that ends badly is pushed to you by the watcher, so nothing goes unnoticed while
+  you are doing something else. Look with `status` or `read` when you have a reason to,
+  act on what you find, and go back to your own work.
 - **The recovery chain, in order.** `status` first, to tell "running but stuck" from
   "offline" → `wts_session_tool resume` for the offline one (a host restart puts
   every session offline), or `wts_session_tool create` in **the same task space** for
@@ -83,7 +84,8 @@ it — so `wts_session_tool find` is the fallback for when it is not.
 
 Do not poll in a loop, and do not steer or cancel on a timer: look at the real state
 when something suggests you should, then decide. That judgement is yours, not a
-watchdog's.
+watchdog's. A caller that blocks on a session is not making it either — it is only
+waiting to become responsive again.
 
 
 ## Adding a repository to a task already under way

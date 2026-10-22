@@ -899,8 +899,7 @@ only channel through.
 | `wts_session_tool read` | Reads messages (count, `role` filter, `sinceSeq` paging), online or offline alike |
 | `wts_session_tool send` | Sends a message; `mode` is `queue` or `steer`, and `finalReport: true` says this message is the task's final report |
 | `wts_session_tool create` | Opens a new session in a directory you name (the task space), optionally handing it a self-contained prompt |
-| `wts_session_tool resume` | Brings an offline session back online, after which `send` / `read` / `wait` work directly |
-| `wts_session_tool wait` | Waits for this output; on timeout it returns **the latest output that already exists** marked `stale`, never nothing |
+| `wts_session_tool resume` | Brings an offline session back online, after which `send` / `read` work directly |
 | `wts_session_tool cancel` | Aborts the running turn, optionally keeping whatever work is queued |
 
 ### Their parameters
@@ -910,10 +909,9 @@ only channel through.
 | `find` | `query`, `sessionIdMatch`, `titleMatch`, `cwdMatch` (all substring matches), `liveOnly`, `resultLimit` (10 by default, 50 at most) |
 | `status` | `sessionId` (required), `stalledMsThreshold` (60000 by default), `recent` (8 by default, 20 at most), `reasoning` (`none` / `last` / `live` / `tail`, `tail` by default) |
 | `read` | `sessionId` (required), `sinceSeq`, `messageLimit` (20 by default, 100 at most), `role` (`user` / `assistant` / `both`), `includeReasoning` (true by default) |
-| `send` | `sessionId`, `message` (both required), `mode` (`steer` by **default** / an explicit `queue`), `timeoutMs` (180000 by default, 3600000 at most), `finalReport` (false by default; only `true` writes `reportedAt`) |
-| `create` | `cwd` (absolute path, the task space) or `workspaceId`, `prompt`, `timeoutMs` |
+| `send` | `sessionId`, `message` (both required), `mode` (`steer` by **default** / an explicit `queue`), `finalReport` (false by default; only `true` writes `reportedAt`) |
+| `create` | `cwd` (absolute path, the task space) or `workspaceId`, `prompt` |
 | `resume` | `sessionId` (required) |
-| `wait` | `sessionId` (required), `sinceSeq` (`-1` counts every event), `timeoutMs`, `requireTurnEnd` |
 | `cancel` | `sessionId` (required), `reason` (**required**, free text; missing or blank is refused), `keepInbox` (false by default, meaning queued work is cleared), `cause` (an optional short label) |
 
 ### Which to use when
@@ -924,8 +922,9 @@ only channel through.
   boundary.
 - **`find` is usually unnecessary**: `create` / `dispatch` already wrote the session id into the task's
   record and `list` reports it too, so `find` is the fallback when that id is not to hand.
-- **A timeout is not an empty answer**: when `wait`'s budget runs out it returns the latest output that
-  exists, marked `stale`, so you always learn what it said last.
+- **There is no way to wait, and none is needed**: a dispatched session reports its own progress, and an
+  abnormal turn end is pushed to you by the watcher. Look with `status` / `read` when you have a reason to,
+  then go back to your own work instead of blocking on the session.
 
 ---
 
