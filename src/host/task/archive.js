@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import { auditEnter, recordError, recordEvent, recordWarning } from './audit-log.js'
 import { coded, warned } from './codes.js'
+import { SCAN_CONCURRENCY, mapWithLimit } from './concurrency.js'
 import { assertDeliveryGate, deliveryGatePreview, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
 import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
@@ -252,12 +253,20 @@ async function dirtyPathsInTheWay(subprocess, site, branch, target) {
  * @param mainRepo - the source repository.
  * @param requested - an explicitly requested target, possibly empty.
  * @param taskBranch - the branch being merged, which can never be the target.
+ * @param knownCheckedOut - the branch the caller has already read for this repository.
+ *   Passed rather than read again: `planTask` asks `rev-parse --abbrev-ref HEAD` for
+ *   every repository already, and a second identical `git` process per repository is
+ *   process creation spent to learn something this call was handed. Omitted means the
+ *   caller has not read it and this asks git itself, which is what a direct caller of
+ *   this function outside a plan still gets.
  * @returns the local branch name to merge into.
  * @throws Error when no branch can be determined, or the request names another.
  */
-export async function resolveMergeTarget(subprocess, mainRepo, requested, taskBranch) {
+export async function resolveMergeTarget(subprocess, mainRepo, requested, taskBranch, knownCheckedOut) {
   const name = basename(mainRepo)
-  const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const checkedOut = typeof knownCheckedOut === 'string'
+    ? knownCheckedOut
+    : await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   // Git answers `HEAD` for a detached checkout, and nothing at all in a repository
   // with no commits yet: neither names a branch a merge could land on by itself.
   const onBranch = checkedOut !== '' && checkedOut !== 'HEAD'
@@ -506,36 +515,55 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   }
 
   const entries = await readdir(taskPath, { withFileTypes: true })
-  const worktrees = []
+  // Which entries are worktrees, and what the rest are, is one `stat` per directory
+  // entry - and a document count for the ones that hold documents. Both are independent
+  // per entry, so they are asked together under the same ceiling as the git questions
+  // below: a task space holding a dozen stray directories walked one at a time was the
+  // other half of the wait before the dialog could paint.
+  //
+  // The two lists are separated afterwards rather than while the work runs, so the order
+  // within each is the directory order it always was - the dialog lists repositories and
+  // strays in the order this returns them.
+  const classified = await mapWithLimit(entries, SCAN_CONCURRENCY, async (entry) => {
+    const entryPath = join(taskPath, entry.name)
+    if (entry.isDirectory() && await isLinkedWorktree(entryPath)) {
+      return { worktree: entryPath }
+    }
+    if (TASK_OWNED_ENTRIES.includes(entry.name)) return undefined
+    const kind = strayKind(entry.name, entry.isDirectory())
+    return {
+      // Only the user's own directories are worth walking: nobody needs a
+      // document count of `node_modules`.
+      documents: kind !== 'content' ? 0 : entry.isDirectory() ? await countDocuments(entryPath) : (isDocument(entry.name) ? 1 : 0),
+      stray: { name: entry.name, directory: entry.isDirectory(), kind },
+    }
+  })
+  const worktrees = classified.filter((row) => row?.worktree !== undefined).map((row) => row.worktree)
   // What the container holds besides its worktrees. `finishTask` always clears
   // the plugin's own directory and keeps the rest unless the caller's `strays`
   // choice clears them, so this is exactly what `archive`/`discard` would remove —
   // minus that directory, which is never a surprise.
-  const strays = []
-  for (const entry of entries) {
-    const entryPath = join(taskPath, entry.name)
-    if (entry.isDirectory() && await isLinkedWorktree(entryPath)) {
-      worktrees.push(entryPath)
-      continue
-    }
-    if (TASK_OWNED_ENTRIES.includes(entry.name)) continue
-    const kind = strayKind(entry.name, entry.isDirectory())
-    strays.push({
-      name: entry.name,
-      directory: entry.isDirectory(),
-      // Only the user's own directories are worth walking: nobody needs a
-      // document count of `node_modules`.
-      documents: kind !== 'content' ? 0 : entry.isDirectory() ? await countDocuments(entryPath) : (isDocument(entry.name) ? 1 : 0),
-      kind,
-    })
-  }
+  const strays = classified
+    .filter((row) => row?.stray !== undefined)
+    .map((row) => ({ ...row.stray, documents: row.documents }))
   if (worktrees.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
 
-  const repositories = []
-  let mergeTarget
-  let changedFiles = 0
-  let commits = 0
-  for (const worktreePath of worktrees) {
+  // Each repository is asked the same handful of questions, and none of the answers
+  // depends on another repository's. They used to be asked in one serial loop, which on
+  // Windows is the whole cost of this call: a `git.exe` launch is almost entirely process
+  // creation, so a task spanning three repositories paid for twenty-one of them end to
+  // end and the dialog sat on "loading repositories" until the last one returned.
+  //
+  // Parallel across repositories, serial within one, and capped at the same ceiling the
+  // rest of the plugin uses for "how much git is in flight". The cap is the point: each
+  // question spawns a process, and unbounded `Promise.all` over a ten-repository task
+  // spends its time in process creation competing with itself. Within one repository the
+  // calls stay in order because they depend on each other - the merge target is needed
+  // before the commits ahead of it can be counted.
+  //
+  // A worker that throws still rejects the whole call, which is what the ownership check
+  // below relies on: E1006 has to stop the plan rather than become a row.
+  const repositories = await mapWithLimit(worktrees, SCAN_CONCURRENCY, async (worktreePath) => {
     const name = basename(worktreePath)
     const branch = await tryRunGit(subprocess, worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
     const status = await tryRunGit(subprocess, worktreePath, ['status', '--short', '--branch'])
@@ -567,7 +595,10 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
       // detached HEAD has no default, but naming one of these still merges.
       plan.branches = await mergeCandidates(subprocess, mainRepo, listed, branch, plan.checkedOut)
       try {
-        plan.target = await resolveMergeTarget(subprocess, mainRepo, targets?.[name], branch)
+        // `checkedOut` handed over rather than read again: this branch already asked
+        // `rev-parse --abbrev-ref HEAD` one call ago, and the same question to the same
+        // repository is a process launch spent to learn what is in hand.
+        plan.target = await resolveMergeTarget(subprocess, mainRepo, targets?.[name], branch, checkedOut)
         // Left out rather than claimed as zero when git will not answer the count:
         // "no commits" is a fact about the branch, and a repository that could not be
         // asked is not one holding none. This is the rule the status endpoint follows
@@ -575,19 +606,22 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
         const ahead = await tryRunGit(subprocess, worktreePath, ['rev-list', '--count', `${plan.target}..HEAD`])
         const counted = Number.parseInt(ahead, 10)
         if (Number.isFinite(counted)) plan.commits = counted
-        mergeTarget = mergeTarget ?? plan.target
       } catch (error) {
         plan.error = error.message
       }
     }
+    return plan
+  })
 
-    changedFiles += plan.changedFiles
-    // A total is a sum, so a repository that could not be counted is left out of it
-    // rather than counted as nothing - and the top level keeps its number, because
-    // the dialog prints it as the headline of what this would bring.
-    commits += plan.commits ?? 0
-    repositories.push(plan)
-  }
+  // Derived from the finished rows, in the order the worktrees came in, so the parallel
+  // scheduling changes only the wall clock: the first repository that resolved a target
+  // still supplies the headline one, and the totals are the same sums.
+  const mergeTarget = repositories.find((row) => row.target !== undefined)?.target
+  const changedFiles = repositories.reduce((sum, row) => sum + row.changedFiles, 0)
+  // A total is a sum, so a repository that could not be counted is left out of it
+  // rather than counted as nothing - and the top level keeps its number, because
+  // the dialog prints it as the headline of what this would bring.
+  const commits = repositories.reduce((sum, row) => sum + (row.commits ?? 0), 0)
 
   await auditOutcome(repositories, [], 'plan')
   // What the delivery gate would say about a merge of this task, computed here rather than
@@ -1054,11 +1088,19 @@ async function finishTaskLocked(subprocess, options) {
   // later finish will ever remove it. The record is the only thing that can still tell
   // the two apart, and that is what it is for.
   const remains = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
+  // One `stat` per directory entry, and none of them depends on another. Asked together
+  // under the plugin's usual ceiling: on a task spanning several repositories this is
+  // the first of the three read-only passes a finish makes before it touches anything,
+  // and each one used to be a serial walk over the whole container.
+  const classifiedEntries = await mapWithLimit(entries, SCAN_CONCURRENCY, async (entry) => {
+    if (!entry.isDirectory()) return undefined
     const worktreePath = join(taskPath, entry.name)
-    if (await isLinkedWorktree(worktreePath)) { worktrees.push(worktreePath); continue }
-    if (recordedNames.has(entry.name)) remains.push(worktreePath)
+    if (await isLinkedWorktree(worktreePath)) return { worktree: worktreePath }
+    return recordedNames.has(entry.name) ? { remains: worktreePath } : undefined
+  })
+  for (const row of classifiedEntries) {
+    if (row?.worktree !== undefined) worktrees.push(row.worktree)
+    else if (row?.remains !== undefined) remains.push(row.remains)
   }
   if (worktrees.length === 0 && remains.length === 0) throw coded('E2004', `no git worktrees found in ${taskPath}`, { path: taskPath, reason: 'none' })
 
@@ -1069,11 +1111,19 @@ async function finishTaskLocked(subprocess, options) {
   // git has already unregistered and can never delete. So the whole finish is refused
   // while anything is in the way, and refusing costs nothing: nothing has happened yet,
   // which is what makes "close it and finish again" true rather than hopeful.
-  const held = []
-  for (const worktreePath of worktrees) {
-    const reason = await removableNow(worktreePath)
-    if (reason !== '') held.push({ path: worktreePath, reason })
-  }
+  //
+  // Concurrent, and safe to be: the probe renames a directory to a name derived from its
+  // own path and puts it back, so two probes touch two different names and neither reads
+  // the other's. What is NOT parallel is anything that acts on the answer - the refusal
+  // below still runs after every probe has finished, so a held worktree stops the finish
+  // before a single merge.
+  const probes = await mapWithLimit(worktrees, SCAN_CONCURRENCY, async (worktreePath) => ({
+    path: worktreePath,
+    reason: await removableNow(worktreePath),
+  }))
+  // In the container's own order, so the refusal names the worktrees in the order the
+  // caller sees them in the dialog rather than in whatever order the probes finished.
+  const held = probes.filter((entry) => entry.reason !== '')
   if (held.length > 0) {
     throw coded(
       'E5011',
@@ -1093,10 +1143,37 @@ async function finishTaskLocked(subprocess, options) {
   // away or to delete as a leftover.
   const strandedByRemoval = new Set()
 
-  for (const worktreePath of worktrees) {
-    const name = basename(worktreePath)
+  // The read-only half of the per-repository work, done before the loop that acts.
+  //
+  // The loop below cannot be parallel: it merges, removes and deletes, and each of those
+  // is a decision about state the previous repository's actions may have changed. What it
+  // reads before deciding, though, is four independent questions about one checkout -
+  // which branch, which source repository, whether a merge is standing, whether work is
+  // uncommitted - and none of them changes another repository's answer. On Windows each
+  // is a `git.exe` launch, so a five-repository finish was paying for twenty serial
+  // launches before it had merged anything.
+  //
+  // Asked here, keyed by path, and read out of the map in the loop. A repository whose
+  // answers are already in hand is still acted on in the container's order, one at a
+  // time - the ordering guarantee is the loop's, not this map's.
+  const probesByPath = new Map()
+  await mapWithLimit(worktrees, SCAN_CONCURRENCY, async (worktreePath) => {
     const branch = await tryRunGit(subprocess, worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
     const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
+    const midMerge = await mergeInProgress(subprocess, worktreePath)
+    // `status` is only worth asking when the answer can matter: the condition below is
+    // the only reader, and it is false for an abandonment with force. Skipping it there
+    // keeps this pass to the questions the loop will actually consult.
+    const uncommitted = (merge || !deleteBranch) && !force && !midMerge
+      ? await uncommittedCount(subprocess, worktreePath)
+      : 0
+    probesByPath.set(worktreePath, { branch, porcelain, midMerge, uncommitted })
+  })
+
+  for (const worktreePath of worktrees) {
+    const name = basename(worktreePath)
+    const probed = probesByPath.get(worktreePath) ?? { branch: '', porcelain: '', midMerge: false, uncommitted: 0 }
+    const { branch, porcelain, midMerge } = probed
     // `git worktree list` always prints the main working tree first.
     const mainRepo = parseWorktrees(porcelain).find((row) => row.isMain)?.path ?? ''
     // `needsCommit` and `dirtyCheckout` are the two ways a finish stops on work that is
@@ -1121,8 +1198,7 @@ async function finishTaskLocked(subprocess, options) {
     // wanted - it is discarded as the worktree goes - and an abandonment deletes the branch
     // and the work with it, which the caller asked for by name; a merge still standing is
     // the next step's business.
-    const midMerge = await mergeInProgress(subprocess, worktreePath)
-    if ((merge || !deleteBranch) && !force && !midMerge && await uncommittedCount(subprocess, worktreePath) > 0) {
+    if ((merge || !deleteBranch) && !force && !midMerge && probed.uncommitted > 0) {
       // Flagged, not just described: this is the stop the panel answers with "hand the
       // commits to the agent", and a tool caller has to reach the same answer.
       outcome.needsCommit = true

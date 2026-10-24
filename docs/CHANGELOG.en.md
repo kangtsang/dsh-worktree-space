@@ -4,6 +4,45 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
+## 1.3.5 — 2026-10-24
+
+The finish dialog opens faster, and a tool result says what to do next.
+
+### Added
+
+- **A result now says what the next call should be.** A tool description is read once, at the
+  start, and an agent that has already decided the work is quicker to do itself does not go back
+  to it. Four points now restate the default flow in the answer itself — the work belongs to a
+  session in the task space, not to this conversation, and it is implemented here only when the
+  user explicitly asked for that:
+  - a `create` **with no `prompt`**: the space exists with no session on it, and the answer
+    carries a `dispatch` call that can be copied as written;
+  - `suggest-root`: the next call should be one `create` with a `prompt`;
+  - `add` with no session recorded, and `list` where no task has one: the same thing about the
+    worktree nobody is on.
+
+  A `create` given a `prompt`, a `dispatch` and a `done` add nothing — those already are what the
+  guidance is trying to reach.
+
+### Changed
+
+- **The finish dialog loads faster.** Each repository's git questions used to run in one serial
+  loop, and on Windows a `git.exe` launch is almost entirely process creation — a
+  three-repository task paid for twenty-one of them end to end. The repositories are now asked
+  concurrently (within one repository the calls stay in order, because each depends on the
+  previous answer), and one `rev-parse` that was asked twice for the same repository is gone.
+  Measured against four synthetic repositories: about 700ms down to 206ms.
+
+- **`done` is faster too.** The read-only probes a finish makes per repository — the branch, the
+  source repository, whether a merge is standing, whether work is uncommitted — now run
+  concurrently. The actions that follow (merge, remove, delete a branch) stay serial, because one
+  repository's failure must not change another's. Measured against synthetic repositories: three
+  of them went from 722ms to 333ms, and five from 1179ms to 434ms.
+
+- **`resolveMergeTarget` takes an optional fifth parameter** for the branch the caller has
+  already read, which saves a duplicate query. Omitting it still asks git, so existing callers
+  are unaffected.
+
 ## 1.3.4 — 2026-10-22
 
 The ability to wait on a session is gone.

@@ -1703,6 +1703,60 @@ describe("finishTask", () => {
     }
   }
 
+  it("probes the worktrees together before it acts on any of them", async () => {
+    // A finish reads four things about each worktree before deciding anything: the branch,
+    // the source repository, whether a merge is standing, and whether work is uncommitted.
+    // None of those changes another worktree's answer, so they are asked concurrently -
+    // on Windows each is a `git.exe` launch, and they were the bulk of a multi-repository
+    // finish's wall clock.
+    //
+    // What must not change is the answer, and what must not become concurrent is the
+    // acting: the loop still merges, removes and deletes one repository at a time, in the
+    // container's order. This asserts the read half is concurrent and the result is what
+    // the serial version produced.
+    const fixture = await taskFixture()
+    let inFlight = 0
+    let peak = 0
+    const { subprocess } = subprocessMock({
+      ...fixture.handlers,
+      // The mocked removal has to change the filesystem, or the container can never
+      // become empty and the finish reports it as unfinished.
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    const observed = {
+      spawn: (request) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        const inner = subprocess.spawn(request)
+        return {
+          ...inner,
+          done: inner.done.then(async (result) => {
+            // Long enough for a sibling worktree's question to arrive while this one is
+            // outstanding; a serial probe never has two outstanding and stays at one.
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            inFlight -= 1
+            return result
+          }),
+        }
+      },
+    }
+    try {
+      const result = await fixture.finish(observed, { task: "login", merge: true, deleteBranch: true })
+      expect(peak).toBeGreaterThan(1)
+      // The rows, their order and their verdicts are what the serial finish gave: the
+      // parallel pass only moved the questions earlier, it did not change any answer.
+      expect(result.repositories.map((entry) => entry.name)).toEqual(["alpha", "beta"])
+      expect(result.repositories.every((entry) => !entry.error)).toBe(true)
+      expect(result.repositories.every((entry) => entry.removed === true)).toBe(true)
+      expect(result.repositories.every((entry) => entry.merged === true)).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("merges, removes every worktree, deletes the branches and clears the container", async () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({
@@ -3434,6 +3488,48 @@ describe("planTask", () => {
         .rejects.toThrow(/no such task space/)
       await expect(planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: "" }))
         .rejects.toThrow(/tasks root is required/)
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("asks the repositories together, and still answers them in the container's order", async () => {
+    // The plan asks every repository the same handful of questions and they are asked
+    // concurrently, because on Windows each one is a `git.exe` process launch and the
+    // dialog waits for all of them. What the parallelism must not change is the answer:
+    // the rows come back in the order the container lists its entries, the totals are
+    // the same sums, and the headline target is still the first repository that has one.
+    const fixtureUnderTest = await fixture()
+    let inFlight = 0
+    let peak = 0
+    const { subprocess } = subprocessMock(fixtureUnderTest.handlers)
+    // Each answer is delayed a little, which is what gives a sibling repository's
+    // question time to arrive while this one is outstanding. A serial plan never has
+    // two outstanding at once, so its peak stays at one and the assertion below fails.
+    const concurrent = {
+      spawn: (request) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        const inner = subprocess.spawn(request)
+        return {
+          ...inner,
+          done: inner.done.then(async (result) => {
+            await new Promise((resolve) => setTimeout(resolve, 5))
+            inFlight -= 1
+            return result
+          }),
+        }
+      },
+    }
+    try {
+      const plan = await planTask(concurrent, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })
+      // More than one repository's question was in flight at once. This is the
+      // measurement: a serial loop peaks at one, and the whole change is the peak.
+      expect(peak).toBeGreaterThan(1)
+      // And the answer is the one the serial loop gave: same rows, same order, same sums.
+      expect(plan.repositories.map((entry) => entry.name)).toEqual(["alpha", "beta"])
+      expect(plan).toMatchObject({ mergeTarget: "develop", changedFiles: 2, commits: 4 })
+      expect(plan.repositories.map((entry) => entry.target)).toEqual(["develop", "develop"])
     } finally {
       await fixtureUnderTest.cleanup()
     }

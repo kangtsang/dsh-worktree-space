@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "version": "1.3.4",
+  "version": "1.3.5",
   "baseline": {
-    "package": "dsh-worktree-space@1.3.4",
-    "commit": "0dd0184 (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
+    "package": "dsh-worktree-space@1.3.5",
+    "commit": "38a95df (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
     "note": "The manifest state, the acceptance procedure, the acceptance results and the boundary cases below all describe this version only; no other version is referenced.",
     "procedure": "docs/store-evidence.md"
   },
@@ -13,7 +13,7 @@
     "powershell": "$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) (\"dsh-evidence-\" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null"
   },
   "manifest": {
-    "version": "1.3.4",
+    "version": "1.3.5",
     "enginesNode": ">=22.19.0",
     "enginesDsh": ">=0.2.0-rc.1 <0.3.0-0",
     "peers": {
@@ -79,12 +79,12 @@
     "status": "run",
     "note": "the store contract's clause 8 requires install -> configuration -> visible -> uninstall/rollback in a disposable profile, and unit tests do not substitute for it. Each row below comes from an actual run on that release's own DSH CLI, per docs/store-evidence.md sections 1 and 2.",
     "web": {
-      "ranOn": "2026-10-22",
-      "artifact": "dsh-worktree-space-1.3.4.tgz",
+      "ranOn": "2026-10-24",
+      "artifact": "dsh-worktree-space-1.3.5.tgz",
       "artifactFiles": 28,
-      "artifactBytes": 1077548,
-      "artifactSha256": "A99F87243CD83616E21C6CD511BFEF74AF7A4924DEB833D4619C0A89F9181D39",
-      "artifactCommit": "0dd0184",
+      "artifactBytes": 1085589,
+      "artifactSha256": "43543678E09746A1E0ED75511FA3FE6E11C365B2267C793C1A299BAE43E898F8",
+      "artifactCommit": "38a95df",
       "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (55E1074F...495E9, 320063 bytes) and lib/index.js (C5B6C0D3...4A0CE, 375204 bytes), and unpacking the tested tarball gives those same two hashes",
       "ports": {
         "0.2.1-rc.2": 34800,
@@ -94,22 +94,66 @@
       },
       "node": "v24.18.0",
       "pnpm": "12.6.0",
-      "totalSeconds": 31,
-      "verdict": "PASS (4 passed, 0 failed)",
+      "totalSeconds": 39,
+      "verdict": "PASS (5 passed, 0 failed)",
       "report": "D:\\dsh-acceptance\\dsh-worktree-space\\matrix\\logs\\matrix-report.md",
-      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.3.4, commit 0dd0184, 4 versions)"
+      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.3.5, commit 38a95df, 5 versions)"
     },
     "desktop": "confirmed by the author outside this run; the desktop lifecycle does not go through the command line",
     "rows": [
       {
-        "dsh": "0.2.1-rc.2",
+        "dsh": "0.2.1-rc.3",
         "node": "v24.18.0",
-        "seconds": 11,
+        "seconds": 10,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.4"
+          "installedVersion": "1.3.5"
+        },
+        "compose": {
+          "result": "passed",
+          "exit": 0,
+          "lines": 1234,
+          "worktreeSpaceMentions": 3,
+          "nameMentions": 1
+        },
+        "visible": {
+          "result": "passed",
+          "pageStatus": 200,
+          "pageMentions": 5,
+          "pageBytes": 38492,
+          "bundleStatus": 200,
+          "bundleBytes": 320139,
+          "bundleType": "text/javascript; charset=utf-8",
+          "bundleRegisters": 1,
+          "bundleEndpoints": 1,
+          "bundleRev": "3c5de365c636",
+          "rpcOk": "HTTP 200 {\"ok\":true}",
+          "rpcInventedEndpoint": "HTTP 404"
+        },
+        "uninstall": {
+          "result": "passed",
+          "exit": 0,
+          "nodeModulesGone": true,
+          "patchMentions": 0
+        },
+        "rollback": {
+          "result": "passed",
+          "exit": 0,
+          "lines": 1231,
+          "worktreeSpaceMentions": 0
+        }
+      },
+      {
+        "dsh": "0.2.1-rc.2",
+        "node": "v24.18.0",
+        "seconds": 9,
+        "install": {
+          "result": "passed",
+          "exit": 0,
+          "incompatibleWarning": false,
+          "installedVersion": "1.3.5"
         },
         "compose": {
           "result": "passed",
@@ -128,7 +172,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "229722e0de05",
+          "bundleRev": "52300fcf036a",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -148,12 +192,12 @@
       {
         "dsh": "0.2.1-rc.1",
         "node": "v24.18.0",
-        "seconds": 10,
+        "seconds": 8,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.4"
+          "installedVersion": "1.3.5"
         },
         "compose": {
           "result": "passed",
@@ -172,7 +216,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "24d2f9741ee9",
+          "bundleRev": "c321bd7e7c0b",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -192,12 +236,12 @@
       {
         "dsh": "0.2.0-rc.2",
         "node": "v24.18.0",
-        "seconds": 5,
+        "seconds": 6,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.4"
+          "installedVersion": "1.3.5"
         },
         "compose": {
           "result": "passed",
@@ -216,7 +260,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "a3fec57c98de",
+          "bundleRev": "76415705d588",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -236,12 +280,12 @@
       {
         "dsh": "0.2.0-rc.1",
         "node": "v24.18.0",
-        "seconds": 5,
+        "seconds": 6,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.3.4"
+          "installedVersion": "1.3.5"
         },
         "compose": {
           "result": "passed",
@@ -260,7 +304,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "e36e34d75837",
+          "bundleRev": "dc373e36f2b6",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },

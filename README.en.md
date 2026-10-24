@@ -198,8 +198,8 @@ branch back first and removes the worktree afterwards.
 - Clients: **both the web client and the desktop client work**; the desktop client was verified by
   hand, the command-line matrix does not cover it
 
-**All four official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`
-and `0.2.1-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
+**All five official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`,
+`0.2.1-rc.2` and `0.2.1-rc.3` — each against **its own** DSH CLI, in a disposable profile, through
 install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
 the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
 matrix. The per-release record is in
