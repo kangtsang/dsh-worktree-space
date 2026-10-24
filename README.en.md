@@ -1,6 +1,6 @@
 # Worktree Space
 
-[简体中文](README.md) · **English** · [Changelog](CHANGELOG.en.md)
+[简体中文](README.md) · **English** · [Changelog](docs/CHANGELOG.en.md)
 
 Worktree Space: One task, one space — work on parallel tracks. A task that involves one or more Git repositories goes into its own task space directory, where each participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH workspace and sessions start working inside it, so several tasks can run in parallel without interfering with one another. When the space is created you settle **whether this task deploys for acceptance** — tick it, and a passing smoke record becomes the gate the finishing merge has to clear. When a task is finished its branch is merged back into the target branch, the worktrees are removed, and whatever documents were left in the space are filed into a directory you choose; uncommitted work and merge conflicts can instead be handed to an agent session.
 
@@ -232,7 +232,7 @@ contacts no external service and reports no telemetry.
 | Global resources | No global installs, no daemon or resident service, no writes to system directories |
 
 The full account — what it reads, what it writes, which subcommands it runs and what happens when
-things fail — is in [PERMISSIONS.en.md](PERMISSIONS.en.md); the disposable-Profile install, start,
+things fail — is in [PERMISSIONS.en.md](docs/PERMISSIONS.en.md); the disposable-Profile install, start,
 uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
 
 **Failure boundaries (never silent):**
@@ -557,7 +557,7 @@ it with it. Failing to write it never affects any operation.
 | Document | What it covers |
 | --- | --- |
 | [USAGE.en.md](USAGE.en.md) | **The Worktree Space manual** in two independent parts — **the manual route** (sections 1–9: the management page, creating, working, adding repositories, deploy and acceptance, finishing, conflicts, troubleshooting) and **agent orchestration end to end** (sections 10–14) — plus an error-code reference and a session-control appendix. The Chinese edition is [USAGE.md](USAGE.md) |
-| [PERMISSIONS.en.md](PERMISSIONS.en.md) | The full permissions and failure boundaries: what is read, what is written, which `git` subcommands run, and what happens when one fails |
+| [PERMISSIONS.en.md](docs/PERMISSIONS.en.md) | The full permissions and failure boundaries: what is read, what is written, which `git` subcommands run, and what happens when one fails |
 | [docs/store-evidence.md](docs/store-evidence.md) | The disposable-profile install, start, uninstall and rollback acceptance steps, with per-release records |
-| [CHANGELOG.en.md](CHANGELOG.en.md) | Release history |
+| [CHANGELOG.en.md](docs/CHANGELOG.en.md) | Release history |
 | [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) | Problem reports |

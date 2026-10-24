@@ -84,11 +84,7 @@ assert.equal(result.length, 1, "npm pack must produce one package manifest")
 
 const files = result[0].files.map(({ path }) => path).sort()
 const expected = [
-  "CHANGELOG.en.md",
-  "CHANGELOG.md",
   "LICENSE",
-  "PERMISSIONS.en.md",
-  "PERMISSIONS.md",
   "README.en.md",
   "README.md",
   "assets/skill/worktree-space/SKILL.md",
@@ -100,6 +96,10 @@ const expected = [
   "assets/skill/worktree-space/references/working.md",
   "client/client.js",
   "cordis.patch.yml",
+  "docs/CHANGELOG.en.md",
+  "docs/CHANGELOG.md",
+  "docs/PERMISSIONS.en.md",
+  "docs/PERMISSIONS.md",
   "docs/img/finish-task.png",
   "docs/img/isolation-model.png",
   "docs/img/manage-worktree-space.png",

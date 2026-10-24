@@ -1905,4 +1905,219 @@ describe("registerTaskTool", () => {
       await fixture.cleanup()
     }
   })
+
+  /**
+   * The blocks the model reads for one completed call.
+   * @param tool - the captured definition.
+   * @param args - the arguments the call was made with.
+   * @param value - the value it returned.
+   * @returns the rendered text, one entry per block.
+   */
+  const renderedText = (tool, args, value) => tool.output.render(args, value).map((block) => block.text)
+
+  describe("the guidance a result carries", () => {
+    // A description is read once and a model that has decided to do the work itself
+    // does not go back to it; the result of the call it just made is what it reads
+    // next. These are the points where the default flow has to be said out loud,
+    // and the points where repeating it would be noise.
+
+    it("tells a create with no prompt to dispatch the work, not to do it here", async () => {
+      const { value, captured } = await createOnce()
+      // Nothing was opened, so the space is sitting there with no session on it.
+      expect(value.sessionId).toBe("")
+      const [, ...rest] = renderedText(captured[0], { action: "create", task: "login" }, value)
+      // The summary stays exactly what it was: it is the card's text too.
+      expect(renderedText(captured[0], {}, value)[0]).toBe(value.summary)
+      const guidance = rest.join("\n")
+      expect(guidance).toContain("No session is on this task space yet")
+      expect(guidance).toContain('action: "dispatch"')
+      expect(guidance).toContain("shares none of this conversation")
+      // The escape hatch is stated, because a default with no stated exception reads
+      // as a prohibition - and this one is a real instruction a user may give.
+      expect(guidance).toContain("only if the user explicitly asked")
+      // And the task's own facts are in it, so the next call can be written from this
+      // answer without a lookup.
+      expect(guidance).toContain(value.task)
+      expect(guidance).toContain(value.tasksRoot)
+    })
+
+    it("says nothing extra once a create has dispatched, because that is the flow", async () => {
+      const services = {
+        sessionController: { create: async () => ({ sessionId: "session-1" }), prompt: async () => ({}) },
+        sessions: { get: () => ({ append: () => {} }) },
+      }
+      const { value, captured } = await createOnce(services, { prompt: "add the feature" }, { agent: { session: { id: "caller" } } })
+      expect(value.sessionId).toBe("session-1")
+      // One block: the answer, with no advice attached. A correct call that still
+      // gets a lecture is how a model learns to skip the guidance entirely.
+      expect(renderedText(captured[0], { action: "create", prompt: "x" }, value)).toEqual([value.summary])
+    })
+
+    it("points a suggest-root at a create that dispatches in one call", async () => {
+      const source = await sourceFixture()
+      const { ctx, captured } = toolContext()
+      try {
+        registerTaskTool(ctx)
+        const value = await captured[0].execute({ action: "suggest-root", sourceRoot: source.root }, {})
+        const guidance = renderedText(captured[0], { action: "suggest-root" }, value).slice(1).join("\n")
+        // The shape of the next call, not only the rule: one create that also hands
+        // the first job over, rather than a create followed by the work happening here.
+        expect(guidance).toContain("`create` with a `prompt`")
+        expect(guidance).toContain("not in this conversation")
+      } finally {
+        await source.cleanup()
+      }
+    })
+
+    it("leaves a dispatch and a done alone, and an empty container alone", async () => {
+      // A dispatch has handed work over and a done has finished it: both are the
+      // outcome the guidance is trying to reach, so neither is told to do anything.
+      const dispatched = await taskSpaceFixture()
+      try {
+        const { ctx, captured } = toolContext(dispatched.subprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: dispatched.container, prompt: "go" },
+          {},
+        )
+        expect(renderedText(captured[0], { action: "dispatch" }, value)).toEqual([value.summary])
+      } finally {
+        await dispatched.cleanup()
+      }
+      const finished = await taskSpaceFixture()
+      try {
+        const { ctx, captured } = toolContext(finished.subprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "done", task: "login", project: PROJECT, tasksRoot: finished.container, merge: true },
+          {},
+        )
+        expect(renderedText(captured[0], { action: "done" }, value)).toEqual([value.summary])
+      } finally {
+        await finished.cleanup()
+      }
+      // Nothing to work on is a plain answer, not an invitation.
+      const { ctx, captured } = toolContext()
+      registerTaskTool(ctx)
+      const value = await captured[0].execute({ action: "list", tasksRoot: join(tmpdir(), "multi-worktree-guidance-none") }, {})
+      expect(renderedText(captured[0], { action: "list" }, value)).toEqual([value.summary])
+    })
+
+    it("leaves the card's own text untouched, guidance and all", async () => {
+      // The card is read by a person who already knows what to press, and its text
+      // is the projection's. Anything added to the render must not reach it.
+      const { value, captured } = await createOnce()
+      const meta = captured[0].output.presentationMeta({ action: "create" }, value)
+      expect(JSON.stringify(meta)).not.toContain("dispatch")
+      expect(meta.summary).toBe(value.summary)
+    })
+
+    /**
+     * A task space with one worktree, a record naming the sessions given, and a
+     * second repository outside it to add.
+     * @param sessions - the record's sessions, or undefined for a record that names none.
+     * @returns the container, the added repository's path, and a cleanup.
+     */
+    async function addFixture(sessions) {
+      const container = await mkdtemp(join(tmpdir(), "multi-worktree-guidance-add-"))
+      const taskPath = join(container, PROJECT, "login")
+      const worktree = join(taskPath, "alpha")
+      await mkdir(worktree, { recursive: true })
+      await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
+      await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+      await writeFile(recordAt(taskPath), JSON.stringify({
+        version: 1, task: "login", project: PROJECT, tasksRoot: container,
+        sourceRoot: "E:/source", branch: "task/login", baseRef: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+        ...(sessions === undefined ? {} : { sessions }),
+        repositories: [{ name: "alpha", sourcePath: "E:/source/alpha", branch: "task/login" }],
+      }))
+      const added = join(container, "..", `${basename(container)}-gamma`, "gamma")
+      await mkdir(join(added, ".git"), { recursive: true })
+      return {
+        container,
+        added,
+        cleanup: async () => {
+          await rm(container, { recursive: true, force: true })
+          await rm(join(added, ".."), { recursive: true, force: true })
+        },
+      }
+    }
+
+    /** The subprocess double an `add` needs: one branch, and no existing task branch. */
+    const addSubprocess = {
+      spawn: ({ argv }) => {
+        const key = parseGitArgv(argv).args.join(" ")
+        return {
+          done: Promise.resolve({ exitCode: key.startsWith("show-ref") ? 1 : 0, signal: null }),
+          collected: {
+            stdout: { readFrom: () => ({ text: key.includes("--abbrev-ref") ? "task/login" : "" }) },
+            stderr: { readFrom: () => ({ text: "" }) },
+          },
+        }
+      },
+    }
+
+    it("reads the record before telling an add to open a session", async () => {
+      // `add` opens nothing - a repository added to a task is not a job - so the only
+      // thing that can say whether a session is already on the space is the record.
+      // Without that read the guidance would tell a caller to open a session in a task
+      // space that has one.
+      const withoutSession = await addFixture(undefined)
+      try {
+        const { ctx, captured } = toolContext(addSubprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "add", task: "login", project: PROJECT, tasksRoot: withoutSession.container, repos: [withoutSession.added] },
+          {},
+        )
+        expect(value.sessionId).toBe("")
+        const blocks = renderedText(captured[0], { action: "add" }, value)
+        expect(blocks).toHaveLength(2)
+        expect(blocks[1]).toContain("dispatch")
+      } finally {
+        await withoutSession.cleanup()
+      }
+      const withSession = await addFixture([{ sessionId: "sess-existing", role: "task", at: "2026-10-02T00:00:00Z" }])
+      try {
+        const { ctx, captured } = toolContext(addSubprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute(
+          { action: "add", task: "login", project: PROJECT, tasksRoot: withSession.container, repos: [withSession.added] },
+          {},
+        )
+        expect(value.sessionId).toBe("sess-existing")
+        expect(renderedText(captured[0], { action: "add" }, value)).toEqual([value.summary])
+      } finally {
+        await withSession.cleanup()
+      }
+    })
+
+    it("steers a list only when a task in it has never been worked in", async () => {
+      // A container of task spaces nobody has opened a session on is the shape a
+      // caller is most likely to finish by hand, so the answer says how to start.
+      const idle = await addFixture(undefined)
+      try {
+        const { ctx, captured } = toolContext(addSubprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute({ action: "list", tasksRoot: idle.container }, {})
+        const blocks = renderedText(captured[0], { action: "list" }, value)
+        expect(blocks).toHaveLength(2)
+        expect(blocks[1]).toContain("dispatch")
+      } finally {
+        await idle.cleanup()
+      }
+      // One session on it, and the list is a plain answer again.
+      const worked = await addFixture([{ sessionId: "sess-existing", role: "task", at: "2026-10-02T00:00:00Z" }])
+      try {
+        const { ctx, captured } = toolContext(addSubprocess)
+        registerTaskTool(ctx)
+        const value = await captured[0].execute({ action: "list", tasksRoot: worked.container }, {})
+        expect(renderedText(captured[0], { action: "list" }, value)).toEqual([value.summary])
+        expect(value.summary).toContain("sess-existing")
+      } finally {
+        await worked.cleanup()
+      }
+    })
+  })
 })

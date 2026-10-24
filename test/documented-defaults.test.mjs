@@ -34,7 +34,7 @@ const read = (name) => readFileSync(join(ROOT, name), "utf8")
  * Every place a default is stated in prose, and how to pull the stated number out.
  *
  * `directories` and `ignored` are optional because not every document states them:
- * PERMISSIONS.md does not quote the skip list, and neither document counts the
+ * `docs/PERMISSIONS.md` does not quote the skip list, and neither document counts the
  * built-in names in its default column. Where a document is silent, this stays
  * silent with it - a check that demands a sentence the document has no reason to
  * contain is a check that gets deleted.
@@ -53,12 +53,12 @@ const STATED = [
     ignored: /\| Directories the scan skips \|[^|]*\|\s*the plugin's (\d+)\s*\|/,
   },
   {
-    file: "PERMISSIONS.md",
+    file: "docs/PERMISSIONS.md",
     depth: /最多 `scanDepth` 层（1–5，默认 (\d+)）/,
     directories: /最多 `maxScanDirectories` 个目录（默认 (\d+)）/,
   },
   {
-    file: "PERMISSIONS.en.md",
+    file: "docs/PERMISSIONS.en.md",
     // Wrapped across a line break in the source, so the gap is `[\s\S]` and the
     // bound is what stops it reaching the next setting's number.
     depth: /`scanDepth` levels[\s\S]{0,20}?default (\d+)/,

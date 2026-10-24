@@ -2,7 +2,7 @@
 
 本文件是 DSH STORE 上架契约第 8 条要求的证据记录：**可安装的插件必须在一次性 Profile 里完成
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
-[`PERMISSIONS.md`](../PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
+[`PERMISSIONS.md`](PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
 
 声明基线：`dsh-worktree-space@1.3.4`，被测树是本仓库默认分支上的固定提交 `0dd0184`；最终发版提交与它只差这两份证据文档自己（见第 5 节循环性一条）。下面的清单现状、验收方法、
 验收结果与边界情形都以它为准，不引用其它版本。

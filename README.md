@@ -1,6 +1,6 @@
 # Worktree Space
 
-**简体中文** · [English](README.en.md) · [更新日志](CHANGELOG.md)
+**简体中文** · [English](README.en.md) · [更新日志](docs/CHANGELOG.md)
 
 Worktree Space：一任务一空间，工作多路并行。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。建空间时可以定下**这个任务要不要部署验收**，勾了它，一条通过的冒烟记录就是收尾合并的闸门。任务结束时把任务分支合并回目标分支、移除 worktree，并把空间里遗留的文档归档到指定目录；也可以把未处理的提交和合并冲突交给一个 agent 会话处理。
 
@@ -190,7 +190,7 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | 凭据 | 不读取、不保存、不转发；插件不接触密钥 |
 | 全局资源 | 不装全局包、不起常驻进程或服务、不写系统目录 |
 
-逐条说明（读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](PERMISSIONS.md)；
+逐条说明（读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](docs/PERMISSIONS.md)；
 一次性 Profile 的安装、启动、卸载与回滚验收证据见 [docs/store-evidence.md](docs/store-evidence.md)。
 
 **失败边界（绝不静默）：**
@@ -455,7 +455,7 @@ worktree 里，可以就地处理。
 | 文档 | 内容 |
 | --- | --- |
 | [USAGE.md](USAGE.md) | **《Worktree Space 使用指南》**：分**面板手动流程**（1–9 节：管理页面、新建、工作、补仓库、部署验收、结束任务、冲突处理、排障）与**Agent 自动编排**（10–14 节）两部分，另有错误码速查与「会话控制工具」附录。英文版是 [USAGE.en.md](USAGE.en.md) |
-| [PERMISSIONS.md](PERMISSIONS.md) | 权限与失败边界的完整声明：读什么、写什么、执行哪些 `git` 子命令、失败时如何处理 |
+| [PERMISSIONS.md](docs/PERMISSIONS.md) | 权限与失败边界的完整声明：读什么、写什么、执行哪些 `git` 子命令、失败时如何处理 |
 | [docs/store-evidence.md](docs/store-evidence.md) | 一次性 profile 的安装、启动、卸载与回滚验收步骤与逐版本记录 |
-| [CHANGELOG.md](CHANGELOG.md) | 版本发布历史 |
+| [CHANGELOG.md](docs/CHANGELOG.md) | 版本发布历史 |
 | [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) | 问题反馈 |

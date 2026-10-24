@@ -26,6 +26,17 @@ const DESCRIPTION = [
     + 'repository on one branch. Drive it in order: suggest-root, then create, then list, then done. Ask the user for '
     + 'the task name and the container root before creating anything.',
 
+  // The rule this tool exists to make reachable, stated as the default rather than as
+  // one option among two: a caller that reads only this line and then does the work in
+  // its own session has missed the point of the space it just made. The exception is
+  // named in the same breath, because it is real - a user may say "do it here" - and a
+  // default with no stated exception is read as a prohibition.
+  '**The task is done by a session in the task space, not by this conversation.** Create the space with a `prompt` '
+    + '(or hand a later job over with `dispatch`) and the session that takes it does the work, with its own context and '
+    + 'its own approval gate, while this conversation stays free to direct it. Implement the task in the current session '
+    + 'only when the user explicitly asked for that - not because a prompt was easy to carry out here, and not because '
+    + 'the space already exists. Every answer below repeats this where the next step is yours to choose.',
+
   '**Ask about the acceptance fence before you create a task space or dispatch a session into one, and never answer '
     + 'it for the user.** deployTarget "docker" means the task expects a deployment and **the smoke is the finish line** '
     + '- the acceptance URL and a recorded pass are what a completion report carries, not the fact that the code is '
@@ -1100,6 +1111,70 @@ function summarize(action, value) {
   return `${headline}${failed}${attention}${handoff}${commit}${dirty}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
 }
 
+/**
+ * The steering a result gives when the next step is the caller's to choose.
+ *
+ * Tool descriptions are read once, at the start, and a model that has already
+ * decided to do the work itself does not go back to them. What it does read is
+ * the answer to the call it just made - so the default flow is repeated there,
+ * at the three points where a caller can still go wrong. Each line names the
+ * action to call next rather than only the rule, because the failure being
+ * prevented is not ignorance of the rule but a plausible detour taken around it.
+ *
+ * Absent wherever the caller has already done the right thing: a `create` given a
+ * prompt has dispatched, a `dispatch` has handed work over, and a `done` has
+ * finished. Repeating the advice there would be noise on every correct call, and
+ * noise is what makes a model stop reading the guidance at all.
+ * @param value - the action's normalized envelope.
+ * @returns the guidance lines, or an empty array when the caller is on the flow.
+ */
+function nextSteps(value) {
+  const implement = 'Do the work in a session of the task space, not in this conversation: '
+  if (value.action === 'suggest-root') {
+    // Nothing is made yet, so the guidance is about how the very next call is
+    // shaped: one `create` that also hands the first job over, rather than a
+    // create followed by the work being done here.
+    return [
+      'Next: one `create` with a `prompt` builds the space **and** puts a session on the first job in a single call - '
+        + 'the panel\'s "Create and open", already working. ' + implement
+        + '`create` alone, then implementing the task in this conversation, is the flow this tool exists to replace.',
+    ]
+  }
+  if (value.action === 'create' && value.sessionId === '') {
+    // The one case worth the most words: the space exists, no session is on it,
+    // and the work is sitting right here in a conversation that could plausibly
+    // just do it. `dispatch` is the way forward, and it needs a prompt written to
+    // stand alone - which is why that is spelled out rather than assumed.
+    return [
+      '**No session is on this task space yet, and the work belongs to one.** Hand the first job over with '
+        + '`wts_worktree_space({ action: "dispatch", task: "' + value.task + '", tasksRoot: "' + (value.tasksRoot || value.container)
+        + '", prompt: "..." })` — write the prompt as a brief that stands alone, because the session that reads it '
+        + 'shares none of this conversation. Then watch it with `wts_session_tool` (status, send, read); it reports its '
+        + 'own progress and a turn that ends badly is pushed to you, so there is nothing to wait on.',
+      'Implement the task in this conversation only if the user explicitly asked for that. Creating the space without a '
+        + 'prompt is not that instruction, and neither is the task looking small from here: the space was made so the '
+        + 'work would run in its own checkout on its own branch, and doing it here leaves that branch empty.',
+    ]
+  }
+  if (value.action === 'add' && value.sessionId === '') {
+    // A repository was added to a space that has no session recorded: the new
+    // worktree is there and nobody is on it.
+    return [
+      'Next: ' + implement + '`dispatch` a job if this repository needs one. Commits are made inside each '
+        + 'repository subdirectory, never in the task space root.',
+    ]
+  }
+  if (value.action === 'list' && value.sessions.length === 0 && value.repositories.length > 0) {
+    // Task spaces exist and none has ever been worked in. Reported only when there
+    // is something to work on, so an empty container stays a plain answer.
+    return [
+      'None of these has a session on it yet. Put one on the task that needs work with '
+        + '`wts_worktree_space({ action: "dispatch", ... })` rather than implementing it here.',
+    ]
+  }
+  return []
+}
+
 /** How many repository rows a result card carries. */
 const CARD_ROW_LIMIT = 20
 
@@ -1210,11 +1285,22 @@ export function registerTaskTool(ctx, options = {}) {
     },
     output: {
       schema: OUTPUT_SCHEMA,
-      render: (_args, value) => [{ type: 'text', text: value.summary }],
+      // The summary first, then the steering - as its own block, so it reads as an
+      // instruction about what to do next rather than as part of the answer. It is
+      // appended rather than folded into the summary because the summary is also
+      // the card's text: keeping them apart is what leaves the interface alone
+      // while the model gets the guidance.
+      render: (_args, value) => {
+        const steps = nextSteps(value)
+        return steps.length === 0
+          ? [{ type: 'text', text: value.summary }]
+          : [{ type: 'text', text: value.summary }, { type: 'text', text: steps.join('\n\n') }]
+      },
       // The card's own projection, bounded here as well as at the card: a
       // hundred-repository task must neither bloat the session log nor a card.
       // `total` stays in place, so a capped list can never be read as the whole
-      // answer.
+      // answer. Deliberately carries no `nextSteps`: that guidance is addressed to
+      // the model, and a card is read by a person who already knows what to press.
       presentationMeta: (_args, value) => ({
         summary: value.summary,
         total: value.repositories.length,
@@ -1400,6 +1486,16 @@ export function registerTaskTool(ctx, options = {}) {
         value.container = result.path
         value.tasksRoot = result.tasksRoot
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
+        // The session the space is already being worked in, read the way `done`
+        // reads it. `add` opened nothing - a repository added to a task is not a
+        // job - so without this the guidance below would tell a caller to open a
+        // session in a task space that already has one on it.
+        const recorded = await readTaskMetadata(result.path).catch(() => undefined)
+        const sessions = normalizeSessions(recorded?.sessions ?? recorded?.sessionId)
+        if (sessions.length > 0) {
+          value.sessionId = sessions[sessions.length - 1].sessionId
+          value.sessions = sessions.map((entry) => ({ sessionId: entry.sessionId, role: entry.role, at: entry.at ?? '' }))
+        }
         value.summary = summarize(action, value)
         return value
       }

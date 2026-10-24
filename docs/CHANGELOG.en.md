@@ -1,7 +1,7 @@
 # Changelog
 
 What changed in each release. Earlier versions live in the git history only; the per-release
-evidence for host compatibility is in [`docs/store-evidence.md`](docs/store-evidence.md).
+evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [`CHANGELOG.md`](CHANGELOG.md).
 
 ## 1.3.4 — 2026-10-22
@@ -138,3 +138,109 @@ gaps closed.
 
 Everything that changed since 1.2.1. This is what a user or an agent can observe; how it was
 arrived at is not here.
+
+### Breaking changes
+
+- **The tool is renamed `wts_worktree_space`** (was `task_worktree_space`), and eight new
+  `wts_session_tool_*` session tools arrive.
+- **`done` requires `merge`.** A call without a boolean is refused (E7006) - a merge is the step
+  whose two directions cost differently and cannot be undone.
+- **The finish's untracked-content parameter becomes `strays`**: `archive` (the default), `keep`,
+  `discard`; the entries to keep move to `keepEntries`. The tool refuses `discard` (E7007).
+  **The default also changed**: `archive` removes the task space from disk, where 1.2.1's default
+  left it standing.
+- **The plugin's own files move into `.worktree-space/`**: the record, the note and the deploy root.
+  The old locations are no longer read.
+- **The bundled skill is renamed** `task-worktree-space` to `worktree-space`.
+
+### Added
+
+- **Deploying for acceptance, end to end.** A create may state `deployTarget: docker`, which copies
+  the workspace's `.worktree-space/deploy/` into the task space; the entry implements `up`, `smoke`
+  and `destroy`. `up` writes the acceptance URL, `smoke` writes `lastSmoke`. **The gate**: until a
+  smoke records `pass`, `done` with `merge: true` is refused (E5006). A create that asks to deploy
+  with nothing to deploy with is refused (E4015).
+- **Eight session-control tools**: `find`, `status`, `read`, `send`, `create`, `resume`, `wait`,
+  `cancel`.
+- **A new `dispatch` action** hands a job to a session in a task space that already exists, with a
+  permission and a watch flag it may name.
+- **A task space can be registered as a DSH Workspace**: `registerWorkspace` (on by default) and
+  `unregisterWorkspace` (undone with the finish by default).
+- **The task record is also kept under the source root**:
+  `<source root>/.worktree-space/tasks/<project>/<task>.json`, with archive in `tasks-archive/`.
+
+## 1.2.1 — 2026-10-06
+
+### Added
+
+- A **plugin settings** entry at the foot of the management page's nav column, opening this
+  plugin's own configuration page.
+- A **feedback** link under the full-page panel's heading; only the dialog had one.
+- A second line under the heading, **the flow**: pick a workspace, create the task space, let the
+  agent work, finish the task.
+
+### Fixed
+
+- The management page section of the README described something that was no longer true: the view
+  switch has been in the shared nav column, not the toolbar.
+
+## 1.2.0 — 2026-10-04
+
+### Added
+
+- **"Add repository" decides off the scan.** Whether a repository may be added is whether the scan
+  lists it, not whether one of its parents is a registered Workspace.
+- **Names and paths on a row can be selected and copied**: the arrow is the control, the text is no
+  longer inside a button.
+- **The default scan depth goes from two levels to three**, so a workspace registered over a deeper
+  layout no longer reads like an empty directory.
+- Repositories one level below a workspace can create a task space, and a task space is **found by
+  location** rather than compared as a string.
+
+### Fixed
+
+- **A task's commits on a detached HEAD were silently dropped**: `rev-parse --abbrev-ref HEAD`
+  answers the literal `HEAD`, so the merge became the target branch merging itself - reported as
+  success, with the commits left dangling. It is refused now.
+- **A failed create's rollback left its branch behind**, so a retry of the same name met "branch
+  already exists".
+- **One create error reached the audit log and the caller with different codes** (E2005 against a
+  collapsed E9001).
+- `E7007` was missing from the code table and was published as `E9001`.
+- A create that ticked **"save as default"** and then threw **deleted the task space it had just
+  made**.
+- Two workspaces with a repository of the same name **crossed their "add repository" checkboxes**.
+- Opening a row's menu from the keyboard **attached the action to whichever row the pointer had
+  last used**.
+
+## 1.1.0 — 2026-10-01
+
+### Features
+
+- **Create a task space**: pick a source root, name the task, choose a branch prefix (`task/` by
+  default), tick the repositories to span, choose where it goes. Each repository gets a worktree on
+  `<prefix><task>`.
+- **The task space is registered as a Workspace** named `<parent>/<task>`, with a session opened on
+  it whose working directory is that task space.
+- **A management page with three views** - workspaces, Git repositories, task spaces - each
+  searchable, filterable by what needs attention, and collapsible row by row or all at once.
+- **Finish a task**: merge each repository into its target branch, remove the worktrees, archive the
+  documents, unregister the Workspace; refused while a session is still running in it.
+- **A task-space menu** on each workspace row: create a task space, finish one.
+- **The layout**: task spaces live under the container root, filed by project (the source
+  workspace's own directory name) and then by task, with each repository's worktree under that.
+  Archive goes to `<project>/<task>-<timestamp>/`.
+- **No extra service dependencies**: scan depth and the directory limit are this plugin's own
+  settings; DSH themes and language settings are honoured.
+
+### Changed
+
+- The management page opens on the **workspaces view** (it opened on task spaces, the one view from
+  which a task cannot be started).
+- The directory that holds task spaces is named the **Worktree Space container**, and "merge back
+  into the current branch" becomes "merge back into the target branch".
+- Each of the three views carries one sentence saying what it lists, below the control it describes.
+
+### Compatibility
+
+- DSH `>=0.1.7-rc.1 <0.3.0-0`; available as both the web and desktop profiles.
