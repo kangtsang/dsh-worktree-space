@@ -7,6 +7,25 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.3.7 — 2026-10-26
+
+有新版本发布时，管理页和插件详情页会提示，并可直接复制安装用的包名。文档同时做了精简。
+
+### 新增
+
+- **有新版本时给出提示。** 管理页标题旁、以及插件管理页里本插件的详情页，会在有新版本时显示一个胶囊，
+  写明版本号。列表来自 npm，取不到时静默不提示——网络不通不该变成一条错误。
+
+  两种操作：**左键**打开更新说明，**右键**复制 `dsh-worktree-space@1.3.7` 这样的包名，可以直接粘贴到
+  插件管理的安装框里。复制的版本就是胶囊上那个版本，不是「最新」——提示针对的正是这一版。
+
+  版本号在构建时写入包内，不在运行时读取：浏览器读不到 `package.json`。
+
+### 变更
+
+- **README 精简了功能说明。** 搜索、筛选、折叠这类看界面就能知道的操作不再逐一描述，与功能无关的数字
+  与自我说明也去掉了。功能条目从 11 条降到 6 条。
+
 ## 1.3.6 — 2026-10-25
 
 工作区右键菜单可以直接在文件管理器或编辑器里打开目录，添加工作区与仓库改为选择目录。
@@ -261,6 +280,32 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.3.7 — 2026-10-26
+
+The management page and this plugin's own detail page say when a newer version is
+published, and copy the package spec to install it. The documentation is shorter too.
+
+### Added
+
+- **A notice when a newer version exists.** The management page's title row, and this
+  plugin's detail page under Plugins, show a capsule naming the version. It comes from
+  npm, and stays quiet when it cannot be fetched - a network that is down is not an error
+  worth reporting.
+
+  Two actions: **left click** opens the release notes, **right click** copies a spec like
+  `dsh-worktree-space@1.3.7` for the Plugins page's install field. The version copied is the
+  one the capsule names, not `latest` - that version is what the notice is about.
+
+  The version is stamped into the bundle at build time rather than read at runtime: a
+  browser cannot read `package.json`.
+
+### Changed
+
+- **A shorter README.** Searching, filtering and folding are no longer described one by
+  one - the interface answers those by being looked at - and numbers that say nothing
+  about the feature, along with the plugin's own self-description, are gone. Eleven
+  feature bullets become six.
 
 ## 1.3.6 — 2026-10-25
 

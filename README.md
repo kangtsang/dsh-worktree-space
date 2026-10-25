@@ -73,28 +73,17 @@ dsh plugin --profile web add dsh-worktree-space
   - **Git 仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree；
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理），
     任务行下面就是它的部署卡片。
-
-  三个视图都能搜索，也能用「待处理」筛出需关注的行（有改动、被锁定、可清理，或状态读取失败）；
-  每行左边的箭头能单独折叠，筛选旁的按钮可以一次全部展开或折叠。
 - **给任务补仓库**：任务进行到一半才发现少一个仓库时，在任务行上点「添加仓库」—— 候选就是 Git 仓库视图里
   那一列，任务已经有的不会重复列出；也可以直接填一个仓库目录，它会注册成工作区，因此同样进入 Git 仓库视图。
-  新仓库在任务现有分支上开 worktree，起点默认各仓库当前的 HEAD，也可指定分支或提交。新加的仓库可以和原来的
-  仓库不在同一个公共目录、甚至不在同一个磁盘上：合并与收尾都不受影响（合并是逐仓库读它自己的源仓库做的），
-  受影响的只是交接给 agent 提交时会话的工作目录盖不住那些源仓库的 `.git`，需要在那个会话里批准提权。
-  本版本**不支持**从任务里移除仓库。
+  新仓库在任务现有分支上开 worktree，起点默认各仓库当前的 HEAD，也可指定分支或提交。新仓库可以位于不同目录
+  甚至不同磁盘；只有在把提交交给 agent 时才可能需要批准提权（见使用指南）。本版本**不支持**从任务里移除仓库。
 - **结束任务**：在任务行上点「结束任务」，默认把各仓库的分支合并回它的目标分支、删掉 worktree、把任务
   空间里的文档归档到选定的目录，最后注销这个工作区；**任务空间里还有会话在干活时先拒绝**。合并往哪儿做、
   冲突怎么办，见「结束 Worktree Space」。
 - **新建任务空间**与**结束任务空间**也在工作区列表自己的 `⋯` 菜单里 —— 前者只对包含代码仓库的工作区显示，
   后者只对确属任务空间的目录显示，点开的就是同一个对话框。
-- **界面完整支持中英双语。** 管理页面、创建与结束对话框、配置项及其说明、按钮与错误提示，全部随 DSH 的语言
-  设置切换；插件向宿主注册 `zh` 与 `en` 两套文案（当前各 351 条），不自带语言开关。插件列表里的名称、描述与图标
-  只有英文一份。
-- **面板功能本身无额外服务依赖。** 入口开关、扫描深度和目录上限均由插件自身配置控制（见[配置](#-配置)）。支持 DSH
-  主题。勾了「部署到 Docker」的任务另有一层前提：这台机器上要有可用的容器引擎，见
-  [部署验收](#-部署验收)。
-- **可开关的操作日志。** 容器根下的 `worktree-space-log.jsonl` 记录这个任务空间做过什么，默认开启，
-  排查和复现直接读它；见[操作日志](#-操作日志)。
+- **界面跟随 DSH 的语言设置**，管理页、对话框、配置项与错误提示均有中英文。
+  勾了「部署到 Docker」的任务另有一层前提：这台机器上要有可用的容器引擎，见[部署验收](#-部署验收)。
 
 ## 📂 任务目录结构
 
@@ -288,7 +277,7 @@ worktree 与分支一起，不会留半个任务在那儿。
 
 两种形态共用同一条左侧导航，下面三项在**工作区 / Git 仓库 / 任务空间**三个视图间切换；导航底部是
 **⚙ 插件设置**，跳到宿主的插件页改本插件的配置。右侧的统计跟着视图变（`N 个任务` / `N 个工作区` /
-`N 个仓库 · M 个 Worktree`），搜索或筛选时显示 `可见 / 总数`。
+`N 个仓库 · M 个 Worktree`）。
 
 面板每次打开都会重新扫描，但会先用宿主缓存的上一次扫描结果绘制界面，打开即可显示数据。这份记忆只放在
 DSH 实例的内存里，实例关闭时随之清空。
@@ -553,20 +542,14 @@ top right.
   - **Git repositories** lists every Git repository found and the worktrees linked to it;
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable), with that task's deployment card under its row.
-
-  All three can be searched, and **Needs attention** narrows them to rows worth a look
-  (changes, a lock, something prunable, or a status that failed to read). The arrow on a row
-  folds that row on its own; the button beside the filters folds or opens them all at once.
 - **Add a repository to a task** from its row, when the work turns out to need one the task
   did not start with. The candidates are the Git repository view's own list, minus the ones the
   task already has; a repository directory can also be typed in, and it is registered as a
   Workspace so it joins that view too. The new repository gets a worktree on the branch the
   task is already on, starting from its own HEAD or from a branch or commit you name.
-  An added repository may share no common directory with the ones the task began with, and may
-  not even be on the same volume: merging and finishing are unaffected, because each repository's
-  source is read from its own worktree. What it does affect is the working directory of a session
-  handed the commit — it cannot reach those source repositories' `.git`, so the elevation is
-  approved in that session. This release does **not** offer removing a repository from a task.
+  An added repository may sit in another directory or on another volume; the only thing that
+  affects is a session handed the commit, which may need the elevation approved in that session
+  (see the guide). This release does **not** offer removing a repository from a task.
 - **Finish a task** from its row: each repository's branch is merged back into its target branch,
   the worktrees are removed, the task space's documents are filed under a selected directory,
   and the Workspace registration is removed — but **not while a session is still working in that
@@ -574,18 +557,10 @@ top right.
 - **New task space** and **Finish task space** also sit in that workspace list's own `⋯` menu — the
   first for Workspaces that hold repositories, the second for directories that really are task
   spaces; both open the same dialog the rest of this document describes.
-- **The interface is fully bilingual in Chinese and English.** The management page, the create and
-  finish dialogs, the configuration items and their explanations, the buttons and the error messages
-  all switch with DSH's language setting; the plugin registers `zh` and `en` with the host (351 strings
-  each at this release) and carries no language switch of its own. The plugin list's name, description
-  and icon are English only.
-- **No extra service needed for the panel itself.** The entries, the scan depth and the directory limit all
-  live in the plugin's own configuration (see Configuration). It follows DSH themes. A task
-  ticked **Deploy to Docker** has one prerequisite of its own — a container engine this machine
-  can reach; see [Deploy and acceptance](#-deploy-and-acceptance).
-- **An operation log, on by default and switchable.** `worktree-space-log.jsonl` at the container root
-  records what this task space did; reading it is how a report gets reproduced. See
-  [The operation log](#-the-operation-log).
+- **The interface follows DSH's language setting**; the page, the dialogs, the configuration
+  items and the error messages all come in Chinese and English. A task ticked **Deploy to Docker**
+  has one prerequisite of its own — a container engine this machine can reach; see
+  [Deploy and acceptance](#-deploy-and-acceptance).
 
 ## 📂 Layout of a task
 
@@ -809,8 +784,7 @@ Open the **management page** — two ways in:
 Both forms share one left-hand navigation: three entries switch between the **Workspaces**, **Git
 repositories** and **Task spaces** views, and **⚙ Plugin Settings** at the foot jumps to this
 plugin's configuration on the Host's Plugins page. The statistics on the right follow the view
-(`N tasks` / `N workspaces` / `N repositories · M worktrees`) and show `visible / total` while a
-search or filter is applied.
+(`N tasks` / `N workspaces` / `N repositories · M worktrees`).
 
 The panel rescans every time it is opened, but it first paints what the Host still remembers of the
 previous scan, so it shows data straight away. That memory lives in the DSH instance's own process
