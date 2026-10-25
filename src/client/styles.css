@@ -730,6 +730,69 @@
   .dws-menu-item:hover { background: var(--wt-hover); }
   .dws-menu-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-menu-item-icon { display: inline-flex; flex: none; align-items: center; color: var(--wt-secondary); }
+  /* A product's own svg arrives at its vendor's size (IDEA's is 64x64), so the row
+     gives it a box instead of letting it set one - and no colour of ours, because the
+     icon carries its own. */
+  .dws-menu-item-icon-brand svg { width: 14px; height: 14px; display: block; }
+  /* A row that opens a submenu: the chevron sits at the far end, and the label keeps
+     its own width so a long application name does not push it off. */
+  .dws-menu-item-chevron { display: inline-flex; flex: none; align-items: center; margin-left: auto; color: var(--wt-muted); }
+  /* The submenu, positioned by the adapter beside the row that owns it. It floats over
+     the shell rather than nesting inside its menu, so it is not found by the scan that
+     fills that menu - and it escapes the menu's own overflow.
+     Only the geometry lives here. The surface - background, border, radius, shadow - is
+     copied from the owning menu at open time, because the shell owns that look and a
+     token named here would be a second guess at it. What is below is the fallback for a
+     flyout with no owning menu to read from, and it draws no border of its own: the
+     shell's menu is separated by its shadow, and an outline here would be a line the
+     menu beside it does not have. */
+  .dws-submenu { position: fixed; z-index: 80; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; min-width: 180px; max-width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 360px); overflow: auto; padding: 4px; border: none; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+  /* A failure notice about one press on a menu that has already closed, so it is fixed
+     to the corner - there is no element left for it to sit under.
+     Opaque rather than `--wt-soft`: that token is `bg-module-platform`, which carries
+     alpha, and an error that lets the page show through reads as a disabled hint. The
+     surface token is what the shell's own cards use for the same reason. The left border
+     is the state colour rather than a filled background, so the text keeps full contrast
+     in both themes. */
+  /* A failure notice about one press on a menu that has already closed, so it is fixed
+     to the corner - there is no element left for it to sit under.
+
+     The `--wt-*` aliases are declared HERE rather than inherited. They are defined on the
+     plugin's own surfaces (`.dws-settings`, `.dws-dialog-content`, …), and this card is
+     none of those: it is a sibling of the shell, fixed to the viewport, so every
+     `var(--wt-surface)` in it resolved to nothing and the declaration was dropped whole -
+     which is why the first version came out with no background, no border and no state
+     colour at all.
+
+     Opaque rather than `--wt-soft`: that token is `bg-module-platform`, which carries
+     alpha, and an error letting the page show through reads as a disabled hint. The state
+     colour is the left border only, so the text keeps full contrast in both themes. */
+  .dws-error-card {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    --wt-hover: var(--dsw-alias-interactive-bg-hover);
+    --wt-danger: var(--dsw-alias-state-error-primary);
+    position: fixed; right: 18px; bottom: 18px; z-index: 70; box-sizing: border-box;
+    display: flex; align-items: flex-start; gap: 10px;
+    /* Height comes from the content, never from the viewport: a card that stretched would
+       be a panel, and this one is a message about a single press. */
+    width: min(400px, calc(100vw - 36px)); max-height: min(50vh, 320px); height: auto;
+    padding: 12px 12px 12px 13px;
+    border: 1px solid var(--wt-line); border-left: 3px solid var(--wt-danger);
+    border-radius: 9px; background: var(--wt-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    color: var(--wt-text); font-family: inherit; font-size: 14px; font-weight: 400;
+  }
+  .dws-error-card-mark { display: inline-flex; flex: none; align-items: center; margin-top: 1px; color: var(--wt-danger); }
+  .dws-error-card-mark svg { display: block; }
+  .dws-error-card-body { display: grid; gap: 3px; min-width: 0; flex: 1 1 auto; }
+  .dws-error-card-title { margin: 0; color: var(--wt-text); font-size: 13px; font-weight: 600; line-height: 19px; }
+  .dws-error-card-detail { margin: 0; max-height: 6em; overflow: hidden; color: var(--wt-secondary); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+  .dws-error-card-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wt-secondary); cursor: pointer; }
+  .dws-error-card-close:hover { background: var(--wt-hover); color: var(--wt-text); }
+  .dws-error-card-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-finish-report { display: grid; gap: 7px; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }
   .dws-finish-report p { margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 19px; }
   .dws-finish-repos { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }

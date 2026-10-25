@@ -2,7 +2,7 @@
 import { cleanup, render, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMenuEntries } from "../src/client/components/WorkspaceMenuEntries"
-import { t } from "../src/client/lib/i18n"
+import { format, t } from "../src/client/lib/i18n"
 import { OWN_MENU_ITEM, workspaceIdFromRowKey } from "../src/client/lib/workspace-menu"
 
 const repositoryPath = "E:\\workspace\\public\\kratos-admin"
@@ -73,14 +73,20 @@ async function until(check: () => boolean, { attempts = 200 } = {}) {
   for (let attempt = 0; attempt < attempts && !check(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
-function setup({ canHost = true, isTask = false, items = [workspace] } = {}) {
-  const api = { inspectTask: vi.fn().mockResolvedValue({ path: workspace.path, isTask, task: "antest", tasksRoot: "E:\\worktree-space", repositories: [] }) }
+function setup({ canHost = true, isTask = false, items = [workspace], apps = [] as Array<{ id: string; name: string; icon?: string }>, fileManager = true } = {}) {
+  const api = {
+    inspectTask: vi.fn().mockResolvedValue({ path: workspace.path, isTask, task: "antest", tasksRoot: "E:\\worktree-space", repositories: [] }),
+    // The workspace menu asks the Host which IDEs this machine has. Empty by default,
+    // which is the answer a machine without one gives.
+  }
   const workspaces = { list: { getSnapshot: () => ({ items }), subscribe: () => () => {} } }
   const canCreate = vi.fn().mockReturnValue(canHost)
   const onCreate = vi.fn()
   const onArchive = vi.fn()
-  const view = render(<WorkspaceMenuEntries api={api as any} workspaces={workspaces as any} canCreate={canCreate} onCreate={onCreate} onArchive={onArchive} />)
-  return { api, canCreate, onCreate, onArchive, view }
+  const onReveal = vi.fn()
+  const onOpenIn = vi.fn()
+  const view = render(<WorkspaceMenuEntries api={api as any} workspaces={workspaces as any} canCreate={canCreate} onCreate={onCreate} onArchive={onArchive} onReveal={onReveal} onOpenIn={onOpenIn} capability={{ available: fileManager, applications: apps }} />)
+  return { api, canCreate, onCreate, onArchive, onReveal, onOpenIn, view }
 }
 
 afterEach(() => {
@@ -107,7 +113,7 @@ describe("this plugin's entries in the workspace menu", () => {
     expect(next.canCreate).toHaveBeenCalledWith(workspace)
     expect(menu.contains(ownItem(t("workspaceCreate")))).toBe(true)
     // Between the shell's own rows rather than after them: rename, ours, delete.
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
     // Carrying the glyph the management panel's own create button wears - Lucide's
     // plus, two paths on its 24-unit grid.
     expect(ownItem(t("workspaceCreate"))?.querySelectorAll("svg path")).toHaveLength(2)
@@ -135,7 +141,7 @@ describe("this plugin's entries in the workspace menu", () => {
     const menu = openMenu()
 
     await until(() => ownItem(t("archiveWorkspace")) !== null)
-    expect(rowLabels(menu)).toEqual(["rename", t("archiveWorkspace"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("archiveWorkspace"), t("workspaceReveal"), "delete"])
     // The shell's own archive glyph, which is what its session rows use.
     expect(ownItem(t("archiveWorkspace"))?.querySelectorAll("svg path")).toHaveLength(3)
 
@@ -144,24 +150,218 @@ describe("this plugin's entries in the workspace menu", () => {
     expect(next.onCreate).not.toHaveBeenCalled()
   })
 
-  it("puts both entries in one menu, in the order this plugin lists them", async () => {
+  it("puts every entry in one menu, in the order this plugin lists them", async () => {
     setup({ canHost: true, isTask: true })
     const menu = openMenu()
 
-    await until(() => ownItems().length === 2)
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("archiveWorkspace"), "delete"])
+    await until(() => ownItems().length === 3)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("archiveWorkspace"), t("workspaceReveal"), "delete"])
     // One wrapper each, all hanging off the shell's own list.
-    expect(new Set(ownItems().map((item) => item.parentElement)).size).toBe(2)
+    expect(new Set(ownItems().map((item) => item.parentElement)).size).toBe(3)
     expect(new Set(ownItems().map((item) => item.parentElement?.parentElement)).size).toBe(1)
   })
 
-  it("stays out of the menu when the Workspace holds no repositories and is no task container", async () => {
+  it("offers only the reveal entry when the Workspace holds no repositories and is no task container", async () => {
+    // The reveal entry is unconditional: every Workspace is a directory, and opening
+    // it is a fact about the row rather than about what the directory holds. The two
+    // task entries are the ones that depend on classification.
     const next = setup({ canHost: false, isTask: false })
     const menu = openMenu()
 
     await waitFor(() => expect(next.api.inspectTask).toHaveBeenCalledTimes(1))
-    expect(ownItems()).toHaveLength(0)
+    await until(() => ownItem(t("workspaceReveal")) !== null)
+    expect(ownItems()).toHaveLength(1)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceReveal"), "delete"])
+
+    ownItem(t("workspaceReveal"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    expect(next.onReveal).toHaveBeenCalledExactlyOnceWith(workspace.path)
+    expect(next.onCreate).not.toHaveBeenCalled()
+    expect(next.onArchive).not.toHaveBeenCalled()
+  })
+
+  it("puts the applications in a submenu that opens on hover, not on a click", async () => {
+    // The Host reports whatever a machine has installed. A row each would push the
+    // shell's own rename and delete off the menu on a machine with a full toolchain,
+    // so the applications live behind one row.
+    //
+    // Hover rather than click, and that is not a preference: the shell closes its own
+    // menu when a menu item is clicked, so pressing the parent left an orphan flyout
+    // with the menu it belonged to already gone.
+    const next = setup({
+      canHost: true,
+      isTask: false,
+      apps: [
+        { id: "idea", name: "IntelliJ IDEA" },
+        { id: "code", name: "Visual Studio Code" },
+      ],
+    })
+    const menu = openMenu()
+
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+    expect(rowLabels(menu)).toEqual([
+      "rename",
+      t("workspaceCreate"),
+      t("workspaceReveal"),
+      t("workspaceOpenIn"),
+      "delete",
+    ])
+
+    // A click must not open it and must not act: the shell would read the click as
+    // "this row was chosen" and take the menu away underneath.
+    const parent = ownItem(t("workspaceOpenIn"))
+    parent?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    expect(document.querySelector("[data-dws-submenu]")).toBeNull()
+    expect(next.onOpenIn).not.toHaveBeenCalled()
+    expect(next.onReveal).not.toHaveBeenCalled()
+
+    // Hovering does.
+    parent?.dispatchEvent(new Event("pointerenter"))
+    const submenu = document.querySelector("[data-dws-submenu]")
+    expect(submenu).not.toBeNull()
+    expect([...(submenu?.querySelectorAll('[role="menuitem"]') ?? [])].map((row) => row.textContent)).toEqual([
+      format(t("workspaceOpenInApp"), { app: "IntelliJ IDEA" }),
+      format(t("workspaceOpenInApp"), { app: "Visual Studio Code" }),
+    ])
+
+    // Choosing one hands back the Host's application id, never a path: what to start is
+    // the Host's business, and a path from here would be a command the client chose.
+    ;[...(submenu?.querySelectorAll('[role="menuitem"]') ?? [])][0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    expect(next.onOpenIn).toHaveBeenCalledExactlyOnceWith(workspace.path, "idea")
+    // And the flyout goes with the choice.
+    expect(document.querySelector("[data-dws-submenu]")).toBeNull()
+  })
+
+  it("takes the submenu down when the shell closes the menu it belongs to", async () => {
+    // The shell owns its menu and closes it whenever it likes - a click elsewhere, a
+    // scroll, Escape. A flyout left standing belongs to nothing, and its rows would act
+    // on a workspace the user is no longer looking at.
+    const next = setup({ canHost: true, apps: [{ id: "idea", name: "IntelliJ IDEA" }] })
+    const menu = openMenu()
+
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+    ownItem(t("workspaceOpenIn"))?.dispatchEvent(new Event("pointerenter"))
+    expect(document.querySelector("[data-dws-submenu]")).not.toBeNull()
+
+    // The shell's menu goes, the way it does when the user clicks away.
+    menu.remove()
+    // The scan that notices is the one the MutationObserver already drives; give it the
+    // frame it coalesces into.
+    await until(() => document.querySelector("[data-dws-submenu]") === null)
+    expect(document.querySelector("[data-dws-submenu]")).toBeNull()
+    expect(next.onOpenIn).not.toHaveBeenCalled()
+  })
+
+  it("ties each flyout to the row that opened it", async () => {
+    // Two workspace rows, two menus: the flyout names its owner, which is what lets the
+    // scan tell "my menu is still open" from "my menu is gone".
+    const second = { workspaceId: "w2", path: "E:\\workspace\\other", title: "other" }
+    setup({ canHost: true, apps: [{ id: "idea", name: "IntelliJ IDEA" }], items: [workspace, second] })
+    const menu = openMenu()
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+    const owner = ownItem(t("workspaceOpenIn"))
+    const identity = owner?.getAttribute(OWN_MENU_ITEM)
+    expect(identity).toBeTruthy()
+    // A non-empty value, so a flyout can select its own row rather than any of them.
+    expect(identity).not.toBe("")
+
+    owner?.dispatchEvent(new Event("pointerenter"))
+    const submenu = document.querySelector("[data-dws-submenu]")
+    expect(submenu?.getAttribute("data-dws-submenu-owner")).toBe(identity)
+  })
+
+  it("mounts the flyout inside the menu it belongs to", async () => {
+    // Not a cosmetic choice, and not `body`. The shell closes its menu when the pointer
+    // leaves it, and a flyout in another subtree *is* leaving - so reaching for the
+    // submenu shut both. A DOM descendant does not count as leaving: moving between an
+    // element and its child never fires `pointerleave` on the parent, wherever the child
+    // is painted. This test is what keeps that from being undone.
+    const next = setup({ canHost: true, apps: [{ id: "idea", name: "IntelliJ IDEA" }] })
+    const menu = openMenu()
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+
+    ownItem(t("workspaceOpenIn"))?.dispatchEvent(new Event("pointerenter"))
+    const submenu = document.querySelector("[data-dws-submenu]")
+    expect(submenu).not.toBeNull()
+    expect(menu.contains(submenu)).toBe(true)
+    // And it is still positioned by the viewport, so it escapes the menu's own overflow
+    // rather than being clipped by it.
+    expect((submenu as HTMLElement).style.position === "" || (submenu as HTMLElement).style.position === "fixed").toBe(true)
+
+    // Leaving the row closes it shortly - but entering the flyout calls that off, which
+    // is how the pointer gets across the gap between the two boxes.
+    ownItem(t("workspaceOpenIn"))?.dispatchEvent(new Event("pointerleave"))
+    submenu?.dispatchEvent(new Event("pointerenter"))
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    expect(document.querySelector("[data-dws-submenu]")).not.toBeNull()
+    // Nothing was chosen by any of that: hovering is not selecting.
+    expect(next.onOpenIn).not.toHaveBeenCalled()
+  })
+
+  it("takes the flyout's surface from the element that actually paints one", async () => {
+    // A menu is usually a transparent `[role="menu"]` inside a wrapper that carries the
+    // surface: the role says what the element is, not what it looks like. Copying the
+    // menu's own `backgroundColor` therefore copied `rgba(0, 0, 0, 0)`, and the flyout
+    // came out see-through over whatever it was covering.
+    //
+    // jsdom resolves no cascade for our stylesheet, so the wrapper here is given the
+    // background inline - which is exactly the shape being tested: the menu is
+    // transparent, something above it is not, and the flyout must find that something.
+    const next = setup({ canHost: true, apps: [{ id: "idea", name: "IntelliJ IDEA" }] })
+    const menu = openMenu()
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+
+    // The shell's wrapper: a parent of the menu, painting the surface the menu sits on.
+    const wrapper = document.createElement("div")
+    wrapper.style.background = "rgb(250, 250, 250)"
+    wrapper.style.borderRadius = "10px"
+    menu.parentElement?.insertBefore(wrapper, menu)
+    wrapper.appendChild(menu)
+
+    ownItem(t("workspaceOpenIn"))?.dispatchEvent(new Event("pointerenter"))
+    const submenu = document.querySelector("[data-dws-submenu]") as HTMLElement | null
+    expect(submenu).not.toBeNull()
+    // The painted colour, not the menu's transparent one.
+    expect(submenu?.style.background).toBe("rgb(250, 250, 250)")
+    expect(submenu?.style.background).not.toContain("rgba(0, 0, 0, 0)")
+    expect(next.onOpenIn).not.toHaveBeenCalled()
+  })
+
+  it("offers no submenu when the Host lists no applications", async () => {
+    // A machine where nothing is registered for directories: the row would be a menu
+    // that opens onto nothing.
+    setup({ canHost: true, apps: [] })
+    const menu = openMenu()
+    await until(() => ownItem(t("workspaceReveal")) !== null)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
+    expect(document.querySelector("[data-dws-submenu]")).toBeNull()
+  })
+
+  it("offers no file-manager entry on a machine that has none", async () => {
+    // A headless server, or a deployment whose Host cannot reach a desktop at all: the
+    // probe answers `available: false` and the entry is not offered, rather than being
+    // offered and failing on every press.
+    const next = setup({ canHost: false, isTask: false, fileManager: false })
+    const menu = openMenu()
+
+    await until(() => ownItems().length >= 1)
+    expect(next.api.inspectTask).toHaveBeenCalled()
+    expect(ownItem(t("workspaceReveal"))).toBeNull()
     expect(rowLabels(menu)).toEqual(["rename", "delete"])
+  })
+
+  it("offers the applications even when there is no file manager", async () => {
+    // The two are independent: a Host that can launch an application on a directory has
+    // no reason to need a file manager as well.
+    const next = setup({
+      canHost: false,
+      isTask: false,
+      fileManager: false,
+      apps: [{ id: "idea", name: "IntelliJ IDEA" }],
+    })
+    const menu = openMenu()
+
+    await until(() => ownItem(t("workspaceOpenIn")) !== null)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceOpenIn"), "delete"])
   })
 
   it("ignores a row it has no Workspace for, and a menu opened without one", async () => {
@@ -196,7 +396,7 @@ describe("this plugin's entries in the workspace menu", () => {
     // thing here that says which row that was.
     ownItem(t("workspaceCreate"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     expect(next.onCreate).toHaveBeenCalledExactlyOnceWith({ path: second.path, title: second.title })
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
   })
 
   it("takes its entries back when the plugin goes away", async () => {

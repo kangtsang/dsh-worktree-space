@@ -728,7 +728,6 @@ export const Config = z.object({
    */
   auditLog: z.union(['on', 'off']).default('on').loose().volatile()
     .description('Write a record of every operation, git call and failure to the container root. Off stops new records and keeps the log already there.'),
-  /** The Web UI's control is gone: this is the one place the depth is chosen. */
   scanDepth: z.number().min(MIN_SCAN_DEPTH).max(MAX_SCAN_DEPTH).step(1).default(DEFAULT_SCAN_DEPTH).volatile()
     .description('How many directory levels a scan descends from a Workspace root.'),
   maxScanDirectories: z.number().min(1).max(MAX_SCAN_DIRECTORIES_CEILING).step(1).default(MAX_SCAN_DIRECTORIES).volatile()

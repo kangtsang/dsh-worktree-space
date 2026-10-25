@@ -173,6 +173,30 @@ describe("NewSessionWorktreeButton", () => {
     fireEvent.focus(button)
     expect((await screen.findByRole("tooltip")).textContent).toBe(t("newWorktreeSpace"))
   })
+
+  it("takes the hint down when the pointer leaves, and on any press", async () => {
+    // `mouseleave` alone is not enough, and that is what this pins. The bubble is
+    // `pointer-events: none`, so the pointer stays over whatever is beneath it - which
+    // means it can never be "left" in the usual sense, and an anchor that is re-rendered,
+    // hidden or removed while the pointer is elsewhere never fires a leave at all. A
+    // bubble left behind is a dark box fixed at its last coordinates for good.
+    const user = userEvent.setup()
+    render(<NewSessionWorktreeButton session={{ sessionId: "session-new" as any, blank: true }} useWorkspaces={useWorkspaces as any} onOpen={vi.fn()} />)
+    const button = screen.getByRole("button", { name: t("newWorktreeSpace") })
+
+    await user.hover(button)
+    await screen.findByRole("tooltip")
+
+    // A pointer that moved somewhere else entirely, with no leave on the anchor.
+    fireEvent.pointerMove(document.body, { clientX: 5, clientY: 5 })
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+
+    // And a press anywhere: the row is being used for what it does, not read.
+    fireEvent.focus(button)
+    await screen.findByRole("tooltip")
+    fireEvent.pointerDown(document.body)
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull())
+  })
 })
 
 describe("WorktreesSettings", () => {

@@ -31,6 +31,23 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url))
 const read = (name) => readFileSync(join(ROOT, name), "utf8")
 
 /**
+ * The English half of a merged document.
+ *
+ * 1.3.6 merged each Chinese/English pair into one file - Chinese first, English after
+ * `<a id="english">` - so the English statements no longer live in a file of their own.
+ * Every entry below names one file and, when its prose is the English half, the anchor
+ * its statements sit after; `read` returns that half and the same patterns apply.
+ */
+const readPart = (file, after) => {
+  const whole = read(file)
+  if (after === undefined) return whole
+  const marker = `<a id="${after}"></a>`
+  const at = whole.indexOf(marker)
+  if (at < 0) throw new Error(`${file} no longer carries ${marker}, so its English half cannot be located`)
+  return whole.slice(at)
+}
+
+/**
  * Every place a default is stated in prose, and how to pull the stated number out.
  *
  * `directories` and `ignored` are optional because not every document states them:
@@ -47,7 +64,10 @@ const STATED = [
     ignored: /\| 工作区仓库扫描忽略目录 \|[^|]*\|\s*内置 (\d+) 个\s*\|/,
   },
   {
-    file: "README.en.md",
+    // The English half of the same file, after the merge anchor.
+    file: "README.md",
+    after: "english",
+    label: "README.md (English)",
     depth: /\| Scan depth \|[^|]*\|\s*(\d+)\s*levels\s*\|/,
     directories: /\| Scan directory limit \|[^|]*\|\s*(\d+)\s*\|/,
     ignored: /\| Directories the scan skips \|[^|]*\|\s*the plugin's (\d+)\s*\|/,
@@ -58,7 +78,9 @@ const STATED = [
     directories: /最多 `maxScanDirectories` 个目录（默认 (\d+)）/,
   },
   {
-    file: "docs/PERMISSIONS.en.md",
+    file: "docs/PERMISSIONS.md",
+    after: "english",
+    label: "docs/PERMISSIONS.md (English)",
     // Wrapped across a line break in the source, so the gap is `[\s\S]` and the
     // bound is what stops it reaching the next setting's number.
     depth: /`scanDepth` levels[\s\S]{0,20}?default (\d+)/,
@@ -67,29 +89,32 @@ const STATED = [
 ]
 
 describe("the defaults the documents state", () => {
-  it.each(STATED)("$file states the scan depth the plugin ships", ({ file, depth }) => {
-    const stated = read(file).match(depth)
+  it.each(STATED)("$label states the scan depth the plugin ships", ({ file, after, label, depth }) => {
+    const named = label ?? file
+    const stated = readPart(file, after).match(depth)
     // Not "expect(match).not.toBeNull()": a pattern that stopped matching would
     // otherwise fail on a Number(undefined) that reads like the wrong number.
-    expect(stated, `${file} no longer states a scan depth where this test can read it`).not.toBeNull()
-    expect(Number(stated[1]), `${file} states a scan depth the plugin does not ship`).toBe(DEFAULT_SCAN_DEPTH)
+    expect(stated, `${named} no longer states a scan depth where this test can read it`).not.toBeNull()
+    expect(Number(stated[1]), `${named} states a scan depth the plugin does not ship`).toBe(DEFAULT_SCAN_DEPTH)
   })
 
   it.each(STATED.filter((entry) => entry.directories))(
-    "$file states the directory limit the plugin ships",
-    ({ file, directories }) => {
-      const stated = read(file).match(directories)
-      expect(stated, `${file} no longer states a directory limit where this test can read it`).not.toBeNull()
-      expect(Number(stated[1]), `${file} states a directory limit the plugin does not ship`).toBe(MAX_SCAN_DIRECTORIES)
+    "$label states the directory limit the plugin ships",
+    ({ file, after, label, directories }) => {
+      const named = label ?? file
+      const stated = readPart(file, after).match(directories)
+      expect(stated, `${named} no longer states a directory limit where this test can read it`).not.toBeNull()
+      expect(Number(stated[1]), `${named} states a directory limit the plugin does not ship`).toBe(MAX_SCAN_DIRECTORIES)
     },
   )
 
   it.each(STATED.filter((entry) => entry.ignored))(
-    "$file counts the built-in skip names correctly",
-    ({ file, ignored }) => {
-      const stated = read(file).match(ignored)
-      expect(stated, `${file} no longer counts the built-in names where this test can read it`).not.toBeNull()
-      expect(Number(stated[1]), `${file} counts a different number of built-in skip names than are shipped`).toBe(
+    "$label counts the built-in skip names correctly",
+    ({ file, after, label, ignored }) => {
+      const named = label ?? file
+      const stated = readPart(file, after).match(ignored)
+      expect(stated, `${named} no longer counts the built-in names where this test can read it`).not.toBeNull()
+      expect(Number(stated[1]), `${named} counts a different number of built-in skip names than are shipped`).toBe(
         DEFAULT_IGNORED_SCAN_DIRECTORIES.length,
       )
     },

@@ -36,6 +36,15 @@ export interface WorktreesPageProps {
    * no form simply does not offer the switch.
    */
   config?: ConfigFormLike
+  /**
+   * Opens the host's directory chooser, or undefined when this deployment has none.
+   *
+   * Handed down rather than read from a store: the page that adds a Workspace and the
+   * page that adds a repository both name a directory, and the picker is the host's own
+   * - so a shell that does not serve one keeps the text field rather than a button that
+   * opens nothing.
+   */
+  pickDirectory?: () => Promise<string | null>
 }
 
 /**
@@ -106,7 +115,7 @@ function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
  * keeps its heading and its way back above the two columns, the dialog puts the title in
  * the window's own header, and either way only the rows the view lists scroll.
  */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave, config }: WorktreesPageProps & {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave, config, pickDirectory }: WorktreesPageProps & {
   variant: "panel" | "dialog"
   /** Panel only: the way back to the conversation. */
   onBack?: () => void
@@ -120,6 +129,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     workspaces={workspaces}
     uiWorkspace={uiWorkspace}
     sessions={sessions}
+    pickDirectory={pickDirectory}
     heading={false}
     onCreate={onCreate}
     control={{ view, onView: setView }}

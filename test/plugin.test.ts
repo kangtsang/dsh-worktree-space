@@ -33,7 +33,15 @@ describe("WorktreePlugin compatibility", () => {
     // Without the configuration service the defaults stand: the sidebar footer's
     // shortcut to the page, and not the panel row — that one is asked for.
     expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.footer.action"])
-    expect(WorktreePlugin.inject).toEqual(["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout"])
+    // `remote` carries the host's open-in-app and directory-picker namespaces, and a
+    // nested namespace is declared separately: `remote` alone does not make
+    // `remote.session` readable. Without these the plugin still renders, but every host
+    // capability answers "unavailable" - which is what left the workspace menu with no
+    // reveal entry on a machine that has one.
+    expect(WorktreePlugin.inject).toEqual([
+      "slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout",
+      "remote", "remote.session", "remote.directoryPicker",
+    ])
   })
 
   it("adds the panel row when the configuration asks for it", () => {

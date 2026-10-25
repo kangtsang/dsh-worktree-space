@@ -19,6 +19,8 @@ interface WorktreeManagePanelProps {
   onClose: () => void
   /** This plugin's configuration form, when the shell serves one; see {@link WorktreesPageProps}. */
   config?: ConfigFormLike
+  /** The host's directory chooser, when this deployment has one; see {@link WorktreesPageProps}. */
+  pickDirectory?: () => Promise<string | null>
 }
 
 /**
@@ -31,7 +33,7 @@ interface WorktreeManagePanelProps {
  * the same lists — inside the dialog's own header and footer chrome, so the two ways
  * in are one page seen twice rather than two implementations of it.
  */
-export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config }: WorktreeManagePanelProps) {
+export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config, pickDirectory }: WorktreeManagePanelProps) {
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -50,6 +52,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           variant="dialog"
           onLeave={onClose}
           config={config}
+          pickDirectory={pickDirectory}
         />
       </DialogContent>
     </Dialog>

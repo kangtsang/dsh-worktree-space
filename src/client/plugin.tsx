@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client"
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots"
@@ -24,6 +24,9 @@ import { WorktreePanelIcon, WorktreePanelPage } from "./components/WorktreePanel
 import { createWorktreeApi } from "./lib/api"
 import { previewValue, subscribePreview } from "./lib/config-preview"
 import { installLocale, NS, t } from "./lib/i18n"
+import { alertIconSvg, closeIconSvg } from "./lib/menu-icons"
+import { type OpenCapability, openDirectoryWith, probeOpening, revealDirectory } from "./lib/open-in-app"
+import { canPickDirectory, pickDirectory } from "./lib/directory-picker"
 import { cleanPath } from "./lib/paths"
 import type { SourceRootClassification, Workspace } from "./lib/types"
 
@@ -98,7 +101,13 @@ function installStyles() {
 
 export const WorktreePlugin = {
   name: "dsh-worktree-space",
-  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout"],
+  // `remote` is what carries the host's open-in-app and directory-picker namespaces, and
+  // a nested namespace is declared separately - `remote` alone does not make
+  // `remote.directoryPicker` readable. Declared rather than read opportunistically:
+  // cordis throws on a service that is not injected, and the guarded read that swallowed
+  // that throw made every host capability answer "unavailable" - which is how the
+  // workspace menu came out with no reveal entry on a machine that has one.
+  inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout", "remote", "remote.session", "remote.directoryPicker"],
   apply(ctx: WorktreeClientContext) {
     ctx.effect(installStyles, "dsh-worktree-space styles")
     ctx.effect(() => installLocale(ctx), "dsh-worktree-space locale")
@@ -130,6 +139,10 @@ export const WorktreePlugin = {
     let openArchive: (path: string) => void = () => {}
     let openManage: () => void = () => {}
     let refreshGeneration = 0
+    // The host's own directory chooser, or nothing when this deployment has none. Both
+    // hosts of the management page use it, so it is built once here rather than in
+    // either of them.
+    const picker = canPickDirectory(ctx) ? () => pickDirectory(ctx) : undefined
 
     // Stable faces onto the handlers the overlay installs when it mounts. The menu
     // adapter lives outside React's tree and holds the props it was first given, so
@@ -212,6 +225,50 @@ export const WorktreePlugin = {
       // both read the one classification rather than asking the Host again.
       const { sourceRootPaths } = useSyncExternalStore(subscribeClassification, getClassification, getClassification)
       const canCreate = useCallback((workspace: Workspace) => sourceRootPaths.has(cleanPath(workspace.path)), [sourceRootPaths])
+      // What this deployment can open a directory with, asked once at mount. `null` until
+      // the probe returns; the menu simply offers fewer rows until then rather than dead
+      // ones, and a host with no desktop at all keeps the answer `available: false`.
+      const [capability, setCapability] = useState<OpenCapability | null>(null)
+      useEffect(() => {
+        let live = true
+        void probeOpening(ctx).then((answer) => { if (live) setCapability(answer) })
+        return () => { live = false }
+      }, [])
+      // A failure notice about one press on a menu that has already closed. Both actions
+      // go through the host's own open-in-app capability, so a failure here means the
+      // host declined rather than that this side built the wrong command - which is the
+      // whole reason the command-building code is gone.
+      const [revealFailure, setRevealFailure] = useState<{ message: string; detail?: string } | null>(null)
+      const reveal = useCallback((path: string) => {
+        void (async () => {
+          if (await revealDirectory(ctx, path)) {
+            setRevealFailure(null)
+            return
+          }
+          setRevealFailure({ message: t("workspaceRevealFailed"), detail: t("workspaceRevealUnavailable") })
+        })()
+      }, [t])
+      const openIn = useCallback((path: string, application: string) => {
+        void (async () => {
+          if (await openDirectoryWith(ctx, path, application)) {
+            setRevealFailure(null)
+            return
+          }
+          setRevealFailure({ message: t("workspaceRevealFailed"), detail: t("workspaceRevealUnavailable") })
+        })()
+      }, [t])
+      // Escape closes it, from anywhere. The card is a dead end without that: it has no
+      // backdrop to click and sits in a corner a reader may be looking away from, so the
+      // only obvious exit is the button - which is a small target for a message that is
+      // covering part of what they were reading.
+      useEffect(() => {
+        if (revealFailure === null) return undefined
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key === "Escape") setRevealFailure(null)
+        }
+        document.addEventListener("keydown", onKey, true)
+        return () => document.removeEventListener("keydown", onKey, true)
+      }, [revealFailure])
       useEffect(() => {
         openCreate = (target) => setRequest({ kind: "create", target })
         openArchive = (path) => setRequest({ kind: "archive", path })
@@ -219,7 +276,30 @@ export const WorktreePlugin = {
         return () => { openCreate = () => {}; openArchive = () => {}; openManage = () => {} }
       }, [])
       return <>
-        <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} />
+        <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} onReveal={reveal} onOpenIn={openIn} capability={capability} />
+        {revealFailure === null ? null : (
+          // A card rather than a toast: the host exposes no general notice surface - its
+          // own `RowToast` is a closed union of sidebar events - so this one carries the
+          // shell's own card styling and stays until dismissed. An error that vanished on
+          // its own would be one a reader can miss while looking at the window it is about.
+          <div className="dws-error-card" role="alert">
+            {/* `menu-icons` returns svg *markup*, which the imperatively built row menu
+                inserts by assignment. React escapes a string child instead, so the first
+                version printed the whole `<svg xmlns=…>` on screen and that run of text
+                set the card's height. The markup is this plugin's own constant - nothing
+                from a caller reaches it - which is what makes setting it as html safe. */}
+            <span className="dws-error-card-mark" aria-hidden="true" dangerouslySetInnerHTML={{ __html: alertIconSvg }} />
+            <div className="dws-error-card-body">
+              <p className="dws-error-card-title">{revealFailure.message}</p>
+              {revealFailure.detail === undefined ? null : (
+                <p className="dws-error-card-detail">{revealFailure.detail}</p>
+              )}
+            </div>
+            <button type="button" className="dws-error-card-close" aria-label={t("close")} onClick={() => setRevealFailure(null)}>
+              <span aria-hidden="true" dangerouslySetInnerHTML={{ __html: closeIconSvg }} />
+            </button>
+          </div>
+        )}
         {request?.kind === "create" ? (
           <CreateWorktreeDialog
             target={request.target}
@@ -254,6 +334,7 @@ export const WorktreePlugin = {
             uiWorkspace={uiWorkspace}
             sessions={sessions}
             config={pluginConfigForm ?? undefined}
+            pickDirectory={picker}
             onCreate={(target) => setRequest({ kind: "create", target })}
             onOpenSettings={() => {
               // Close first: the dialog covers the main column, and the page it is
@@ -297,7 +378,7 @@ export const WorktreePlugin = {
     // id means, and a hidden row is a preference, not an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} config={pluginConfigForm ?? undefined} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
+      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} config={pluginConfigForm ?? undefined} pickDirectory={picker} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
     ))
 
     // The plugin's two ways in, each shown or hidden by this plugin's own

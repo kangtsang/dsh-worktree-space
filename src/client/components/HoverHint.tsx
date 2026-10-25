@@ -59,8 +59,18 @@ export function HoverHint({ label, className = "", disabled = false, delayMs = 1
   useLayoutEffect(() => {
     if (!open) return undefined
     const place1 = () => {
-      const box = anchor.current?.getBoundingClientRect()
-      if (box === undefined) return
+      const node = anchor.current
+      const box = node?.getBoundingClientRect()
+      if (node === null || box === undefined) return
+      // An anchor that has been removed has nowhere to point at, and a bubble left behind
+      // by one is the shape this guards against: it is fixed, it has `pointer-events:
+      // none`, and it would otherwise sit at its last coordinates for good. A hidden
+      // anchor is caught by the pointer test below instead - its box is empty, so the
+      // pointer is never inside it.
+      if (!node.isConnected) {
+        close()
+        return
+      }
       const half = (bubble.current?.offsetWidth ?? 0) / 2
       const height = bubble.current?.offsetHeight ?? 0
       // Above the anchor is the shell's default; below is the fallback when the anchor
@@ -72,12 +82,43 @@ export function HoverHint({ label, className = "", disabled = false, delayMs = 1
         below,
       })
     }
+    /**
+     * Close once the pointer is no longer on the anchor.
+     *
+     * The bubble cannot be hovered - it is `pointer-events: none`, so the pointer stays
+     * over whatever is beneath it - which means "the pointer is outside the anchor" and
+     * "the hint should be gone" are the same fact. `mouseleave` alone is not enough: an
+     * anchor that is re-rendered, hidden or removed while the pointer is elsewhere never
+     * fires one, and the bubble stayed on screen.
+     */
+    const onPointerMove = (event: PointerEvent) => {
+      const node = anchor.current
+      if (node === null) return
+      // Over the anchor or anything inside it - padding, border, a child - the hint stays.
+      if (node.contains(event.target as Node | null)) return
+      const box = node.getBoundingClientRect()
+      const { clientX: x, clientY: y } = event
+      // A pointer event without coordinates is one this environment could not build (a
+      // DOM without `PointerEvent`, as a test runner's is). The target alone is then the
+      // answer, and it has already said the pointer is not on the anchor.
+      const measured = Number.isFinite(x) && Number.isFinite(y)
+      if (!measured || x < box.left || x > box.right || y < box.top || y > box.bottom) close()
+    }
     place1()
     window.addEventListener("resize", place1)
     window.addEventListener("scroll", close, true)
+    window.addEventListener("blur", close)
+    // A press anywhere means the pointer interaction moved on: the row under it is being
+    // used for what it does, not read for what it is. This is also the guard for the
+    // keyboard path, where a focused anchor can be replaced without ever firing `blur`.
+    document.addEventListener("pointerdown", close, true)
+    document.addEventListener("pointermove", onPointerMove, true)
     return () => {
       window.removeEventListener("resize", place1)
       window.removeEventListener("scroll", close, true)
+      window.removeEventListener("blur", close)
+      document.removeEventListener("pointerdown", close, true)
+      document.removeEventListener("pointermove", onPointerMove, true)
     }
   }, [open, close])
 

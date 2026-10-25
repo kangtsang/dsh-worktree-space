@@ -41,6 +41,15 @@ interface Props {
   workspaces: WorkspacesService
   uiWorkspace: WorkspaceNavigation
   sessions: ISessions
+  /**
+   * Opens the host's directory chooser, or undefined when this deployment has none.
+   *
+   * Both "add a Workspace" and "add a repository" name a directory on the Host, and the
+   * Host already mounts a picker for exactly that - the same one its own Workspace flow
+   * uses. Passing it in keeps this component free of the client root and lets a test
+   * drive the browse step without one.
+   */
+  pickDirectory?: () => Promise<string | null>
   /** Render the section's own header. Off when the host supplies the heading. */
   heading?: boolean
   onCreate?: (target: Pick<Workspace, "path" | "title">) => void
@@ -79,7 +88,7 @@ const repoName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? 
 const STATUS_CONCURRENCY = 6
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, heading = true, onCreate, control, onLeave, config }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pickDirectory, heading = true, onCreate, control, onLeave, config }: Props) {
   const t = useT()
   const [ownView, setOwnView] = useState<WorktreeView>("spaces")
   const view = control?.view ?? ownView
@@ -547,6 +556,27 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
    * colour, with the field left open so a mistyped path can be corrected without
    * starting again.
    */
+  /**
+   * Ask the host for a directory, and put what it answered into the field.
+   *
+   * `null` is a cancel and changes nothing: the row stays open with whatever it held,
+   * which is what a user who backed out of the chooser expects. A failure is reported
+   * in the row's own error line rather than silently - a button that looks dead is the
+   * one outcome worth spending a sentence on.
+   *
+   * @param apply - receives the chosen path, or is not called on a cancel.
+   * @param fail - receives the message when the chooser could not be opened.
+   */
+  const browse = async (apply: (path: string) => void, fail: (message: string) => void) => {
+    if (pickDirectory === undefined) return
+    try {
+      const chosen = await pickDirectory()
+      if (chosen !== null && chosen !== "") apply(chosen)
+    } catch (reason: any) {
+      fail(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
   const addSource = async () => {
     const path = sourcePath.trim()
     if (path === "" || sourceBusy) return
@@ -640,7 +670,14 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             user is not asking. */}
         {view === "repos" && !addingSource ? <Button className="dws-button dws-add-source-button" disabled={busy} onClick={() => { setSourceError(""); setSourceNotice(""); setAddingSource(true) }}><Plus size={14} />{t("addRepositorySource")}</Button> : null}
         {view === "repos" && addingSource ? <div className="dws-add-source-row">
-          <Input aria-label={t("addRepositorySource")} placeholder={t("addRepositoryManualPlaceholder")} value={sourcePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSourcePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSource() } }} />
+          {/* The path is a directory on the Host, so it is chosen rather than typed:
+              the host mounts a picker for exactly this, and a typed path is the one
+              thing here a user can get wrong without noticing. The field stays for the
+              case where no picker exists, and shows what was chosen otherwise. */}
+          <Input aria-label={t("addRepositorySource")} placeholder={t("addRepositoryManualPlaceholder")} value={sourcePath} autoFocus autoComplete="off" spellCheck={false} readOnly={pickDirectory !== undefined} onChange={event => setSourcePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && pickDirectory === undefined) { event.preventDefault(); void addSource() } }} />
+          {pickDirectory === undefined ? null : (
+            <Button className="dws-button" disabled={sourceBusy} onClick={() => void browse(setSourcePath, setSourceError)}>{t("browse")}</Button>
+          )}
           <Button className="dws-button-primary" disabled={sourceBusy || sourcePath.trim() === ""} onClick={() => void addSource()}>{sourceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{sourceBusy ? t("addingRepository") : t("addRepositoryAdd")}</Button>
           <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSource(false); setSourcePath(""); setSourceError(""); setSourceNotice("") }}><X size={14} /></Button>
         </div> : null}
@@ -651,7 +688,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, head
             repository to a Workspace list this one is what extends. */}
         {view === "spaces" && !addingSpace ? <Button className="dws-button dws-add-source-button" disabled={busy} onClick={() => { setSpaceError(""); setAddingSpace(true) }}><Plus size={14} />{t("addWorkspace")}</Button> : null}
         {view === "spaces" && addingSpace ? <div className="dws-add-source-row">
-          <Input aria-label={t("addWorkspace")} placeholder={t("addWorkspacePlaceholder")} value={spacePath} autoFocus autoComplete="off" spellCheck={false} onChange={event => setSpacePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void addSpace() } }} />
+          {/* Same as the repository row above: a Workspace is a directory the Host
+              names, so the Host's own chooser picks it. */}
+          <Input aria-label={t("addWorkspace")} placeholder={t("addWorkspacePlaceholder")} value={spacePath} autoFocus autoComplete="off" spellCheck={false} readOnly={pickDirectory !== undefined} onChange={event => setSpacePath(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && pickDirectory === undefined) { event.preventDefault(); void addSpace() } }} />
+          {pickDirectory === undefined ? null : (
+            <Button className="dws-button" disabled={spaceBusy} onClick={() => void browse(setSpacePath, setSpaceError)}>{t("browse")}</Button>
+          )}
           <Button className="dws-button-primary" disabled={spaceBusy || spacePath.trim() === ""} onClick={() => void addSpace()}>{spaceBusy ? <Loader2 size={14} className="dws-spin" aria-hidden="true" /> : null}{spaceBusy ? t("addingWorkspace") : t("addWorkspaceConfirm")}</Button>
           <Button className="dws-icon-button" aria-label={t("cancel")} onClick={() => { setAddingSpace(false); setSpacePath(""); setSpaceError("") }}><X size={14} /></Button>
         </div> : null}
