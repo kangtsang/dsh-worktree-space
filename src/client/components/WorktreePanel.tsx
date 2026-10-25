@@ -5,6 +5,7 @@ import { worktreeNavItems, WorktreesSettings } from "./WorktreesSettings"
 import type { WorktreeView } from "./WorktreesSettings"
 import { BrandGlyph, ChevronLeft, Settings } from "./icons"
 import { PluginDescription } from "./PluginDescription"
+import { UpdatePill } from "./UpdatePill"
 import type { createWorktreeApi } from "../lib/api"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -149,7 +150,10 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
     <div className="dws-panel-lead">
       <WorktreeNavBack onBack={onBack} />
       <header className="dws-panel-heading">
-        <h1>{t("worktreesTitle")}</h1>
+        <div className="dws-title-row">
+          <h1>{t("worktreesTitle")}</h1>
+          <UpdatePill />
+        </div>
         <p><PluginDescription /></p>
       </header>
     </div>

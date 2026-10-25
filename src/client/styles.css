@@ -9,7 +9,11 @@
      `border: 1px solid var(--wt-line)` does not fall back to an initial value when
      `--wt-line` is undefined - the declaration is dropped whole - so the card's
      buttons came out with no border at all rather than with a faint one. */
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action, .dws-plugin-config {
+  /* The management page in its panel form needs this list too: it is a `dws-panel`, not
+     a `dws-manage-page`, and without the aliases here every `var(--wt-*)` inside it
+     computes to nothing - which is how the update capsule came out with no border and no
+     background in the panel while looking right in the dialog. */
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
     --wt-muted: var(--dsw-alias-label-tertiary);
@@ -87,6 +91,46 @@
   .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
   .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
   .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+  /* The title and its update capsule on one line. Both hosts use this row, so the
+     capsule sits beside the title in the panel and in the dialog at the same place,
+     and the description beneath is untouched by it. `align-items: center` keeps a
+     20px title and a 20px pill on the same baseline; the wrap is a guard for a narrow
+     dialog, where the two would otherwise push the description off the row. */
+  .dws-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  /* Says a newer version is published, and goes to the changelog. Amber rather than the
+     brand colour: it is a notice, not an action this page performs, and the shell's own
+     warn token is what every other "there is something to look at" mark in the product
+     uses. Rendered only when there is something to say - the component returns null
+     otherwise - so the heading row never reserves space for it.
+     The three tokens are declared HERE rather than inherited, because this capsule has
+     three hosts and one of them is not a plugin surface: the panel and the dialog are
+     inside a `--wt-*` scope, but the Plugins page is the shell's own, and a capsule
+     placed there inherited nothing - it rendered with no border and no background, which
+     reads as text rather than as a control. Declaring them on the element makes the
+     appearance independent of where the shell mounts it. */
+  .dws-update-pill {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    display: inline-flex; flex: none; align-items: center; gap: 6px; max-width: 100%; padding: 2px 12px; border: 1px solid var(--wt-line); border-radius: 999px; background: var(--wt-surface); color: var(--wt-text); font-size: 14px; line-height: 22px; text-decoration: none; white-space: nowrap;
+  }
+  .dws-update-pill:hover { border-color: var(--dsw-alias-state-warn-primary); }
+  .dws-update-pill-label { color: var(--wt-secondary); min-width: 3em; }
+  /* `HoverHint` wraps the pill in a span so its bubble can anchor to it; the wrapper has
+     to stay out of the heading row's layout, or the pill would sit inside a block box
+     and lose its place on the title's baseline. */
+  .dws-update-pill-hint { display: inline-flex; align-items: center; flex: none; }
+  /* The Plugins-detail form. It shares a row with the page's own outline buttons, so it
+     matches their height and type rather than the heading row's: 13px is what that row's
+     buttons use, and the padding keeps the capsule the same height as their box. */
+  .dws-update-pill-compact { padding: 4px 10px; font-size: 13px; line-height: 18px; }
+  .dws-update-pill-version { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dsw-alias-state-warn-primary); }
+  /* The copied state. The label is what changes, so the width would jump when it swaps
+     between "新版本" and "已复制" - a fixed minimum keeps the capsule from twitching
+     under a pointer that has just clicked it. */
+  .dws-update-pill[data-copied="true"] { border-color: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-warn-primary)); }
+  .dws-update-pill[data-copied="true"] .dws-update-pill-label { color: var(--dsw-alias-state-success-primary, var(--wt-secondary)); }
   /* The flow line sits under the description as its own line inside the same
      paragraph: a block span, not a nested paragraph, because the host already
      wraps this in a <p>. */

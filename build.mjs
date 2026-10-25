@@ -28,6 +28,19 @@ await esbuild.build({
   sourcemap: false,
   minify,
   external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client"],
+  // The version the running bundle reports. A browser cannot read `package.json`, and
+  // asking the Host for it would be a round trip for a number that is fixed at build
+  // time anyway - so it is substituted in here, from the same file the manifest and the
+  // registry agree on. `meta.ts` guards with `typeof` so a bundle built without this
+  // define still loads.
+  define: {
+    __WTS_VERSION__: JSON.stringify(packageJson.version),
+    __WTS_REPO__: JSON.stringify(
+      String(packageJson.repository?.url ?? "")
+        .replace(/^git\+/, "")
+        .replace(/\.git$/, ""),
+    ),
+  },
   plugins: [{
     name: "inline-css",
     setup(build) {

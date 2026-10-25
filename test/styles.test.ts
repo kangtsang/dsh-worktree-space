@@ -12,7 +12,7 @@ const styles = readFileSync(new URL("../src/client/styles.css", import.meta.url)
  * drops the declaration whole. So the list is pinned as written, and adding a
  * surface to it is a decision this file makes the reader look at.
  */
-const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-new-session-action, .dws-footer-action, .dws-plugin-config"
+const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config"
 
 /** One rule's declarations, by its exact selector. */
 function rule(selector: string) {
@@ -112,6 +112,17 @@ describe("floating panel surface", () => {
     for (const surface of [".dws-dialog-content", ".dws-plugin-config"]) {
       expect(TOKEN_SCOPE).toContain(surface)
     }
+  })
+
+  it("defines the surface tokens on the panel too, not only on the dialog", () => {
+    // The management page has two hosts: the dialog and the main panel. The panel is a
+    // `dws-panel`, which is not a `dws-manage-page`, so leaving it out of the token
+    // scope left every `var(--wt-*)` inside it undefined - and the update capsule came
+    // out with no border and no background there while looking right in the dialog.
+    // Asserting the scope list is what keeps a third host from repeating it.
+    expect(TOKEN_SCOPE).toContain(".dws-panel")
+    const scope = rule(TOKEN_SCOPE)
+    for (const token of ["--wt-surface", "--wt-line", "--wt-secondary"]) expect(scope).toContain(`${token}:`)
   })
 
   it("draws one navigation for both hosts of the page", () => {
@@ -283,5 +294,23 @@ describe("floating panel surface", () => {
     expect(rule(".dws-panel-content")).toContain("padding: 0 32px 48px 24px")
     // The column carries the settings' own 2px and no top inset besides.
     expect(rule(".dws-panel .dws-nav")).toContain("--dws-nav-pad: 2px 14px 24px")
+  })
+})
+
+describe("the update capsule's own tokens", () => {
+  it("declares the three it draws with, rather than inheriting them", () => {
+    // This capsule has three hosts and one of them is not a plugin surface: the panel and
+    // the dialog sit inside a `--wt-*` scope, but the Plugins page is the shell's own, so
+    // a capsule mounted there inherited nothing - it rendered as plain text with no border
+    // and no background. Declaring the tokens on the element is what makes its appearance
+    // independent of where the shell puts it.
+    const rule = styles.match(/\.dws-update-pill\s*\{([^}]*)\}/)?.[1] ?? ""
+    expect(rule).not.toBe("")
+    for (const token of ["--wt-text", "--wt-secondary", "--wt-line", "--wt-surface"]) {
+      expect(rule).toContain(`${token}:`)
+    }
+    // And it draws with them, rather than with a token it does not declare.
+    expect(rule).toContain("border: 1px solid var(--wt-line)")
+    expect(rule).toContain("background: var(--wt-surface)")
   })
 })

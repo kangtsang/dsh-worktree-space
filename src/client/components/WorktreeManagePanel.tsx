@@ -3,6 +3,7 @@ import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/t
 import { WorktreesPage } from "./WorktreePanel"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { PluginDescription } from "./PluginDescription"
+import { UpdatePill } from "./UpdatePill"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
 import type { createWorktreeApi } from "../lib/api"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -39,7 +40,10 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="dws-manage-dialog">
         <header className="dws-manage-heading">
-          <DialogTitle className="dws-dialog-title">{t("worktreesTitle")}</DialogTitle>
+          <div className="dws-title-row">
+            <DialogTitle className="dws-dialog-title">{t("worktreesTitle")}</DialogTitle>
+            <UpdatePill />
+          </div>
           <DialogDescription className="dws-form-note"><PluginDescription /></DialogDescription>
         </header>
         <WorktreesPage

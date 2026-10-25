@@ -50,7 +50,7 @@ describe("WorktreePlugin compatibility", () => {
 
     // The panel row joins the footer shortcut, and the card that fills the Plugins
     // page's configuration section for this bundle stays either way.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action", "plugins.bundle.config"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action", "plugins.bundle.config", "plugins.detail.actions"])
   })
 
   it("keeps the panel row when the configuration hides the footer shortcut", () => {
@@ -58,7 +58,7 @@ describe("WorktreePlugin compatibility", () => {
     WorktreePlugin.apply(context(registeredSlots, served({ panelEntry: "show", sidebarEntry: "hide" })) as any)
 
     // Hiding a shortcut may not hide the way in: the panel row stays.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config", "plugins.detail.actions"])
   })
 
   it("registers neither entry when the configuration asks for neither, but keeps the page", () => {
@@ -68,6 +68,52 @@ describe("WorktreePlugin compatibility", () => {
     // Both ways in hidden, so neither slot is registered — but the `main` panel is:
     // the row is a preference, the page itself is what the id means, and hiding a row
     // must not leave the shell with a selection it cannot resolve.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config", "plugins.detail.actions"])
+  })
+})
+
+describe("the Plugins-detail capsule registration", () => {
+  /**
+   * A list slot takes `id`; a keyed slot takes `key`. Putting a `key` on a list slot is
+   * accepted by the register call and then never dispatched - the component simply never
+   * renders, with no error anywhere. That is what happened to this capsule: three builds
+   * were verified against a page that showed nothing.
+   */
+  function registrationsOf(name: string) {
+    const options: Array<Record<string, unknown>> = []
+    const ctx = {
+      connection: { rpc: { call: vi.fn() } },
+      workspaces: { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} } },
+      uiWorkspace: {},
+      layout: { selectPanel: vi.fn() },
+      effect: (effect: () => unknown) => effect(),
+      slots: {
+        inject: (_name: string, run: () => unknown) => { run(); return () => {} },
+        register: (o: Record<string, unknown>) => { options.push(o); return () => {} },
+      },
+      inject: (names: string[], run: (ctx: unknown) => void) => {
+        run({ configForms: { get: () => ({ getSnapshot: () => ({ status: "ready", value: {} }), subscribe: () => () => {} }), whileServed: (_n: string[], r: () => void) => { r(); return () => {} } } })
+      },
+    }
+    WorktreePlugin.apply(ctx as any)
+    return options.filter((option) => option.name === name)
+  }
+
+  it("registers with an id, which is what a list slot dispatches on", () => {
+    const actions = registrationsOf("plugins.detail.actions")
+    expect(actions).toHaveLength(1)
+    expect(actions[0]).toHaveProperty("id")
+    expect(actions[0]).not.toHaveProperty("key")
+    // Stable, and namespaced, so two plugins cannot collide on the same row.
+    expect(String((actions[0] as { id?: unknown }).id)).toContain("dsh-worktree-space")
+  })
+
+  it("keeps the keyed configuration card on a key, because that slot is keyed", () => {
+    // The opposite mistake: `plugins.bundle.config` is `kind: "keyed"`, so it needs the
+    // settings namespace and would be ignored with an `id`.
+    const config = registrationsOf("plugins.bundle.config")
+    expect(config).toHaveLength(1)
+    expect(config[0]).toHaveProperty("key")
+    expect(config[0]).not.toHaveProperty("id")
   })
 })

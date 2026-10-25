@@ -14,6 +14,8 @@ import css from "./styles.css"
 import { ArchiveTaskDialog } from "./components/ArchiveTaskDialog"
 import { CreateWorktreeDialog } from "./components/CreateWorktreeDialog"
 import { NewSessionWorktreeButton } from "./components/NewSessionWorktreeButton"
+import { UpdatePill } from "./components/UpdatePill"
+import { PLUGIN_NAME } from "./lib/meta"
 import { PluginConfigCard } from "./components/PluginConfigCard"
 import type { ConfigFormLike } from "./components/PluginConfigCard"
 import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
@@ -453,6 +455,35 @@ export const WorktreePlugin = {
         { name: "plugins.bundle.config", key: NS, locale: NS } as never,
         () => <PluginConfigCard form={form as never} />,
       ))), "dsh-worktree-space plugin configuration card")
+      // The update capsule on this bundle's own page in the Plugins panel, beside the
+      // switch and the uninstall button - the place a reader who is already looking at
+      // the installed version would expect to learn there is a newer one.
+      //
+      // `plugins.detail.actions` is a list slot the page declares for exactly this, so it
+      // is contributed to rather than being inserted into the page's DOM: the shell owns
+      // that row, and a wrapper written from here would be a second guess at its layout.
+      // The subject this page hands over is `{ kind: "bundle", pkg: { name, … } }` - the
+      // package is nested under `pkg`, and the discriminator is `"bundle"`. The row page
+      // uses `"row"` and an official plugin's page `"item"`, both of which put the name
+      // somewhere else, so matching on `kind` first is what keeps this capsule off a page
+      // it does not belong to.
+      // `id`, not `key`, and that is the difference between a registration that renders
+      // and one that is silently ignored. `plugins.detail.actions` is declared
+      // `kind: "list"` with an empty `keyDomain`, so the Host dispatches nothing to it by
+      // key - a `key` here has no meaning, and the contribution never appears. The list
+      // slots take a stable `id` (and an optional `order`) instead; the neighbouring
+      // plugin that shows a control on its own page does the same.
+      ctx.effect(() => ctx.slots.inject("plugins.detail.actions" as never, () => ctx.slots.register(
+        { name: "plugins.detail.actions", id: `${PLUGIN_NAME}/update`, order: 10 } as never,
+        (props: { subject?: { kind?: string; pkg?: { name?: string } } }) => {
+          const subject = props.subject
+          // The Host names a package by its manifest name, not by the settings key:
+          // `ENTRY_ID` is "worktree-space" and this package is "dsh-worktree-space", so
+          // comparing against the entry id never matched and the page stayed empty.
+          if (subject?.kind !== "bundle" || subject.pkg?.name !== PLUGIN_NAME) return null
+          return <UpdatePill compact />
+        },
+      )), "dsh-worktree-space plugin detail update capsule")
     })
   },
 }
