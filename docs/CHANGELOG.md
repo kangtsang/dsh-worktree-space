@@ -7,6 +7,20 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.3.8 — 2026-10-28
+
+任务空间的两个工具改为按会话装载，用不到的会话不再为它们付出常驻开销。
+
+### 变更
+
+- **`wts_worktree_space` 与 `wts_session_tool` 不再在每个会话里常驻。** 两者加起来约 3.6k token，
+  而多数会话跟任务空间无关，所以普通会话只看到一个 `load_worktree_space`：第一次要用任务空间时调它
+  一次，两个工具就装进这个会话。**任务空间里的会话**（被派单干活的那一个）两个工具一开始就在手上，
+  不用多调一次。
+
+  工具自带的说明仍然够用，不读随包 skill 也能完成单件事；skill 补的是描述装不下的那部分——先做什么
+  后做什么、哪些问题要问用户、每种「停下来」是什么意思。
+
 ## 1.3.7 — 2026-10-26
 
 有新版本发布时，管理页和插件详情页会提示，并可直接复制安装用的包名。文档同时做了精简。
@@ -280,6 +294,24 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.3.8 — 2026-10-28
+
+The two task-space tools are now mounted per session, so a session that never needs them
+no longer pays for them on every request.
+
+### Changed
+
+- **`wts_worktree_space` and `wts_session_tool` are no longer resident in every session.**
+  Together they carry about 3.6k tokens, and most sessions have nothing to do with a task
+  space, so an ordinary session sees one `load_worktree_space`: call it once when a task
+  space is first needed and both tools are mounted into that session. A session **inside a
+  task space** - the one a dispatch put there to do the work - starts with both in hand and
+  pays nothing extra.
+
+  Each tool still carries enough description to be used on its own, without reading the
+  bundled skill; the skill adds what a description cannot hold - the order to do things in,
+  which questions to put to the user, and what each stop means.
 
 ## 1.3.7 — 2026-10-26
 
