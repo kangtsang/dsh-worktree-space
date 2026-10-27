@@ -37,7 +37,16 @@ function toolContext(subprocess = quietSubprocess, services = {}) {
   const captured = []
   const ctx = {
     subprocess,
-    get: (name) => (name === "tools" ? { register: (definition) => { captured.push(definition); return () => {} } } : services[name]),
+    // The tool reaches `subprocess` through `get`, not as a property, because the gate
+    // mounts it into a session's own scope - a child fiber, where a property read of a
+    // service that fiber chain did not provide throws instead of answering. A real
+    // context answers both ways, so the double must too: answering only the property
+    // would test a context shape the tool can no longer run in.
+    get: (name) => {
+      if (name === "tools") return { register: (definition) => { captured.push(definition); return () => {} } }
+      if (name === "subprocess") return subprocess
+      return services[name]
+    },
   }
   return { ctx, captured }
 }
@@ -1221,6 +1230,16 @@ describe("registerTaskTool", () => {
       expect(brief).toMatch(/Every finished unit of delivery/)
       expect(brief).toMatch(/the moment you are stuck/i)
       expect(brief).toMatch(/When the task is finished/)
+      // The flag the finish is recognised by, stated where the obligation is. The watch that
+      // tells the caller a session stopped without a final report keys on
+      // `finalReport: true`, so an obligation that names the report but never the flag leaves
+      // every dispatched task reported as missing one: the send arrives, the flag does not,
+      // and the caller is told the work is unaccounted for while the account sits in its
+      // inbox. It has to be scoped to the finish as well - the other three moments carry no
+      // flag, and a model that reads it as applying to all four turns every progress update
+      // into a claim that the work is handed over.
+      expect(brief).toContain("finalReport: true")
+      expect(brief).toMatch(/The three moments above do not carry it/)
       // The two lines that keep the contract from reading as optional: the four moments are
       // never optional, and reporting a finish is not replaced by performing it. A member that
       // calls `done` and stops leaves the caller holding a changed task space and no account

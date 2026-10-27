@@ -1299,9 +1299,16 @@ function taskToolContext(services = {}) {
   const captured = []
   const ctx = {
     subprocess: quietSubprocess,
-    get: (name) => (name === "tools"
-      ? { register: (definition) => { captured.push(definition); return () => {} } }
-      : services[name]),
+    // Both routes, because a real context answers both: the tool reads the service
+    // through `get` now that it is mounted into a session's own scope, where a
+    // property read of an uninjected service throws instead of answering. Read through
+    // the property rather than the closed-over constant, because a case below swaps the
+    // double on the context to answer a different git.
+    get: (name) => {
+      if (name === "tools") return { register: (definition) => { captured.push(definition); return () => {} } }
+      if (name === "subprocess") return ctx.subprocess
+      return services[name]
+    },
   }
   return { ctx, captured }
 }

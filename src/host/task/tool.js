@@ -15,10 +15,20 @@ import { deliveryPolicyOf } from './delivery.js'
 import { normalizeSessions, readTaskMetadata, recordTaskSession, taskSpacePath } from './shared.js'
 
 /**
- * Model-facing description: what this is for, the order to drive it in, and the
- * decisions that are never the model's to make. The workflow itself lives in the
- * bundled skill's SKILL.md, which a session loads when it takes a task on; this
- * carries only what a caller needs before that.
+ * Model-facing description: what this is for, and where the instructions are.
+ *
+ * Deliberately short. The `worktree-space` skill is this plugin's single entry point
+ * and carries the whole of the guidance — the questions to ask before a create, every
+ * argument, what a finish decides, and what each refusal code means — split across
+ * `references/` files that are read by stage. Restating any of that here would be a
+ * second copy to keep in step, and it would be read by every session whether or not it
+ * ever needs a task space.
+ *
+ * Two rules stay, and only because breaking either is not recoverable by reading a
+ * reference afterwards: the work belongs to a dispatched session (a leader that does it
+ * itself has built the isolation and worked outside it), and `deployTarget` is settled
+ * on the create (a fence nobody chose cannot be fitted later). Both are one clause each;
+ * the skill says the rest.
  */
 const DESCRIPTION = [
   'Create, list and finish a per-task Git worktree workspace spanning one or more repositories: one directory per '
@@ -472,6 +482,14 @@ function taskBriefPreamble(facts) {
     `- You are working in a task space for **${task}**, at \`${tasksRoot}\`. Its repositories are`,
     `  separate checkouts on the branch \`${branch}\`; git commands run inside each repository`,
     '  subdirectory, not in the task space root.',
+    // The skill is this plugin's entry point and holds the detail these lines only
+    // summarise. A dispatched session has both tools already, so nothing else would
+    // ever point it there -- and the tool descriptions deliberately do not carry the
+    // instructions.
+    '- **Read the `worktree-space` skill.** It carries the full workflow for a session in a task',
+    '  space - what finishing decides, what to do when it stops on a conflict or on uncommitted work,',
+    '  and what each refusal code means. The lines below are the ones that must hold even if you',
+    '  never open it.',
     '- **Never edit or commit in a source checkout, and never hand-merge there.** The task space is',
     '  where the work goes: `git push`, and a `git merge` you run yourself in a source repository, are',
     '  not yours to do. That is a different thing from finishing the task, which this plugin does for',
@@ -563,6 +581,9 @@ function taskBriefPreamble(facts) {
     '  - what passed and what the evidence was (the command, and its result - not "tests pass");',
     '  - **what you did not verify**, and what a reader should not assume from your report;',
     '  - anything still in the way, or a decision of yours the caller may want to revisit.',
+    '  Send this one with `finalReport: true` - that flag is what tells the caller the work is',
+    '  handed over; a report without it is read as a progress update, and a turn that ends after',
+    '  one is reported to the caller as a missing report. The three moments above do not carry it.',
     '',
     'Between those four, report when you judge a report helps the caller act: something landed',
     'that changes what comes next, an assumption turned out false, or the shape of the work changed',
@@ -1226,6 +1247,33 @@ function cardText(result) {
 }
 
 /**
+ * The profile's subprocess service, as this tool must reach it.
+ *
+ * **Probed, never read as `ctx.subprocess`.** The tool is registered into a session's
+ * own scope (see `tool-gate.js`), and that scope is a child fiber of the plugin's. A
+ * property read walks the fiber chain and only finds a service a fiber in that chain
+ * provided, so `ctx.subprocess` there throws `cannot get property "subprocess" without
+ * inject` - which is exactly what it did the first time the tools were mounted per
+ * session. `ctx.get` reads the service table instead, and answers whether or not this
+ * particular scope is the one that provided it. It is also what the host's own terminal
+ * tool does for the same service (`agent.ctx.get('subprocess')`).
+ *
+ * The value is read per call rather than captured at registration, for the same reason
+ * the configured root is: a service that is reloaded while a session is running should
+ * be picked up by that session's next call, not by its next mount.
+ * @param ctx - the context the tool was registered with: the session's, or the plugin's.
+ * @returns the service, or undefined when this deployment serves none.
+ */
+function subprocessOf(ctx) {
+  if (ctx === null || ctx === undefined || typeof ctx.get !== 'function') return undefined
+  try {
+    return ctx.get('subprocess')
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Register the `wts_worktree_space` tool when the deployment serves tools.
  *
  * Both guards matter: a deployment without a tool runtime must keep its
@@ -1321,7 +1369,7 @@ export function registerTaskTool(ctx, options = {}) {
         // hands it to `assertIsolated` against the recommendation - and a spelling
         // with a `..` in it compares as a string, not as the directory it names.
         const sourceRoot = absolutePath(required(args.sourceRoot, 'sourceRoot'))
-        const result = await suggestTaskRoot(ctx.subprocess, sourceRoot, {
+        const result = await suggestTaskRoot(subprocessOf(ctx), sourceRoot, {
           tasksRoot: args.tasksRoot,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           // The plugin's own setting outranks the recommendation: it is the user's
@@ -1354,7 +1402,7 @@ export function registerTaskTool(ctx, options = {}) {
         const deployTarget = typeof args.deployTarget === 'string' && args.deployTarget.trim() !== ''
           ? args.deployTarget.trim()
           : undefined
-        const result = await createTask(ctx.subprocess, {
+        const result = await createTask(subprocessOf(ctx), {
           sourceRoot,
           task: required(args.task, 'task'),
           tasksRoot: args.tasksRoot,
@@ -1466,9 +1514,9 @@ export function registerTaskTool(ctx, options = {}) {
 
       if (action === 'add') {
         const task = required(args.task, 'task')
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
+        const tasksRoot = await containerFor(subprocessOf(ctx), args.tasksRoot, args.sourceRoot, configuredRoot())
         const project = projectFor(args.project, args.sourceRoot)
-        const result = await addTaskRepositories(ctx.subprocess, {
+        const result = await addTaskRepositories(subprocessOf(ctx), {
           task,
           project,
           tasksRoot,
@@ -1501,8 +1549,8 @@ export function registerTaskTool(ctx, options = {}) {
       }
 
       if (action === 'list') {
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
-        const result = await listTasks(ctx.subprocess, { tasksRoot })
+        const tasksRoot = await containerFor(subprocessOf(ctx), args.tasksRoot, args.sourceRoot, configuredRoot())
+        const result = await listTasks(subprocessOf(ctx), { tasksRoot })
         const value = envelope(action)
         value.tasksRoot = result.tasksRoot
         for (const task of result.tasks) {
@@ -1561,7 +1609,7 @@ export function registerTaskTool(ctx, options = {}) {
               + 'which one the user wants; do not leave it to a default.',
           )
         }
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
+        const tasksRoot = await containerFor(subprocessOf(ctx), args.tasksRoot, args.sourceRoot, configuredRoot())
         const project = projectFor(args.project, args.sourceRoot)
         // Asked before anything is removed, and refused rather than warned: a finish takes the
         // worktrees and the task space away, so a session still writing in there would lose the
@@ -1579,7 +1627,7 @@ export function registerTaskTool(ctx, options = {}) {
         // record is "nothing is recorded", never a reason to refuse a finish that would
         // otherwise go through.
         const beforeFinish = await readTaskMetadata(taskSpacePath(tasksRoot, project, task)).catch(() => undefined)
-        const result = await finishTask(ctx.subprocess, {
+        const result = await finishTask(subprocessOf(ctx), {
           task,
           project,
           tasksRoot,
@@ -1678,7 +1726,7 @@ export function registerTaskTool(ctx, options = {}) {
        */
       if (action === 'dispatch') {
         const task = required(args.task, 'task')
-        const tasksRoot = await containerFor(ctx.subprocess, args.tasksRoot, args.sourceRoot, configuredRoot())
+        const tasksRoot = await containerFor(subprocessOf(ctx), args.tasksRoot, args.sourceRoot, configuredRoot())
         const project = projectFor(args.project, args.sourceRoot)
         const prompt = required(args.prompt, 'prompt')
         const taskPath = taskSpacePath(tasksRoot, project, task)

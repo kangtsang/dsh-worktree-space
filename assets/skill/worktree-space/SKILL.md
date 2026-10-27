@@ -20,6 +20,26 @@ Drive the whole workflow through the `wts_worktree_space` tool. Do not run
 > reports belong at
 > https://github.com/kangtsang/dsh-worktree-space/issues when something goes wrong.
 
+## Getting the tools first
+
+**This skill is the entry point; the tools are mounted on demand.** A session that is
+not already inside a task space starts with one small tool, `load_worktree_space`, and
+none of the real ones:
+
+- **Call `load_worktree_space` once, before the first `wts_worktree_space` or
+  `wts_session_tool` call.** It mounts both into this session and removes itself.
+  Nothing else changes — the tool set is the only thing that arrives.
+- **A session inside a task space already has both**, and calling the loader there
+  answers that they are loaded. Never call it speculatively: a session you open in a
+  task space starts with them.
+- Loading the tools does **not** load the rest of this skill. Read the stage you are in,
+  when you are in it — see the table below.
+
+The tools carry enough of their own description to be used without this skill — that is
+deliberate, so a session that needs one quick action does not have to read anything first.
+What this skill adds is the part a description cannot hold: the order to do things in, the
+questions to put to the user, and what each stop means. **Read the stage you are in.**
+
 ## The shape of a task space
 
 ```

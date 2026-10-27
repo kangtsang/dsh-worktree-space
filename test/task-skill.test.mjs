@@ -109,12 +109,45 @@ describe("registerTaskSkill", () => {
     // one level below `finishing.md` rather than in it.
     expect(conflicts).toContain("mergeInProgress")
     expect(conflicts).toContain("dirtyCheckout")
+    // The loading mechanism, which is what makes this skill the entry point: a reader who
+    // never learns the tools are mounted on demand cannot call them at all. This is the
+    // one thing the body adds that no tool description says.
+    expect(loaded.content).toContain("load_worktree_space")
+    expect(loaded.content).toContain("Getting the tools first")
     // The body has to point at every file it hands the reader over to: an index that
     // leaves one out would strand the rule it carries.
     for (const name of ["creating.md", "working.md", "finishing.md", "conflicts.md", "deploying.md", "failures.md"]) {
       expect(loaded.content, name).toContain(`references/${name}`)
       expect(existsSync(join(candidate.resourceBase.path, "references", name)), name).toBe(true)
     }
+  })
+
+  it("keeps every tool self-sufficient, so a quick action needs no skill read", async () => {
+    // The tool descriptions are the plugin's second entry point, and deliberately a
+    // complete one: a session that needs one action should not have to read the skill
+    // first. What this pins is that they stay sufficient - the rules a caller cannot
+    // recover from by reading a reference afterwards must be in the description itself,
+    // because by then the call has already been made.
+    const { registerTaskTool } = await import("../src/host/task/tool.js")
+    const { registerSessionTools } = await import("../src/host/session-tools.js")
+    const captured = []
+    const ctx = { get: (name) => (name === "tools" ? { register: (d) => { captured.push(d); return () => {} } } : undefined) }
+    registerTaskTool(ctx)
+    registerSessionTools(ctx)
+    expect(captured).toHaveLength(2)
+    const [task, session] = captured
+    // Each of these is a rule that is too late to learn from a reference: the finish
+    // cannot be taken back, the fence is settled on the create, and a leader that
+    // implements the task itself has already spent the space.
+    expect(task.description).toContain("merge: true")
+    expect(task.description).toContain("E7006")
+    expect(task.description).toContain("acceptance fence")
+    expect(task.description).toContain("The task is done by a session in the task space")
+    expect(task.description).toContain("E5006")
+    // And the session tool's rule about waiting, which a caller breaks by stopping to
+    // call the tool rather than by passing a wrong argument.
+    expect(session.description).toContain("Never block waiting")
+    expect(session.description).toContain("finalReport")
   })
 
   it("reads the file on every load, so an edited asset is served", async () => {

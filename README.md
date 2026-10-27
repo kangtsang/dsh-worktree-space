@@ -378,6 +378,12 @@ worktree 里，可以就地处理。
 `wts_session_tool` 两个工具，它可以自己把整条链跑完 —— 建空间、派单、盯进度、插话纠偏、部署验收、收尾合并，
 全程不需要人在面板上按任何按钮。
 
+这两个工具**不常驻在每个会话里**：两者加起来约 3.6k token，而多数会话跟任务空间无关。所以普通会话只会
+看到一个 `load_worktree_space`，需要时调一次就把两个工具装进来；**任务空间里的会话**（被派单干活的那一个）
+两个工具一开始就在手上，不用多调一次。
+
+工具本身**自带足够说明，不读 skill 也能用来做单件事**：需要的是快、准，不必先去读一份长文档。
+
 这条路上的两个角色：**队长**是编排的那一个（也是你在对话里的那一个），**队员**是它在任务空间里开出来干活
 的那一个会话。定义见[使用指南第 11 节](USAGE.md#11-术语补充队长与队员)。
 
@@ -911,6 +917,14 @@ Beyond driving the panel by hand, a second equally supported route exists: give 
 `wts_worktree_space` and `wts_session_tool` tools and it can run the whole chain itself — create the
 space, dispatch, watch progress, steer mid-flight, deploy and accept, merge at the finish — with no
 press in the panel at any point.
+
+Those two tools are **not resident in every session**: together they carry about 3.6k tokens, and most
+sessions have nothing to do with a task space. So an ordinary session sees one `load_worktree_space`
+and mounts the pair with a single call when it needs them, while a session **inside a task space** -
+the one a dispatch put there to do the work - starts with both in hand and pays nothing extra for it.
+
+Each tool also **carries enough description to be used on its own**; the bundled `worktree-space`
+skill adds the order to do things in and what each stop means, loaded a stage at a time.
 
 Two roles on that route: the **leader** is the orchestrating one, the one you are talking to, and the
 **member** is the session it opens in the task space to do the work. Both are defined in

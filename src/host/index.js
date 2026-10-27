@@ -13,8 +13,9 @@ import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTas
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { taskSpacePath } from './task/shared.js'
-import { registerTaskTool, refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from './task/tool.js'
-import { fileSessionUnderWorkspace, registerSessionTools } from './session-tools.js'
+import { refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from './task/tool.js'
+import { fileSessionUnderWorkspace } from './session-tools.js'
+import { registerGatedTools } from './task/tool-gate.js'
 import { SessionWatch } from './session-watch.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
@@ -951,34 +952,27 @@ export function apply(ctx, config = {}) {
   } })
   sessionWatcher.install()
   if (typeof ctx.effect === 'function') ctx.effect(() => () => sessionWatcher.dispose(), 'dsh-worktree-space session watch')
-  // The tool is how the multi-repository workflow is driven while the Web UI is
-  // still the upstream single-repository surface. A deployment that serves no
-  // tool runtime keeps working: the /api endpoints remain the seam. The injected
-  // callback returns the registration's disposer so cordis tears the tool down
-  // with the plugin instead of leaking it.
-  if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerTaskTool(toolsCtx, { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }))
-  } else {
-    registerTaskTool(ctx, { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher })
-  }
-
-  // The session-control tools: finding, watching, reading, messaging, resuming
-  // and stopping the sessions a task space is worked in. A dispatched session is
-  // not this session's child, so the ordinary parent/child channel refuses to
-  // reach it, and these are the only way to ask whether that work is still moving.
+  // The tools are mounted **per session**, from what that session's directory says. A
+  // session inside a task space is the member that reports back and may finish its own
+  // work, so it gets both tools immediately and pays nothing extra for the decision. Every
+  // other session gets one small loader and mounts the two real tools only if it asks -
+  // most sessions never touch a task space, and the pair is about 3.6k tokens of
+  // description and parameters that they would otherwise carry for nothing.
   //
-  // Only `tools` is injected. The session services the tools use - `agents`,
-  // `sessions`, `sessionController`, `sessionPersistence`, `workspaceRegistry`,
-  // `agentPresets`, `sessionTitle` - are probed per call instead, because
-  // injecting them would make a profile that serves any one of them differently
-  // mount **no session tools at all**: silent, and indistinguishable from the
-  // plugin not being installed. Probing answers "this deployment does not offer
-  // X", which a caller can act on, and it is the same rule the rest of this
-  // plugin follows for a peer service a deployment need not serve.
+  // Mounting per session is also what makes deferred loading possible at all: a tool
+  // marked `deferLoading` in a session's baseline list is never activated, so a plugin
+  // that registered these two globally could only hide them, not offer them on demand.
+  // Registering into the session's own scope after its first header is what produces the
+  // addition that activates them.
+  //
+  // A deployment that serves no tool runtime keeps working: the /api endpoints remain the
+  // seam, and the injected callback returns the unmount so cordis tears the registrations
+  // down with the plugin instead of leaking them.
+  const gatedOptions = { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }
   if (typeof ctx.inject === 'function') {
-    ctx.inject(['tools'], (toolsCtx) => registerSessionTools(toolsCtx))
+    ctx.inject(['tools'], (toolsCtx) => registerGatedTools(toolsCtx, gatedOptions))
   } else {
-    registerSessionTools(ctx)
+    registerGatedTools(ctx, gatedOptions)
   }
 
   // The bundled skill carries the fuller workflow guidance, which is loaded on

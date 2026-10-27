@@ -66,9 +66,12 @@ describe.each([
           expect(envelope.type).toBe("server-response")
           expect(envelope.rpcId).toBe("startup-test")
         }
-        // Two tools: the task-space workflow, and the one session-control tool that
-        // watches, corrects and recovers the session it dispatches to. Its eight
-        // actions used to be eight registrations and are one `action` enum now.
+        // One tool: the loader. The two real tools are mounted per session - a session
+        // inside a task space gets them immediately, every other session gets this and
+        // mounts them on demand - so a deployment serving no agent registry, as here,
+        // takes the unconditional fallback and registers the pair instead. That fallback
+        // is what this assertion pins: without an `agents` service there is no
+        // `agent/created` to gate on, and gating anyway would leave no tools at all.
         expect(registered.length).toBe(before + 2)
         const tool = registered[before]
         expect(tool.name).toBe("wts_worktree_space")

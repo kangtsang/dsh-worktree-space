@@ -38,6 +38,7 @@ import { isUsableBranchName, isUsableTaskName } from './task/naming.js'
 import { canonicalPath, isInside } from './task/paths.js'
 import { markSessionReported, readTaskMetadata, taskSessionsOf } from './task/shared.js'
 import { PLUGIN_ROOT, SOURCE_TASKS_DIR, readSourceTaskIndex } from './task/source-index.js'
+import { TASK_SPACE_WALK_LIMIT, taskSpaceAbove } from './task/space-above.js'
 import { withSessionTurn } from './session-turn.js'
 
 /** How many messages a read returns by default, and at most. */
@@ -283,41 +284,11 @@ async function reachOf(ctx, sessionId, agent, exec) {
 }
 
 /**
- * How far up from a session's directory a task space is looked for.
- *
- * The plugin's own layout is `<container root>/<project>/<task>`, and a session is
- * opened either on the task space itself or on a worktree one level inside it, so the
- * record is a level or two up. The walk stops at the drive root anyway; this bound
- * only keeps a pathologically deep directory from turning one tool call into a long
- * chain of reads that cannot succeed.
+ * The walk that finds a task space above a directory, and the bound on it, live in
+ * `task/space-above.js` because the tool gate reads the same answer to decide what a
+ * session starts with. Two copies would be two definitions of "is this session in a
+ * task space", drifting exactly where the answer decides which tools exist.
  */
-const TASK_SPACE_WALK_LIMIT = 8
-
-/**
- * The task space a directory sits in, and the record it holds.
- *
- * Walked upward rather than read at one exact level, because a session may be opened
- * on a worktree rather than on the task space, and the record sits at the task space's
- * own level. `dirname` rather than a split-and-rejoin: rejoining loses a Windows drive
- * prefix, so `C:\space\proj\task` would come back as a relative path that names
- * nothing, and `dirname` also stops cleanly at the root.
- * @param directory - a session's working directory, possibly absent.
- * @returns the task space's directory and its record, or undefined.
- */
-async function taskSpaceAbove(directory) {
-  if (typeof directory !== 'string' || directory === '') return undefined
-  let current = directory
-  for (let level = 0; level < TASK_SPACE_WALK_LIMIT; level += 1) {
-    const metadata = await safelyAsync(() => readTaskMetadata(current))
-    if (metadata !== undefined && metadata !== null && typeof metadata === 'object') {
-      return { path: current, metadata }
-    }
-    const parent = dirname(current)
-    if (parent === current) break
-    current = parent
-  }
-  return undefined
-}
 
 /**
  * Note in the sender's own task record that it has delivered its final report.
@@ -2152,11 +2123,15 @@ export const SESSION_TOOL_NAME = 'wts_session_tool'
 /**
  * Model-facing description for the merged session tool.
  *
- * The eight actions were eight registrations, each carrying its own description;
- * what they repeated was not the action but the ground rules around it - where an
- * id comes from, which actions need a live session, what a `sinceSeq` is for. One
- * description says those once. What it does not carry is the workflow that chooses
- * between the actions, which is the bundled skill's to say.
+ * Short on purpose, like the task tool's: the `worktree-space` skill is this plugin's
+ * single entry point, and `references/working.md` carries the whole of this tool —
+ * every action, every argument, and when to reach for which. Restating that here would
+ * be a second copy to keep in step, read by every session that mounts the tool.
+ *
+ * Two things stay, and both are rules a caller breaks by *stopping* to call the tool
+ * rather than by passing a wrong argument — so no later reference read recovers them:
+ * where the session id comes from (the record, not a guess), and that waiting on a
+ * session is never the answer. Everything else points at the skill.
  */
 const SESSION_DESCRIPTION = [
   'Watch and steer the sessions a task runs in: find, status, read, send, create, resume or cancel, chosen by action. '
@@ -2209,11 +2184,16 @@ const SESSION_DESCRIPTION = [
 /**
  * The merged tool's arguments.
  *
- * One flat object for eight actions, which is the shape `wts_worktree_space` already
+ * One flat object for seven actions, which is the shape `wts_worktree_space` already
  * uses, so the prefix in each description names the action it belongs to. Three pairs
  * collided when the eight were joined - find's `title` / `cwd` / `limit` are filters
  * where create's are values to set, and read's `limit` caps messages where find's caps
  * results - so the filters were renamed rather than left to mean two things.
+ *
+ * Each description carries only what decides whether the call is valid - which action
+ * takes it, a default that changes the answer, a required argument - plus the two
+ * refusals a caller must not retry into. The behaviour each one has is in the skill:
+ * `references/working.md` has the table of actions and arguments.
  */
 const SESSION_PARAMETERS = {
   action: {
