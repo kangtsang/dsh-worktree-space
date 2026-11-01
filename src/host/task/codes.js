@@ -83,6 +83,8 @@ export const ERROR_CODES = {
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
   E4014: 'create.js - the requested deploy script is not a file inside the source root',
   E4015: 'create.js - the task is set to deploy but nothing in the source root or its repositories can deploy it',
+  E4016: 'tool.js - a dispatch named a model that is not a "provider/model" pair',
+  E4017: 'session-tools.js - a model switch was asked for a session that is not a member of a task the caller leads',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',

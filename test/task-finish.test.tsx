@@ -463,11 +463,9 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
     expect(screen.getByText(t("finishHandoffExplain"))).toBeTruthy()
     expect(screen.getByText(t("finishHandoffHint"))).toBeTruthy()
-    // Both entries are gone, and so is the notice that explains them - and nothing opened
-    // a session on its own.
+    // Both entries are gone, and nothing opened a session on its own.
     await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull())
     expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
-    expect(document.querySelector(".dws-beta-notice")).toBeNull()
     expect(next.sessions.create).not.toHaveBeenCalled()
   })
 
@@ -526,10 +524,8 @@ describe("finishing a task", () => {
     expect(document.querySelector(".dws-finish-handoff-sessions li")?.textContent).toBe(`kratos-vue-admin${site.replace(/\\/g, "/")}`)
     expect(screen.getByRole("button", { name: t("finishHandoffOpen") })).toBeTruthy()
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", job: t("finishHandoffJobConflict") }))).toBeTruthy()
-    // What the switch does govern is the notice that explains the entries, and the
-    // entries themselves.
-    await waitFor(() => expect(document.querySelector(".dws-beta-notice")).toBeNull())
-    expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull()
+    // What the switch governs is the entries themselves.
+    await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull())
   })
 
   it("closes the dialog when the user follows the session the finish handed work to", async () => {

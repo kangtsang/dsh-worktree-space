@@ -11,7 +11,8 @@ import { t } from "../src/client/lib/i18n"
  * round trip.
  */
 function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "container",
-  tasksRootStrategy = "default", tasksRootDirectory = "", ignoredScanDirectories: string[] = [], removedScanDirectories: string[] = []) {
+  tasksRootStrategy = "default", tasksRootDirectory = "", ignoredScanDirectories: string[] = [], removedScanDirectories: string[] = [],
+  taskModelProvider = "", taskModel = "") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
@@ -29,6 +30,8 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "", ha
     tasksRootDirectory,
     ignoredScanDirectories,
     removedScanDirectories,
+    taskModelProvider,
+    taskModel,
   }
   const listeners = new Set<() => void>()
   return {
@@ -400,6 +403,153 @@ describe("the configuration card's archive destination row", () => {
     fireEvent.click(within(row).getByRole("button", { name: t("configSave") }))
     await waitFor(() => expect(form.set).toHaveBeenCalledWith("archiveDocumentsDirectory", ""))
     expect(read()).toMatchObject({ archiveDocumentsDirectory: "" })
+  })
+})
+
+/**
+ * The model row.
+ *
+ * The one row whose options come from the Host rather than from the schema, so the cases
+ * that matter are the ones a fixed list does not have: the catalog arriving late, the
+ * catalog being unreachable, and a configured route the catalog no longer carries.
+ */
+describe("the task session model row", () => {
+  const CATALOG = {
+    providers: [
+      { provider: "deepseek-account", models: ["deepseek-chat", "deepseek-reasoner"] },
+      { provider: "codearts", models: ["gw-1"] },
+    ],
+  }
+
+  it("is unspecified by default, and says what that means", () => {
+    // The shipped state has to be the one that needs no thought: a dispatch that names no
+    // model starts on the dispatching session's model. A concrete model first in the list
+    // would read as a recommendation, and every untouched profile would be moved onto it.
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} models={CATALOG} />)
+    expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain(t("taskModelInherit"))
+    expect(hintIn(t("taskModelLabel"))).toBe(t("taskModelHint"))
+  })
+
+  it("offers every route the Host can reach, and writes both halves", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} models={CATALOG} />)
+
+    fireEvent.click(screen.getByLabelText(t("taskModelLabel")))
+    const menu = within(screen.getByRole("menu"))
+    expect(menu.getByRole("menuitem", { name: "deepseek-account/deepseek-reasoner" })).toBeTruthy()
+    expect(menu.getByRole("menuitem", { name: "codearts/gw-1" })).toBeTruthy()
+
+    fireEvent.click(menu.getByRole("menuitem", { name: "codearts/gw-1" }))
+    // Both halves, provider first: a model id is never configured under the previous
+    // provider, not even for the moment between two writes.
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("taskModelProvider", "codearts"))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("taskModel", "gw-1"))
+    expect(read()).toMatchObject({ taskModelProvider: "codearts", taskModel: "gw-1" })
+  })
+
+  it("clears both halves when unspecified is chosen again", async () => {
+    const { form, read } = configForm("task/", true, "", "hide", "container", "default", "", [], [], "codearts", "gw-1")
+    render(<PluginConfigCard form={form} models={CATALOG} />)
+    expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain("codearts/gw-1")
+
+    fireEvent.click(screen.getByLabelText(t("taskModelLabel")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("taskModelInherit") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("taskModelProvider", ""))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("taskModel", ""))
+    expect(read()).toMatchObject({ taskModelProvider: "", taskModel: "" })
+  })
+
+  it("keeps a configured route the catalog no longer carries, rather than erasing it", async () => {
+    // A provider that was uninstalled still has to be visible: it is what the
+    // configuration says, and a row that showed "unspecified" instead would make the next
+    // save drop a setting nobody touched.
+    const { form } = configForm("task/", true, "", "hide", "container", "default", "", [], [], "uninstalled", "gone")
+    render(<PluginConfigCard form={form} models={CATALOG} />)
+    expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain("uninstalled/gone")
+  })
+
+  it("says so when the catalog cannot be read, and still offers unspecified", () => {
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} models={{ providers: [] }} />)
+    expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain(t("taskModelInherit"))
+    fireEvent.click(screen.getByLabelText(t("taskModelLabel")))
+    // The only choice is "unspecified", which is a real answer rather than an empty menu.
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem")).toHaveLength(1)
+  })
+
+  it("asks the Host for the catalog when the shell did not hand one in", async () => {
+    const { form } = configForm()
+    const loadModels = vi.fn(async () => CATALOG)
+    render(<PluginConfigCard form={form} loadModels={loadModels} />)
+    await waitFor(() => expect(loadModels).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByLabelText(t("taskModelLabel")))
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "deepseek-account/deepseek-chat" })).toBeTruthy()
+  })
+
+  it("asks the Host once per attempt, even when the loader is an inline arrow", async () => {
+    // The flicker this pins: `loadModels={() => api.models()}` makes a new function on
+    // every render, so listing it as an effect dependency re-ran the read on every render.
+    // Setting the loading state caused the next render, which produced the next function -
+    // the row and everything below it flickered, and the Host was asked repeatedly for one
+    // menu. Re-rendering the card must not re-ask.
+    const { form } = configForm()
+    let calls = 0
+    const { rerender } = render(<PluginConfigCard form={form} loadModels={() => { calls += 1; return Promise.resolve(CATALOG) }} />)
+    await waitFor(() => expect(calls).toBe(1))
+
+    // Same unstable shape as the caller above, and several renders of it.
+    for (let i = 0; i < 3; i += 1) {
+      rerender(<PluginConfigCard form={form} loadModels={() => { calls += 1; return Promise.resolve(CATALOG) }} />)
+    }
+    await waitFor(() => expect(screen.getByLabelText(t("taskModelLabel")).getAttribute("aria-busy")).toBe("false"))
+    expect(calls).toBe(1)
+  })
+
+  it("says the list is still being read, rather than showing it as empty", async () => {
+    // The Host walks every provider before answering, which takes seconds on a real
+    // deployment. Saying "Not specified" for that whole wait reads as "this deployment
+    // has no models", which is the wrong conclusion and the one a reader draws fastest.
+    let release: (value: typeof CATALOG) => void = () => {}
+    const pending = new Promise<typeof CATALOG>((resolve) => { release = resolve })
+    const { form } = configForm()
+    render(<PluginConfigCard form={form} loadModels={() => pending} />)
+
+    const row = () => screen.getByLabelText(t("taskModelLabel"))
+    expect(row().textContent).toContain(t("taskModelLoading"))
+    expect(row().getAttribute("aria-busy")).toBe("true")
+    // The note under the label says the same thing, so the reason is on screen and not
+    // only in the control's value.
+    expect(hintIn(t("taskModelLabel"))).toBe(t("taskModelLoadingHint"))
+
+    // The menu says it too, instead of opening onto a single "unspecified" row.
+    fireEvent.click(row())
+    expect(within(screen.getByRole("menu")).getByText(t("taskModelLoadingMenu"))).toBeTruthy()
+    // "Unspecified" stays live: it is the value in force and the one a reader keeping the
+    // default needs. Every other row waits for its answer.
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("taskModelInherit") })).toHaveProperty("disabled", false)
+
+    release!(CATALOG)
+    await waitFor(() => expect(row().getAttribute("aria-busy")).toBe("false"))
+    expect(row().textContent).not.toContain(t("taskModelLoading"))
+  })
+
+  it("offers a retry when the read failed, and asks the Host again", async () => {
+    const { form } = configForm()
+    const loadModels = vi.fn()
+      .mockRejectedValueOnce(new Error("gateway timeout"))
+      .mockResolvedValue(CATALOG)
+    render(<PluginConfigCard form={form} loadModels={loadModels} />)
+
+    await waitFor(() => expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain(t("taskModelUnavailable")))
+    fireEvent.click(screen.getByLabelText(t("taskModelLabel")))
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("button", { name: t("taskModelRetry") }))
+
+    // A plain second call: the Host keeps no catalog between reads, so a retry has nothing
+    // to bypass and takes no argument saying it wants to.
+    await waitFor(() => expect(loadModels).toHaveBeenCalledTimes(2))
+    expect(loadModels).toHaveBeenLastCalledWith()
+    await waitFor(() => expect(screen.getByLabelText(t("taskModelLabel")).textContent).not.toContain(t("taskModelUnavailable")))
   })
 })
 

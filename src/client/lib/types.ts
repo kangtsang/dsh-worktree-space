@@ -375,7 +375,7 @@ export interface TaskPreference {
   archiveDocumentsStrategy?: ArchiveStrategy
   /** The root the `custom` strategy files into, empty when none is set. */
   archiveDocumentsDirectory: string
-  /** `show` when the finish offers the two experimental agent entries, `hide` otherwise. */
+  /** `show` when the finish offers the two agent entries, `hide` otherwise. */
   handoffEntry: string
   /**
    * `on` when the sessions that a finish hands an agent are opened at the container root

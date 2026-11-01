@@ -7,6 +7,47 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.3.9 — 2026-11-02
+
+派单时可以指定任务会话使用的模型；任务会话的模型出故障、自己恢复不了时，队员可以给它换一个再唤醒继续干。
+
+### 新增
+
+- **派单时指定模型。** `wts_worktree_space` 的 `create` 与 `dispatch` 增加 `model` 参数（形如
+  `provider/model`）与可选的 `reasoningEffort`。任务会话用哪个模型按这个顺序决定：**派单时指定的
+  `model`** → **插件配置里的「任务会话模型」** → **派单会话当前使用的模型**。前两条都没指定时就是
+  默认行为，不需要配置任何东西。
+
+  指定了宿主用不了的模型不会静默退回：会话照常开起、活照常交出去，答复里带一条警告，写明实际可用的模型。
+
+- **插件配置新增「任务会话模型」。** 选项就是宿主当前能用的模型列表，默认「不指定」。读取时先显示
+  「正在读取模型列表」而不是空的「不指定」——后者会被读成「这个部署没有模型」；读取失败时给出重试。
+
+- **`wts_session_tool` 新增 `model` 动作。** 不带参数时返回该会话当前的模型与宿主能用的全部模型；
+  带上 `provider/model` 就切换，**会话若已离线会先自动唤醒**，所以「换模型 + 继续干」是一次调用。
+  换的模型记在会话自己的日志里，重启后仍然有效。
+
+  只有**派出这个任务的会话**能改它。队员之间互相改、或者队员反过来改队长的，都会被拒绝（`E4017`）。
+
+### 变更
+
+- **交给 agent 的两个入口不再是「实验性」。** 结束任务对话框里的提示条、配置项名称里的括注、
+  文档里的 Beta 说明一并去掉；配置项改名为「交由 agent 解决冲突入口」。
+- **侧边栏面板入口的配置项改名为「插件槽位入口」**，与它实际控制的东西一致。
+- **README 新增「快速开始」章节**，用三步走通一次完整任务；章节顺序调整为按使用顺序阅读，
+  「插件配置」与「权限与失败边界」移到操作日志之前。
+
+### 修复
+
+- **配置卡片改选项时整行闪烁。** 读取模型列表的函数被当作 effect 依赖，而调用方每次都传一个新的
+  内联函数，于是每次渲染都重新发起请求、重新进入加载状态，形成循环。现在只按会话的实际状态变化读取。
+- **模型目录读取会把宿主整个打挂。** `llm.listModels()` 是异步方法，未 `await` 的调用抛出的拒绝
+  逃出了 `try/catch`，在真实宿主上（43 个 provider 中有 41 个没有适配器）变成未处理拒绝。现在逐个
+  provider `await` 并各自兜错，另加单 provider 超时，某个适配器挂起只影响它自己那一行。
+- **派单返回值通不过宿主的输出校验。** 返回值里带了 `model` / `modelSource`，而声明的输出 schema
+  没有这两个属性（`additionalProperties: false`），宿主的校验会**丢掉整个结果**——任务空间、分支、
+  会话都已创建，调用方却只拿到一句 schema 报错。
+
 ## 1.3.8 — 2026-10-28
 
 任务空间的两个工具改为按会话装载，用不到的会话不再为它们付出常驻开销。
@@ -294,6 +335,65 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.3.9 — 2026-11-02
+
+A dispatch can name the model its task session runs on, and a member whose model fails can
+be moved onto another one and woken up to carry on.
+
+### Added
+
+- **A dispatch can name a model.** `create` and `dispatch` on `wts_worktree_space` take a
+  `model` argument (`provider/model`) plus an optional `reasoningEffort`. The model a task
+  session starts on is decided in this order: **the `model` named on the dispatch** → **the
+  "task session model" in the plugin configuration** → **the model the dispatching session
+  is using**. With neither of the first two set, that last one is the default and needs no
+  configuration at all.
+
+  A model the host cannot route to is not swapped for the inherited one in silence: the
+  session is still opened and the work still handed over, and the answer carries a warning
+  naming the routes that do exist.
+
+- **A "task session model" row in the plugin configuration.** Its options are the models
+  the host can reach right now, and it defaults to "not specified". While the list is being
+  read it says "reading the model list" rather than an empty "not specified" — the latter
+  reads as "this deployment has no models" — and offers a retry when the read failed.
+
+- **A `model` action on `wts_session_tool`.** With no argument it reports the session's
+  current model and every model the host can reach; with `provider/model` it switches,
+  **resuming the session first when it is offline**, so switching and continuing is one
+  call. The choice is recorded on the session's own log and survives a restart.
+
+  Only the session that dispatched a task may change it. A member moving its leader, or two
+  members moving each other, are refused (`E4017`).
+
+### Changed
+
+- **The two entries that hand work to an agent are no longer "experimental".** The notice in
+  the finish dialog, the parenthetical in the setting's name and the Beta notes in the docs
+  are gone; the setting is now "agent handoff entry".
+- **The sidebar panel row's setting is renamed to "plugin slot entry"**, which is what it
+  controls.
+- **The README gains a "quick start" chapter** walking one complete task in three steps, and
+  the chapters are ordered the way they are read: "plugin configuration" and "permissions
+  and failure boundaries" now sit before the operation log.
+
+### Fixed
+
+- **Changing an option in the configuration card made the row flicker.** The model-list
+  reader was listed as an effect dependency while the caller passed a fresh inline function
+  each render, so every render looked like a new request, re-entered the loading state and
+  rendered again. It now reads only when the session's own state changes.
+- **Reading the model catalog could take the whole host down.** `llm.listModels()` is async,
+  and the rejection from an un-awaited call escaped its `try/catch`; on a real host — 41 of
+  43 providers have no adapter — it became an unhandled rejection. Each provider is now
+  awaited inside its own guard, with a per-provider timeout so a hung adapter costs its own
+  row and nothing else.
+- **A dispatch's result failed the host's output validation.** The value carried `model` /
+  `modelSource` while the declared output schema did not allow them
+  (`additionalProperties: false`), and the host discards the **whole** result over one
+  undeclared property — the task space, the branch and the session had all been created,
+  and the caller saw only a schema error.
 
 ## 1.3.8 — 2026-10-28
 

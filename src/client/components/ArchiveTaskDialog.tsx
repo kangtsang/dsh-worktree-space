@@ -8,7 +8,6 @@ import { hostWarningText } from "../lib/host-messages"
 import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/documents"
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
-import { BetaNotice } from "./BetaNotice"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions, SessionTarget } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -1155,11 +1154,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
               {shownSessions.length > 0 ? <p className="dws-finish-handoff-note"><AlertCircle size={13} aria-hidden="true" /><span>{t("finishHandoffScene")}</span></p> : null}
             </> : null}
             {authorizing ? <p className="dws-finish-handoff-hint" role="status"><Loader2 size={14} className="dws-spin" aria-hidden="true" /> {t("finishHandoffAuthorizing")}</p> : null}
-            {/* Handing work to an agent is the part of this that is still being worked
-                out, and this panel is where that is said rather than the page. It is said
-                only where the entries it describes are offered: the notice explains them,
-                so it has nothing to explain on a Host that hides them. */}
-            {handoffEntry ? <BetaNotice /> : null}
             {handoffError !== "" ? <p className="dws-finish-error">{format(t("finishHandoffFailed"), { error: handoffError })}</p> : null}
           </div> : null}
           {result === null && plan === null && loadError === "" ? <div className="dws-dialog-loading" role="status">

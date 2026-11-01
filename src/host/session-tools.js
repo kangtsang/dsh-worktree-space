@@ -40,6 +40,14 @@ import { markSessionReported, readTaskMetadata, taskSessionsOf } from './task/sh
 import { PLUGIN_ROOT, SOURCE_TASKS_DIR, readSourceTaskIndex } from './task/source-index.js'
 import { TASK_SPACE_WALK_LIMIT, taskSpaceAbove } from './task/space-above.js'
 import { withSessionTurn } from './session-turn.js'
+import {
+  applyRoute,
+  currentSelectionOf,
+  describeRoutes,
+  modelCatalogOf,
+  routeInCatalog,
+  selectionOf,
+} from './task/session-model.js'
 
 /** How many messages a read returns by default, and at most. */
 const DEFAULT_READ_LIMIT = 20
@@ -281,6 +289,49 @@ async function reachOf(ctx, sessionId, agent, exec) {
     inRecordAsLeader: named.some((entry) => entry.role === 'leader'),
     inSourceCheckout: isSourceCheckoutOf(callerSpace.metadata, targetCwd),
   }
+}
+
+/**
+ * Whether the caller leads the task this target works in, and the target is its member.
+ *
+ * **Why this reads the target's record and not the caller's.** The other direction in
+ * this file — {@link reachOf} — starts from the caller's own task space, because a
+ * *member* works inside one and can read the record that names both ends. A leader does
+ * not: it works in the source checkout, outside every task space, which is exactly why
+ * the record keeps a copy of itself under the source root. So the question "may I move
+ * this member's model" is answered from the record that describes the member's own task
+ * space, and both ends are checked in it:
+ *
+ *   - the **caller** is named there as `leader` (or is the target itself, for the one
+ *     case where a session opened its own task space and dispatched into it);
+ *   - the **target** is named there as `task` or `handoff`.
+ *
+ * Checking both is what makes the reach directional, the same way cancellation is: a
+ * member can read the leader's id out of the same record, and without this it could move
+ * the model of the session it reports to — or of a sibling in the same task space. Neither
+ * is a decision a member was given.
+ *
+ * A record written before the roles existed answers `task` for every entry, so the
+ * target's half still holds; the caller's half then fails, because nothing in it is
+ * spelled `leader`. That is the conservative direction and it is the right one: on such a
+ * record this plugin genuinely cannot tell a leader from a member, and moving a model is
+ * not a change to guess at.
+ * @param sessionId - the target session.
+ * @param targetCwd - the target's working directory, live or persisted.
+ * @param callerSessionId - the session making the call.
+ * @returns whether the caller leads this target's task.
+ */
+async function callerLeadsMember(sessionId, targetCwd, callerSessionId) {
+  if (typeof callerSessionId !== 'string' || callerSessionId === '') return false
+  const space = await taskSpaceAbove(targetCwd)
+  if (space === undefined) return false
+  const named = taskSessionsOf(space.metadata)
+  const target = named.find((entry) => entry.sessionId === sessionId)
+  if (target === undefined) return false
+  if (target.role !== 'task' && target.role !== 'handoff') return false
+  const caller = named.find((entry) => entry.sessionId === callerSessionId)
+  if (caller === undefined) return false
+  return caller.role === 'leader'
 }
 
 /**
@@ -2117,6 +2168,168 @@ function sessionCancel(ctx) {
   }
 }
 
+/**
+ * `wts_session_tool model` — what a member is running on, and how to move it.
+ *
+ * One action for both halves, because they are the same question asked twice: called
+ * without a model it answers what the session is on and what it could be moved to; called
+ * with one it moves it. Two actions would make a leader that does not know the spelling
+ * of a model id read one action to find it and then call another to use it, and the second
+ * call is the one that matters.
+ *
+ * **Why a leader needs this at all.** A dispatched task is one long turn, and a provider
+ * that goes down mid-turn takes that turn with it. The member cannot recover itself — it
+ * is the thing that is failing — and the leader is the only session that knows the task
+ * should carry on. So the leader puts the member on a route that works and wakes it, and
+ * the work continues from where it stopped.
+ *
+ * **Why it can wake the session.** A model failure is frequently the thing that took the
+ * session offline in the first place: after a host restart, or after the agent was
+ * disposed, there is no live agent to write a selection to. `resume` is therefore part of
+ * the switch rather than a step the caller has to know to take first, and it is what makes
+ * "switch and continue" one call. A resume that fails is reported and the switch is not
+ * attempted, because a selection written to a session that is not running has nothing to
+ * read it.
+ *
+ * The selection is written durably, so it survives a restart, and the route is asserted on
+ * the member's next request — see `task/session-model.js` for why both, and for why the
+ * controller's own `selectModel` RPC is not used here (it would move the deployment's
+ * default model for every new session, which is not this caller's decision to make).
+ * @param ctx - the host plugin context.
+ * @returns the registration disposer.
+ */
+function sessionModel(ctx) {
+  return {
+    render: (_args, value) => {
+      if (value.offered !== true || value.reason !== '') return [{ type: 'text', text: value.reason }]
+      const lines = []
+      if (value.changed === true) {
+        lines.push(`moved ${value.sessionId} from ${value.previous ?? '(unknown)'} to ${value.model}`)
+      } else {
+        lines.push(`${value.sessionId} runs on ${value.model ?? '(unknown)'}`)
+      }
+      if (value.resumed === true) lines.push('the session was offline and has been resumed, so it can continue')
+      if (Array.isArray(value.routes) && value.routes.length > 0 && value.changed !== true) {
+        lines.push('routes this host can reach:')
+        for (const route of value.routes.slice(0, 40)) lines.push(`  ${route}`)
+      }
+      if (typeof value.note === 'string' && value.note !== '') lines.push(value.note)
+      return [{ type: 'text', text: lines.join('\n') }]
+    },
+    async execute(args, exec) {
+      const sessionId = requiredString(args.sessionId, 'sessionId', 'the id wts_session_tool find answered with')
+      const agents = agentsOf(ctx)
+      if (agents === undefined) return refusal(NO_AGENTS)
+      const callerSessionId = sessionIdOf(exec?.agent)
+
+      // The target's directory, needed for the direction test before the target is
+      // touched: the record that says who leads this task lives in its task space.
+      let agent = safely(() => agents.get(sessionId))
+      const liveCwd = typeof agent?.session?.header?.cwd === 'string' ? agent.session.header.cwd : ''
+      const targetCwd = liveCwd !== '' ? liveCwd : await persistedDirectory(ctx, sessionId)
+
+      // The one gate this action has, and it is directional: a leader moves its own
+      // member's model, and a member moves neither its leader's nor a sibling's. Reading
+      // is not gated the same way - asking what a session runs on is the same reach as
+      // `status` - but a *change* is a decision about someone else's session.
+      const wanted = typeof args.model === 'string' && args.model.trim() !== '' ? args.model.trim() : ''
+      const callerLeads = await callerLeadsMember(sessionId, targetCwd, callerSessionId)
+      if (wanted !== '' && !callerLeads) {
+        return unavailable(sessionId, `${JSON.stringify(sessionId)} is not a member of a task this session leads, so its `
+          + 'model is not this call\'s to change; a dispatched session may only be moved by the session that dispatched it '
+          + '(E4017)')
+      }
+      if (!(await sessionInScope(ctx, sessionId, agent, exec)) && !callerLeads) {
+        return unavailable(sessionId, outOfScopeReason(sessionId))
+      }
+
+      // What it is on now, read before anything moves so the answer can name both ends.
+      const before = agent !== undefined && agent !== null && typeof agent.session === 'object'
+        ? currentSelectionOf(ctx, agent.session)
+        : undefined
+
+      // No model named: this is the question "what is it on, and what could it be on".
+      if (wanted === '') {
+        const catalog = await modelCatalogOf(ctx)
+        const routes = []
+        for (const group of catalog.providers) for (const model of group.models) routes.push(`${group.provider}/${model}`)
+        const current = before === undefined ? '' : `${before.provider}/${before.model}`
+        return asJson({
+          offered: true,
+          sessionId,
+          reason: '',
+          changed: false,
+          live: agent !== undefined && agent !== null,
+          model: current === '' ? undefined : current,
+          ...(before?.reasoningEffort === undefined ? {} : { reasoningEffort: before.reasoningEffort }),
+          routes,
+          canChange: callerLeads,
+          summary: current === ''
+            ? `session ${sessionId} has no recorded model yet; ${routes.length} route${routes.length === 1 ? '' : 's'} available.`
+            : `session ${sessionId} runs on ${current}; ${routes.length} route${routes.length === 1 ? '' : 's'} available.`,
+        })
+      }
+
+      // A route the host cannot reach is refused before anything is written: the session
+      // would fail at its next request with a provider error, and the leader would have no
+      // way to connect that back to the call it made.
+      const at = wanted.indexOf('/')
+      const provider = at < 0 ? '' : wanted.slice(0, at).trim()
+      const model = at < 0 ? '' : wanted.slice(at + 1).trim()
+      if (provider === '' || model === '') {
+        throw new Error(`E4016: model must be "provider/model" (got ${JSON.stringify(wanted)}); `
+          + 'call this action without `model` to list the routes this host can reach')
+      }
+      const catalog = await modelCatalogOf(ctx)
+      if (!routeInCatalog(catalog, provider, model)) {
+        return unavailable(sessionId, `${wanted} is not a route this host can reach; available: ${describeRoutes(catalog)}`)
+      }
+      const effort = typeof args.reasoningEffort === 'string' && args.reasoningEffort.trim() !== ''
+        ? args.reasoningEffort.trim()
+        : undefined
+      const selection = selectionOf(provider, model, effort)
+
+      // Offline: resume first, because there is nothing to write a selection to. This is
+      // the ordinary case after a provider failure, not an edge one - the failure is often
+      // what disposed the agent - so it is folded into the call rather than pushed back at
+      // the caller as another step to get right.
+      let resumed = false
+      if (agent === undefined || agent === null) {
+        if (typeof agents.resume !== 'function') return refusal(NO_RESUME)
+        const handle = await safelyAsync(() => agents.resume({ resumeSessionId: sessionId }))
+        if (handle === undefined || handle.agent === undefined) {
+          return unavailable(sessionId, `session ${JSON.stringify(sessionId)} is offline and could not be resumed, so the `
+            + 'model could not be changed; it will keep the model it had when it comes back')
+        }
+        agent = handle.agent
+        resumed = true
+      }
+
+      const applied = applyRoute(ctx, agent, selection)
+      if (!applied.durable && !applied.live) {
+        return unavailable(sessionId, `the model could not be written to ${JSON.stringify(sessionId)}: this deployment `
+          + 'serves neither a session log nor a session controller selection')
+      }
+      const previous = before === undefined ? undefined : `${before.provider}/${before.model}`
+      return asJson({
+        offered: true,
+        sessionId,
+        reason: '',
+        changed: true,
+        live: true,
+        resumed,
+        model: `${provider}/${model}`,
+        ...(effort === undefined ? {} : { reasoningEffort: effort }),
+        ...(previous === undefined ? {} : { previous }),
+        note: applied.durable
+          ? 'the selection is recorded on the session and applies from its next request, so the session keeps it across a restart.'
+          : 'the selection applies to this session now but could not be recorded on its log, so a restart would lose it.',
+        summary: `session ${sessionId} moved to ${provider}/${model}${previous === undefined ? '' : ` (was ${previous})`}${resumed ? ', resumed from offline' : ''}.`,
+      })
+    },
+  }
+}
+
 /** The one name the eight session actions are served under. */
 export const SESSION_TOOL_NAME = 'wts_session_tool'
 
@@ -2134,7 +2347,7 @@ export const SESSION_TOOL_NAME = 'wts_session_tool'
  * session is never the answer. Everything else points at the skill.
  */
 const SESSION_DESCRIPTION = [
-  'Watch and steer the sessions a task runs in: find, status, read, send, create, resume or cancel, chosen by action. '
+  'Watch and steer the sessions a task runs in: find, status, read, send, create, resume, cancel or model, chosen by action. '
     + 'The session id is in the task\'s own record - wts_worktree_space list reports it, and so does '
     + '.worktree-space/worktree-space.json - so take it from there; find is the fallback for an id nobody wrote down. '
     + 'A dispatched session is NOT this session\'s child, so send_message cannot reach it.',
@@ -2199,8 +2412,8 @@ const SESSION_PARAMETERS = {
   action: {
     type: 'string',
     required: true,
-    enum: ['find', 'status', 'read', 'send', 'create', 'resume', 'cancel'],
-    description: 'find, status, read, send, create, resume or cancel.',
+    enum: ['find', 'status', 'read', 'send', 'create', 'resume', 'cancel', 'model'],
+    description: 'find, status, read, send, create, resume, cancel or model.',
   },
   sessionId: { type: 'string', description: 'Target session id. Required for every action except find and create.' },
   query: { type: 'string', description: '(find) Substring matched against the id, title and working directory (case-insensitive).' },
@@ -2227,6 +2440,8 @@ const SESSION_PARAMETERS = {
   keepInbox: { type: 'boolean', description: '(cancel) Keep queued and steering input instead of clearing it (default false).' },
   cause: { type: 'string', description: '(cancel) Short label for the kind of stopping this is; the why belongs in reason.' },
   reason: { type: 'string', description: '(cancel) REQUIRED: why this session is being stopped, in your own words.' },
+  model: { type: 'string', description: '(model) Route to move the session to, as "provider/model". Omit it and the action answers what the session is on and which routes this host can reach.' },
+  reasoningEffort: { type: 'string', description: '(model) Reasoning effort for the route named in `model`. Omit for the provider\'s own default.' },
 }
 
 /**
@@ -2248,6 +2463,7 @@ function sessionToolDefinition(ctx) {
     create: sessionCreate(ctx),
     resume: sessionResume(ctx),
     cancel: sessionCancel(ctx),
+    model: sessionModel(ctx),
   }
   return {
     name: SESSION_TOOL_NAME,
@@ -2265,7 +2481,7 @@ function sessionToolDefinition(ctx) {
       const handler = handlers[args?.action]
       if (handler === undefined) {
         return refusal(`${SESSION_TOOL_NAME}: no action named ${JSON.stringify(args?.action ?? '')}; `
-          + 'the action is one of find, status, read, send, create, resume or cancel')
+          + 'the action is one of find, status, read, send, create, resume, cancel or model')
       }
       return handler.execute(args, exec)
     },

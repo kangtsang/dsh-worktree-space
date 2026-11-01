@@ -138,6 +138,17 @@ export function createWorktreeApi(connection: ConnectionService) {
      * force. The write path is the configuration form itself.
      */
     preferences: (signal?: AbortSignal) => read<TaskPreference>("task.preference", {}, signal),
+    /**
+     * Every model route this Host can reach, grouped by provider.
+     *
+     * Its own call rather than a field on `preferences`, because it is the one expensive
+     * question here: the Host walks each provider's model list. Only the Plugins page's
+     * model row asks, so folding it into the preferences would make every create dialog
+     * pay for a catalog it never shows. A Host that cannot reach any provider answers
+     * with an empty list and the reasons, and the row says so rather than showing an
+     * empty menu.
+     */
+    models: (signal?: AbortSignal) => read<{ providers: Array<{ provider: string; models: string[] }>; default?: { provider: string; model: string }; notes: string[] }>("task.models", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
     createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string; deployTarget?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
     /**

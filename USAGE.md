@@ -99,7 +99,7 @@
 | 入口 | 在哪 | 打开什么 | 默认 |
 | --- | --- | --- | --- |
 | **侧边栏底部快捷入口** | 侧边栏底部的 **Worktree Space** | 以**对话框**打开管理页面 | 显示 |
-| **面板入口** | 侧边栏「新会话」下方的 **Worktree Space** 行 | 在**主区域整页**打开同一个管理页面 | 隐藏（在插件设置里打开） |
+| **插件槽位入口** | 侧边栏「新会话」下方的 **Worktree Space** 行 | 在**主区域整页**打开同一个管理页面 | 隐藏（在插件设置里打开） |
 | **会话里的按钮** | 空白会话输入框旁的插件图标（悬停提示「新建 Worktree Space」） | 直接打开**新建**对话框 | 只在当前会话是空白、且所在工作区能建任务空间时出现 |
 | **工作区列表的 `⋯` 菜单** | 某个工作区行的菜单 | **新建 Worktree Space**；确属任务空间的目录另有 **结束 Worktree Space** | 显示 |
 
@@ -406,7 +406,7 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 插件不代写提交。两条路：
 
 - 自己在各自的 worktree 里 `git add` / `git commit`（提交信息由读过这些改动的人来写）；
-- 或用 **交由 agent 提交**（实验性，见 7.6）。
+- 或用 **交由 agent 提交**（见 7.6）。
 
 处理完**点「继续结束任务」**；如果你是在对话框外面（终端或别的会话里）提交的，
 关掉再打开对话框 —— 它每次打开都会重读一遍。
@@ -467,11 +467,9 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 > 报告会留着：点了 **打开会话** 或者关掉对话框之后，再回来重打开，进度和报告都还在，
 > 你接着上次的地方继续。
 
-### 7.6 可选：把提交和冲突交给 agent（实验性）
+### 7.6 可选：把提交和冲突交给 agent
 
-> **Beta**：这两个入口的功能处于实验性验证阶段，行为可能继续调整。它们**默认显示**，
-> 想回到纯手工流程就把插件设置里的「交由 agent 解决冲突入口」设为「隐藏」。
-> 遇到问题请到 [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
+> 这两个入口**默认显示**，想回到纯手工流程就把插件设置里的「交由 agent 解决冲突入口」设为「隐藏」。
 
 结束任务对话框可以开一个 DSH agent 会话代为完成两件事：
 
@@ -798,6 +796,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `wts_session_tool create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
 | `wts_session_tool resume` | 把离线会话拉回在线，之后可直接 `send` / `read` |
 | `wts_session_tool cancel` | 中止当前回合，可选是否保留排队中的工作 |
+| `wts_session_tool model` | 看会话当前用哪个模型、这个宿主能用哪些模型；给一个 `"provider/model"` 就切换（会话若离线会先自动唤醒）。只有派出这个任务的会话能改 |
 
 ### 主要参数
 
@@ -810,6 +809,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `create` | `cwd`（绝对路径，任务空间）或 `workspaceId`、`prompt` |
 | `resume` | `sessionId`（必填） |
 | `cancel` | `sessionId`（必填）、`reason`（**必填**，自由文本；缺失或空白即拒）、`keepInbox`（默认 false，即清掉排队的工作）、`cause`（可选简短标签） |
+| `model` | `sessionId`（必填）、`model`（`"provider/model"`；不给就只回答当前模型与可用模型）、`reasoningEffort`（可选，随 `model` 一起生效） |
 
 ### 何时用哪个
 
@@ -1302,7 +1302,7 @@ task space move to "Ungrouped" and keep their transcripts.**
 
 - commit yourself with `git add` / `git commit` in each worktree (a commit message is best written by
   whoever read those changes);
-- or use **Hand the commits to an agent** (experimental, see 7.6).
+- or use **Hand the commits to an agent** (see 7.6).
 
 When it is done, press **Carry on finishing**. If you committed outside the dialog — in a terminal or
 another session — close it and open it again: every opening re-reads. **Force** works too: those changes
@@ -1373,12 +1373,10 @@ is disabled for the moment.
 > The report keeps: after **Open session** or after closing the dialog, coming back reopens it with the
 > progress and the report still there, so you carry on where you left off.
 
-### 7.6 Optional: handing the commits and the conflicts to an agent (experimental)
+### 7.6 Optional: handing the commits and the conflicts to an agent
 
-> **Beta**: these two entrances are experimental and their behaviour may still move. They **show by
-> default**; set "Handing conflicts and commits to an agent" to "hidden" in the plugin's settings to get
-> the purely guide route back. When something goes wrong, please report it at
-> [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
+> These two entrances **show by default**; set "Handing conflicts and commits to an agent" to "hidden"
+> in the plugin's settings to get the purely guide route back.
 
 The finish dialog can open a DSH agent session and have it do two things for you:
 
@@ -1733,6 +1731,7 @@ only channel through.
 | `wts_session_tool create` | Opens a new session in a directory you name (the task space), optionally handing it a self-contained prompt |
 | `wts_session_tool resume` | Brings an offline session back online, after which `send` / `read` work directly |
 | `wts_session_tool cancel` | Aborts the running turn, optionally keeping whatever work is queued |
+| `wts_session_tool model` | Reports which model a session is on and which models this host can reach; given a `"provider/model"` it switches the session (resuming it first when it is offline). Only the session that dispatched the task may change it |
 
 ### Their parameters
 
@@ -1745,6 +1744,7 @@ only channel through.
 | `create` | `cwd` (absolute path, the task space) or `workspaceId`, `prompt` |
 | `resume` | `sessionId` (required) |
 | `cancel` | `sessionId` (required), `reason` (**required**, free text; missing or blank is refused), `keepInbox` (false by default, meaning queued work is cleared), `cause` (an optional short label) |
+| `model` | `sessionId` (required), `model` (`"provider/model"`; omitted, the action only reports the current model and the available ones), `reasoningEffort` (optional, applies together with `model`) |
 
 ### Which to use when
 

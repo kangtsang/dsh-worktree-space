@@ -29,6 +29,16 @@ open, and the work is the user's to start.
 Task branches are local only. Pushing one to a remote is the user's own action:
 this plugin never writes to a remote, so never push from here.
 
+**Which model the session runs on** is decided in one order, and both ways of opening a
+session use it. `model` (with an optional `reasoningEffort`) on the call is the first
+choice — pass `"provider/model"` when this particular job needs a particular model, and
+`wts_session_tool model` with no argument lists the routes the host can reach. Failing
+that, the **Plugins page** setting "Task session model" applies to every session this
+plugin opens. Failing that, the session starts on **the model this conversation is
+using** — which is what happens when nobody has an opinion, and is the shipped default.
+A model this host cannot reach is not silently swapped for the inherited one: the
+dispatch still happens, and the answer carries a warning naming the routes that exist.
+
 
 ### Watching the member session (and correcting it)
 
@@ -81,6 +91,17 @@ it — so `wts_session_tool find` is the fallback for when it is not.
   one that is lost → and **read its last state before deciding what to send**.
   `wts_session_tool cancel` is the brake: it aborts the active turn, and `keepInbox`
   decides whether the queued work survives.
+- **When the model is what failed, move the session rather than restarting the work.**
+  A provider that goes down mid-turn takes the turn with it, and the member cannot
+  recover itself — it is the thing that is failing. `wts_session_tool model` puts it on
+  a route that works: called with no `model` it answers what the session is on and every
+  route this host can reach; called with one (`"provider/model"`) it switches the
+  session, and **resumes it first if it went offline**, so switching and continuing is
+  one call. The selection is written to the session's own log, so the session keeps it
+  across a restart. Only the session that dispatched a member may move it: a member
+  moving its leader, or a sibling, is refused (E4017) — that decision belongs to the
+  session that asked for the work. The same reach is what `wts_worktree_space`'s `model`
+  argument uses when a dispatch picks a model up front.
 
 Do not poll in a loop, and do not steer or cancel on a timer: look at the real state
 when something suggests you should, then decide. That judgement is yours, not a

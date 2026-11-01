@@ -359,6 +359,16 @@
   .dws-plugin-config-item { display: flex; width: 100%; align-items: center; gap: 12px; border: 0; border-radius: 8px; padding: 7px 10px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; white-space: nowrap; cursor: pointer; }
   .dws-plugin-config-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
   .dws-plugin-config-item-label { flex: 1; }
+  /* The row that says a list is still being read, inside the menu it will fill. */
+  .dws-plugin-config-loading { display: flex; align-items: center; gap: 8px; padding: 7px 10px; color: var(--wt-muted); font-size: 13px; line-height: 20px; }
+  .dws-plugin-config-loading > svg { flex: none; }
+  .dws-plugin-config-retry { margin-left: auto; border: 0; border-radius: 6px; padding: 2px 8px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  .dws-plugin-config-retry:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  /* A disabled menu row is one whose answer has not arrived: dimmed, not clickable, but
+     still read as an item rather than vanishing - a list that changes length while it
+     loads is harder to aim at than one whose rows are greyed. */
+  .dws-plugin-config-item:disabled { opacity: .45; cursor: default; }
+  .dws-plugin-config-item:disabled:hover { background: 0 0; }
   .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }
   /* The one row whose value is typed rather than picked. */
   .dws-plugin-config-field:has(.dws-plugin-config-text) { flex: 1; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
@@ -733,11 +743,6 @@
      pending state here - and goes quiet once it stops. */
   .dws-finish-handoff-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--wt-warn); }
   .dws-finish-handoff-state.is-idle { color: var(--wt-muted); }
-  /* The beta notice: it belongs to handing work to an agent, so it lives in the panel
-     that reports those sessions - not on the page that manages worktrees. */
-  .dws-beta-notice { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
-  .dws-beta-notice a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-  .dws-beta-badge { flex: none; padding: 0 6px; border: 1px solid var(--wt-warn); border-radius: 999px; color: var(--wt-warn); font-size: 11px; line-height: 16px; letter-spacing: .02em; }
   /* The other half of that small print, in the same size: what opening a session does to
      the dialog it was opened from. */
   .dws-finish-handoff-note { display: flex; align-items: flex-start; gap: 6px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }

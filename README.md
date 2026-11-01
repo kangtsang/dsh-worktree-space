@@ -6,7 +6,7 @@
 
 Worktree Space：一任务一空间，工作多路并行。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。建空间时可以定下**这个任务要不要部署验收**，勾了它，一条通过的冒烟记录就是收尾合并的闸门。任务结束时把任务分支合并回目标分支、移除 worktree，并把空间里遗留的文档归档到指定目录；也可以把未处理的提交和合并冲突交给一个 agent 会话处理。
 
-两条路各有侧重，可以只看其中一条：**在面板上手动点完全程**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[高级用法](#-高级用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
+两条路各有侧重，可以只看其中一条：**在面板上手动点完全程**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[进阶用法](#-进阶用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 ![License](https://img.shields.io/badge/license-MIT-22c55e)
@@ -17,22 +17,18 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 
 📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV17Mn56dECu)
 
-> [!IMPORTANT]
-> **Beta（实验性）**：把提交和合并冲突交给 agent 处理的功能处于实验性验证阶段，行为可能继续调整；它**默认
-> 显示**，如需隐藏这两个入口，将插件配置里的「交由 agent 解决冲突入口」设为「隐藏」（见[实验性一节](#-实验性把提交与冲突交给-agent)）；
-> 本文档其余部分描述的是不借助 agent 的标准流程。遇到问题请在
-> [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 里反馈。
-
 ## 📑 目录
 
 - [🚀 安装](#-安装)
+- [🔧 环境要求](#-环境要求)
+- [⚡ 快速开始](#-快速开始)
 - [✨ 功能](#-功能)
 - [📂 任务目录结构](#-任务目录结构)
-- [🔧 环境要求](#-环境要求)
+- [🛠️ 使用](#-使用)　**面板手动流程**：[➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🚢 部署验收](#-部署验收) · [🏁 结束](#-结束-worktree-space)（[组合行为](#各选项组合的行为)）
+- [🤖 进阶用法：让 Agent 全自动编排](#-进阶用法让-agent-全自动编排)
+- [🤖 把提交与冲突交给 agent](#-把提交与冲突交给-agent)
+- [⚙️ 插件配置](#-插件配置)
 - [🔐 权限与失败边界](#-权限与失败边界)
-- [🛠️ 使用](#-使用)　**面板手动流程**：[⚙️ 配置](#-配置) · [➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🚢 部署验收](#-部署验收) · [🏁 结束](#-结束-worktree-space)（[组合行为](#各选项组合的行为)）
-- [🤖 高级用法：让 Agent 全自动编排](#-高级用法让-agent-全自动编排)
-- [🤖 实验性：把提交与冲突交给 agent](#-实验性把提交与冲突交给-agent)
 - [📝 操作日志](#-操作日志)
 - [📄 配套文档](#-配套文档)
 
@@ -48,6 +44,58 @@ dsh plugin --profile web add dsh-worktree-space
 
 **桌面端在插件管理页里操作**：侧边栏 → **插件**，在「插件包名」填 `dsh-worktree-space`，点「安装」；
 卸载时在插件列表里点开 **Worktree Space**，进「插件详情」页，右上方点「卸载」按钮。
+
+## 🔧 环境要求
+
+- [Node.js](https://nodejs.org) `>=22.19.0`
+- [Git](https://git-scm.com)：所有 worktree 与分支操作都由它执行，不随插件分发，需在 `PATH` 上
+- DSH `>=0.2.0-rc.1 <0.3.0-0`，即 0.2.x（下界自 `0.2.0-rc.1` 起，不含 0.3.0 线的预发布）
+- 客户端：**网页端与桌面端均可用**；桌面端由人工验证，命令行矩阵未覆盖
+
+**五个官方版本逐个实测通过**：`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`、`0.2.1-rc.3`，
+每个版本都用**该版本自己**的 DSH CLI 在一次性 profile 里跑通了安装、启动、卸载、回滚。这套验证覆盖的是
+**命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。逐条记录见
+[`docs/store-evidence.md`](docs/store-evidence.md)。
+
+DSH 会**强制校验**清单里 `peerDependencies` 声明的 DSH 版本范围：运行时的版本不满足，就在安装前或启动时
+拒绝加载，并给出 `dsh plugin allow-version` 的精确豁免命令。`engines.dsh` 之类的字段只是声明，不会阻止加载。
+实测范围之外的版本一律按未知处理，不拿宽泛范围冒充证据；遇到版本相关的问题请到
+[Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
+
+## ⚡ 快速开始
+
+一次完整任务的最短路径：在仓库工作区里与 Agent 确认需求，由它在任务空间内完成修改，
+你验收后合并回各仓库当前检出的分支。全程无需手动执行 git 命令。
+
+### 第一步：在仓库工作区与 Agent 理清需求
+
+先在本仓库的工作区会话中说明任务范围：涉及哪些仓库、要达到什么效果、以什么标准判定完成。
+**这一步必须早于任何 git 操作**——需求未定时创建任务空间，中途变更方向意味着已建的 worktree
+与已产生的提交都要重来。
+
+需求明确后，Agent 会逐项确认任务空间的位置、参与的仓库、起点分支以及是否启用部署验收。
+其中**是否部署验收**在创建任务空间时即固定，事后无法追加或更改，须在此步一并确定。
+
+### 第二步：发送提示词，创建任务空间并派单
+
+需求确定后，向该会话发送：
+
+> 创建一个任务空间并派单，将已确定好的需求通过 worktree 方式检出并执行修改实现；
+> 修改完成后通知我验收，验收通过后再合并。
+
+Agent 据此创建任务空间——每个参与仓库一份 worktree，共用一条任务分支——并开启一个任务会话，
+把需求作为任务书交付。任务会话在独立目录中修改代码，不影响各仓库当前的检出。
+
+### 第三步：验收后提交合并
+
+任务会话完成修改后通知你。**先验收**：在所给 worktree 中确认实现是否符合需求、测试是否通过。
+
+验收通过后，回到派单的会话发送：
+
+> 现在验收通过，请合并到各仓库当前检出分支，并删除任务空间。
+
+Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分支。若某个仓库停在冲突或未提交的改动上，
+它**不会强制继续**，而是指出受阻的仓库，待对应会话处理后再合并。
 
 ## ✨ 功能
 
@@ -148,93 +196,13 @@ dsh plugin --profile web add dsh-worktree-space
 那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录和操作日志那个文件（见[操作日志](#-操作日志)）。删掉 worktree 不会删除对应的 Git
 分支；结束任务会先把分支合并回去，再删 worktree。
 
-## 🔧 环境要求
-
-- [Node.js](https://nodejs.org) `>=22.19.0`
-- [Git](https://git-scm.com)：所有 worktree 与分支操作都由它执行，不随插件分发，需在 `PATH` 上
-- DSH `>=0.2.0-rc.1 <0.3.0-0`，即 0.2.x（下界自 `0.2.0-rc.1` 起，不含 0.3.0 线的预发布）
-- 客户端：**网页端与桌面端均可用**；桌面端由人工验证，命令行矩阵未覆盖
-
-**五个官方版本逐个实测通过**：`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`、`0.2.1-rc.3`，
-每个版本都用**该版本自己**的 DSH CLI 在一次性 profile 里跑通了安装、启动、卸载、回滚。这套验证覆盖的是
-**命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。逐条记录见
-[`docs/store-evidence.md`](docs/store-evidence.md)。
-
-DSH 会**强制校验**清单里 `peerDependencies` 声明的 DSH 版本范围：运行时的版本不满足，就在安装前或启动时
-拒绝加载，并给出 `dsh plugin allow-version` 的精确豁免命令。`engines.dsh` 之类的字段只是声明，不会阻止加载。
-实测范围之外的版本一律按未知处理，不拿宽泛范围冒充证据；遇到版本相关的问题请到
-[Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
-
-## 🔐 权限与失败边界
-
-本插件在运行时会读写文件、并调用 `git`；这两类权限就是它的功能本身，无法裁剪为零。运行期依赖都由 DSH
-profile 提供，不随插件分发 —— 安装本插件不会引入新的运行期第三方依赖，也不连接任何外部服务、不上报遥测。
-
-**权限一览：**
-
-| 权限 | 范围 |
-| --- | --- |
-| 文件读取 | 所选工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间与 Worktree Space 容器根下的记录文件；各 worktree 的 `.git` 标记文件；结束任务时为判断合并是否仍留冲突而读回变更文件的内容 |
-| 文件写入 | 只写任务空间与 Worktree Space 容器根下的文件，以及配置选定的归档目录（见[配置](#-配置)），结束时删除的是插件自己创建的 worktree 与文档；合并时另在**系统临时目录**里建一份临时检出，用完即删。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录 |
-| 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）；部署勾了时才另跑任务自己的入口脚本（`up` / `smoke`）。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下（见下表）；交给 agent 的提交由宿主里的那个会话自己执行 |
-| 操作日志 | 容器根下的 `worktree-space-log.jsonl`，**默认开启**：改动仓库状态的 `git` 命令、任何失败的 `git` 命令、每个操作的结论、每个错误与警告（带错误码）。可在插件设置里关掉，关掉不影响已有文件。**不含任何文件内容**，URL 里的凭据写入前抹掉；不发送到任何地方，不离开这台机器 |
-| 网络 | 无：插件自身不发任何 HTTP 请求，也不执行任何 `git push`；它发出的 `git` 子命令全是本地操作 |
-| 凭据 | 不读取、不保存、不转发；插件不接触密钥 |
-| 全局资源 | 不装全局包、不起常驻进程或服务、不写系统目录 |
-
-逐条说明（读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](docs/PERMISSIONS.md)；
-一次性 Profile 的安装、启动、卸载与回滚验收证据见 [docs/store-evidence.md](docs/store-evidence.md)。
-
-**失败边界（绝不静默）：**
-
-| 情形 | 行为 |
-| --- | --- |
-| 扫描目录数超过上限 | 不再抛错丢掉全部结果：停在上限处并提示哪些更深的仓库没看到，请提高上限或换一个更具体的工作区 |
-| 任一 `git` 命令失败 | 抛出 `git <参数> failed (exit N): <stderr>`，把 Git 自己的诊断原样带出 |
-| 结束任务时任务空间里还有会话在干活 | 拒绝整次收尾并点名那几个会话；先让它们停下来或结束它们 |
-| 结束任务时某仓库还有未提交的改动 | 停下该仓库（`force` 才丢弃）：`uncommitted work is waiting in <worktree>; commit it before the task can be finished`；插件**不代写提交**，其余仓库继续，结果里逐条报出 |
-| 合并已解决但没有提交 | `the merge in <worktree> is resolved but not committed`，现场原样保留 |
-| 解决后的文件里仍有冲突标记 | `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
-| 试合并撞上冲突 | 不自动 `merge --abort`，保留合并现场（`mergeSite` 与 `conflictedFiles`），待解决并提交后可继续 |
-| 真合并撞上期间的新提交 | 试合并通过后，真合并时目标分支出现新提交，插件撤销本次合并（`merge --abort`，分支恢复原状）并原样带出 Git 的诊断；worktree 与任务分支保留，再次点「继续结束任务」会重新试合并 |
-| 部署验收没通过就想合并 | 拒绝合并并说明缺什么（`up` 还是 `smoke`）；冒烟通过后直接重试即可 |
-| worktree 删除失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`，保留该 worktree 并报告，可用 `git worktree prune` 清理 |
-| 任务目录非空 | 保留目录与工作区注册，不强行删除 |
-| 无法确认的事实 | 在文档里写「未知」，不把「没有搜到」推断成「不访问」 |
-
 ## 🛠️ 使用
 
-本节是**面板手动流程**的简述：从配置、创建、干活、部署验收到结束任务，全程在界面上点完，
+本节是**面板手动流程**的简述：从创建、干活、部署验收到结束任务，全程在界面上点完，
 不需要「队长 / 队员」或工具调用那一套。每一步的完整说明、会遇到的异常与被拒之后怎么办，
-见 [《Worktree Space 使用指南》](USAGE.md)。
+见 [《Worktree Space 使用指南》](USAGE.md)。各项设置见[插件配置](#-插件配置)。
 另一条路 —— 让一个 Agent 用 `wts_worktree_space` 把整条链自动跑完 —— 见
-[高级用法：让 Agent 全自动编排](#-高级用法让-agent-全自动编排)。
-
-### ⚙️ 配置
-
-**在界面里改**（推荐）：侧边栏 →「插件」→ **Worktree Space** →「插件详情」页的配置区，和其它插件的配置在同一处，
-保存后立即生效，无需重启。也可以直接改配置文件：DSH 数据目录下 `profiles/<profile>/cordis.patch.yml`
-里这个插件的 `config:` 区块，改完重启 DSH 生效。
-
-| 设置 | 取值 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| 面板入口（「新会话」下方） | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
-| 侧边栏底部快捷入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
-| 交由 agent 解决冲突入口 | 显示 / 隐藏 | 显示 | 结束任务对话框里「交由 agent 提交」「交由 agent 解决冲突」两个**实验性**入口；隐藏时走标准流程：自己提交、自己解决冲突，再点继续结束任务 |
-| 交由 agent 处理冲突和提交的会话使用完全权限 | 关 / 开 | **关** | 打开后，这两个会话开在**任务空间**上并立即置为「完全权限」（`danger-full-access`）；**代价是该会话此后可以写到这台机器上 DSH 进程能写的任何位置**，不再逐次询问。只影响之后开起的会话，结束任务对话框里可以就地切换。 |
-| 操作日志 | 开 / 关 | **开** | 容器根下 `worktree-space-log.jsonl` 的开关。关掉只是不再写新记录，磁盘上已有的日志原样保留 |
-| 扫描深度 | 1–5 层 | 3 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
-| 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | 一次扫描最多读取的目录数；超了会停下来并提示哪些没看到 |
-| 工作区仓库扫描忽略目录 | 任意目录名列表 | 内置 25 个 | 扫描永远不会进入这些名字的目录。插件自带 25 个：各语言的依赖与编译输出目录（`node_modules`、`target`、`__pycache__`、`Pods` 等），加上插件自己的任务容器名 `worktree-space`、`dsh-worktree-space`。可以添加自己的，也可以把内置的放回来 —— **放回内置项需要二次确认**，因为代价落在下一次扫描上。名字不区分大小写；点右侧「编辑」打开对话框，可搜索、增删，保存后才写入配置 |
-| 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建对话框里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
-| Worktree Space 容器根目录 | 默认 / 指定目录 | **默认** | 新建任务空间默认放哪。**推荐用默认**：它按下面的规则从源码根推导，落在根工作空间的下一层，因此同一根工作区下的所有项目——无论各自埋得多深——都会落进同一个容器。若改用指定目录，而它与仓库目录没有公共祖先，agent 处理提交与冲突的会话需要手动提权 |
-| 指定 Worktree Space 容器根目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则按推荐规则推导。新建对话框里改动容器根并勾选「设为默认 Worktree Space 容器根目录」，点创建时把这两项一并写回 |
-| 归档文档位置 | 跟随容器根 / 指定目录 | **跟随容器根** | 遗留文档存到哪个根目录下；两档都在该根目录下再建一层 `<项目>/<任务名>-<YYYYMMDD-HHMMSS>`，时间戳是归档那一刻的本地时间，精确到秒。默认档收在容器根自己的 `archived-docs` 里，与任务空间建在哪一层无关 |
-| 指定归档目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则收在容器根的 `archived-docs` 里 |
-
-扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` **目录**就认定是
-仓库（`git` 的链接 worktree 里 `.git` 是文件，不重复计入）；`node_modules`、`dist`、`build`、`vendor` 等目录
-和隐藏目录会跳过（`.worktrees` 除外）。
+[进阶用法：让 Agent 全自动编排](#-进阶用法让-agent-全自动编排)。
 
 ### ➕ 创建 Worktree Space
 
@@ -321,7 +289,7 @@ DSH 实例的内存里，实例关闭时随之清空。
 按钮就一直不可用 —— 这些改动不是插件这一侧能写的，worktree 也不会带着它们被移除。在各自的 worktree 里
 `git add` 与 `git commit`（提交信息由你写），**关掉再打开对话框**（它会重读），那些仓库就不再拦着了。
 也可勾选 **强制**：放弃这些改动，它们随 worktree 一并丢弃。需要代为处理时用 **交由 agent 提交**
-（实验性，见[下一节](#-实验性把提交与冲突交给-agent)）。正处在未完成合并中的仓库不走这一步，那份交给第 3 步。
+（见[下一节](#-把提交与冲突交给-agent)）。正处在未完成合并中的仓库不走这一步，那份交给第 3 步。
 
 **2. 合并。先反着试一次，再正着合。** 真正的合并是**把任务分支合并进目标分支**（默认是该仓库源检出
 所在的分支），落点在**源仓库**。但在动目标分支之前，插件先在任务空间**自己的 worktree 里反着试一次**
@@ -337,7 +305,7 @@ worktree 里，可以就地处理。
 **3. 冲突。停下，等你在现场解决。** 只要有仓库停在冲突上，这次结束就是**部分完成**：其余仓库照常合并并移除，
 停在冲突上的仓库原地保留，报告里给出 `mergeInProgress`、`mergeSite`（现场目录）与 `conflictedFiles`。
 现场就是任务分支自己的 worktree：在那里解决冲突、`git add`，再用一条说明取舍的 `git commit` 完成合并提交，
-然后点 **继续结束任务**。需要由 agent 处理时用 **交由 agent 解决冲突**（实验性）。没提交干净、或者文件里还留着
+然后点 **继续结束任务**。需要由 agent 处理时用 **交由 agent 解决冲突**。没提交干净、或者文件里还留着
 冲突标记的，插件**不替它提交**，原样保留并说明。
 
 #### 各选项组合的行为
@@ -372,7 +340,7 @@ worktree 里，可以就地处理。
 > 这份组合表只是速查。每个勾选框的确切含义、被拒之后的处理，见
 > [使用指南第 7 节](USAGE.md#7-结束任务)。
 
-## 🤖 高级用法：让 Agent 全自动编排
+## 🤖 进阶用法：让 Agent 全自动编排
 
 面板手动操作之外，还有一条同样受支持的路：给一个 Agent 装上 `wts_worktree_space` 与
 `wts_session_tool` 两个工具，它可以自己把整条链跑完 —— 建空间、派单、盯进度、插话纠偏、部署验收、收尾合并，
@@ -400,13 +368,55 @@ worktree 里，可以就地处理。
 | 部署验收 | 勾了部署的任务，用任务空间自己的入口 `up` / `smoke` 过冒烟闸门 |
 
 盯住一个会话靠的是 `wts_session_tool` 的八个 action：`find` / `status` / `read` / `send` / `create` /
-`resume` / `cancel`。参数与「何时用哪个」见[使用指南附录](USAGE.md#附录会话控制工具参考)。
+`resume` / `cancel` / `model`。参数与「何时用哪个」见[使用指南附录](USAGE.md#附录会话控制工具参考)。
 
 两条路执行的是**同一套流程**，差别只在由谁驱动。完整的步骤、以及**哪些事仍然只有人能做**
 （放弃任务、丢弃遗留内容、豁免冒烟闸门），见使用指南的
 [第二部分 · Agent 自动编排](USAGE.md#第二部分--agent-自动编排)。
 
-## 🤖 实验性：把提交与冲突交给 agent
+### 使用提示词示例
+
+在对话中使用无需记 action 名和参数，只需要触发关键术语把需求讲清楚即可，Agent 自己会处理工具调用参数。
+以下四个是最常用的场景，可直接参照改写。
+
+> **仅创建任务空间，不派发任务。**
+> 「在 `E:\workspace\my-project` 下创建任务空间 `login-revamp`，涉及 auth 与 web 两个仓库。」
+>
+> 结果为一条任务分支与两个 worktree，**不创建会话**。适用于先确认目录结构与 worktree 布局，
+> 稍后再决定由哪个会话承接工作。
+
+> **创建任务空间并派单，一次完成。**
+> 「创建任务空间 `login-revamp`，涉及 auth 与 web 两个仓库，并在其中开启会话执行：将登录页切换到
+> 新设计稿，并保证现有测试通过。」
+>
+> 最常用的方式：创建目录与 worktree、注册工作区、开启任务会话、交付任务书，一次完成。
+> 任务书必须**自包含**——任务会话不共享当前对话的上下文。
+
+> **含部署与冒烟验收。**
+> 「创建任务空间执行本次改动，只检出本次改动涉及的仓库：`gateway`、`product`、`web`、`e2e`。
+> 完成后部署到 Docker，冒烟验收通过后合并回当前分支。」
+>
+> 仓库有两种写法，取舍不同：**点名列出**（如上）结果确定，适合已经清楚改动范围时；
+> **只说「只检出本次改动涉及的仓库」**则由 Agent 依据改动范围自行判断，省事但需要复核它的选择。
+> 任务空间为列出的每个仓库各建一个 worktree，未列出的仓库不会被检出——这是它区别于「检出全部」的地方。
+>
+> 部署在**创建任务空间时确定**，事后无法追加，因此必须在提示词中一并说明。冒烟由任务空间自己的入口脚本
+> 执行（默认 `.worktree-space/deploy/deploy.sh`，实现 `up` / `smoke` / `destroy` 三个子命令），
+> 结果写入状态文件，未通过则拒绝合并；所以冒烟需要的依赖写在 `deploy.sh` 里，或随列出的仓库一并检出。
+
+> **仅执行合并收尾。**
+> 「任务已完成，合并回 `main` 并删除任务分支。」
+>
+> 对应 `done`：合并、移除 worktree、归档遗留内容，并按需删除分支。**遇到冲突或未提交改动时不会强制继续**，
+> 而是指出受阻的仓库；由对应会话处理完毕后再次调用 `done` 即可。
+
+两点需要留意：
+
+- **同一任务不要连续派发两次**：两个会话修改同一批文件会互相打断。补充要求用 `send` 的 `steer`；
+  派发第二项任务前，先确认前一项已经收尾。
+- **仍需由使用者决定的操作**：放弃任务空间、丢弃遗留内容、豁免冒烟闸门。Agent 会停下来询问，不会代为决定。
+
+## 🤖 把提交与冲突交给 agent
 
 结束任务对话框可以开一个 DSH agent 会话代为完成两件事：**交由 agent 提交**（有未提交改动的仓库）、
 **交由 agent 解决冲突**（停在合并冲突上的仓库）。两种都**不 push、不动其它仓库或任务空间、不把分支
@@ -431,7 +441,89 @@ worktree 里，可以就地处理。
 步骤很简单：点按钮 → 会话开起来干活（对话结束后插件重读一次计划，标题换成绿灯加「可以继续结束任务」）→
 你自己点 **确认结束任务** 或 **继续结束任务**。**最后那一下始终由你按下**，会话停下来不会自动往下走。
 
-> 完整步骤与会话工作目录怎么定，见[使用指南第 7.6 节](USAGE.md#76-可选把提交和冲突交给-agent实验性)。
+> 完整步骤与会话工作目录怎么定，见[使用指南第 7.6 节](USAGE.md#76-可选把提交和冲突交给-agent)。
+
+## ⚙️ 插件配置
+
+**在界面里改**（推荐）：侧边栏 →「插件」→ **Worktree Space** →「插件详情」页的配置区，和其它插件的配置在同一处，
+保存后立即生效，无需重启。也可以直接改配置文件：DSH 数据目录下 `profiles/<profile>/cordis.patch.yml`
+里这个插件的 `config:` 区块，改完重启 DSH 生效。
+
+| 设置 | 取值 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| 插件槽位入口 | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
+| 侧边栏底部快捷入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
+| 交由 agent 解决冲突入口 | 显示 / 隐藏 | 显示 | 结束任务对话框里「交由 agent 提交」「交由 agent 解决冲突」两个入口；隐藏时走标准流程：自己提交、自己解决冲突，再点继续结束任务 |
+| 交由 agent 处理冲突和提交的会话使用完全权限 | 关 / 开 | **关** | 打开后，这两个会话开在**任务空间**上并立即置为「完全权限」（`danger-full-access`）；**代价是该会话此后可以写到这台机器上 DSH 进程能写的任何位置**，不再逐次询问。只影响之后开起的会话，结束任务对话框里可以就地切换。 |
+| 操作日志 | 开 / 关 | **开** | 容器根下 `worktree-space-log.jsonl` 的开关。关掉只是不再写新记录，磁盘上已有的日志原样保留 |
+| 扫描深度 | 1–5 层 | 3 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
+| 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | 一次扫描最多读取的目录数；超了会停下来并提示哪些没看到 |
+| 工作区仓库扫描忽略目录 | 任意目录名列表 | 内置 25 个 | 扫描永远不会进入这些名字的目录。插件自带 25 个：各语言的依赖与编译输出目录（`node_modules`、`target`、`__pycache__`、`Pods` 等），加上插件自己的任务容器名 `worktree-space`、`dsh-worktree-space`。可以添加自己的，也可以把内置的放回来 —— **放回内置项需要二次确认**，因为代价落在下一次扫描上。名字不区分大小写；点右侧「编辑」打开对话框，可搜索、增删，保存后才写入配置 |
+| 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建对话框里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
+| Worktree Space 容器根目录 | 默认 / 指定目录 | **默认** | 新建任务空间默认放哪。**推荐用默认**：它按下面的规则从源码根推导，落在根工作空间的下一层，因此同一根工作区下的所有项目——无论各自埋得多深——都会落进同一个容器。若改用指定目录，而它与仓库目录没有公共祖先，agent 处理提交与冲突的会话需要手动提权 |
+| 指定 Worktree Space 容器根目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则按推荐规则推导。新建对话框里改动容器根并勾选「设为默认 Worktree Space 容器根目录」，点创建时把这两项一并写回 |
+| 归档文档位置 | 跟随容器根 / 指定目录 | **跟随容器根** | 遗留文档存到哪个根目录下；两档都在该根目录下再建一层 `<项目>/<任务名>-<YYYYMMDD-HHMMSS>`，时间戳是归档那一刻的本地时间，精确到秒。默认档收在容器根自己的 `archived-docs` 里，与任务空间建在哪一层无关 |
+| 指定归档目录 | 任意路径 | 留空 | 只在「指定目录」这一档生效；留空则收在容器根的 `archived-docs` 里 |
+| 任务会话模型 | 宿主可路由的任意「供应商/模型」 | **不指定** | 派单开起的任务会话用哪个模型。选项就是宿主当前能用的模型列表；**不指定**时任务会话跟随派单会话自己用的模型。派单时用 `model` 参数指定则优先于这里（详见[任务会话用哪个模型](#任务会话用哪个模型)） |
+
+#### 任务会话用哪个模型
+
+派单（含「创建并打开会话」那种一次做完的）会开一个任务会话，它用哪个模型按这个顺序决定：
+
+1. **派单时指定的 `model`** —— 只影响那一次派单。形如 `provider/model`，可另带 `reasoningEffort`。
+2. **上面这个「任务会话模型」设置** —— 影响之后开起的每个任务会话。
+3. **派单会话当前用的模型** —— 前两条都没指定时用它，也就是默认行为，不需要配置任何东西。
+
+指定了宿主**用不了的**模型不会静默退回：会话照常开起、活照常交出去，答复里会带一条警告，写明实际可用的模型。
+
+任务会话跑到一半因为**模型故障**停下时（供应商挂了、路由不可用），它自己恢复不了 —— 故障的就是它。
+这时用 `wts_session_tool` 的 `model` 动作给它换一个模型：不带参数时列出它当前的模型和宿主能用的全部模型，
+带上 `"provider/model"` 就切换，**会话若已离线会先自动唤醒**，所以「换模型 + 继续干」是一次调用。
+换的模型记在会话自己的日志里，重启后仍然有效。
+
+只有**派出这个任务的会话**能改它的模型。队员之间互相改、或者队员反过来改队长的，都会被拒绝（`E4017`）。
+
+
+扫描覆盖全部工作区；按广度优先逐层进行，每层最多同时读 8 个目录。任何一层只要发现 `.git` **目录**就认定是
+仓库（`git` 的链接 worktree 里 `.git` 是文件，不重复计入）；`node_modules`、`dist`、`build`、`vendor` 等目录
+和隐藏目录会跳过（`.worktrees` 除外）。
+
+## 🔐 权限与失败边界
+
+本插件在运行时会读写文件、并调用 `git`；这两类权限就是它的功能本身，无法裁剪为零。运行期依赖都由 DSH
+profile 提供，不随插件分发 —— 安装本插件不会引入新的运行期第三方依赖，也不连接任何外部服务、不上报遥测。
+
+**权限一览：**
+
+| 权限 | 范围 |
+| --- | --- |
+| 文件读取 | 所选工作区目录（广度优先扫描，跳过 `node_modules`、`dist`、`build`、`vendor` 与隐藏目录，`.worktrees` 除外）；任务空间与 Worktree Space 容器根下的记录文件；各 worktree 的 `.git` 标记文件；结束任务时为判断合并是否仍留冲突而读回变更文件的内容 |
+| 文件写入 | 只写任务空间与 Worktree Space 容器根下的文件，以及配置选定的归档目录（见[插件配置](#-插件配置)），结束时删除的是插件自己创建的 worktree 与文档；合并时另在**系统临时目录**里建一份临时检出，用完即删。**不写**源码仓库检出里的文件，也**不写** DSH 数据目录 |
+| 命令执行 | 只调用 `git`（`git -C <目录> <子命令>`，固定参数、不经 shell，全部走同一处 `runGit`）；部署勾了时才另跑任务自己的入口脚本（`up` / `smoke`）。**`add` 与 `commit` 不在其中**：插件不代写提交，未提交的改动会让该仓库停下（见下表）；交给 agent 的提交由宿主里的那个会话自己执行 |
+| 操作日志 | 容器根下的 `worktree-space-log.jsonl`，**默认开启**：改动仓库状态的 `git` 命令、任何失败的 `git` 命令、每个操作的结论、每个错误与警告（带错误码）。可在插件设置里关掉，关掉不影响已有文件。**不含任何文件内容**，URL 里的凭据写入前抹掉；不发送到任何地方，不离开这台机器 |
+| 网络 | 无：插件自身不发任何 HTTP 请求，也不执行任何 `git push`；它发出的 `git` 子命令全是本地操作 |
+| 凭据 | 不读取、不保存、不转发；插件不接触密钥 |
+| 全局资源 | 不装全局包、不起常驻进程或服务、不写系统目录 |
+
+逐条说明（读什么、写什么、执行哪些子命令、失败时怎么办）见 [PERMISSIONS.md](docs/PERMISSIONS.md)；
+一次性 Profile 的安装、启动、卸载与回滚验收证据见 [docs/store-evidence.md](docs/store-evidence.md)。
+
+**失败边界（绝不静默）：**
+
+| 情形 | 行为 |
+| --- | --- |
+| 扫描目录数超过上限 | 不再抛错丢掉全部结果：停在上限处并提示哪些更深的仓库没看到，请提高上限或换一个更具体的工作区 |
+| 任一 `git` 命令失败 | 抛出 `git <参数> failed (exit N): <stderr>`，把 Git 自己的诊断原样带出 |
+| 结束任务时任务空间里还有会话在干活 | 拒绝整次收尾并点名那几个会话；先让它们停下来或结束它们 |
+| 结束任务时某仓库还有未提交的改动 | 停下该仓库（`force` 才丢弃）：`uncommitted work is waiting in <worktree>; commit it before the task can be finished`；插件**不代写提交**，其余仓库继续，结果里逐条报出 |
+| 合并已解决但没有提交 | `the merge in <worktree> is resolved but not committed`，现场原样保留 |
+| 解决后的文件里仍有冲突标记 | `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
+| 试合并撞上冲突 | 不自动 `merge --abort`，保留合并现场（`mergeSite` 与 `conflictedFiles`），待解决并提交后可继续 |
+| 真合并撞上期间的新提交 | 试合并通过后，真合并时目标分支出现新提交，插件撤销本次合并（`merge --abort`，分支恢复原状）并原样带出 Git 的诊断；worktree 与任务分支保留，再次点「继续结束任务」会重新试合并 |
+| 部署验收没通过就想合并 | 拒绝合并并说明缺什么（`up` 还是 `smoke`）；冒烟通过后直接重试即可 |
+| worktree 删除失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`，保留该 worktree 并报告，可用 `git worktree prune` 清理 |
+| 任务目录非空 | 保留目录与工作区注册，不强行删除 |
+| 无法确认的事实 | 在文档里写「未知」，不把「没有搜到」推断成「不访问」 |
 
 ## 📝 操作日志
 
@@ -477,25 +569,18 @@ The two routes differ in emphasis and you can read only one of them: **clicking 
 <img src="docs/img/isolation-model.png" alt="Worktree Space Isolation Model" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
 
-> [!IMPORTANT]
-> **Beta (experimental)**: handing the commits and the merge conflicts to an agent is a feature
-> in an experimental validation phase and is **shown by default** - set the plugin's agent handoff
-> entry to hide to take those two entries off the finish dialog; its behaviour may still change
-> (see the [experimental section](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)).
-> The rest of this document describes the flow
-> without an agent. Please report problems in
-> [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues).
-
 ## 📑 Contents
 
 - [🚀 Install](#-install)
+- [🔧 Requirements](#-requirements)
+- [⚡ Quick start](#-quick-start)
 - [✨ Features](#-features)
 - [📂 Layout of a task](#-layout-of-a-task)
-- [🔧 Requirements](#-requirements)
-- [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
-- [🛠️ Usage](#-usage)　**the manual route**: [⚙️ Configuration](#-configuration) · [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🚢 Deploy and acceptance](#-deploy-and-acceptance) · [🏁 Finish](#-finish-a-worktree-space) ([combinations](#what-each-combination-does))
+- [🛠️ Usage](#-usage)　**the manual route**: [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🚢 Deploy and acceptance](#-deploy-and-acceptance) · [🏁 Finish](#-finish-a-worktree-space) ([combinations](#what-each-combination-does))
 - [🤖 Advanced: letting an agent orchestrate end to end](#-advanced-letting-an-agent-orchestrate-end-to-end)
-- [🤖 Experimental: handing the commits and the conflicts to an agent](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)
+- [🤖 Handing the commits and the conflicts to an agent](#-handing-the-commits-and-the-conflicts-to-an-agent)
+- [⚙️ Plugin configuration](#-plugin-configuration)
+- [🔐 Permissions and failure boundaries](#-permissions-and-failure-boundaries)
 - [📝 The operation log](#-the-operation-log)
 - [📄 Companion documents](#-companion-documents)
 
@@ -513,6 +598,72 @@ To uninstall: `dsh plugin --profile web remove dsh-worktree-space`. To update, r
 `dsh-worktree-space` in **Plugin package name**, and press **Install**; to remove it, open
 **Worktree Space** from the list, go to its **Plugin details** page, and press **Uninstall** at the
 top right.
+
+## 🔧 Requirements
+
+- [Node.js](https://nodejs.org) `>=22.19.0`
+- [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
+  plugin, and has to be on `PATH`
+- DSH `>=0.2.0-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.0-rc.1`, excluding the 0.3.0 line's prereleases)
+- Clients: **both the web client and the desktop client work**; the desktop client was verified by
+  hand, the command-line matrix does not cover it
+
+**All five official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`,
+`0.2.1-rc.2` and `0.2.1-rc.3` — each against **its own** DSH CLI, in a disposable profile, through
+install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
+the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
+matrix. The per-release record is in
+[`docs/store-evidence.md`](docs/store-evidence.md).
+
+DSH **enforces** the DSH range declared in the manifest's `peerDependencies`: a runtime that does not
+satisfy it has the install refused before pnpm runs, or the plugin refused at startup, with the
+exact-version exemption (`dsh plugin allow-version`) offered instead. Fields such as `engines.dsh` are
+declarations and block nothing. Anything outside the tested range is treated as unknown rather than
+passed off as evidence; if you hit a version-specific problem, open an
+[issue](https://github.com/kangtsang/dsh-worktree-space/issues).
+
+## ⚡ Quick start
+
+The shortest path through one complete task: settle the requirement with the agent in your repository
+workspace, let it make the change inside a task space, then review it and merge back into each
+repository's currently checked-out branch. No git command has to be typed by hand.
+
+### Step 1: settle the requirement in the repository workspace
+
+Start a session in this repository's workspace and state the scope of the task: which repositories are
+involved, what the result should be, and what counts as done. **This comes before any git operation** —
+creating a task space around a requirement that is still moving means the worktrees already made and the
+commits already written have to be redone when the direction changes.
+
+Once the requirement is settled, the agent confirms the task space's location, the participating
+repositories, the starting commit, and whether the task is deployed for acceptance. **Whether to deploy
+is fixed when the task space is created** and cannot be added or changed afterwards, so it has to be
+settled here.
+
+### Step 2: send the prompt that creates the task space and dispatches
+
+With the requirement settled, send this to that session:
+
+> Create a task space and dispatch: check out the settled requirement as a worktree and carry out the
+> change; tell me when it is done so I can review it before it is merged.
+
+The agent creates the task space — one worktree per participating repository, all on one task branch —
+and opens a task session, handing it the requirement as its brief. That session edits files in its own
+directory and leaves the repositories' current checkouts untouched.
+
+### Step 3: review, then merge
+
+The task session reports when the change is done. **Review it first**: in the worktree it names, confirm
+the implementation meets the requirement and the tests pass.
+
+Once it passes, go back to the dispatching session and send:
+
+> The review has passed; merge it into each repository's currently checked-out branch and remove the
+> task space.
+
+The agent merges, removes the worktrees, files what was left behind, and deletes the branch when asked.
+If a repository is stopped on a conflict or uncommitted work it **will not force its way past**; it names
+the repository that stopped it, and merges once that session has resolved it.
 
 ## ✨ Features
 
@@ -640,105 +791,14 @@ container root, adding exactly one directory — `archived-docs` — and the ope
 whole volume. Removing a worktree does not delete the Git branch behind it; finishing a task merges the
 branch back first and removes the worktree afterwards.
 
-## 🔧 Requirements
-
-- [Node.js](https://nodejs.org) `>=22.19.0`
-- [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
-  plugin, and has to be on `PATH`
-- DSH `>=0.2.0-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.0-rc.1`, excluding the 0.3.0 line's prereleases)
-- Clients: **both the web client and the desktop client work**; the desktop client was verified by
-  hand, the command-line matrix does not cover it
-
-**All five official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`,
-`0.2.1-rc.2` and `0.2.1-rc.3` — each against **its own** DSH CLI, in a disposable profile, through
-install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
-the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
-matrix. The per-release record is in
-[`docs/store-evidence.md`](docs/store-evidence.md).
-
-DSH **enforces** the DSH range declared in the manifest's `peerDependencies`: a runtime that does not
-satisfy it has the install refused before pnpm runs, or the plugin refused at startup, with the
-exact-version exemption (`dsh plugin allow-version`) offered instead. Fields such as `engines.dsh` are
-declarations and block nothing. Anything outside the tested range is treated as unknown rather than
-passed off as evidence; if you hit a version-specific problem, open an
-[issue](https://github.com/kangtsang/dsh-worktree-space/issues).
-
-## 🔐 Permissions and failure boundaries
-
-At runtime this plugin reads and writes files and runs `git`. Those two permissions *are* its
-function; they cannot be reduced to zero. Every runtime dependency is supplied by the DSH profile and
-none of them ship with the plugin — installing it brings in no new runtime third-party dependency,
-contacts no external service and reports no telemetry.
-
-**Permissions at a glance:**
-
-| Permission | Scope |
-| --- | --- |
-| File reads | The selected Workspace directories (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); the record files in the task space and at the Worktree Space container root; each worktree's `.git` marker file; and, at finish, the contents of the files git lists, read only to decide whether a merge still carries conflict markers |
-| File writes | Only inside the task space, the Worktree Space container root, and the archive directory the configuration names (see Configuration); finishing a task removes only the worktrees and documents the plugin itself created, and a merge also `git worktree add`s one temporary checkout under the **system temporary directory** and deletes it right after. It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory |
-| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell; plus the task's own entry script (`up` / `smoke`), and only for a task created with deployment ticked. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository (see below), and a commit handed to an agent is run by the host's own session |
-| Operation log | `worktree-space-log.jsonl` at the container root, **on by default**: the git commands that change repository state, any git command that fails, the outcome of every operation, and every error and warning with an error code. Switchable in the plugin settings; switching it off leaves any log already there alone. **No file contents**, credentials in a URL masked before the write; nothing sends it anywhere and it leaves this machine |
-| Network | None: the plugin itself makes no HTTP requests and runs no `git push`; every `git` subcommand it runs is local |
-| Credentials | Reads, stores and forwards none; the plugin never touches keys |
-| Global resources | No global installs, no daemon or resident service, no writes to system directories |
-
-The full account — what it reads, what it writes, which subcommands it runs and what happens when
-things fail — is in [PERMISSIONS.md](docs/PERMISSIONS.md); the disposable-Profile install, start,
-uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
-
-**Failure boundaries (never silent):**
-
-| Situation | Behaviour |
-| --- | --- |
-| Directory scan hits its limit | It stops where it is and says which deeper repositories were not looked at; raise the limit, or point the Workspace at a narrower root. It no longer throws away every other path's findings |
-| Any `git` command fails | Throws `git <args> failed (exit N): <stderr>`, surfacing Git's own diagnosis verbatim |
-| A session is still working in the task space at finish | The whole finish is refused, naming those sessions; let them finish or stop them first |
-| A repository still holds uncommitted work at finish | That repository stops (`force` is what discards it): `uncommitted work is waiting in <worktree>; commit it before the task can be finished`; the plugin **writes no commit**, the others carry on, and the result names each one |
-| A merge is resolved but not committed | `the merge in <worktree> is resolved but not committed` — the state is kept as it stands |
-| The resolved files still carry conflict markers | `the resolved merge still has conflict markers in <files>` — kept as they stand, no side is taken |
-| The rehearsal merge conflicts | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until it is resolved and committed, then carry on |
-| The real merge meets a fresh commit | The rehearsal passed, then the real merge ran into a commit someone pushed in between: the merge is undone (`merge --abort`, the branch is left as it was) and Git's own words are surfaced; the worktree and the task branch are kept, and pressing **Continue finishing** rehearses again |
-| Deploy and acceptance blocks the merge | Refuses the merge and names what is missing — a deployment or a smoke — and takes the merge again once there is a passing smoke |
-| Worktree removal fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)`; the worktree is kept and reported, and `git worktree prune` is the remedy |
-| A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
-| A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
-
 ## 🛠️ Usage
 
-This section sketches the **manual route** — configuration, creating, working, deploy and acceptance,
-finishing — clicked through on the panel, with no leader or member and no tool calls in sight. The
+This section sketches the **manual route** — creating, working, deploy and acceptance, finishing —
+clicked through on the panel, with no leader or member and no tool calls in sight. The
 full instructions for each step, the failures you can meet and what to do after a refusal are in the
-[Worktree Space manual](USAGE.md). The other route — one agent driving the whole chain with
+[Worktree Space manual](USAGE.md); every setting is in
+[Plugin configuration](#-plugin-configuration). The other route — one agent driving the whole chain with
 `wts_worktree_space` — is [Advanced: letting an agent orchestrate end to end](#-advanced-letting-an-agent-orchestrate-end-to-end).
-
-### ⚙️ Configuration
-
-**In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → the configuration
-section of its **Plugin details** page, beside every other plugin's; changes take effect
-immediately, no restart. The file can also be
-edited directly: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
-data directory, which needs a DSH restart.
-
-| Setting | Values | Default | Meaning |
-| --- | --- | --- | --- |
-| Panel entry (under New session) | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
-| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
-| Agent handoff entry (experimental) | show / hide | show | The finish dialog's two experimental entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
-| Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened in the **task space** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters. |
-| Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
-| Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
-| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, the scan stops and says what it did not reach |
-| Directories the scan skips | any list of directory names | the plugin's 25 | A scan never descends into directories with these names. The plugin ships 25: dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — plus this plugin's own task container, under both names it takes, `worktree-space` and `dsh-worktree-space`. You can add your own, and you can put one of those back. **Restoring a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
-| Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
-| Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source root by the rule above and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits. A custom directory that shares no common ancestor with the repositories makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
-| Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
-| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<YYYYMMDD-HHMMSS>` folder beneath it, the stamp being the local time of that moment, to the second. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
-| Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the Worktree Space container root's `archived-docs` |
-
-A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
-a time per level. A directory holding a `.git` **directory** counts as a repository — a linked
-worktree carries `.git` as a file, and is not counted twice — and `node_modules`, `dist`, `build`,
-`vendor` and hidden directories are skipped (except `.worktrees`).
 
 ### ➕ Create a Worktree Space
 
@@ -847,7 +907,7 @@ changes are not this side's to write, and a worktree will not be removed carryin
 each worktree with `git add` and `git commit` (the message is written by the user), then **close and
 reopen the dialog**, which re-reads the plan; those repositories stop blocking it. **Force** is the
 other way past: those changes are discarded with the worktree. **Hand the commits to the agent** does
-it for you instead (experimental, see the [next section](#-experimental-handing-the-commits-and-the-conflicts-to-an-agent)).
+it for you instead (see the [next section](#-handing-the-commits-and-the-conflicts-to-an-agent)).
 A repository standing in an unfinished merge does not take part in this step — that one belongs to
 step 3.
 
@@ -871,7 +931,7 @@ a conflict keeps its worktree while the others merge and go, and the report name
 `mergeSite` (where the conflict stands) and `conflictedFiles`. The site is the task branch's own
 worktree: resolve the conflict there, `git add`, and one `git commit` that says how the two sides are
 reconciled concludes the merge. **Continue finishing** then carries on. **Hand the conflict to the
-agent** puts a session on it instead (experimental). Left resolved but uncommitted, or still carrying
+agent** puts a session on it instead. Left resolved but uncommitted, or still carrying
 markers, the plugin does **not** commit it for you — it keeps things as they stand and says so.
 
 #### What each combination does
@@ -943,7 +1003,7 @@ Two roles on that route: the **leader** is the orchestrating one, the one you ar
 | Deploy and accept | for a deploying task, the space's own entry runs `up` / `smoke` to pass the smoke gate |
 
 Keeping a hold on one session is the work of `wts_session_tool`'s eight actions: `find` / `status` /
-`read` / `send` / `create` / `resume` / `cancel`. Their arguments and "which one when"
+`read` / `send` / `create` / `resume` / `cancel` / `model`. Their arguments and "which one when"
 are in the [manual's appendix](USAGE.md#appendix-the-session-control-tools).
 
 Both routes run **the same flow**; only the driver differs. The full chain, and **which steps still
@@ -951,7 +1011,59 @@ have to be done by the user** (abandoning a task, discarding what was left behin
 gate), are in the manual's
 [part two, agent orchestration end to end](USAGE.md#part-two--an-agent-orchestrating-end-to-end).
 
-## 🤖 Experimental: handing the commits and the conflicts to an agent
+### Example prompts
+
+There is no action name to memorise and no argument to look up: state the requirement in terms of the
+key concepts and the agent resolves the tool call and its arguments itself. These four cover the usual
+scenarios and can be adapted directly.
+
+> **Create the task space only, dispatch nothing.**
+> "Create the task space `login-revamp` under `E:\workspace\my-project`, spanning the `auth` and `web`
+> repositories."
+>
+> The result is one task branch and two worktrees, with **no session created**. Useful for confirming
+> the directory and worktree layout first, and deciding later which session takes the work.
+
+> **Create the task space and dispatch, in one call.**
+> "Create the task space `login-revamp`, spanning `auth` and `web`, and open a session in it to switch
+> the sign-in page to the new design and keep the existing tests passing."
+>
+> The most common route: directory and worktrees, workspace registration, the task session, and its
+> brief, all at once. The brief must **stand alone** — the task session does not share this
+> conversation's context.
+
+> **With a deployment and a smoke gate.**
+> "Create a task space for this change, checking out only the repositories this change touches:
+> `gateway`, `product`, `web`, `e2e`. Deploy it to Docker on completion, and merge it back into the
+> current branch once the smoke passes."
+>
+> Naming the repositories is the precise form and suits a change whose scope is already known. Saying
+> "only the repositories this change touches" leaves the choice to the agent, which is less to write but
+> worth checking. The task space creates one worktree per listed repository and none for the rest - which
+> is what makes this different from checking out everything.
+>
+> The deployment is **settled when the task space is created** and cannot be added later, so it has to
+> be stated in the prompt. The smoke runs through the task space's own entry script
+> (`.worktree-space/deploy/deploy.sh` by default, implementing `up` / `smoke` / `destroy`), writes its
+> result to the state file, and a smoke that did not pass refuses the merge; whatever the smoke depends
+> on therefore belongs in `deploy.sh`, or among the repositories listed above.
+
+> **Finish and merge only.**
+> "The task is complete; merge it back into `main` and delete the task branch."
+>
+> This runs `done`: merge, remove the worktrees, file what was left behind, and delete the branch when
+> asked. It **will not force its way past** a conflict or uncommitted work; it names the repository that
+> stopped it, that session resolves the problem, and `done` is called again.
+
+Two points worth noting:
+
+- **Do not dispatch a second job to the same task while one is running.** Two sessions editing the same
+  files interrupt each other. To add a requirement, use `send` with `steer`; to dispatch a second job,
+  confirm the first has finished.
+- **What still requires the user's decision**: abandoning a task space, discarding what was left behind,
+  exempting the smoke gate. The agent stops and asks rather than deciding these.
+
+## 🤖 Handing the commits and the conflicts to an agent
 
 The finish dialog can open a DSH agent session to do two things: **Hand the commits to the agent**
 (for repositories with uncommitted work) and **Hand the conflict to the agent** (for repositories
@@ -990,7 +1102,103 @@ finishing** yourself. **That last press is always the user's**; a session stoppi
 itself.
 
 > What each button does, how the working directory is chosen, and the full steps:
-> [section 7.6 of the manual](USAGE.md#76-optional-handing-the-commits-and-the-conflicts-to-an-agent-experimental).
+> [section 7.6 of the manual](USAGE.md#76-optional-handing-the-commits-and-the-conflicts-to-an-agent).
+
+## ⚙️ Plugin configuration
+
+**In the UI** (recommended): sidebar → **Plugins** → **Worktree Space** → the configuration
+section of its **Plugin details** page, beside every other plugin's; changes take effect
+immediately, no restart. The file can also be
+edited directly: the plugin's `config:` block in `profiles/<profile>/cordis.patch.yml` under the DSH
+data directory, which needs a DSH restart.
+
+| Setting | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| Plugin slot entry | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
+| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
+| Agent handoff entry | show / hide | show | The finish dialog's two entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
+| Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened in the **task space** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters. |
+| Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
+| Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
+| Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, the scan stops and says what it did not reach |
+| Directories the scan skips | any list of directory names | the plugin's 25 | A scan never descends into directories with these names. The plugin ships 25: dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — plus this plugin's own task container, under both names it takes, `worktree-space` and `dsh-worktree-space`. You can add your own, and you can put one of those back. **Restoring a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
+| Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
+| Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source root by the rule above and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits. A custom directory that shares no common ancestor with the repositories makes the session that hands commits and conflicts to an agent ask for authorisation by hand |
+| Custom Worktree Space container root | any path | empty | Used only by the custom strategy; empty keeps the derived recommendation. Changing the Worktree Space container root in the create dialog and ticking Set as the default Worktree Space container root writes both back when the space is created |
+| Archive documents location | in the container root / custom directory | **in the container root** | The root the archive is filed under; both strategies add a `<project>/<task>-<YYYYMMDD-HHMMSS>` folder beneath it, the stamp being the local time of that moment, to the second. The default files them in the Worktree Space container root's own `archived-docs`, wherever the task space was made |
+| Custom archive directory | any path | empty | Used only by the custom strategy; empty files them in the Worktree Space container root's `archived-docs` |
+| Task session model | any provider/model this host can route to | **not specified** | The model a dispatched task session runs on. The options are the models the host can reach right now; **not specified** means the task session follows the model the dispatching session is using. Naming a `model` on the dispatch itself takes precedence over this (see [Which model a task session uses](#which-model-a-task-session-uses)) |
+
+#### Which model a task session uses
+
+A dispatch — including the one-call "create and open a session" — opens a task session, and
+its model is decided in this order:
+
+1. **The `model` given on the dispatch** — that call only. Written as `provider/model`, with
+   an optional `reasoningEffort`.
+2. **The Task session model setting above** — every task session opened afterwards.
+3. **The model the dispatching session is using** — when neither of the above names one.
+   This is the default, and it needs no configuration at all.
+
+A model the host cannot route to is not swapped for the inherited one in silence: the session
+is still opened and the work is still handed over, and the answer carries a warning naming the
+routes that do exist.
+
+When a task session stops because **its model failed** — the provider went down, the route is
+unavailable — it cannot recover itself, because it is the thing that is failing. Move it with
+`wts_session_tool`'s `model` action: with no argument it reports the session's current model and
+every model the host can reach; with `"provider/model"` it switches, **resuming the session
+first if it went offline**, so switching and continuing is one call. The selection is recorded
+on the session's own log, so it survives a restart.
+
+Only the session that dispatched a task may move its model. A member moving its leader, or two
+members moving each other, are refused (`E4017`).
+
+
+A scan covers **every** Workspace. It goes breadth-first, reading up to eight directories at
+a time per level. A directory holding a `.git` **directory** counts as a repository — a linked
+worktree carries `.git` as a file, and is not counted twice — and `node_modules`, `dist`, `build`,
+`vendor` and hidden directories are skipped (except `.worktrees`).
+
+## 🔐 Permissions and failure boundaries
+
+At runtime this plugin reads and writes files and runs `git`. Those two permissions *are* its
+function; they cannot be reduced to zero. Every runtime dependency is supplied by the DSH profile and
+none of them ship with the plugin — installing it brings in no new runtime third-party dependency,
+contacts no external service and reports no telemetry.
+
+**Permissions at a glance:**
+
+| Permission | Scope |
+| --- | --- |
+| File reads | The selected Workspace directories (breadth-first scan, skipping `node_modules`, `dist`, `build`, `vendor` and hidden directories except `.worktrees`); the record files in the task space and at the Worktree Space container root; each worktree's `.git` marker file; and, at finish, the contents of the files git lists, read only to decide whether a merge still carries conflict markers |
+| File writes | Only inside the task space, the Worktree Space container root, and the archive directory the configuration names (see Configuration); finishing a task removes only the worktrees and documents the plugin itself created, and a merge also `git worktree add`s one temporary checkout under the **system temporary directory** and deletes it right after. It does **not** write the files of a source repository's checkout and does **not** write the DSH data directory |
+| Command execution | `git` only, always as `git -C <dir> <subcommand>` with fixed argv through a single `runGit` seam — no shell; plus the task's own entry script (`up` / `smoke`), and only for a task created with deployment ticked. **`add` and `commit` are not among them**: the plugin writes no commit, uncommitted work stops that repository (see below), and a commit handed to an agent is run by the host's own session |
+| Operation log | `worktree-space-log.jsonl` at the container root, **on by default**: the git commands that change repository state, any git command that fails, the outcome of every operation, and every error and warning with an error code. Switchable in the plugin settings; switching it off leaves any log already there alone. **No file contents**, credentials in a URL masked before the write; nothing sends it anywhere and it leaves this machine |
+| Network | None: the plugin itself makes no HTTP requests and runs no `git push`; every `git` subcommand it runs is local |
+| Credentials | Reads, stores and forwards none; the plugin never touches keys |
+| Global resources | No global installs, no daemon or resident service, no writes to system directories |
+
+The full account — what it reads, what it writes, which subcommands it runs and what happens when
+things fail — is in [PERMISSIONS.md](docs/PERMISSIONS.md); the disposable-Profile install, start,
+uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/store-evidence.md).
+
+**Failure boundaries (never silent):**
+
+| Situation | Behaviour |
+| --- | --- |
+| Directory scan hits its limit | It stops where it is and says which deeper repositories were not looked at; raise the limit, or point the Workspace at a narrower root. It no longer throws away every other path's findings |
+| Any `git` command fails | Throws `git <args> failed (exit N): <stderr>`, surfacing Git's own diagnosis verbatim |
+| A session is still working in the task space at finish | The whole finish is refused, naming those sessions; let them finish or stop them first |
+| A repository still holds uncommitted work at finish | That repository stops (`force` is what discards it): `uncommitted work is waiting in <worktree>; commit it before the task can be finished`; the plugin **writes no commit**, the others carry on, and the result names each one |
+| A merge is resolved but not committed | `the merge in <worktree> is resolved but not committed` — the state is kept as it stands |
+| The resolved files still carry conflict markers | `the resolved merge still has conflict markers in <files>` — kept as they stand, no side is taken |
+| The rehearsal merge conflicts | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until it is resolved and committed, then carry on |
+| The real merge meets a fresh commit | The rehearsal passed, then the real merge ran into a commit someone pushed in between: the merge is undone (`merge --abort`, the branch is left as it was) and Git's own words are surfaced; the worktree and the task branch are kept, and pressing **Continue finishing** rehearses again |
+| Deploy and acceptance blocks the merge | Refuses the merge and names what is missing — a deployment or a smoke — and takes the merge again once there is a passing smoke |
+| Worktree removal fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)`; the worktree is kept and reported, and `git worktree prune` is the remedy |
+| A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
+| A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |
 
 ## 📝 The operation log
 

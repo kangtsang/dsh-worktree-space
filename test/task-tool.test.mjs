@@ -233,11 +233,47 @@ async function taskSpaceFixture({ keepWorktree = false, delivery, conflict = fal
  * @param schema - the declared object schema.
  * @param value - the object an action returned.
  */
+/**
+ * Assert every property the schema marks required is present.
+ *
+ * "Required" here means `required: true` on the property itself, which is this repo's
+ * convention. The host reads the JSON-Schema `required` **array** instead, so the two
+ * disagree about what is optional; this helper follows the property flag, because that is
+ * the intent a reader of the schema infers. A property without the flag may be absent, and
+ * `expectNoUndeclaredKeys` below still stops it from being present when undeclared.
+ * @param schema - the declared object schema.
+ * @param value - the object an action returned.
+ */
 function expectObjectShape(schema, value) {
-  for (const key of Object.keys(schema.properties)) {
+  for (const [key, property] of Object.entries(schema.properties)) {
+    if (property.required !== true) continue
     expect(value, `missing '${key}'`).toHaveProperty(key)
     expect(value[key], `'${key}' must not be undefined`).not.toBeUndefined()
   }
+}
+
+/**
+ * Assert a value carries nothing the declared schema does not allow.
+ *
+ * The other direction, and the one that was missing when this went out. The Host validates
+ * a tool result against its declared schema and rejects the **whole** result for one
+ * undeclared property — `additionalProperties: false` means exactly that. A dispatch that
+ * added `model` and `modelSource` to its value without declaring them created the task
+ * space, the branch and the session, then failed to return any of it: the caller got
+ * `"value.model" is not a declared property` and had to read the record off disk to find
+ * out that the work had in fact been done.
+ *
+ * `expectObjectShape` could not catch it: it checks every declared key is present, which
+ * says nothing about keys the value carries and the schema never heard of.
+ * @param schema - the declared object schema, with `additionalProperties: false`.
+ * @param value - the object an action returned.
+ * @param where - what is being checked, for the failure message.
+ */
+function expectNoUndeclaredKeys(schema, value, where) {
+  if (schema.additionalProperties !== false) return
+  const declared = new Set(Object.keys(schema.properties ?? {}))
+  const extra = Object.keys(value).filter((key) => !declared.has(key))
+  expect(extra, `${where}: undeclared keys would fail the Host's validation`).toEqual([])
 }
 
 /**
@@ -247,8 +283,12 @@ function expectObjectShape(schema, value) {
  */
 function expectEnvelopeShape(schema, value) {
   expectObjectShape(schema, value)
+  expectNoUndeclaredKeys(schema, value, "envelope")
   const rowSchema = schema.properties.repositories.items
-  for (const row of value.repositories) expectObjectShape(rowSchema, row)
+  for (const row of value.repositories) {
+    expectObjectShape(rowSchema, row)
+    expectNoUndeclaredKeys(rowSchema, row, "repository row")
+  }
 }
 
 describe("registerTaskTool", () => {
@@ -2136,6 +2176,250 @@ describe("registerTaskTool", () => {
         expect(value.summary).toContain("sess-existing")
       } finally {
         await worked.cleanup()
+      }
+    })
+  })
+
+  /**
+   * Which model a dispatch puts its session on.
+   *
+   * The precedence is the feature: what the call named, then what the Plugins page names,
+   * then what the dispatching session is on. Each case below removes the level above it, so
+   * a resolver that ignored one of the three would fail the case that isolates it.
+   */
+  describe("the model a dispatched session starts on", () => {
+    /**
+     * A dispatch deployment that records what was appended to the new session.
+     *
+     * The new session's own agent is served by `agents`, because that is what a model
+     * switch is written to: the controller created the session, and the selection lands on
+     * the agent behind it.
+     * @param options - the configured model the entry would pass, and the caller's route.
+     * @returns the tool, the appended events, and the run context for the caller.
+     */
+    async function modelDispatch({ configuredModel, callerRoute } = {}) {
+      const fixture = await taskSpaceFixture()
+      const appended = []
+      const services = {
+        sessionController: {
+          create: async () => ({ sessionId: "session-1" }),
+          prompt: async () => ({ accepted: true }),
+        },
+        sessions: { get: () => ({ append: () => {} }) },
+        agents: {
+          get: (id) => (id === "session-1"
+            ? {
+              id,
+              session: {
+                header: { id, cwd: fixture.taskPath },
+                snapshotEvents: () => [],
+                append: (type, data) => appended.push({ type, data }),
+              },
+            }
+            : undefined),
+        },
+        llm: {
+          listProviders: () => [{ id: "deepseek-account" }, { id: "codearts" }],
+          listConfigurableProviders: () => [],
+          listModels: (provider) => (provider === "codearts"
+            ? [{ id: "gw-1" }]
+            : [{ id: "deepseek-chat" }, { id: "deepseek-reasoner" }]),
+        },
+        // What the dispatching session is on. The projection is the durable fold, which is
+        // the only place a session's *current* model can be read: `agent.options` is the
+        // constant captured at creation and is never written back.
+        sessionProjections: { stateOf: () => (callerRoute === undefined ? undefined : { lastUsed: callerRoute, pending: null }) },
+        workspaceRegistry: {
+          create: async () => ({}),
+          resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin/login" }),
+          list: () => [{ id: "ws-login", path: fixture.taskPath }],
+        },
+      }
+      const { ctx, captured } = toolContext(fixture.subprocess, services)
+      registerTaskTool(ctx, { configuredModel: () => configuredModel })
+      return {
+        fixture,
+        appended,
+        tool: captured[0],
+        // The caller works in the source checkout, outside the task space - which is where
+        // a leader actually is, and the reason the direction test reads the member's record.
+        run: { agent: { id: "session-caller", session: { id: "session-caller", header: { cwd: join(fixture.container, PROJECT) } } } },
+      }
+    }
+
+    /** The model selections written to the dispatched session. */
+    const selectionsIn = (appended) => appended.filter((event) => event.type === "model/selection").map((event) => event.data)
+
+    it("uses the model the call named, above the configured one", async () => {
+      const { tool, appended, run, fixture } = await modelDispatch({
+        configuredModel: { provider: "codearts", model: "gw-1" },
+        callerRoute: { provider: "deepseek-account", model: "deepseek-chat" },
+      })
+      try {
+        const value = await tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", model: "deepseek-account/deepseek-reasoner" },
+          run,
+        )
+        expect(selectionsIn(appended)).toEqual([{ provider: "deepseek-account", model: "deepseek-reasoner" }])
+        expect(value.model).toBe("deepseek-account/deepseek-reasoner")
+        expect(value.modelSource).toBe("request")
+        // The Host rejects the whole result for one undeclared property, so the value has
+        // to be checked against the contract and not only against itself. Measured on a
+        // real dispatch: everything succeeded and the caller got nothing but the schema
+        // error.
+        expectEnvelopeShape(tool.output.schema, value)
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("falls back to the configured model when the call named none", async () => {
+      const { tool, appended, run, fixture } = await modelDispatch({
+        configuredModel: { provider: "codearts", model: "gw-1" },
+        callerRoute: { provider: "deepseek-account", model: "deepseek-chat" },
+      })
+      try {
+        const value = await tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+          run,
+        )
+        expect(selectionsIn(appended)).toEqual([{ provider: "codearts", model: "gw-1" }])
+        expect(value.modelSource).toBe("config")
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("inherits the dispatching session's model when nothing else names one", async () => {
+      // The shipped behaviour, and the reason the setting can be left unspecified: a
+      // member that runs on the leader's model is what a leader expects when it has not
+      // thought about models at all.
+      const { tool, appended, run, fixture } = await modelDispatch({
+        callerRoute: { provider: "deepseek-account", model: "deepseek-chat" },
+      })
+      try {
+        const value = await tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+          run,
+        )
+        expect(selectionsIn(appended)).toEqual([{ provider: "deepseek-account", model: "deepseek-chat" }])
+        expect(value.modelSource).toBe("leader")
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("applies the same precedence to a create that hands over its first job", async () => {
+      // `create` with a prompt is a dispatch in one call, and it goes through the same
+      // resolver - so a create that named a model must not be the one path that ignores it.
+      const appended = []
+      const services = {
+        workspaceRegistry: {
+          resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin" }),
+          create: async (path, title) => ({ path, title }),
+        },
+        sessionController: {
+          create: async () => ({ sessionId: "session-1" }),
+          prompt: async () => ({ accepted: true }),
+        },
+        sessions: { get: () => ({ append: () => {} }) },
+        agents: {
+          get: (id) => (id === "session-1"
+            ? {
+              id,
+              session: {
+                header: { id, cwd: "/tmp/nowhere" },
+                snapshotEvents: () => [],
+                append: (type, data) => appended.push({ type, data }),
+              },
+            }
+            : undefined),
+        },
+        llm: {
+          listProviders: () => [{ id: "codearts" }],
+          listConfigurableProviders: () => [],
+          listModels: () => [{ id: "gw-1" }],
+        },
+        sandboxPolicy: { overrideOf: () => "workspace-write" },
+      }
+      const { value } = await createOnce(
+        services,
+        { prompt: "add the feature", model: "codearts/gw-1" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(selectionsIn(appended)).toEqual([{ provider: "codearts", model: "gw-1" }])
+      expect(value.model).toBe("codearts/gw-1")
+    })
+
+    it("refuses a model that is not a provider/model pair", async () => {
+      const { tool, run, fixture } = await modelDispatch()
+      try {
+        await expect(tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", model: "deepseek-chat" },
+          run,
+        )).rejects.toThrow(/E4016/)
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("says so rather than silently keeping the inherited model when the route is unreachable", async () => {
+      // A route the host cannot reach would fail at the member's first request with a
+      // provider error, and the leader would have no way to connect that back to this
+      // call. The dispatch still succeeds - the session is open and the work is handed
+      // over - so this is a warning naming what happened.
+      const { tool, appended, run, fixture } = await modelDispatch()
+      try {
+        const value = await tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", model: "codearts/nope" },
+          run,
+        )
+        expect(selectionsIn(appended)).toEqual([])
+        // Absent rather than empty: the dispatch opened a session but no model was applied,
+        // so `model` says nothing at all. An empty string would claim the question was
+        // answered with "none", which is a different statement from "no model was decided".
+        expect(value.model).toBeUndefined()
+        expect(value.modelSource).toBeUndefined()
+        expect(value.warnings.join(" ")).toContain("cannot route to that model")
+        expect(value.warnings.join(" ")).toContain("codearts/gw-1")
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("says so when a model was asked for but no registry can take it", async () => {
+      // A deployment with no `agents` service still opens the session - the controller
+      // does that - but there is nowhere to write a selection. Silence here would let a
+      // leader that named a model believe the member is on it.
+      const fixture = await taskSpaceFixture()
+      const services = {
+        sessionController: {
+          create: async () => ({ sessionId: "session-1" }),
+          prompt: async () => ({ accepted: true }),
+        },
+        sessions: { get: () => ({ append: () => {} }) },
+        llm: {
+          listProviders: () => [{ id: "codearts" }],
+          listConfigurableProviders: () => [],
+          listModels: () => [{ id: "gw-1" }],
+        },
+        workspaceRegistry: {
+          create: async () => ({}),
+          resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin/login" }),
+          list: () => [{ id: "ws-login", path: fixture.taskPath }],
+        },
+      }
+      const { ctx, captured } = toolContext(fixture.subprocess, services)
+      registerTaskTool(ctx)
+      try {
+        const value = await captured[0].execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", model: "codearts/gw-1" },
+          { agent: { id: "session-caller", session: { id: "session-caller", header: { cwd: join(fixture.container, PROJECT) } } } },
+        )
+        expect(value.sessionId).toBe("session-1")
+        expect(value.warnings.join(" ")).toContain("no live-agent registry")
+      } finally {
+        await fixture.cleanup()
       }
     })
   })

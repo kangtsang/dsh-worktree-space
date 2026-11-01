@@ -185,6 +185,15 @@ describe("the code table and the public filter are one list", () => {
     for (const name of files) {
       if (name.endsWith(".js")) sources.set(name, await readFile(new URL(`../src/host/task/${name}`, import.meta.url), "utf8"))
     }
+    // The host root's own modules are read too, because a code can be raised outside
+    // `task/`: `E4017` is the session tools refusing a model switch, and that lives in
+    // `session-tools.js`. Reading only the subdirectory made the check claim the code
+    // came from nowhere rather than from the wrong place, which is the failure it is
+    // meant to report.
+    const hostFiles = await readdir(new URL("../src/host", import.meta.url))
+    for (const name of hostFiles) {
+      if (name.endsWith(".js")) sources.set(name, await readFile(new URL(`../src/host/${name}`, import.meta.url), "utf8"))
+    }
     const indexSource = await readFile(new URL("../src/host/index.js", import.meta.url), "utf8")
 
     // Each entry says where it comes from. That claim is checked rather than

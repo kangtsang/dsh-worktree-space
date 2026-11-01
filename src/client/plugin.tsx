@@ -451,9 +451,23 @@ export const WorktreePlugin = {
       // plugin-manager package, part of the shell rather than a dependency of this
       // plugin. The card renders nothing without a form.
       if (typeof forms.whileServed !== "function") return
+      /**
+       * One stable identity for the catalog read, for the life of this registration.
+       *
+       * Written as a hoisted constant rather than inline in the JSX below, and that is a
+       * fix rather than tidiness: `loadModels={() => api.models()}` made a new function on
+       * every render, the card's loading effect lists `loadModels` among its dependencies,
+       * and so every render looked like a new request. The effect re-ran, which set
+       * "loading", whose state change caused another render, which produced another
+       * function - a loop that asked the Host for the catalog over and over and made the
+       * row and everything under it flicker until the round trip finally settled.
+       *
+       * `api` is itself stable for this closure, so the function can be too.
+       */
+      const loadModels = () => api.models()
       ctx.effect(() => forms.whileServed([ENTRY_ID], () => ctx.slots.inject("plugins.bundle.config" as never, () => ctx.slots.register(
         { name: "plugins.bundle.config", key: NS, locale: NS } as never,
-        () => <PluginConfigCard form={form as never} />,
+        () => <PluginConfigCard form={form as never} loadModels={loadModels} />,
       ))), "dsh-worktree-space plugin configuration card")
       // The update capsule on this bundle's own page in the Plugins panel, beside the
       // switch and the uninstall button - the place a reader who is already looking at

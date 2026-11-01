@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, ChevronDown } from "./icons"
+import { Check, ChevronDown, Loader2 } from "./icons"
 import { Button, Dialog, DialogContent, DialogDescription, Input } from "./ui"
 import { format, useT } from "../lib/i18n"
 import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/config-preview"
@@ -106,7 +106,19 @@ const TASKS_ROOT_DIRECTORY_FIELD = "tasksRootDirectory"
 const TASKS_ROOT_STRATEGY_FALLBACK = "default"
 
 /** The row that decides whether a record of every operation is written. */
-const AUDIT_LOG_FIELD = "auditLog"/**
+const AUDIT_LOG_FIELD = "auditLog"
+/**
+ * The two rows that name the model a dispatched session runs on.
+ *
+ * Two fields rather than one, matching the Host schema: a model id is only unique inside
+ * its provider, and one joined string would have to be split again on the way back. The
+ * row reads and writes them together, so the card still shows one decision - the pair is
+ * one answer, and a half-filled pair is the setting saying "not specified".
+ */
+const TASK_MODEL_PROVIDER_FIELD = "taskModelProvider"
+const TASK_MODEL_FIELD = "taskModel"
+/** The value the row writes when "Not specified" is chosen: both halves cleared. */
+const TASK_MODEL_NONE = ""/**
  * The two states, as the Host schema spells them. The default is on: a log that
  * starts empty and is only turned on when something goes wrong arrives too late
  * to be the record of what went wrong.
@@ -532,12 +544,199 @@ function ListFieldRow({ field, removedField, label, hint, builtIn, form, notify 
 interface PluginConfigCardProps {
   /** The form the Host serves for this plugin, or undefined when there is none. */
   form?: ConfigFormLike
+  /**
+   * Every model route this Host can reach, when the shell has already loaded it.
+   *
+   * Left out, the row asks for itself through `api.models`. Handed in, a page that has
+   * the catalog already does not pay for a second walk of every provider.
+   */
+  models?: ModelCatalogLike
+  /**
+   * How the row asks for the catalog when `models` was not handed in.
+   *
+   * No argument: the Host reads the providers fresh on every call, so a retry needs no
+   * way to say "bypass the cache" - there is nothing between it and the answer.
+   */
+  loadModels?: () => Promise<ModelCatalogLike>
+}
+
+/** One provider and the models it serves, as the model row offers them. */
+export interface ModelCatalogLike {
+  providers: Array<{ provider: string; models: string[] }>
+}
+
+/** One option in the model row: the "not specified" entry, or one route. */
+interface ModelChoice {
+  /** `provider\u0000model`, or the empty string for "not specified". */
+  value: string
+  provider: string
+  model: string
+}
+
+/** The value a route is offered under: the two halves in one comparable string. */
+const routeValue = (provider: string, model: string) => `${provider}\u0000${model}`
+
+/**
+ * The row that decides which model a dispatched session runs on.
+ *
+ * ## Why it is not one more `ChoiceField`
+ *
+ * The other rows offer a fixed list the schema knows about: two states for a switch, five
+ * depths for a scan. This one offers **whatever the Host can route to right now**, which is
+ * a list that changes with what is installed and logged in, and which arrives from an
+ * endpoint rather than from the schema. So the options are built here, from the catalog,
+ * and the row has three states the fixed lists do not have: loading, "no model list
+ * available", and a value in force that the catalog no longer carries.
+ *
+ * ## Why "Not specified" is first and is the default
+ *
+ * Because it is the shipped behaviour and the one that needs no thought: a dispatch that
+ * names nothing starts on the model the dispatching session is using. Putting a concrete
+ * model first would make the row look like it is recommending one, and every profile that
+ * never touched it would be moved onto a model nobody chose.
+ *
+ * ## Why a stale value is kept rather than dropped
+ *
+ * A configured route whose provider was uninstalled still has to be visible: it is what
+ * the configuration says, and a row that silently showed "Not specified" instead would
+ * make the next save erase a setting the user never touched. It joins the list as an
+ * extra entry, the way the choice rows already handle a value their list does not offer.
+ * @param props - the served values, the form to write through, and the catalog.
+ */
+function TaskModelRow({ provider, model, catalog, loading, unavailable, onRetry, form, notify }: {
+  /** The provider half in force, empty when none is set. */
+  provider: string
+  /** The model half in force, empty when none is set. */
+  model: string
+  catalog: ModelCatalogLike | undefined
+  /** Whether the catalog is still being read. */
+  loading: boolean
+  /** Whether the catalog could not be read at all, as opposed to being empty. */
+  unavailable: boolean
+  /** Asks for the catalog again, after a read that failed. */
+  onRetry: () => void
+  form: ConfigFormLike
+  notify: (message: string | null) => void
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const current = provider === "" || model === "" ? "" : routeValue(provider, model)
+  const choices: ModelChoice[] = [{ value: TASK_MODEL_NONE, provider: "", model: "" }]
+  for (const group of catalog?.providers ?? []) {
+    for (const id of group.models) choices.push({ value: routeValue(group.provider, id), provider: group.provider, model: id })
+  }
+  // A configured route the catalog does not carry joins the list, so the row shows what
+  // is in force instead of the nearest thing to it.
+  const offered = choices.some((choice) => choice.value === current)
+  if (current !== "" && !offered) choices.push({ value: current, provider, model })
+
+  const labelOf = (choice: ModelChoice) => choice.value === TASK_MODEL_NONE
+    ? t("taskModelInherit")
+    : `${choice.provider}/${choice.model}`
+  const active = choices.find((choice) => choice.value === current)
+
+  const pick = (choice: ModelChoice) => {
+    setOpen(false)
+    // Both halves are written, always, and in this order: the provider first, so a model
+    // id is never momentarily configured under the previous provider. A "not specified"
+    // pick clears both, which is what makes the setting say nothing rather than name a
+    // half-route.
+    setBusy(true)
+    notify(null)
+    setPreview(TASK_MODEL_PROVIDER_FIELD, choice.provider)
+    setPreview(TASK_MODEL_FIELD, choice.model)
+    void form.set(TASK_MODEL_PROVIDER_FIELD, choice.provider)
+      .then((acceptedProvider) => acceptedProvider
+        ? form.set(TASK_MODEL_FIELD, choice.model)
+        : false)
+      .then((accepted) => {
+        setBusy(false)
+        if (accepted === false) {
+          setPreview(TASK_MODEL_PROVIDER_FIELD, undefined)
+          setPreview(TASK_MODEL_FIELD, undefined)
+          notify(t("configNotSaved"))
+          return
+        }
+        notify(t("configSaved"))
+      })
+      .catch(() => {
+        setBusy(false)
+        setPreview(TASK_MODEL_PROVIDER_FIELD, undefined)
+        setPreview(TASK_MODEL_FIELD, undefined)
+        notify(t("configNotSaved"))
+      })
+  }
+
+  /**
+   * What the row says while it has no list to choose from.
+   *
+   * Three states, and the difference matters: the catalog is still being read (usually a
+   * few seconds, because the host asks every provider), the read failed, or there is a
+   * list. Collapsing the first two - which is what the row did - left it reading
+   * "Not specified" for the whole wait, so a slow read looked like a Host with no models
+   * at all, and the only way to tell was to wait and see whether the menu eventually
+   * filled in.
+   */
+  const note = loading
+    ? t("taskModelLoadingHint")
+    : unavailable ? t("taskModelUnavailableHint") : t("taskModelHint")
+  return <div className="dws-plugin-config-row dws-plugin-config-model">
+    <span className="dws-plugin-config-label">{t("taskModelLabel")}
+      <span className="dws-plugin-config-hint">{note}</span>
+    </span>
+    <span className="dws-plugin-config-field">
+      <button type="button" className="dws-plugin-config-select" aria-label={t("taskModelLabel")}
+        aria-haspopup="menu" aria-expanded={open} aria-busy={loading} disabled={busy}
+        onClick={() => setOpen(!open)}>
+        <span className="dws-plugin-config-value">
+          {/* Loading and failed both come before the current value, and for the same
+              reason: "Not specified" is always in the list - it is the empty choice - so
+              testing the value first would show it for the whole wait and hide the fact
+              that anything is happening at all. Only a real configured route is worth
+              showing while the list is missing, and it is the one case left below. */}
+          {loading
+            ? t("taskModelLoading")
+            : unavailable
+              ? t("taskModelUnavailable")
+              : active !== undefined ? labelOf(active) : t("taskModelNotSpecified")}
+        </span>
+        {/* The spinner sits where the chevron is, so the row's width does not jump when
+            the list arrives. `aria-hidden` because `aria-busy` already says the same
+            thing to a screen reader. */}
+        {loading
+          ? <Loader2 size={14} strokeWidth={1.3} className="dws-spin" aria-hidden="true" />
+          : <ChevronDown size={14} strokeWidth={1.3} aria-hidden="true" />}
+      </button>
+      {open ? <div className="dws-plugin-config-menu" role="menu">
+        {loading ? <div className="dws-plugin-config-loading" role="status">
+          <Loader2 size={14} strokeWidth={1.3} className="dws-spin" aria-hidden="true" />
+          <span>{t("taskModelLoadingMenu")}</span>
+        </div> : null}
+        {unavailable && !loading ? <div className="dws-plugin-config-loading" role="status">
+          <span>{t("taskModelUnavailable")}</span>
+          <button type="button" className="dws-plugin-config-retry" onClick={onRetry}>{t("taskModelRetry")}</button>
+        </div> : null}
+        {choices.map((choice) => <button type="button" role="menuitem" key={choice.value || "none"}
+          className="dws-plugin-config-item"
+          data-selected={choice.value === current ? "true" : "false"}
+          /* "Not specified" stays live while the list loads: it is the current value and
+             the one a reader most often wants to keep, so disabling it would be the one
+             choice the row makes unavailable. */
+          disabled={loading && choice.value !== TASK_MODEL_NONE}
+          onClick={() => pick(choice)}>
+          <span className="dws-plugin-config-item-label">{labelOf(choice)}</span>
+          {choice.value === current ? <Check size={16} strokeWidth={1} aria-hidden="true" /> : null}
+        </button>)}
+      </div> : null}
+    </span>
+  </div>
 }
 
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD]) {
+  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -563,8 +762,75 @@ function textOf(section: unknown): Record<string, string> {
  * takes the optimistic value back, so the row never claims a setting that is not
  * in force.
  */
-export function PluginConfigCard({ form }: PluginConfigCardProps) {
+export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardProps) {
   const t = useT()
+  // The catalog the model row offers, and whether asking for it failed.
+  //
+  // Loaded once per mount rather than on every menu open: the walk behind it visits every
+  // provider's model list on the Host, and a menu that re-ran it would stutter on each
+  // click. A row whose catalog is missing still renders and still says "Not specified" -
+  // that is the value it is meant to show when nothing is configured, and it is also what
+  // a Host with no reachable provider leaves as the only choice.
+  const [catalog, setCatalog] = useState<ModelCatalogLike | undefined>(models)
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false)
+  /**
+   * Whether a read is in flight.
+   *
+   * Its own state rather than "`catalog` is undefined": a read that failed also leaves the
+   * catalog undefined, and the row has to say different things for the two. The Host walks
+   * every provider before answering, which takes a few seconds on a real deployment - long
+   * enough that the row sitting on "Not specified" in the meantime reads as "there are no
+   * models", which is exactly the wrong conclusion.
+   */
+  const [catalogLoading, setCatalogLoading] = useState(models === undefined && loadModels !== undefined)
+  /** A counter, so Retry re-runs the effect rather than duplicating its body here. */
+  const [catalogAttempt, setCatalogAttempt] = useState(0)
+  /**
+   * The loader, held by reference rather than listed as a dependency.
+   *
+   * A caller writing `loadModels={() => api.models()}` inline - the natural way to pass it -
+   * produces a new function on every render. With that function in the dependency array,
+   * each render looked like a new request: the effect re-ran, set the loading state, that
+   * state change caused another render, and the round trip repeated. On screen it is the
+   * model row and everything below it flickering until the fetch happens to settle, and the
+   * console shows the catalog being asked for many times for one menu.
+   *
+   * Reading through a ref means the component is correct whichever way the caller passes
+   * it; `plugin.tsx` also hoists its copy, and both are wanted, because either one alone
+   * still leaves the other's mistake live.
+   */
+  const loadModelsRef = useRef(loadModels)
+  loadModelsRef.current = loadModels
+  useEffect(() => {
+    if (models !== undefined) {
+      setCatalog(models)
+      setCatalogLoading(false)
+      setCatalogUnavailable(false)
+      return
+    }
+    const load = loadModelsRef.current
+    if (load === undefined) {
+      setCatalogLoading(false)
+      return
+    }
+    let live = true
+    setCatalogLoading(true)
+    setCatalogUnavailable(false)
+    void load()
+      .then((loaded) => {
+        if (!live) return
+        setCatalog(loaded)
+        setCatalogLoading(false)
+      })
+      .catch(() => {
+        if (!live) return
+        setCatalogUnavailable(true)
+        setCatalogLoading(false)
+      })
+    return () => { live = false }
+    // `loadModels` is deliberately absent: see the ref above. `models` stays, because the
+    // shell handing a catalog in is a real change of state rather than a new callback.
+  }, [models, catalogAttempt])
   // Read from the snapshot once up front, not only when it changes: the form is a
   // snapshot rather than something to wait on, so the first paint can already carry the
   // values in force. It matters here because the strategy among them is what decides
@@ -682,5 +948,19 @@ export function PluginConfigCard({ form }: PluginConfigCardProps) {
         </span>
       </div>
     })}
+    {/* The model row sits last, after every setting that is about the task space rather
+        than about what runs in it: it is the only row whose list comes from the Host at
+        open time, so it is the one that can arrive a moment late and must not push the
+        rows above it around while it does. */}
+    <TaskModelRow
+      provider={chosen[TASK_MODEL_PROVIDER_FIELD] ?? served[TASK_MODEL_PROVIDER_FIELD] ?? ""}
+      model={chosen[TASK_MODEL_FIELD] ?? served[TASK_MODEL_FIELD] ?? ""}
+      catalog={catalog}
+      loading={catalogLoading}
+      unavailable={catalogUnavailable}
+      onRetry={() => setCatalogAttempt((attempt) => attempt + 1)}
+      form={form}
+      notify={setNotice}
+    />
   </div>
 }

@@ -17,6 +17,7 @@ import { refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from
 import { fileSessionUnderWorkspace } from './session-tools.js'
 import { registerGatedTools } from './task/tool-gate.js'
 import { SessionWatch } from './session-watch.js'
+import { installRouteHook, modelCatalogOf } from './task/session-model.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -24,7 +25,7 @@ export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './tas
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open', 'task.models']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -61,7 +62,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005', 'E1006',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006', 'E2007',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015', 'E4016', 'E4017',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
@@ -318,9 +319,9 @@ let archiveStrategyReference
  * Whether the agent handoff entries are offered, as the running entry carries it.
  *
  * Shown unless the setting says otherwise, which is the schema's own default: what it
- * governs is the plugin's experimental part, and a profile that turns it off gets the
- * standard finish - the commit and the conflict resolution are the user's own then.
- * Volatile for the same reason as the two settings above.
+ * governs is whether the finish offers to hand work to an agent, and a profile that turns
+ * it off gets the standard finish - the commit and the conflict resolution are the user's
+ * own then. Volatile for the same reason as the two settings above.
  */
 let handoffEntryReference
 
@@ -331,6 +332,18 @@ let handoffEntryReference
  * is open, and the endpoint that widens a session asks at use time rather than at load.
  */
 let handoffFullAccessReference
+
+/**
+ * The model the configuration names for the sessions this plugin opens.
+ *
+ * Held as two references rather than as one route, and read together at use time by
+ * {@link configuredTaskModel}: the pair is one decision - a provider without a model
+ * names nothing - and reading it apart would let the two halves disagree while the form
+ * is being edited. Volatile like the rest of this schema, which is what makes the
+ * Plugins page serve them and a save reach the next dispatch.
+ */
+let taskModelProviderReference
+let taskModelReference
 
 /**
  * Whether the container root is derived from the source root or named by the user.
@@ -421,6 +434,30 @@ export function configuredTasksRoot() {
   if (tasksRootStrategyReference?.get() !== 'custom') return ''
   const value = tasksRootDirectoryReference?.get()
   return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * The model the configuration names for sessions this plugin opens.
+ *
+ * One answer rather than the pair the two fields hold, and the shape is what makes the
+ * precedence readable at the call sites: a half-filled pair is **not** a route, because
+ * a model id without its provider names nothing - the same id can be served by two
+ * providers, and guessing the provider is how a dispatch ends up on the wrong one. So a
+ * pair with either half empty answers `undefined`, which the dispatch reads as "this
+ * level said nothing" and falls through to the level below it.
+ *
+ * Both halves are trimmed and read through `settingValue`, so a plain value passed by a
+ * test or by a future direct call is honoured exactly like a live reference. Reading only
+ * the reference shape fails quietly here, as it does for every other setting in this
+ * file: `''.get` is undefined, so a plain empty string reads as unset - which happens to
+ * be the right answer for the default and the wrong one for a value someone wrote.
+ * @returns the configured route, or undefined when the configuration names none.
+ */
+export function configuredTaskModel() {
+  const provider = String(settingValue(taskModelProviderReference) ?? '').trim()
+  const model = String(settingValue(taskModelReference) ?? '').trim()
+  if (provider === '' || model === '') return undefined
+  return { provider, model }
 }
 
 /**
@@ -676,14 +713,14 @@ export const Config = z.object({
   /**
    * Whether the two entries that hand work to an agent are offered.
    *
-   * Shown by default, because that is the finish the plugin has been shipping: a profile
-   * that would rather not see an experimental entry sets this to hide, and the standard
-   * finish is then the user's own commit and their own conflict resolution. The dialogs
-   * read it from `task.preference` rather than from this form, because that is where the
-   * other setting they default from already arrives.
+   * Shown by default, because that is the finish the plugin ships: a profile that would
+   * rather not see these entries sets this to hide, and the standard finish is then the
+   * user's own commit and their own conflict resolution. The dialogs read it from
+   * `task.preference` rather than from this form, because that is where the other setting
+   * they default from already arrives.
    */
   handoffEntry: z.union(['show', 'hide']).default('show').loose().volatile()
-    .description('Offer the two experimental entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
+    .description('Offer the two entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
   /**
    * Whether the sessions a finish hands an agent are opened with full access.
    *
@@ -835,6 +872,34 @@ export const Config = z.object({
    */
   archiveDocumentsDirectory: z.string().default('').volatile()
     .description('Where archived documents go under the custom strategy. Empty files them under the container root instead.'),
+  /**
+   * The model every session this plugin opens starts on.
+   *
+   * Two strings rather than one, because a model id is only unique inside its provider:
+   * `deepseek-chat` is a different route depending on which provider serves it, and one
+   * joined `provider/model` string would have to be split again at every use. Both empty
+   * is the shipped state and means **not specified**, which is a real answer rather than
+   * a missing one: a dispatch that names no model then starts on the model the
+   * dispatching session is using, which is what a leader expects when it has not thought
+   * about models at all.
+   *
+   * The precedence, highest first, is:
+   *
+   *   1. the `model` argument on the dispatch itself (one call, one session);
+   *   2. this setting (every session this plugin opens);
+   *   3. the model the dispatching session is on (the default, and the only one that
+   *      needs nothing configured).
+   *
+   * Read through {@link configuredTaskModel} at the moment a session is opened rather
+   * than captured in `apply`, so a value saved from the Plugins page reaches the next
+   * dispatch instead of the one after a reload.
+   *
+   * Volatile like the rest of this schema: that is what makes the Plugins page serve it.
+   */
+  taskModelProvider: z.string().default('').volatile()
+    .description('Provider of the model every session this plugin opens starts on. Empty means not specified, and a dispatched session then inherits the model of the session that dispatched it.'),
+  taskModel: z.string().default('').volatile()
+    .description('Model id for task sessions, inside taskModelProvider. Empty means not specified, and a dispatched session then inherits the model of the session that dispatched it.'),
 })
 
 /**
@@ -911,6 +976,10 @@ export function apply(ctx, config = {}) {
   // And for how much access those entries get: the card writes it, the endpoint that
   // widens a session reads it, and off is what anything but an explicit `on` means.
   handoffFullAccessReference = config.handoffFullAccess
+  // And for the model task sessions start on: two references read as one answer by
+  // `configuredTaskModel`, so a save on the Plugins page reaches the next dispatch.
+  taskModelProviderReference = config.taskModelProvider
+  taskModelReference = config.taskModel
   // And for where a task space goes: the settings card writes the pair, and every
   // caller that was not told a container root resolves it through these.
   tasksRootStrategyReference = config.tasksRootStrategy
@@ -932,6 +1001,26 @@ export function apply(ctx, config = {}) {
   // only the reference shape fails quietly: `'off'.get` is undefined, so a plain
   // 'off' reads as unset and the switch stays on - the opposite of the ask.
   setAuditEnabledReader(() => settingValue(config.auditLog) !== 'off')
+
+  // The rewrite that makes a model switch reach the member's next request. Installed once
+  // for the host and answering only for the sessions a leader explicitly moved, so a
+  // request nobody asked this plugin to change is passed through untouched. It is armed
+  // here rather than lazily because `agent/request` is a waterfall: a listener added after
+  // the request has started misses it, and the whole point is the request after the switch.
+  //
+  // A host that serves no event dispatch keeps working - the durable `model/selection`
+  // event is still written, and the controller's own selection still applies - so this is
+  // reported rather than thrown, the same trade the session watch makes below.
+  const disposeRouteHook = installRouteHook(ctx)
+  if (disposeRouteHook === undefined && typeof ctx.logger?.warn === 'function') {
+    try {
+      ctx.logger.warn('dsh-worktree-space: this deployment serves no agent/request dispatch, so a model switch '
+        + 'is recorded and applied through the session selection only')
+    } catch { /* a log that fails must not become the failure */ }
+  }
+  if (disposeRouteHook !== undefined && typeof ctx.effect === 'function') {
+    ctx.effect(() => () => disposeRouteHook(), 'dsh-worktree-space session model routing')
+  }
 
   // Watching the sessions this plugin dispatches work to, so a turn that ends badly reaches
   // the agent that asked for the work instead of dying silently in a session nobody is
@@ -968,7 +1057,7 @@ export function apply(ctx, config = {}) {
   // A deployment that serves no tool runtime keeps working: the /api endpoints remain the
   // seam, and the injected callback returns the unmount so cordis tears the registrations
   // down with the plugin instead of leaking them.
-  const gatedOptions = { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), sessionWatch: sessionWatcher }
+  const gatedOptions = { configuredRoot: configuredTasksRoot, configuredFullAccess: configuredHandoffFullAccess, configuredArchive: () => ({ strategy: configuredArchiveStrategy(), directory: configuredArchiveDirectory() }), configuredModel: configuredTaskModel, sessionWatch: sessionWatcher }
   if (typeof ctx.inject === 'function') {
     ctx.inject(['tools'], (toolsCtx) => registerGatedTools(toolsCtx, gatedOptions))
   } else {
@@ -1221,6 +1310,26 @@ export function apply(ctx, config = {}) {
           ...taskScanBounds(),
         })
     })
+
+    // The routes this host can reach, for the configuration card's model row.
+    //
+    // Its own endpoint rather than a field on `task.preference`, because the two are
+    // different questions asked at different times: the preferences are read on every
+    // dialog open and are cheap, while this one walks every provider's model list and is
+    // only needed by the Plugins page. Folding it in would make every create dialog pay
+    // for a catalog it never shows.
+    //
+    // Never throws: the catalog answers with what it could reach and why the rest failed,
+    // which is what the row needs in order to say "no model list available" instead of
+    // showing an empty menu.
+    //
+    // Read fresh on every call, with no cache between them. A remembered catalog is a
+    // catalog that can disagree with what the deployment actually offers - a model added
+    // or a provider's credential removed shows up late, and the row would offer a route
+    // that no longer resolves. The wait that cache was there to hide is handled where it
+    // belongs: a per-provider timeout on the way in (`LIST_MODELS_TIMEOUT_MS`), and a
+    // "reading the model list" state in the row on the way out.
+    if (endpoint === 'task.models') return recover(async () => modelCatalogOf(ctx))
 
     if (endpoint === 'task.preference') return recover(async () => {
       // Read-only, and shaped as a record rather than a bare string: the next
