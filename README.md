@@ -15,7 +15,7 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 <img src="docs/img/isolation-model.png" alt="Worktree Space隔离模型" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
 
-📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV17Mn56dECu)
+📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV14Zxt6tEGb)
 
 ## 📑 目录
 
@@ -100,8 +100,9 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 ## ✨ 功能
 
 - **从会话里建任务空间。** 勾选要参与的仓库（默认全选）、给任务起名、定分支前缀、指定任务空间放哪。
-  每个参与的仓库都会得到一份位于 `<分支前缀><任务名>` 的 worktree（前缀默认 `task/`），起点可以是各仓库
-  当前的 HEAD，也可以指定某个在所有选中仓库里都存在的分支或提交。
+  每个参与的仓库都会得到一份位于 `<分支前缀><任务名>` 的 worktree（前缀默认 `task/`）。起点默认是各仓库
+  当前的 HEAD；面板另有一个下拉，列出**所有已勾选仓库共有**的分支，没有单独指定起点的仓库都从这里开始，
+  而每张卡片也可以只给那一个仓库另选起点。走工具调用时，`baseRef` / `baseRefs` 接受任意 ref（含提交）。
 - **唯一一项交付选择：这个任务要不要部署验收。** 任务信息最后就是一个勾选框 —— **部署到 Docker**，
   勾上后会多出一个 **部署脚本** 输入框（留空则用 `工作区/.worktree-space/deploy/deploy.sh`）。
   它之所以在建的时候就问，是因为**交付策略只在创建时落一次，事后没有入口能加、能改**：没勾等于定了
@@ -219,7 +220,8 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
    默认起点，面板里的「跟随默认分支起点」可以退回。
 2. **默认分支起点**（仓库列表下方，未选时显示「各自当前 HEAD」）：没有单独设置起点的仓库都从这里开始。
    列表只列出**所有已勾选仓库共有**的分支 —— 一次创建给每个 worktree 同一个起点，某个仓库没有该分支
-   就会整次失败。字段名旁的 `?` 写着完整的优先级与例外。
+   就会整次失败。取消勾选某个仓库后，所选分支若不再共有，会作废、不带进创建。字段名旁的 `?` 写着
+   完整的优先级与例外。
 3. **任务名称**：会转成小写，除字母、数字、点、连字符和下划线以外的字符（空格、中文等）都换成连字符；
    它同时是任务空间的目录名和分支后缀。不合法时直接说出违反了哪一条。
 4. **分支前缀**：分支名就是前缀加任务名（默认 `task/`）。改成与当前默认不同的值时，下面出现
@@ -476,7 +478,9 @@ worktree 里，可以就地处理。
 2. **上面这个「任务会话模型」设置** —— 影响之后开起的每个任务会话。
 3. **派单会话当前用的模型** —— 前两条都没指定时用它，也就是默认行为，不需要配置任何东西。
 
-指定了宿主**用不了的**模型不会静默退回：会话照常开起、活照常交出去，答复里会带一条警告，写明实际可用的模型。
+指定了宿主**用不了的**模型不会被静默退回，但两种情形不一样。宿主**确认不支持**这个模型时，这次派单
+直接失败（`E4018`）——任务空间、分支、会话都不会创建，换一个模型重派即可，答复里列出实际可用的路由；
+宿主只是**读不出**路由（模型目录暂时读不到）时照常派单，答复里带一条警告，写明读不出的原因。
 
 任务会话跑到一半因为**模型故障**停下时（供应商挂了、路由不可用），它自己恢复不了 —— 故障的就是它。
 这时用 `wts_session_tool` 的 `model` 动作给它换一个模型：不带参数时列出它当前的模型和宿主能用的全部模型，
@@ -671,9 +675,11 @@ the repository that stopped it, and merges once that session has resolved it.
 
 - **Create a task space from a session.** Tick the repositories taking part (all of them are ticked
   to start with), name the task, settle the branch prefix, and say where the space goes. Every
-  participating repository gets a worktree on `<branch prefix><task>` — `task/<task>` by default —
-  starting from each repository's current HEAD, or from a branch or commit that exists in **every**
-  selected repository.
+  participating repository gets a worktree on `<branch prefix><task>` — `task/<task>` by default.
+  The start point defaults to each repository's current HEAD; a dropdown in the dialog lists the
+  branches **every ticked repository carries** and every repository without a start point of its own
+  starts there, while a card can name a start point for that one repository alone. Through the tool,
+  `baseRef` / `baseRefs` accept any ref, commits included.
 - **One delivery choice, and only one: does this task deploy for acceptance?** The bottom of Task
   details is a single tick box — **Deploy to Docker** — which, once ticked, adds one **Deploy script**
   field (empty means `workspace/.worktree-space/deploy/deploy.sh`). It is asked at creation because
@@ -816,21 +822,28 @@ top down:
 
 1. **Repositories**: tick the ones taking part. Each card names the branch its HEAD is on and its
    path, and the footer carries **Select all / Select none** with "N / M selected". **One is the
-   minimum.**
-2. **Task name**: lower-cased, with everything except letters, digits, dots, dashes and underscores
+   minimum.** The **Choose branch** button on a card sets the start point for that repository's new
+   worktree alone, and it is **not a checkout** — the source repository stays on the branch it is on.
+   Once set, that repository stops following the default start point below; **Use the default start
+   point below** on the same panel puts it back.
+2. **Default start point** (under the repository list, showing **Each repository's current HEAD**
+   until one is chosen): every repository without a start point of its own starts here. The list
+   holds only the branches **every ticked repository carries** — one create gives every worktree the
+   same start point, so a branch one of them lacks fails the whole create. The `?` beside the field
+   spells out the full order and the exceptions, and a choice that stops being shared — because a
+   repository carrying it was unticked — is discarded rather than sent.
+3. **Task name**: lower-cased, with everything except letters, digits, dots, dashes and underscores
    (spaces, Chinese characters and so on) turned into dashes. It is both the task space's directory
    name and the branch suffix, and an invalid name is reported with the rule it breaks.
-3. **Branch prefix**: the branch is this prefix plus the task name, `task/` by default. Change it to
+4. **Branch prefix**: the branch is this prefix plus the task name, `task/` by default. Change it to
    something other than the stored default and **Set as the default branch prefix** appears — ticking
    it writes this value back into the settings when the space is created.
-4. **Worktree Space container root**: pre-filled with the recommendation, one level below the root
+5. **Worktree Space container root**: pre-filled with the recommendation, one level below the root
    workspace, and rarely changed; moving it offers the same **Set as the default…** box, which writes
    the path back the same way. A container root that is itself a Git repository is refused.
-5. **Deploy to Docker** (unticked to start with): ticked, it adds one **Deploy script** field, empty
+6. **Deploy to Docker** (unticked to start with): ticked, it adds one **Deploy script** field, empty
    meaning `workspace/.worktree-space/deploy/deploy.sh`. This box settles whether a passing smoke
    gates the merge, and it is **recorded once, at creation** — nothing afterwards can add it.
-6. **Branch base**: each repository's **current HEAD** (the default), or a **named branch or commit**,
-   which has to exist in **every** selected repository — one missing refuses the create.
 7. **Preview**: the branch name and the space's directory this task will use, live as you type.
 8. Press **Create and open session**: the space is built and a session is opened in it.
 
@@ -1141,9 +1154,12 @@ its model is decided in this order:
 3. **The model the dispatching session is using** — when neither of the above names one.
    This is the default, and it needs no configuration at all.
 
-A model the host cannot route to is not swapped for the inherited one in silence: the session
-is still opened and the work is still handed over, and the answer carries a warning naming the
-routes that do exist.
+A model the host cannot route to is not swapped for the inherited one in silence, but the two
+ways that can happen differ. When the host **knows** it does not serve the model, the dispatch
+itself fails (`E4018`) — no task space, no branch, no session is made, and the answer lists the
+routes that do exist, so naming another model and dispatching again is the whole repair. When the
+host merely **cannot read** the routes (the model catalogue is out of reach), the dispatch goes
+through and the answer carries a warning saying what could not be read.
 
 When a task session stops because **its model failed** — the provider went down, the route is
 unavailable — it cannot recover itself, because it is the thing that is failing. Move it with

@@ -191,7 +191,7 @@
 | 名字被**别的**任务空间占了 | `E2001` | 换任务名 |
 | 同名任务空间已在磁盘上、只是没注册 | `E2002` | **不要换名重建**，对话框会给出 **重新注册** 按钮，点了就能接着用 |
 | 分支已被占用 | `E3001` | 换任务名 |
-| 起点 ref 在某个仓库里不存在 | `E3002` | 换一个每个选中仓库都有的分支或提交 |
+| 起点 ref 在某个仓库里不存在 | `E3002` | 换一个每个选中仓库都有的分支，或给缺它的那个仓库单独传 `baseRefs[仓库名]` |
 | 部署脚本路径越界或不存在 | `E4014` | 把脚本放进工作区的 `.worktree-space/deploy/`，或改路径 |
 | 勾了部署却没有入口 | `E4015` | 补一个入口脚本，或先不勾部署 |
 | 创建中途失败 | `E2005` / `E2006` | 前者已完整回滚（名字可原样重试）；后者有残留，按对话框里点名的路径手工清理 |
@@ -742,7 +742,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `E2001` | 名字被**别的**任务空间占了 | 换任务名 |
 | `E2002` | 同名任务空间已在磁盘上、只是没注册 | 面板 **重新注册**，不要换名重建 |
 | `E3001` | 分支已被占用 | 换任务名 |
-| `E3002` | 起点 ref 在某个仓库里不存在 | 换一个每个选中仓库都有的分支或提交 |
+| `E3002` | 起点 ref 在某个仓库里不存在 | 换一个每个选中仓库都有的分支，或给缺它的那个仓库单独传 `baseRefs[仓库名]` |
 | `E4001` | 一个仓库都没选 | 至少选一个 |
 | `E4002` | 一个任务里两个仓库同名 | 改名后再选 |
 | `E4014` | 部署脚本不是工作区 `.worktree-space/deploy/` 下的现有文件 | 把脚本放进那个目录，或改路径 |
@@ -772,6 +772,10 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 
 | 码 | 含义 |
 | --- | --- |
+| `E4016` | 工具调用里的 `model` 没写成 `"provider/model"` 形式 |
+| `E4017` | 要改某个会话的模型，但调用方不是派出这个任务的会话 |
+| `E4018` | 派单指定的模型**确认不在**宿主能路由的范围里 —— **任务空间、分支、会话都没有创建**；换一个模型重派即可，报错里列出了可用的路由 |
+| `E4019` | `baseRefs` 点名了一个本次没选中的仓库 —— 按仓库名改写，或先用 `list` 核对名字 |
 | `E7005` | 未知的 action |
 | `E7006` | 缺必传参数（目前只有 `done` 的 `merge`） |
 | `E7007` | 通过工具调用了不可逆操作（`force`、`strays: "discard"`）—— 只能由你在面板上做 |
@@ -961,7 +965,8 @@ the host's plugin page to change this plugin's configuration.
 The search box matches tasks, Workspaces, repositories, branches and paths at once. All three views carry
 a **Needs attention** filter for the rows worth looking at (changed, locked, prunable, or whose status
 could not be read); in the Workspaces view that tier means "has repositories". The arrow on each row
-folds it alone; the button beside it expands or collapses everything at once.
+folds it alone; **all three views start folded**, and the button beside it expands or collapses
+everything at once.
 
 **Every opening rescans**, but the panel first paints itself from the previous scan, so there is data on
 screen immediately. That memory lives in the DSH instance's process only and goes when the instance does.
@@ -978,26 +983,32 @@ Top to bottom:
 
 1. **Select repositories**: tick the repositories taking part in the task; each card names its current
    HEAD branch and its path. Below sit **Select all / Clear** and "N of M repositories selected".
-   **Pick at least one**; all are ticked to begin with.
-2. **Task information → Task name**: the name is lower-cased and every character that is not a letter,
+   **Pick at least one**; all are ticked to begin with. The **Choose branch** button on a card sets the
+   start point for that repository's new worktree alone, and it is **not a checkout** — the source
+   repository stays on the branch it is on; **Use the default start point below** on the same panel
+   puts it back.
+2. **Default start point** (below the repository list, showing **Each repository's current HEAD** until
+   one is chosen): every repository without a start point of its own starts here. The list holds only
+   the branches **every ticked repository carries** — one create gives every worktree the same start
+   point, so one repository lacking it refuses the whole create (`E3002`). A choice that stops being
+   shared, because the repository carrying it was unticked, is discarded rather than sent. The `?`
+   beside the field spells out the whole rule.
+3. **Task information → Task name**: the name is lower-cased and every character that is not a letter,
    a digit, a dot, a hyphen or an underscore (spaces, Chinese characters, and so on) becomes a hyphen.
    It is both the task space's directory name and the branch suffix. Anything illegal is named as such
    on the spot.
-3. **Branch prefix** (`task/` by default): the branch name is the prefix plus the task name. Once it
+4. **Branch prefix** (`task/` by default): the branch name is the prefix plus the task name. Once it
    differs from the current default, **Set as the default branch prefix** appears below it; ticking it
    writes this value back into the plugin's settings when you press **Create and open session**.
-4. **Worktree Space container root**: already filled with the recommendation — **`worktree-space`, one
+5. **Worktree Space container root**: already filled with the recommendation — **`worktree-space`, one
    level below the root workspace**, which is almost always what you want. The rule looks only at the
    first directory below the volume root, so `~/workspace/project1` and `~/workspace/deep-path/project2`
    recommend **the same** container. Changing it offers a **Set as default…** tick box too. The container
    root must neither contain nor be contained by the source root, and a container root that is itself a
    git repository is refused.
-5. **Deploy to Docker** (unticked by default): ticking it reveals the **Deploy script** box; leave it
+6. **Deploy to Docker** (unticked by default): ticking it reveals the **Deploy script** box; leave it
    empty and `workspace/.worktree-space/deploy/deploy.sh` is used. Why this has to be settled before the
    create is explained in 3.2.
-6. **Branch start point**: **each repository's current HEAD** (the default) or **a named branch or
-   commit**. In the second case that ref has to exist in **every** ticked repository; one miss refuses
-   the create (`E3002`).
 7. **Preview**: the **branch name** and **space directory name** this task will use, updating live as you
    type above.
 8. **Create and open session**: builds everything, then opens a session in that task space.
@@ -1047,7 +1058,7 @@ the deploy root. It is never archived, and it goes with the container when the s
 | The name is taken by a **different** task space | `E2001` | Pick another task name |
 | A task space of that name is already on disk, just not registered | `E2002` | **Do not rebuild under a new name** — the dialog offers **Register again**, which puts it back to use |
 | The branch is already taken | `E3001` | Pick another task name |
-| The start ref does not exist in one of the repositories | `E3002` | Name a branch or commit every ticked repository has |
+| The start ref does not exist in one of the repositories | `E3002` | Name a branch every ticked repository has, or give the one repository without it a `baseRefs[repository name]` of its own |
 | The deploy script's path is outside the deploy root, or missing | `E4014` | Move the script into the Workspace's `.worktree-space/deploy/`, or change the path |
 | Deploy ticked, no entry available | `E4015` | Add an entry script, or leave Deploy unticked for now |
 | Something failed part way through | `E2005` / `E2006` | The first has been rolled back whole (retry the name as it is); the second left something behind — clear the paths the dialog names by hand |
@@ -1280,7 +1291,7 @@ lays out what is about to happen:
 | Area | Contents |
 | --- | --- |
 | Status line | Uncommitted changes · commits awaiting merge · the space's directory name |
-| Repository list | Per row: repository name, task branch, `→` **target branch dropdown**, N commits, uncommitted / nothing uncommitted, the **source repository** path. The dropdown changes the target and recomputes the preview at once; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
+| Repository list | Per row: repository name, task branch, `→` **target branch**; the **source repository** path sits on the next line, with N commits and uncommitted / nothing uncommitted after it. The target opens a **searchable branch list**, and changing it recomputes the preview at once; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
 | Other content in the task space | Names of the entries that will be archived or deleted, plus a document count; several build/editor artefacts are deleted alongside them; the note at the foot says `.worktree-space/` is not archiveable content |
 
 ### 7.2 The four options
@@ -1379,8 +1390,8 @@ is disabled for the moment.
 
 ### 7.6 Optional: handing the commits and the conflicts to an agent
 
-> These two entrances **show by default**; set "Handing conflicts and commits to an agent" to "hidden"
-> in the plugin's settings to get the purely guide route back.
+> These two entrances are **always shown**; there is no setting that hides them. Leave them unused and
+> the standard route applies: commit and resolve the conflict yourself, then continue finishing.
 
 The finish dialog can open a DSH agent session and have it do two things for you:
 
@@ -1675,7 +1686,7 @@ the plugin is broken, and worth reporting) · `E9` an unknown failure.
 | `E2001` | The name is taken by a **different** task space | Pick another task name |
 | `E2002` | A task space of that name is on disk already, just not registered | **Register again** on the panel; do not rebuild under a new name |
 | `E3001` | The branch is already taken | Pick another task name |
-| `E3002` | The start ref does not exist in one of the repositories | Name a branch or commit every selected repository has |
+| `E3002` | The start ref does not exist in one of the repositories | Name a branch every selected repository has, or give the one repository without it a `baseRefs[repository name]` of its own |
 | `E4001` | No repository was selected | Select at least one |
 | `E4002` | Two repositories in one task share a name | Rename one, then select it |
 | `E4014` | The deploy script is not an existing file under the Workspace's `.worktree-space/deploy/` | Put the script in that directory, or change the path |
@@ -1705,6 +1716,10 @@ the plugin is broken, and worth reporting) · `E9` an unknown failure.
 
 | Code | Meaning |
 | --- | --- |
+| `E4016` | `model` was not written as `"provider/model"` |
+| `E4017` | A model switch was asked for a session by something other than the session that dispatched it |
+| `E4018` | The model a dispatch named is one the host **knows** it does not serve — **no task space, no branch and no session were made**; the error lists the routes that do exist, so name another model and dispatch again |
+| `E4019` | `baseRefs` names a repository this call does not select — fix the name, or check it against what `list` reports |
 | `E7005` | Unknown action |
 | `E7006` | A required argument is missing (today only `done`'s `merge`) |
 | `E7007` | An irreversible operation asked for through the tool (`force`, `strays: "discard"`) — only you, on the panel, may do those |

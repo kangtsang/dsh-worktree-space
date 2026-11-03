@@ -7,6 +7,38 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.3.10 — 2026-11-03
+
+每个仓库可以有自己的起点分支，创建对话框里逐仓库选择；模型不可达时派单直接失败，不再留下一个跑不起来的会话。
+
+### 新增
+
+- **按仓库指定起点。** `wts_worktree_space` 的 `create` 与 `add` 增加 `baseRefs` 参数：一个「仓库名 →
+  ref」的映射。每个仓库的起点按 **`baseRefs[仓库名]` → `baseRef` → 该仓库当前 HEAD** 求值，所以
+  「大部分仓库从 `develop` 起、只有某个从 `main` 起」只需写出例外的那一个。`baseRefs` 点名了本次没选中的
+  仓库会被拒绝（`E4019`），拼错的名字不会静默失效。
+- **创建对话框可以逐个仓库选起点。** 每张仓库卡片上有 **指定分支**，点开是这个仓库的分支列表（可搜索，
+  最多 100 条，超出时说明还剩多少条）。它只给这一个仓库的 worktree 定起点，**不是 checkout**。
+- **默认起点改为从共有分支里选。** 「分支起点」从「单选 + 手填 ref」变成一个下拉，列出**所有已勾选仓库
+  共有**的分支——一次创建给每个 worktree 同一个起点，某个仓库没有的分支不能作为共同起点。取消勾选仓库后，
+  所选分支若不再共有会作废、不带进创建。列表只列**本地分支**。
+- **`create` / `dispatch` 增加 `agentPreset`**，指定任务会话由哪个 agent preset 组合而成。
+- **`list` / `add` / `done` 返回值的 `sessions` 每项带上 `model` 与 `modelSource`**，可以直接看出某个
+  任务会话跑在哪个模型上、这个选择来自哪一层。
+
+### 变更
+
+- **模型不可达时派单直接失败（`E4018`），不再留下一个注定跑不起来的会话。** 校验提到创建任何东西之前：
+  宿主**确认不支持**该模型时，任务空间、分支、会话都不会创建；宿主只是**读不出**模型目录时照常派单，
+  答复里说明读不出的原因。这两种情形原先共用一句「无法路由」，现在分别给提示。
+- **交给 agent 的两个入口常驻显示**，插件配置里的「交由 agent 解决冲突入口」一项已删除。
+- **管理页面默认折叠**，三个视图都从折叠状态开始。
+
+### 修复
+
+- **会话的模型会从任务记录里消失。** 读回记录时会重建会话条目，而重建没带上 `model` / `modelSource`；
+  会话回报一次就把这两个字段从文件里抹掉，归档后更无从查起。现在两处都透传。
+
 ## 1.3.9 — 2026-11-02
 
 派单时可以指定任务会话使用的模型；任务会话的模型出故障、自己恢复不了时，队员可以给它换一个再唤醒继续干。
@@ -335,6 +367,46 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.3.10 — 2026-11-03
+
+Each repository can have a start point of its own, chosen per repository in the create dialog; a dispatch
+naming a model the host does not serve now fails instead of leaving a session that cannot run.
+
+### Added
+
+- **A start point per repository.** `create` and `add` on `wts_worktree_space` take a `baseRefs` argument:
+  a mapping of repository **name** to ref. Each repository's start point is resolved as
+  **`baseRefs[name]` → `baseRef` → that repository's own HEAD**, so "everybody from `develop` except that
+  one from `main`" only has to name the exception. A name `baseRefs` carries for a repository this call
+  does not select is refused (`E4019`) rather than quietly ignored.
+- **The create dialog picks a start point per repository.** Each repository card carries **Choose branch**,
+  which opens that repository's own branch list — searchable, at most 100 entries, with a note saying how
+  many were left out. It sets the start point for that one repository's worktree and is **not a checkout**.
+- **The default start point is now chosen from the shared branches.** The field changed from a radio pair
+  with a free-text ref into a dropdown listing the branches **every ticked repository carries** — one
+  create gives every worktree the same start point, so a branch one of them lacks cannot be the shared one.
+  Unticking a repository makes a choice that is no longer shared void rather than sending it. The list holds
+  **local branches** only.
+- **`create` / `dispatch` take `agentPreset`**, naming the agent preset a task session is composed from.
+- **`sessions` in the `list` / `add` / `done` answers now carry `model` and `modelSource`**, so which model
+  a task session runs on, and which level chose it, are readable from the answer itself.
+
+### Changed
+
+- **A dispatch naming a model the host does not serve fails (`E4018`) instead of leaving a session that
+  cannot run.** The check now happens before anything is created: when the host **knows** it does not serve
+  the model, no task space, branch or session is made; when the host merely **cannot read** the catalogue,
+  the dispatch goes through and the answer says what could not be read. The two used to share one
+  "cannot route" sentence; each now gets its own.
+- **The two agent handoff entrances are always shown**; the "agent handoff entry" setting is gone.
+- **The management page opens folded**, all three views starting collapsed.
+
+### Fixed
+
+- **A session's model disappeared from the task record.** Reading the record back rebuilt each session
+  entry without `model` / `modelSource`, so one report from the session erased both from the file, and a
+  finish archived what was left. Both places now carry them through.
 
 ## 1.3.9 — 2026-11-02
 

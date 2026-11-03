@@ -36,8 +36,13 @@ choice — pass `"provider/model"` when this particular job needs a particular m
 that, the **Plugins page** setting "Task session model" applies to every session this
 plugin opens. Failing that, the session starts on **the model this conversation is
 using** — which is what happens when nobody has an opinion, and is the shipped default.
-A model this host cannot reach is not silently swapped for the inherited one: the
-dispatch still happens, and the answer carries a warning naming the routes that exist.
+A model this host cannot reach is not silently swapped for the inherited one, and the two ways
+that can happen differ. When the host **knows** it does not serve the model, the call fails with
+`E4018` **before anything is made** — no task space, no branch, no session — and the answer lists
+the routes that do exist, so name another model and call again. When the host merely **cannot
+read** the routes (the model catalogue is out of reach), the dispatch goes through on the
+inherited model and the answer carries a warning saying what could not be read: that one is
+worth retrying later rather than fixing by changing the argument.
 
 
 ### Watching the member session (and correcting it)
