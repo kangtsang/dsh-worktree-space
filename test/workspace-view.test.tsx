@@ -100,9 +100,9 @@ describe("WorktreesSettings workspace view", () => {
     const path = name?.closest(".dws-repo-header")?.querySelector(".dws-repo-path")
     expect(path?.closest("button")).toBeNull()
     expect(path?.textContent).toBe("/projects")
-    // The arrow is still the control, and it still folds the row.
+    // The arrow is still the control, and the row now opens folded like every other one.
     const arrow = name?.closest(".dws-repo-header")?.querySelector(".dws-chevron-toggle")
-    expect(arrow?.getAttribute("aria-expanded")).toBe("true")
+    expect(arrow?.getAttribute("aria-expanded")).toBe("false")
   })
 
   it("keeps a disabled arrow on a Workspace that holds nothing, rather than no control at all", async () => {

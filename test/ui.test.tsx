@@ -53,7 +53,7 @@ describe("CreateWorktreeDialog", () => {
   it("creates one task across every discovered repository and opens it", async () => {
     const user = userEvent.setup()
     const next = services()
-    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), createTask: vi.fn().mockResolvedValue(createdTask()), doneTask: vi.fn() }
+    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), branches: vi.fn().mockResolvedValue({}), createTask: vi.fn().mockResolvedValue(createdTask()), doneTask: vi.fn() }
     const onClose = vi.fn()
     render(<CreateWorktreeDialog target={target as any} api={api as any} workspaces={next.workspaces as any} uiWorkspace={next.uiWorkspace as any} onCreated={vi.fn()} onClose={onClose} />)
 
@@ -76,7 +76,7 @@ describe("CreateWorktreeDialog", () => {
   it("creates only the repositories the user keeps", async () => {
     const user = userEvent.setup()
     const next = services()
-    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), createTask: vi.fn().mockResolvedValue(createdTask(["alpha"])), doneTask: vi.fn() }
+    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), branches: vi.fn().mockResolvedValue({}), createTask: vi.fn().mockResolvedValue(createdTask(["alpha"])), doneTask: vi.fn() }
     render(<CreateWorktreeDialog target={target as any} api={api as any} workspaces={next.workspaces as any} uiWorkspace={next.uiWorkspace as any} onCreated={vi.fn()} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /beta/ })).toBeTruthy())
@@ -87,15 +87,30 @@ describe("CreateWorktreeDialog", () => {
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha"], baseRef: undefined, branchPrefix: "task/", deployTarget: "none" }))
   })
 
-  it("starts every branch from the named ref the user chose", async () => {
+  it("starts every branch from the shared ref the user chose", async () => {
     const user = userEvent.setup()
     const next = services()
-    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), createTask: vi.fn().mockResolvedValue(createdTask()), doneTask: vi.fn() }
+    // Both repositories carry `main`, which is what makes it offerable as the
+    // shared start point: the menu is their intersection.
+    const api = {
+      suggestRoot: vi.fn().mockResolvedValue(suggestion()),
+      branches: vi.fn().mockResolvedValue({
+        "/repo/alpha": { branches: ["main", "develop"], truncated: 0 },
+        "/repo/beta": { branches: ["main", "hotfix"], truncated: 0 },
+      }),
+      createTask: vi.fn().mockResolvedValue(createdTask()),
+      doneTask: vi.fn(),
+    }
     render(<CreateWorktreeDialog target={target as any} api={api as any} workspaces={next.workspaces as any} uiWorkspace={next.uiWorkspace as any} onCreated={vi.fn()} onClose={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByRole("radio", { name: t("baseNamed") })).toBeTruthy())
-    await user.click(screen.getByRole("radio", { name: t("baseNamed") }))
-    await user.type(screen.getByPlaceholderText(t("baseRefPlaceholder")), "main")
+    await waitFor(() => expect(api.branches).toHaveBeenCalled())
+    // `fireEvent` rather than `userEvent` for the two clicks that build the
+    // choice: the panel is portalled to the body, which the dialog marks
+    // `pointer-events: none`, and userEvent refuses to click through it. The
+    // dialog's own click handler is what this asserts, not the pointer plumbing.
+    const shared = screen.getByRole("button", { name: new RegExp(`^${t("baseRefEachOwnHead")}$`) })
+    fireEvent.click(shared)
+    fireEvent.click(screen.getByRole("button", { name: "main" }))
     await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
@@ -105,7 +120,7 @@ describe("CreateWorktreeDialog", () => {
   it("refuses to create without a valid name or a selected repository", async () => {
     const user = userEvent.setup()
     const next = services()
-    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), createTask: vi.fn(), doneTask: vi.fn() }
+    const api = { suggestRoot: vi.fn().mockResolvedValue(suggestion()), branches: vi.fn().mockResolvedValue({}), createTask: vi.fn(), doneTask: vi.fn() }
     render(<CreateWorktreeDialog target={target as any} api={api as any} workspaces={next.workspaces as any} uiWorkspace={next.uiWorkspace as any} onCreated={vi.fn()} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /alpha/ })).toBeTruthy())
@@ -121,7 +136,7 @@ describe("CreateWorktreeDialog", () => {
 
   it("reports a source root it cannot use instead of offering a form", async () => {
     const next = services()
-    const api = { suggestRoot: vi.fn().mockResolvedValue({ ...suggestion(), repositories: [] }), createTask: vi.fn(), doneTask: vi.fn() }
+    const api = { suggestRoot: vi.fn().mockResolvedValue({ ...suggestion(), repositories: [] }), branches: vi.fn().mockResolvedValue({}), createTask: vi.fn(), doneTask: vi.fn() }
     render(<CreateWorktreeDialog target={target as any} api={api as any} workspaces={next.workspaces as any} uiWorkspace={next.uiWorkspace as any} onCreated={vi.fn()} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(t("notSourceRoot"))).toBeTruthy())
@@ -212,6 +227,8 @@ describe("WorktreesSettings", () => {
 
   it("groups linked worktrees without showing the main repository as a row", async () => {
     const next = renderSettings([{ path: "/repo", branch: "main", isMain: true, locked: false, prunable: false }, { path: "/repo.worktrees/feature", branch: "feature", isMain: false, locked: false, prunable: false }], [])
+    // Rows open folded, so the worktrees under this one are a click away.
+    fireEvent.click(await screen.findByRole("button", { name: `${t("toggleRepository")} repo` }))
     await waitFor(() => expect(screen.getByText("feature")).toBeTruthy())
     // A worktree row is informational: its controls live on the repository header above it.
     expect(document.querySelectorAll(".dws-worktree button")).toHaveLength(0)

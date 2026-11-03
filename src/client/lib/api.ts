@@ -9,6 +9,7 @@ import type {
   DeploymentStatus,
   FinishTaskResult,
   RememberedScan,
+  RepositoryBranchMap,
   SourceRootClassification,
   TaskInspection,
   TaskPlan,
@@ -131,6 +132,13 @@ export function createWorktreeApi(connection: ConnectionService) {
     /** The recommended container location for a source root, before creating anything. */
     suggestRoot: (sourceRoot: string, tasksRoot?: string, signal?: AbortSignal) => read<TaskRootSuggestion>("task.suggest-root", { sourceRoot, tasksRoot }, signal),
     /**
+     * The start points each repository can offer, read in one batch when the
+     * dialog opens rather than when a picker is clicked. An empty answer means
+     * the read has not happened or has failed, never "no branches here" - a
+     * failed read carries its own `reason` per repository.
+     */
+    branches: (paths: string[], signal?: AbortSignal) => read<RepositoryBranchMap>("task.branches", { paths }, signal),
+    /**
      * This Host's preference for a new task space's branch prefix.
      *
      * Read rather than assumed: the value is the plugin configuration's, which the
@@ -147,10 +155,14 @@ export function createWorktreeApi(connection: ConnectionService) {
      * pay for a catalog it never shows. A Host that cannot reach any provider answers
      * with an empty list and the reasons, and the row says so rather than showing an
      * empty menu.
+     *
+     * `registryRead` says whether the provider roster itself was read: `failed` means the
+     * lists below are partial, so an absent provider is not evidence that the host cannot
+     * serve it.
      */
-    models: (signal?: AbortSignal) => read<{ providers: Array<{ provider: string; models: string[] }>; default?: { provider: string; model: string }; notes: string[] }>("task.models", {}, signal),
+    models: (signal?: AbortSignal) => read<{ providers: Array<{ provider: string; models: string[] }>; default?: { provider: string; model: string }; notes: string[]; registryRead: "ok" | "failed" }>("task.models", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
-    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; branchPrefix?: string; deployTarget?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
+    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; baseRefs?: Record<string, string>; branchPrefix?: string; deployTarget?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
     /**
      * Add repositories to a task that already exists.
      *
@@ -160,7 +172,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      * another volume — the merge at the end reads each worktree's own source
      * repository, so where it is makes no difference to that.
      */
-    addRepositories: (payload: { task: string; project: string; tasksRoot: string; repositories: string[]; baseRef?: string }) => call<AddRepositoriesResult>("task.add-repositories", payload),
+    addRepositories: (payload: { task: string; project: string; tasksRoot: string; repositories: string[]; baseRef?: string; baseRefs?: Record<string, string> }) => call<AddRepositoriesResult>("task.add-repositories", payload),
     /** Whether a directory is a task container, and what it holds. */
     inspectTask: (path: string, signal?: AbortSignal) => read<TaskInspection>("task.inspect", { path }, signal),
     /**

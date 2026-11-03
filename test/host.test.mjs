@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { apply, branchTargets, Config, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, ignoredScanDirectorySet, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MAX_SCAN_DIRECTORIES_CEILING, MIN_SCAN_DEPTH, parseGitArgv, parseWorktrees, resolveScanDepth, topLevelRequestedPaths } from "../src/host/index.js"
+import { apply, branchTargets, Config, configuredTasksRoot, DEFAULT_SCAN_DEPTH, discoverGitRoots, fail, ignoredScanDirectorySet, MAX_SCAN_DEPTH, MAX_SCAN_DIRECTORIES, MAX_SCAN_DIRECTORIES_CEILING, MIN_SCAN_DEPTH, parseGitArgv, parseWorktrees, resolveScanDepth, SCAN_CONCURRENCY, topLevelRequestedPaths } from "../src/host/index.js"
 import { setAuditEnabled } from "../src/host/task/audit-log.js"
 import { clearScanCache, SCAN_CACHE_LIMIT } from "../src/host/task/scan-cache.js"
 
@@ -319,7 +319,7 @@ describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
       "worktree.scan", "worktree.cached", "worktree.status",
-      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access", "task.handoff-open", "task.models",
+      "task.classify-root", "task.classify-roots", "task.suggest-root", "task.branches", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access", "task.handoff-open", "task.models",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
 
@@ -375,6 +375,116 @@ describe("worktree RPC contract", () => {
     } finally {
       await fixture.cleanup()
     }
+  })
+
+  // The create dialog asks for every selected repository's start points in one
+  // batch as it opens. Local branches only, short-named, and the 100-branch
+  // ceiling is reported as a count.
+  describe("task.branches", () => {
+    const key = "for-each-ref --format=%(refname:short) refs/heads"
+
+    it("lists each repository's own branches in one call", async () => {
+      const handler = handleFor({ [key]: "main\ndevelop\nrelease/2.0\n" })
+      const answer = (await handler("task.branches", { paths: ["/repo/alpha", "/repo/beta"] })).value
+      for (const path of ["/repo/alpha", "/repo/beta"]) {
+        expect(answer[path]).toEqual({
+          branches: ["main", "develop", "release/2.0"],
+          truncated: 0,
+        })
+      }
+    })
+
+    it("caps the list at 100 and counts what was left out", async () => {
+      const names = Array.from({ length: 103 }, (_, index) => `b${index}`).join("\n")
+      const handler = handleFor({ [key]: names })
+      const answer = (await handler("task.branches", { paths: ["/repo"] })).value
+      expect(answer["/repo"].branches).toHaveLength(100)
+      expect(answer["/repo"].branches[0]).toBe("b0")
+      expect(answer["/repo"].branches[99]).toBe("b99")
+      expect(answer["/repo"].truncated).toBe(3)
+    })
+
+    it("keeps one repository's failure out of the others' answers", async () => {
+      // The failed one answers with an empty list AND a reason: an empty list
+      // alone would be read by the dialog as "this repository has no branches".
+      const spawned = []
+      const subprocess = {
+        spawn({ argv }) {
+          const parsed = parseGitArgv(argv)
+          spawned.push(parsed.args.join(" "))
+          // A git process that cannot even be created is the shape this guards:
+          // the other repository must still get its full answer.
+          if (parsed.cwd === "/repo/broken") throw new Error("not a git repository")
+          return {
+            done: Promise.resolve({ exitCode: 0, signal: null }),
+            collected: {
+              stdout: { readFrom: () => ({ text: "main\nrelease/2.0\n" }) },
+              stderr: { readFrom: () => ({ text: "" }) },
+            },
+          }
+        },
+      }
+      const routes = new Map()
+      const ctx = {
+        subprocess,
+        connection: { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path) } } },
+        effect(effect) { return effect() },
+      }
+      apply(ctx)
+      const route = routes.get("/api/dsh-worktree-space/task.branches")
+      const response = await route.fetch(new Request("http://localhost/api/dsh-worktree-space/task.branches", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "client-request", rpcId: "test", method: "dsh-worktree-space/task.branches", payload: { paths: ["/repo/alpha", "/repo/broken"] } }),
+      }))
+      const answer = (await response.json()).result.value
+      expect(answer["/repo/alpha"].branches).toEqual(["main", "release/2.0"])
+      expect(answer["/repo/alpha"].truncated).toBe(0)
+      expect(answer["/repo/broken"].branches).toEqual([])
+      expect(answer["/repo/broken"].truncated).toBe(0)
+      expect(answer["/repo/broken"].reason).toMatch(/not a git repository/)
+      expect(spawned).toContain(key)
+    })
+
+    it("never holds more git processes in flight than the scan's concurrency", async () => {
+      // The ceiling is the point of the pool, not an optimisation: 40 repositories
+      // used to mean 40 git.exe processes spawned at once, spending their time in
+      // process creation competing with each other. What is asserted is the
+      // high-water mark of processes alive together, not the total.
+      let inFlight = 0
+      let peak = 0
+      const subprocess = {
+        spawn() {
+          inFlight += 1
+          peak = Math.max(peak, inFlight)
+          return {
+            done: Promise.resolve().then(() => { inFlight -= 1 }).then(() => ({ exitCode: 0, signal: null })),
+            collected: {
+              stdout: { readFrom: () => ({ text: "main\n" }) },
+              stderr: { readFrom: () => ({ text: "" }) },
+            },
+          }
+        },
+      }
+      const routes = new Map()
+      const ctx = {
+        subprocess,
+        connection: { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path) } } },
+        effect(effect) { return effect() },
+      }
+      apply(ctx)
+      const paths = Array.from({ length: 40 }, (_, index) => `/repo/${index}`)
+      const route = routes.get("/api/dsh-worktree-space/task.branches")
+      const response = await route.fetch(new Request("http://localhost/api/dsh-worktree-space/task.branches", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "client-request", rpcId: "test", method: "dsh-worktree-space/task.branches", payload: { paths } }),
+      }))
+      const answer = (await response.json()).result.value
+      expect(Object.keys(answer)).toHaveLength(40)
+      expect(peak).toBeGreaterThan(1)
+      expect(peak).toBeLessThanOrEqual(SCAN_CONCURRENCY)
+    })
   })
 
   it("reports a complete scan", async () => {
@@ -485,16 +595,14 @@ describe("worktree RPC contract", () => {
     }
   })
 
-  it("answers whether the agent entries are offered, and offers them by default", async () => {
-    // Shown is what anything but an explicit hide means, so a profile that never touches
-    // the setting keeps the finish it has been getting.
-    let entry
-    const handler = handleFor({}, { handoffEntry: { get: () => entry } })
-    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "show" })
-    entry = "hide"
-    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "hide" })
-    entry = "show"
-    expect((await handler("task.preference")).value).toMatchObject({ handoffEntry: "show" })
+  it("answers the finish preference without a switch that hides the agent handoff", async () => {
+    // The two entries are part of the finish rather than an option: a profile that once
+    // said `hide` gets them like any other, and the endpoint no longer reports a setting
+    // that could take them away.
+    const handler = handleFor({}, { handoffEntry: { get: () => "hide" } })
+    const value = (await handler("task.preference")).value
+    expect(value).not.toHaveProperty("handoffEntry")
+    expect(value).toMatchObject({ defaultBranchPrefix: "task/" })
   })
 
   it("writes the audit log unless the configuration says otherwise", async () => {

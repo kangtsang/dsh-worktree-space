@@ -48,7 +48,7 @@ describe("i18n", () => {
 
     act(() => locale.setActive("en"))
     await waitFor(() => expect(screen.getByText("Task name")).toBeTruthy())
-    expect(screen.getByText("Branch from")).toBeTruthy()
+    expect(screen.getByText("Default start point")).toBeTruthy()
     dispose()
   })
 })

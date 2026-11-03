@@ -28,7 +28,7 @@ import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { validateProjectName, validateRepositoryDirectoryName } from './naming.js'
 import { isInside, refuseDelete, samePathLocation } from './paths.js'
 
-import { TASK_METADATA, TASK_README, isLinkedWorktree, listTaskWorktrees, pluginRootPath, readTaskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { TASK_METADATA, TASK_README, isLinkedWorktree, listTaskWorktrees, ownStartPointsOf, pluginRootPath, readTaskMetadata, startPointsFor, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /**
  * The branch every repository of a task shares, read from the container itself.
@@ -239,20 +239,21 @@ async function restoreMetadata(taskPath, previousJson, previousReadme) {
  * each, and the base is one each of them has. Only then are the worktrees cut.
  *
  * The worktrees join the branch the task is already on, not a new one — that
- * shared branch is what links a task's commits across repositories — and they
- * start from `baseRef` when one is given and from each repository's own HEAD when
- * it is not, which is the same rule a create follows.
+ * shared branch is what links a task's commits across repositories — and each
+ * starts from the ref `baseRefs` names for its repository, else from `baseRef`,
+ * else from its own HEAD: the same rule a create follows.
  * @param subprocess - the profile's subprocess service.
  * @param options - `task`, `project` and `tasksRoot` name the task space;
  *   `repositories` are absolute paths to source repositories, which may sit
  *   anywhere on disk and need share nothing with each other; `baseRef` is the
- *   optional commit to start from.
+ *   optional commit every repository starts from; `baseRefs` names a start point
+ *   per repository NAME, which wins over `baseRef` for that repository.
  * @returns the task's branch, container path, and the repositories this call added.
  * @throws Error when the task space is missing, unusable, or any guard above
  *   refuses; after taking back the worktrees this call made, when it fails partway.
  */
 export async function addTaskRepositories(subprocess, options) {
-  const { task, project, tasksRoot, repositories, baseRef } = options
+  const { task, project, tasksRoot, repositories, baseRef, baseRefs } = options
 
   if (typeof tasksRoot !== 'string' || tasksRoot.trim() === '') throw coded('E1004', 'a tasks root is required')
   if (!Array.isArray(repositories) || repositories.length === 0) {
@@ -282,20 +283,41 @@ export async function addTaskRepositories(subprocess, options) {
     ...(Array.isArray(recorded.repositories) ? recorded.repositories.map((entry) => entry?.name) : []),
   ])
 
-  const start = typeof baseRef === 'string' && baseRef.trim() !== '' ? baseRef.trim() : undefined
-  const selected = []
+  // The names are resolved up front rather than one at a time inside the loop,
+  // because the start points are: `baseRefs` is a mapping keyed by repository name,
+  // and a name in it that this call does not select is a request that does not add
+  // up - refused here (E4019), before a single repository has been looked at,
+  // rather than after some of them have been validated and some of the guards
+  // below have already passed.
+  const names = []
   for (const raw of repositories) {
     const repoPath = typeof raw === 'string' ? raw.trim() : ''
     if (repoPath === '') throw coded('E4005', 'a repository path is required')
+    names.push(validateRepositoryDirectoryName(basename(repoPath)))
+  }
+  // Each repository's own start point: what `baseRefs` names for it, else
+  // `baseRef`, else nothing, which is its own HEAD. The same three answers, in the
+  // same order, a create applies.
+  const startPoints = startPointsFor(names, { baseRef, baseRefs })
+  // Compared against the base the RECORD carries, not the one this call named:
+  // that is the value a reader would otherwise read as this repository's, and a
+  // task created from `main` extended from `release` has to say `release` on the new
+  // entry or its record claims a base it never used.
+  const ownBases = ownStartPointsOf(startPoints, recorded.baseRef ?? null)
+  const start = typeof baseRef === 'string' && baseRef.trim() !== '' ? baseRef.trim() : undefined
+  const selected = []
+  for (const [index, raw] of repositories.entries()) {
+    const repoPath = typeof raw === 'string' ? raw.trim() : ''
+    if (repoPath === '') throw coded('E4005', 'a repository path is required')
     // The name this repository would take in the task space, checked as the
-    // directory name it is before anything else is asked about it. `taken` below
-    // catches a collision with a worktree the task already has, but it cannot catch
-    // a collision with the plugin's *own* entries - `.worktree-space` is not a
-    // worktree, so nothing in that set is it, and a repository by that name would
-    // put a checkout where the record and the deploy root live. `basename` returning
-    // `.` or `..` is refused for the same reason: `join(taskPath, '..')` is the
-    // project layer, one level above the task space.
-    const name = validateRepositoryDirectoryName(basename(repoPath))
+    // directory name it is by `names` above: `taken` below catches a collision with
+    // a worktree the task already has, but it cannot catch a collision with the
+    // plugin's *own* entries - `.worktree-space` is not a worktree, so nothing in
+    // that set is it, and a repository by that name would put a checkout where the
+    // record and the deploy root live. `basename` returning `.` or `..` is refused
+    // for the same reason: `join(taskPath, '..')` is the project layer, one level
+    // above the task space.
+    const name = names[index]
     // Two of the repositories being added, before the ones the task already has:
     // the first is a choice this request made twice, the second is a name the task
     // took before it, and they are fixed differently.
@@ -315,8 +337,12 @@ export async function addTaskRepositories(subprocess, options) {
         `branch '${branch}' already exists in '${name}'; a worktree cannot be named after a branch that is already there, and cutting one would point this task at work already in progress`,
       )
     }
-    if (start !== undefined && !(await gitSucceeded(subprocess, repoPath, ['rev-parse', '--verify', '--quiet', `${start}^{commit}`]))) {
-      throw coded('E3002', `base '${start}' not found in '${name}'`)
+    // This repository's own start point, and the ref looked up in it: with
+    // `baseRefs` two repositories can be looking for two different refs, so the
+    // message names both the repository and the ref it was missing.
+    const base = startPoints.get(name)
+    if (base !== undefined && !(await gitSucceeded(subprocess, repoPath, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]))) {
+      throw coded('E3002', `base '${base}' not found in '${name}'`, { repository: name, baseRef: base })
     }
     taken.add(name)
     // The validated name travels with the path rather than being recomputed at the
@@ -339,9 +365,13 @@ export async function addTaskRepositories(subprocess, options) {
       // The source facts describe the checkout the worktree is cut from, so they
       // are read before the branch exists, exactly as a create reads them.
       const facts = await sourceFacts(subprocess, repoPath)
-      const args = start === undefined
+      // This repository's own start point rather than the call's: `startPoints` was
+      // resolved and validated above, and an undefined answer is the same omission
+      // of an argument an add with no base always produced.
+      const base = startPoints.get(name)
+      const args = base === undefined
         ? ['worktree', 'add', worktreePath, '-b', branch]
-        : ['worktree', 'add', worktreePath, '-b', branch, start]
+        : ['worktree', 'add', worktreePath, '-b', branch, base]
       // Pushed BEFORE git runs, for the same reason `create.js` does it: `worktree add`
       // can create the branch and the directory and then fail, and a half-made worktree
       // that is not in this list is one the rollback never removes. Here the container
@@ -366,18 +396,28 @@ export async function addTaskRepositories(subprocess, options) {
       //
       // It is not that both values are unknowable; it is that the field answers one
       // question - "where did this task start" - and an add does not change the answer.
-      // What this call used is a fact about the repositories *this call* added, and it is
-      // already recorded on those entries: `startCommit` is the commit each checkout was
-      // actually cut from, which is a stronger statement than the ref that named it. A
-      // separate per-entry `baseRef` is deliberately NOT written - nothing reads it, and a
-      // field that is only ever written is one no test can hold to an interpretation.
       //
-      // The field has exactly one writer (the create) and one reader (the note rendered
-      // for a session), which is what makes "one question, one writer" true here rather
-      // than aspirational. The base this call used is reported to the caller as
-      // `result.baseRef` and recorded in the audit line, so the fact is not lost - it is
-      // just not written into the task's identity, where it would be a second answer to a
-      // question the create already answered.
+      // What this call used is a fact about the repositories *this call* added, and it
+      // is recorded on those entries: `startCommit` is the commit each checkout was
+      // actually cut from, which is the stronger statement, and `baseRef` is written
+      // beside it for the repositories whose start point is not the one the top level
+      // already states. THAT is the change from the rule this comment used to carry -
+      // "a per-entry baseRef is deliberately not written, because nothing reads it".
+      // Two readers read it now, which is the condition that sentence was waiting on:
+      // `inspectTask` returns it with the task, and the note rendered from this record
+      // prints it under "Start points". A field only ever written would indeed have
+      // been a lie; a field written and read is how a task whose repositories started
+      // in different places says so.
+      //
+      // Kept out where it would contradict the top level: a repository that started
+      // from the base the record already names carries no per-entry copy, so the two
+      // can never disagree about one repository.
+      //
+      // Two facts stay as they were, and are worth saying because the per-entry field
+      // makes them visible rather than new: the top level is still one question with one
+      // writer (the create) - this call leaves it alone - and the base this call used is
+      // still reported to its caller as `result.baseRef` and recorded in the audit line,
+      // so nothing is lost by not promoting it into the task's identity.
       //
       // `recorded.baseRef ?? null` is kept rather than dropped: it normalises a record
       // that predates the field, and `null` is what `taskMetadata` writes for "no base was
@@ -390,6 +430,12 @@ export async function addTaskRepositories(subprocess, options) {
           sourcePath: entry.repoPath,
           ...(entry.sourceBranch === undefined ? {} : { sourceBranch: entry.sourceBranch }),
           ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
+          // Compared against the top level the record carries rather than against the
+          // base this call named, because that is the value a reader would otherwise
+          // read as this repository's: an add that names `release` into a task whose
+          // record says `main` has to say `release` here, or the record claims this
+          // worktree came from `main`.
+          ...(ownBases.has(entry.name) ? { baseRef: ownBases.get(entry.name) } : {}),
           branch,
           addedAt: new Date().toISOString(),
         })),
@@ -439,7 +485,15 @@ export async function addTaskRepositories(subprocess, options) {
     branch,
     path: taskPath,
     tasksRoot: tasksRoot.trim(),
+    // The start point every repository this call added began from, when one was
+    // named: the caller's own answer, unchanged by the fact that the record's top
+    // level is left alone. A repository's own start point travels on its row below.
     baseRef: start,
-    repositories: created.map((entry) => ({ name: entry.name, path: entry.path, sourcePath: entry.repoPath })),
+    repositories: created.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      sourcePath: entry.repoPath,
+      ...(ownBases.has(entry.name) ? { baseRef: ownBases.get(entry.name) } : {}),
+    })),
   }
 }

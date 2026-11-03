@@ -102,6 +102,15 @@ export function hostFailureText(t: Translate, code: string, values: HostValues):
       return t("hostE4014")
     case "E4015":
       return t("hostE4015")
+    case "E4019":
+      // The two lists are what the refusal is about: the names that name nothing,
+      // and the repositories that could have been named. Sending them as data is
+      // what lets the sentence be rebuilt in the reader's language instead of
+      // being read out of the Host's English.
+      return format(t("hostE4019"), {
+        named: strings(values.unknown).join(", "),
+        repositories: strings(values.repositories).join(", "),
+      })
     // E5006 covers both shapes of "no passing smoke" - no state file at all, or one whose
     // smoke is missing or red. E5005 used to be the first of those and is retired; a Host
     // old enough to send it falls through to its own English sentence, which is what an

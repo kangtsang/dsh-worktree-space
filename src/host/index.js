@@ -9,7 +9,7 @@ import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/g
 import { mapWithLimit, SCAN_CONCURRENCY } from './task/concurrency.js'
 import { absolutePath, canonicalPath, isInside } from './task/paths.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
-import { addTaskRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
+import { addTaskRepositories, branchesOfRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
 import { recallScan, rememberScan, rememberStatus } from './task/scan-cache.js'
 import { registerTaskSkill } from './task/skill.js'
 import { taskSpacePath } from './task/shared.js'
@@ -17,7 +17,7 @@ import { refuseWhileSessionsWork, sessionsWorkingIn, setSessionPermission } from
 import { fileSessionUnderWorkspace } from './session-tools.js'
 import { registerGatedTools } from './task/tool-gate.js'
 import { SessionWatch } from './session-watch.js'
-import { installRouteHook, modelCatalogOf } from './task/session-model.js'
+import { CONFIG_CATALOG_TIMEOUT_MS, installRouteHook, modelCatalogOf } from './task/session-model.js'
 
 // These helpers moved to the git module; they stay part of the entry module's
 // public surface because callers and tests import them from here.
@@ -25,7 +25,7 @@ export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './tas
 
 const API_PREFIX = '/api/dsh-worktree-space'
 const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
-const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open', 'task.models']
+const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.branches', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open', 'task.models']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
 /**
@@ -62,7 +62,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005', 'E1006',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006', 'E2007',
   'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
-  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015', 'E4016', 'E4017',
+  'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015', 'E4016', 'E4017', 'E4018', 'E4019',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
   'E6001', 'E6002',
   'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
@@ -316,16 +316,6 @@ let archiveDirectoryReference
 let archiveStrategyReference
 
 /**
- * Whether the agent handoff entries are offered, as the running entry carries it.
- *
- * Shown unless the setting says otherwise, which is the schema's own default: what it
- * governs is whether the finish offers to hand work to an agent, and a profile that turns
- * it off gets the standard finish - the commit and the conflict resolution are the user's
- * own then. Volatile for the same reason as the two settings above.
- */
-let handoffEntryReference
-
-/**
  * Whether the sessions handed an agent are opened with full access.
  *
  * Held, not read, like the entry beside it: the settings card writes it while a dialog
@@ -398,14 +388,6 @@ export function configuredArchiveDirectory() {
 export function configuredArchiveStrategy() {
   const value = archiveStrategyReference?.get()
   return value === 'custom' ? value : 'container'
-}
-
-/**
- * Whether the configuration offers the agent handoff entries.
- * @returns `'hide'` when the entries are turned off, `'show'` for anything else.
- */
-export function configuredHandoffEntry() {
-  return handoffEntryReference?.get() === 'hide' ? 'hide' : 'show'
 }
 
 /**
@@ -711,17 +693,6 @@ export const Config = z.object({
   sidebarEntry: z.union(['show', 'hide']).default('show').loose().volatile()
     .description('Show the Worktree Space shortcut in the sidebar footer.'),
   /**
-   * Whether the two entries that hand work to an agent are offered.
-   *
-   * Shown by default, because that is the finish the plugin ships: a profile that would
-   * rather not see these entries sets this to hide, and the standard finish is then the
-   * user's own commit and their own conflict resolution. The dialogs read it from
-   * `task.preference` rather than from this form, because that is where the other setting
-   * they default from already arrives.
-   */
-  handoffEntry: z.union(['show', 'hide']).default('show').loose().volatile()
-    .description('Offer the two entries that hand uncommitted work, and a merge conflict, to an agent. Hidden, the standard flow applies: commit and resolve the conflict yourself, then finish the task again.'),
-  /**
    * Whether the sessions a finish hands an agent are opened with full access.
    *
    * Off, each handoff session is opened on the directory that reaches both the worktree
@@ -970,9 +941,6 @@ export function apply(ctx, config = {}) {
   // And the strategy beside it, which the dialog needs before the directory is
   // any use: it names the root the directory may narrow.
   archiveStrategyReference = config.archiveDocumentsStrategy
-  // And for the agent handoff entries: the settings card writes this one, the finish
-  // dialog reads it, and shown is what anything but an explicit `hide` means.
-  handoffEntryReference = config.handoffEntry
   // And for how much access those entries get: the card writes it, the endpoint that
   // widens a session reads it, and off is what anything but an explicit `on` means.
   handoffFullAccessReference = config.handoffFullAccess
@@ -1311,6 +1279,17 @@ export function apply(ctx, config = {}) {
         })
     })
 
+    // The branch lists the create dialog offers as per-repository start points.
+    // One call for every selected repository rather than one per row: the dialog
+    // opens on all of them, and an empty list shown while the read is in flight
+    // would be read as "this repository has no branches".
+    if (endpoint === 'task.branches') return recover(async () => {
+      const paths = Array.isArray(payload.paths)
+        ? payload.paths.filter((path) => typeof path === 'string' && path.trim() !== '').map((path) => path.trim())
+        : []
+      return branchesOfRepositories(ctx.subprocess, paths, { signal })
+    })
+
     // The routes this host can reach, for the configuration card's model row.
     //
     // Its own endpoint rather than a field on `task.preference`, because the two are
@@ -1327,9 +1306,11 @@ export function apply(ctx, config = {}) {
     // catalog that can disagree with what the deployment actually offers - a model added
     // or a provider's credential removed shows up late, and the row would offer a route
     // that no longer resolves. The wait that cache was there to hide is handled where it
-    // belongs: a per-provider timeout on the way in (`LIST_MODELS_TIMEOUT_MS`), and a
-    // "reading the model list" state in the row on the way out.
-    if (endpoint === 'task.models') return recover(async () => modelCatalogOf(ctx))
+    // belongs: a per-provider timeout on the way in, and a "reading the model list" state
+    // in the row on the way out. This one uses the configuration page's 5 s; a dispatch
+    // being validated uses 8 s, because nobody is watching a spinner there and being
+    // wrong about a route is worse than waiting a little longer for it.
+    if (endpoint === 'task.models') return recover(async () => modelCatalogOf(ctx, CONFIG_CATALOG_TIMEOUT_MS))
 
     if (endpoint === 'task.preference') return recover(async () => {
       // Read-only, and shaped as a record rather than a bare string: the next
@@ -1338,7 +1319,6 @@ export function apply(ctx, config = {}) {
         defaultBranchPrefix: configuredBranchPrefix(),
         archiveDocumentsStrategy: configuredArchiveStrategy(),
         archiveDocumentsDirectory: configuredArchiveDirectory(),
-        handoffEntry: configuredHandoffEntry(),
         // Which of the two arrangements the next handoff will use: the boundary that
         // reaches a repository's git metadata, or the container root with full access.
         // The dialog says which before it opens anything, so it has to know.
@@ -1425,6 +1405,10 @@ export function apply(ctx, config = {}) {
         tasksRoot: absolutePath(payload.tasksRoot),
         repos,
         baseRef: typeof payload.baseRef === 'string' ? payload.baseRef.trim() : undefined,
+        // A name-to-ref mapping, so one repository's start point can differ from the
+        // rest. Passed as-is (object or JSON string): `startPointsFor` is the one
+        // place that refuses a name this call does not select.
+        baseRefs: payload.baseRefs,
         deployScript: payload.deployScript,
         // A caller that names no prefix gets the configured one; an empty string
         // means the same thing, which is what an emptied dialog field sends.
@@ -1468,6 +1452,10 @@ export function apply(ctx, config = {}) {
         baseRef: typeof payload.baseRef === 'string' && payload.baseRef.trim() !== ''
           ? payload.baseRef.trim()
           : undefined,
+        // Keyed by repository name, and winning over `baseRef` for the ones it
+        // names: an add spans repositories that may share no base at all, which is
+        // the same reason a create takes it.
+        baseRefs: payload.baseRefs,
       })
     })
 

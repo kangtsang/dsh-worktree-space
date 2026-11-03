@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ARCHIVE_DIRECTORY_HINT, ARCHIVE_DIRECTORY_HINT_FALLBACK, ARCHIVE_DIRECTORY_LABEL, ARCHIVE_DIRECTORY_LABEL_FALLBACK, PluginConfigCard } from "../src/client/components/PluginConfigCard"
-import { previewValue, setPreview, settlePreview } from "../src/client/lib/config-preview"
+import { setPreview, settlePreview } from "../src/client/lib/config-preview"
 import { t } from "../src/client/lib/i18n"
 
 /**
@@ -10,17 +10,12 @@ import { t } from "../src/client/lib/i18n"
  * write that lands in that same snapshot, which is what the real form does after a
  * round trip.
  */
-function configForm(prefix = "task/", accepted = true, archiveDirectory = "", handoffEntry: string | null = "hide", archiveStrategy = "container",
+function configForm(prefix = "task/", accepted = true, archiveDirectory = "", archiveStrategy = "container",
   tasksRootStrategy = "default", tasksRootDirectory = "", ignoredScanDirectories: string[] = [], removedScanDirectories: string[] = [],
   taskModelProvider = "", taskModel = "") {
   let value: Record<string, unknown> = {
     panelEntry: "hide",
     sidebarEntry: "show",
-    // The agent entry row is served unless a case is asking what the card does without
-    // it: the Host always has this key, and the fallback is what a card opened on a
-    // Host that does not would show. `null` rather than `undefined`, which would fall
-    // back to this parameter's own default.
-    ...(handoffEntry === null ? {} : { handoffEntry }),
     scanDepth: 2,
     maxScanDirectories: 2000,
     defaultBranchPrefix: prefix,
@@ -155,17 +150,7 @@ describe("the configuration card's branch prefix row", () => {
   })
 })
 
-describe("the configuration card's agent handoff row", () => {
-  it("offers the finish's experimental entries as a display choice, with a note of its own", () => {
-    const { form } = configForm()
-    render(<PluginConfigCard form={form} />)
-
-    // The row is the shape the two entry rows already have: a label, a note beneath it,
-    // and the value on the trailing side - hidden until a profile asks otherwise.
-    expect(hintIn(t("entryHandoffLabel"))).toBe(t("entryHandoffHint"))
-    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configHide"))
-  })
-
+describe("the configuration card's handoff access row", () => {
   it("offers the handoff sessions' access as a choice, off by default and described as a permission", () => {
     const { form } = configForm()
     render(<PluginConfigCard form={form} />)
@@ -192,52 +177,6 @@ describe("the configuration card's agent handoff row", () => {
     expect(read()).toMatchObject({ handoffFullAccess: "on" })
     expect(screen.getByLabelText(t("handoffFullAccess")).textContent).toContain(t("handoffFullAccessOn"))
   })
-
-  it("offers the entries as shown when the Host serves no such key, which is the default", () => {
-    const { form } = configForm("task/", true, "", null)
-    render(<PluginConfigCard form={form} />)
-
-    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
-  })
-
-  it("takes the choice back when the Host never answers, rather than keeping it pending", async () => {
-    // The choice rows show the pick at once and settle into the served value once the
-    // Host has it, which the form answers two ways: `false` when the Host turned the
-    // write down, and a rejection when there was never a verdict at all. Only the
-    // first is handled by the `then`, so a dropped connection left the pending value
-    // set for good - and two readers trust it: this row's own display, and the
-    // sidebar, which asks the same store whether to show the entries it governs. Both
-    // went on showing a setting that was never in force, with no notice at all.
-    const { form } = configForm()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(form.set as any).mockRejectedValue(new Error("connection closed"))
-    render(<PluginConfigCard form={form} />)
-
-    fireEvent.click(screen.getByLabelText(t("entryHandoffLabel")))
-    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("configShow") }))
-
-    // Shown at once while the answer is on its way - the row never looks frozen.
-    expect(previewValue("handoffEntry")).toBe("show")
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(t("configNotSaved")))
-    // And given up as soon as it is clear there will be no answer.
-    expect(previewValue("handoffEntry")).toBeUndefined()
-    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).not.toContain(t("configShow"))
-  })
-
-  it("saves the choice through the form the other display choices use", async () => {
-    const { form, read } = configForm()
-    render(<PluginConfigCard form={form} />)
-
-    fireEvent.click(screen.getByLabelText(t("entryHandoffLabel")))
-    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: t("configShow") }))
-
-    // Shown at once, then settled into the served value: the same optimistic store the
-    // sidebar reads, so a dialog opened straight afterwards agrees with the card.
-    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
-    await waitFor(() => expect(form.set).toHaveBeenCalledWith("handoffEntry", "show"))
-    expect(read()).toMatchObject({ handoffEntry: "show" })
-    expect(screen.getByLabelText(t("entryHandoffLabel")).textContent).toContain(t("configShow"))
-  })
 })
 
 describe("the configuration card's archive strategy row", () => {
@@ -258,7 +197,7 @@ describe("the configuration card's archive strategy row", () => {
   })
 
   it("saves the choice through the form the other display choices use", async () => {
-    const { form, read } = configForm("task/", true, "", "hide", "custom")
+    const { form, read } = configForm("task/", true, "", "custom")
     render(<PluginConfigCard form={form} />)
 
     fireEvent.click(screen.getByLabelText(t("archiveDocumentsStrategy")))
@@ -287,7 +226,7 @@ describe("the configuration card's archive strategy row", () => {
 
 describe("the configuration card's task space location rows", () => {
   /** The form as the Host serves it when a directory of the user's own is the location. */
-  const customForm = (tasksRootDirectory: string) => configForm("task/", true, "", "hide", "container", "custom", tasksRootDirectory)
+  const customForm = (tasksRootDirectory: string) => configForm("task/", true, "", "container", "custom", tasksRootDirectory)
 
   it("offers the two locations, and names the one in force", () => {
     const { form } = configForm()
@@ -321,7 +260,7 @@ describe("the configuration card's task space location rows", () => {
     // A directory the derived location never reads is worth no row: showing it would
     // read as a setting being ignored. Driving it from the control rather than from the
     // fixture is also what proves the row follows a pending choice.
-    const { form } = configForm("task/", true, "", "hide", "container", "custom", "E:\\worktree-space")
+    const { form } = configForm("task/", true, "", "container", "custom", "E:\\worktree-space")
     render(<PluginConfigCard form={form} />)
 
     expect(screen.getByLabelText(t("tasksRootDirectory")).textContent).toBe("E:\\worktree-space")
@@ -333,7 +272,7 @@ describe("the configuration card's task space location rows", () => {
   })
 
   it("keeps the directory row off the card while the derived location is in force", () => {
-    const { form } = configForm("task/", true, "", "hide", "container", "default", "E:\\worktree-space")
+    const { form } = configForm("task/", true, "", "container", "default", "E:\\worktree-space")
     render(<PluginConfigCard form={form} />)
 
     // Served but inert: the strategy is what decides, so a leftover directory from an
@@ -369,7 +308,7 @@ describe("the configuration card's task space location rows", () => {
 
 describe("the configuration card's archive destination row", () => {
   /** The form as the Host serves it when a directory of its own is the root in force. */
-  const customForm = (archiveDirectory: string) => configForm("task/", true, archiveDirectory, "hide", "custom")
+  const customForm = (archiveDirectory: string) => configForm("task/", true, archiveDirectory, "custom")
 
   it("shows the destination the Host serves, with its own note under the label", () => {
     const { form } = customForm("E:\\archived-docs")
@@ -449,7 +388,7 @@ describe("the task session model row", () => {
   })
 
   it("clears both halves when unspecified is chosen again", async () => {
-    const { form, read } = configForm("task/", true, "", "hide", "container", "default", "", [], [], "codearts", "gw-1")
+    const { form, read } = configForm("task/", true, "", "container", "default", "", [], [], "codearts", "gw-1")
     render(<PluginConfigCard form={form} models={CATALOG} />)
     expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain("codearts/gw-1")
 
@@ -464,7 +403,7 @@ describe("the task session model row", () => {
     // A provider that was uninstalled still has to be visible: it is what the
     // configuration says, and a row that showed "unspecified" instead would make the next
     // save drop a setting nobody touched.
-    const { form } = configForm("task/", true, "", "hide", "container", "default", "", [], [], "uninstalled", "gone")
+    const { form } = configForm("task/", true, "", "container", "default", "", [], [], "uninstalled", "gone")
     render(<PluginConfigCard form={form} models={CATALOG} />)
     expect(screen.getByLabelText(t("taskModelLabel")).textContent).toContain("uninstalled/gone")
   })

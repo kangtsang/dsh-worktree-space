@@ -109,7 +109,10 @@ describe("WorktreesSettings loading lifecycle", () => {
     showTasks()
 
     // In the task view the sentinel a refresh writes has to read as "checking", which is
-    // what this view used to report as an unknown status.
+    // what this view used to report as an unknown status. The status lives on the
+    // repository row inside the task, so the task is opened first.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleTask")} antest` }))
     await waitFor(() => expect(next.api.status).toHaveBeenCalledTimes(1))
     expect(screen.getByText(t("checkingStatus"))).toBeTruthy()
     expect(screen.queryByText(t("statusUnknown"))).toBeNull()
@@ -178,6 +181,9 @@ describe("WorktreesSettings and the remembered scan", () => {
     // The remembered rows are up before the scan has answered anything, with the
     // status the Host still holds, and without the skeleton in front of them.
     await waitFor(() => expect(screen.getByRole("heading", { name: "linked" })).toBeTruthy())
+    // Rows open folded now, so the row itself is what is painted; its worktree's
+    // remembered status is one click away.
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleRepository")} linked` }))
     expect(screen.getByText(format(t("dirty"), { count: "3" }))).toBeTruthy()
     expect(document.querySelectorAll(".dws-skeleton-row")).toHaveLength(0)
     expect(screen.getByRole("status").textContent).toContain(format(t("scanning"), { depth: "2" }))
@@ -237,8 +243,14 @@ describe("WorktreesSettings and the repositories a Workspace spans", () => {
     const next = setup()
     await showWorkspace(next, scanAnswer([repository("/projects/alpha"), repository("/projects/nested/beta")]))
 
-    // Open to begin with, like every other row in this panel: a Workspace is the
-    // coarsest thing on the page and the repositories under it are what it is for.
+    // Folded to begin with, like every other row in this panel: the Workspaces are the
+    // page, and the repositories under one are what its own click is for.
+    const toggle = screen.getByRole("button", { name: `${t("toggleWorkspace")} Projects` })
+    expect(toggle.getAttribute("aria-expanded")).toBe("false")
+    expect(document.querySelectorAll(".dws-worktree")).toHaveLength(0)
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute("aria-expanded")).toBe("true")
     expect(document.querySelectorAll(".dws-worktree")).toHaveLength(2)
     // Both of them, not just the one that happens to sit directly below: a
     // repository one level down is exactly the one this change exists to show, and
@@ -252,14 +264,9 @@ describe("WorktreesSettings and the repositories a Workspace spans", () => {
     const paths = [...document.querySelectorAll(".dws-worktree-path")].map(node => node.textContent)
     expect(paths.sort()).toEqual(["alpha", "nested/beta"])
 
-    const toggle = screen.getByRole("button", { name: `${t("toggleWorkspace")} Projects` })
-    expect(toggle.getAttribute("aria-expanded")).toBe("true")
     fireEvent.click(toggle)
     expect(document.querySelectorAll(".dws-worktree")).toHaveLength(0)
     expect(toggle.getAttribute("aria-expanded")).toBe("false")
-
-    fireEvent.click(toggle)
-    expect(document.querySelectorAll(".dws-worktree")).toHaveLength(2)
   })
 
   it("names the depth the Host reports, not one the panel guessed", async () => {
@@ -379,8 +386,10 @@ describe("WorktreesSettings and the repositories a Workspace spans", () => {
     // listed there and not under `Projects`.
     const projects = screen.getByRole("button", { name: `${t("toggleWorkspace")} Projects` })
     const narrow = screen.getByRole("button", { name: `${t("toggleWorkspace")} Narrow` })
-    expect(narrow.getAttribute("aria-expanded")).toBe("true")
+    expect(narrow.getAttribute("aria-expanded")).toBe("false")
     expect(projects.hasAttribute("disabled")).toBe(true)
+    // Folded by default; the repository it lists is behind its own click.
+    fireEvent.click(narrow)
     expect([...document.querySelectorAll(".dws-worktree-title strong")].map(node => node.textContent)).toEqual(["beta"])
     // Two badges, each counting the rows its own Workspace lists. Neither repeats
     // the classification's numbers, which measured something else. `Projects`
@@ -423,6 +432,8 @@ describe("WorktreesSettings and what a search lists inside a row", () => {
     next.mount()
     await waitFor(() => expect(next.api.scan).toHaveBeenCalled())
     showRepositories()
+    // Rows open folded; this one is opened so the search has a list to narrow.
+    fireEvent.click(await screen.findByRole("button", { name: `${t("toggleRepository")} alpha` }))
     await waitFor(() => expect(listed()).toHaveLength(2))
 
     type("feature-x")
@@ -440,6 +451,7 @@ describe("WorktreesSettings and what a search lists inside a row", () => {
     next.mount()
     await waitFor(() => expect(next.api.scan).toHaveBeenCalled())
     showRepositories()
+    fireEvent.click(await screen.findByRole("button", { name: `${t("toggleRepository")} alpha` }))
     await waitFor(() => expect(listed()).toHaveLength(1))
     expect(badge()).toBe("1")
   })
@@ -450,6 +462,7 @@ describe("WorktreesSettings and what a search lists inside a row", () => {
     next.mount()
     await waitFor(() => expect(next.api.scan).toHaveBeenCalled())
     showRepositories()
+    fireEvent.click(await screen.findByRole("button", { name: `${t("toggleRepository")} alpha` }))
     await waitFor(() => expect(listed()).toHaveLength(1))
 
     // `main` is the repository's branch rather than a row under it, so it keeps the

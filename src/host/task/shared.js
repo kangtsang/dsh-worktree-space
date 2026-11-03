@@ -300,14 +300,126 @@ export async function listTaskWorktrees(subprocess, taskPath) {
 
 
 /**
+ * The start point each named repository is cut from.
+ *
+ * Three answers, decided per repository rather than once for the task: a ref
+ * `baseRefs` names for that repository, then the task's own `baseRef`, then
+ * nothing - which is what tells the caller to cut from that repository's HEAD.
+ * `baseRef` is therefore a default rather than a separate mode, and the two can
+ * be given together: "everybody starts from `develop` except `legacy`, which
+ * starts from `main`" is one request, not a contradiction.
+ *
+ * A name `baseRefs` carries that this call does not select is refused instead of
+ * ignored. Silence would be the worse answer by a distance: the whole point of
+ * naming a repository is to say where that repository starts, and a misspelled
+ * name that quietly falls back to the default leaves a caller believing a start
+ * point was applied to a worktree that was cut from somewhere else.
+ * @param names - the repository names this call selects, in its own order.
+ * @param options - `baseRef`, the start point for every repository that names
+ * none of its own, and `baseRefs`, a name-to-ref mapping.
+ * @returns a Map from every name in `names` to its ref, or to undefined when
+ * that repository starts from its own HEAD.
+ * @throws E4019 when `baseRefs` names a repository this call does not select, or
+ * carries a value that is not a ref name.
+ */
+export function startPointsFor(names, { baseRef, baseRefs } = {}) {
+  const fallback = typeof baseRef === 'string' && baseRef.trim() !== '' ? baseRef.trim() : undefined
+  const named = normalizeBaseRefs(baseRefs)
+  const keys = Object.keys(named)
+  if (keys.length === 0) return new Map(names.map((name) => [name, fallback]))
+  const selected = new Set(names)
+  const unknown = keys.filter((name) => !selected.has(name))
+  if (unknown.length > 0) {
+    throw coded(
+      'E4019',
+      `baseRefs names ${unknown.map((name) => `'${name}'`).join(', ')}, which this call does not select; `
+        + `it selects ${names.map((name) => `'${name}'`).join(', ')}`,
+      { unknown, repositories: [...names] },
+    )
+  }
+  return new Map(names.map((name) => [name, named[name] ?? fallback]))
+}
+
+/**
+ * The per-repository start points a caller sent, as name-to-ref.
+ *
+ * A string is accepted and parsed, because a caller that has no object to hand
+ * over the wire reaches for JSON; anything that is neither is refused rather
+ * than read as an empty mapping, which is the same reasoning as {@link
+ * startPointsFor}'s refusal. A name whose value is blank is dropped: it says
+ * nothing about that repository, so the task's own base answers for it.
+ * @param value - whatever the caller sent as `baseRefs`.
+ * @returns the mapping, possibly empty.
+ * @throws E4019 when it is neither a mapping nor JSON for one, or when a value
+ * in it is not a ref name.
+ */
+function normalizeBaseRefs(value) {
+  if (value === undefined || value === null) return {}
+  const raw = typeof value === 'string' ? parseBaseRefsJson(value) : value
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw coded('E4019', `baseRefs must be a mapping of repository name to ref: ${typeof value === 'string' ? value : typeof value}`)
+  }
+  const named = {}
+  for (const [name, ref] of Object.entries(raw)) {
+    const key = name.trim()
+    if (key === '') continue
+    if (typeof ref !== 'string') {
+      throw coded('E4019', `baseRefs names '${key}' with a ${typeof ref}; a start point is a ref name`, { repositories: [key] })
+    }
+    const text = ref.trim()
+    // Nothing named is the same as the name being absent, and falls back the same way.
+    if (text !== '') named[key] = text
+  }
+  return named
+}
+
+/** @param text - the JSON a caller sent as `baseRefs`. @returns the parsed value, or a non-object. */
+function parseBaseRefsJson(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The start points that are not the task's own base.
+ *
+ * What the record writes beside each repository, and what a call reports back:
+ * a per-entry `baseRef` is a fact about one repository, so it is written only
+ * where it differs from the answer the task's own `baseRef` already gives. A
+ * record that repeated the task's base on every entry would be two places to
+ * keep in step, and the two could disagree - a top level saying `A` beside a
+ * repository saying `B` is exactly the contradiction this filters out.
+ *
+ * Absence is therefore a statement rather than an omission: a repository with no
+ * `baseRef` of its own started from the task's base, or from its own HEAD when
+ * the task names none.
+ * @param startPoints - the Map {@link startPointsFor} returned.
+ * @param taskBase - the task's own `baseRef`, or null when it names none.
+ * @returns a Map of the repositories whose start point is their own.
+ */
+export function ownStartPointsOf(startPoints, taskBase) {
+  const base = taskBase === undefined || taskBase === null || `${taskBase}`.trim() === '' ? null : `${taskBase}`
+  const own = new Map()
+  for (const [name, ref] of startPoints) {
+    if (ref === undefined || ref === base) continue
+    own.set(name, ref)
+  }
+  return own
+}
+
+/**
  * Build the metadata a container records for itself.
  *
  * `startCommit` is read once per repository, before the branch is created, so
  * the answer belongs to the source checkout rather than to the worktree that
  * was just made from it.
  * @param details - `task`, `tasksRoot`, `sourceRoot`, the shared `branch`, the
- * optional `baseRef`, and the created repositories with their source paths,
- * source branches and starting commits.
+ * optional `baseRef` (the start point shared by every repository that names
+ * none of its own), and the created repositories with their source paths, source
+ * branches, starting commits, and any `baseRef` of their own that differs from
+ * the task's.
  * @returns the document to write as JSON. Alongside the captured facts it
  * carries the `deploymentEnvId` derived from the project and task names — a
  * deployment is not a fact this plugin captures, but the id every deploy
@@ -344,6 +456,12 @@ export function taskMetadata(details) {
       sourcePath: entry.sourcePath,
       ...(entry.sourceBranch === undefined ? {} : { sourceBranch: entry.sourceBranch }),
       ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
+      // The start point this repository was cut from, when it is not the one the
+      // task's own `baseRef` already states. Read back by `inspectTask` and by the
+      // note below, so a field written here is a field something answers with;
+      // absent means the task's own base, or this repository's HEAD when the task
+      // names none. See `ownStartPointsOf`.
+      ...(entry.baseRef === undefined ? {} : { baseRef: entry.baseRef }),
       branch: entry.branch ?? branch,
     })),
   }
@@ -397,10 +515,20 @@ export function normalizeSessions(value) {
     // rule as `at`: a non-empty string, and an absent one stays absent rather than becoming
     // an empty string that reads as "reported at no time".
     const reportedAt = typeof entry.reportedAt === 'string' && entry.reportedAt !== '' ? entry.reportedAt : undefined
+    // `model` and `modelSource` are carried through under the same rule - this function
+    // rebuilds each entry, so a field it does not name is gone the next time the record is
+    // read. That is not a theoretical loss: `markSessionReported` writes back through the
+    // entries this returns, so a field dropped here is erased from the file by the next
+    // report, and `list` answers without it. Non-empty strings only, absent rather than
+    // empty, for the reason `at` and `reportedAt` are.
+    const model = typeof entry.model === 'string' && entry.model !== '' ? entry.model : undefined
+    const modelSource = typeof entry.modelSource === 'string' && entry.modelSource !== '' ? entry.modelSource : undefined
     normalized.push({
       sessionId,
       ...(at === undefined ? {} : { at }),
       ...(reportedAt === undefined ? {} : { reportedAt }),
+      ...(model === undefined ? {} : { model }),
+      ...(modelSource === undefined ? {} : { modelSource }),
       role,
     })
   }
@@ -590,18 +718,37 @@ export function renderTaskMetadata(metadata) {
   // name one without searching: `wts_session_tool status` takes exactly this id.
   // The newest is named first, because that is the one still working.
   const sessions = [...taskSessionsOf(metadata)].reverse()
+  // The repositories cut from a start point of their own, which is what makes a
+  // per-entry `baseRef` worth writing down at all: a session that is told the task
+  // began at `develop` has to be told which repository did not, or it will read the
+  // task's branch in that repository as if it came from the base the note names.
+  const ownBases = repositories.filter((entry) => typeof entry?.baseRef === 'string' && entry.baseRef.trim() !== '')
+  const baseIsNamed = !(baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '')
   const lines = [
     `# Task: ${task}`,
     '',
     ...(typeof project === 'string' && project !== '' ? [`- Project: \`${project}\``] : []),
     `- Branch: \`${branch}\` (one branch per repository below)`,
-    `- Base: ${baseRef === undefined || baseRef === null || `${baseRef}`.trim() === '' ? "each repository's current HEAD" : `\`${baseRef}\``}`,
+    // The task's base is the start point of every repository that names none of its
+    // own below, so the sentence says the whole of what it covers rather than leaving
+    // a reader to wonder whether `main` here is one repository's answer or the task's.
+    `- Base: ${baseIsNamed ? `\`${baseRef}\`` : "each repository's current HEAD"}${ownBases.length === 0 ? '' : ', for every repository that names no start point of its own'}`,
     ...(typeof createdAt === 'string' && createdAt !== '' ? [`- Created: ${createdAt}`] : []),
     `- Source root: \`${sourceRoot}\``,
     ...(sessions.length === 0 ? [] : [`- Sessions: ${sessions.map((entry) => `\`${entry.sessionId}\` (${entry.role})`).join(', ')}`]),
     '- This folder is the agent session working directory.',
     `- The facts above are stored in \`${PLUGIN_ROOT}/${TASK_METADATA}\`; this file is generated from it.`,
     '',
+    // A per-entry `baseRef` is a real answer a reader can act on - which repository
+    // it names, and the ref it was cut from - so the note says it rather than leaving
+    // the reader to open the JSON. The ones with no base of their own are covered by
+    // the line above: the task's base, or their own HEAD when it names none.
+    ...(ownBases.length === 0 ? [] : [
+      '## Start points',
+      `- Every repository not named below started from ${baseIsNamed ? `the task's base \`${baseRef}\`` : 'its own HEAD'}.`,
+      ...ownBases.map((entry) => `- \`${entry.name}\`: \`${entry.baseRef}\``),
+      '',
+    ]),
     ...(sessions.length === 0 ? [] : [
       '## Sessions',
       '- The sessions above were opened for this task; the newest is the one that was working most recently.',

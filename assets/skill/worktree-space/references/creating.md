@@ -31,7 +31,14 @@ Follow this order. Never create a workspace with a guessed location.
 5. **Ask which repositories** to include when the source root holds several and
    the user did not say; pass the chosen directory names as `repos`.
 6. **Ask which commit to start from** — recommend each repository's current HEAD
-   (omit `baseRef`); alternatives are another active branch or the main branch.
+   (omit `baseRef`); alternatives are another active branch or the main branch. A
+   single `baseRef` has to name a ref that exists in **every** selected repository,
+   which is often not true across repositories. When the repositories cannot agree,
+   pass `baseRefs` instead: a mapping of repository NAME to that repository's ref.
+   A name it carries wins over `baseRef`; a repository it leaves out falls back to
+   `baseRef`, then to its own HEAD — so naming both says "everybody from `develop`
+   except `legacy-repo`". A name that is not one of the selected repositories is
+   refused (E4019) rather than silently ignored.
 7. **Branch prefix** — `task/` unless the user asks for another one; pass the
    choice as `branchPrefix` and expect the branch to be that prefix plus the task
    name (`hotfix/<task>`, `release-<task>`, …).

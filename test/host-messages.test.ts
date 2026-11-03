@@ -124,6 +124,8 @@ describe("every sentence the Host's codes are said with", () => {
     ["E4012", {}, ""],
     ["E4014", {}, ""],
     ["E4015", {}, ""],
+    ["E4019", { unknown: ["delta"], repositories: ["alpha", "beta"] }, "delta"],
+    ["E4019", { unknown: ["delta"], repositories: ["alpha"] }, "alpha"],
     ["E5006", {}, ""],
     ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }] }, "/w/a"],
     ["E5011", { held: [{ path: "/w/a", reason: "EBUSY" }, { path: "/w/b", reason: "EPERM" }] }, "/w/b"],

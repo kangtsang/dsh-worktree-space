@@ -958,6 +958,159 @@ describe("createTask", () => {
     }
   })
 
+  it("cuts each repository from the start point its own name carries", async () => {
+    // A task spanning several repositories could not use `baseRef` at all before:
+    // one ref name has to exist in every one of them, and a repo called `develop`
+    // beside one called `main` is the ordinary case rather than the awkward one.
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...branchIsNew("task/login"),
+      "rev-parse --verify --quiet develop^{commit}": "",
+      "rev-parse --verify --quiet main^{commit}": "",
+    })
+    try {
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        baseRefs: { alpha: "develop", beta: "main" },
+      })
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([
+        `worktree add ${join(container.root, source.project, "login", "alpha")} -b task/login develop`,
+        `worktree add ${join(container.root, source.project, "login", "beta")} -b task/login main`,
+      ])
+      // The task's own base stays null: no single ref was given for the task, and a
+      // record claiming one would be saying something the create was not asked for.
+      expect(result.baseRef).toBeUndefined()
+
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
+      expect(metadata.baseRef).toBe(null)
+      expect(metadata.repositories).toEqual([
+        expect.objectContaining({ name: "alpha", baseRef: "develop" }),
+        expect.objectContaining({ name: "beta", baseRef: "main" }),
+      ])
+      // A reader of the note is told which repository started where, rather than
+      // being told nothing and left to read the JSON.
+      const note = await readFile(noteAt(result.path), "utf8")
+      expect(note).toContain("## Start points")
+      expect(note).toContain("- `alpha`: `develop`")
+      expect(note).toContain("- `beta`: `main`")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("uses baseRef for the repositories baseRefs leaves out", async () => {
+    // The two together are one sentence - "everybody from develop except beta" -
+    // not a contradiction to refuse: `baseRef` is the default for the unnamed ones.
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...branchIsNew("task/login"),
+      "rev-parse --verify --quiet develop^{commit}": "",
+      "rev-parse --verify --quiet main^{commit}": "",
+    })
+    try {
+      const result = await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        baseRef: "develop",
+        baseRefs: { beta: "main" },
+      })
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([
+        `worktree add ${join(container.root, source.project, "login", "alpha")} -b task/login develop`,
+        `worktree add ${join(container.root, source.project, "login", "beta")} -b task/login main`,
+      ])
+      const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
+      expect(metadata.baseRef).toBe("develop")
+      // Only the one that differs is written per repository, so the record can never
+      // carry a top level saying `develop` beside a repository saying `develop` too -
+      // or, worse, beside one saying something else.
+      expect(metadata.repositories[0]).not.toHaveProperty("baseRef")
+      expect(metadata.repositories[1]).toEqual(expect.objectContaining({ name: "beta", baseRef: "main" }))
+      expect(await readFile(noteAt(result.path), "utf8")).toContain("Every repository not named below started from the task's base `develop`")
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("refuses a repository baseRefs names that the task does not select", async () => {
+    // Silence would be the worse answer: the caller named a start point for a
+    // repository, and a misspelled name would quietly fall back to the default while
+    // the caller believes it was applied.
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock(branchIsNew("task/login"))
+    try {
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        baseRefs: { gamma: "main" },
+      })).rejects.toMatchObject({ code: "E4019" })
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        baseRefs: { gamma: "main" },
+      })).rejects.toThrow(/'gamma'.*'alpha'.*'beta'/s)
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("names the repository whose own start point is missing", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess } = subprocessMock({
+      ...branchIsNew("task/login"),
+      "rev-parse --verify --quiet release^{commit}": { exitCode: 128, stderr: "unknown revision" },
+    })
+    try {
+      await expect(createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        repos: ["beta"],
+        baseRefs: { beta: "release" },
+      })).rejects.toThrow(/base 'release' not found in 'beta'/)
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
+  it("starts a repository baseRefs leaves out from its own HEAD when no base was named", async () => {
+    const source = await sourceFixture()
+    const container = await containerFixture()
+    const { subprocess, keys } = subprocessMock({
+      ...branchIsNew("task/login"),
+      "rev-parse --verify --quiet main^{commit}": "",
+    })
+    try {
+      await createTask(subprocess, {
+        sourceRoot: source.root,
+        task: "login",
+        tasksRoot: container.root,
+        baseRefs: { beta: "main" },
+      })
+      // No last argument, exactly as a create with no base always produced.
+      expect(keys().filter((key) => key.startsWith("worktree add"))).toEqual([
+        `worktree add ${join(container.root, source.project, "login", "alpha")} -b task/login`,
+        `worktree add ${join(container.root, source.project, "login", "beta")} -b task/login main`,
+      ])
+    } finally {
+      await source.cleanup()
+      await container.cleanup()
+    }
+  })
+
   it("refuses a base that a repository does not have", async () => {
     const source = await sourceFixture()
     const container = await containerFixture()
@@ -3579,6 +3732,43 @@ describe("inspectTask", () => {
     }
     return { root, taskPath, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
+
+  it("names the repositories whose start point is not the task's", async () => {
+    // The reader that makes writing a per-entry `baseRef` honest: a caller that read
+    // `baseRef` above is told which repositories did not start there, so one task
+    // branch cannot be read as if every worktree came from the same place.
+    const fixtureUnderTest = await fixture()
+    const path = recordAt(fixtureUnderTest.taskPath)
+    const recorded = JSON.parse(await readFile(path, "utf8"))
+    await writeFile(path, `${JSON.stringify({
+      ...recorded,
+      baseRef: "develop",
+      repositories: [
+        { ...recorded.repositories[0], baseRef: "main" },
+        recorded.repositories[1],
+      ],
+    }, null, 2)}\n`, "utf8")
+    try {
+      expect(await inspectTask(fixtureUnderTest.taskPath)).toEqual(expect.objectContaining({
+        baseRef: "develop",
+        startPoints: [{ name: "alpha", baseRef: "main" }],
+      }))
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
+
+  it("carries no start points when every repository started from the task's base", async () => {
+    // Absent rather than empty: a record with no per-entry base is the one every
+    // version before this produced, and an empty array would ask a caller to wonder
+    // whether it was not looked for or was looked for and found nothing.
+    const fixtureUnderTest = await fixture()
+    try {
+      expect(await inspectTask(fixtureUnderTest.taskPath)).not.toHaveProperty("startPoints")
+    } finally {
+      await fixtureUnderTest.cleanup()
+    }
+  })
 
   it("falls back to the legacy note when the record is absent or unusable", async () => {
     // A container written by a version before worktree-space.json existed is still

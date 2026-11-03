@@ -25,10 +25,13 @@ import {
   applyRoute,
   clearRoute,
   currentSelectionOf,
+  describeRoutes,
+  explainRoute,
   modelCatalogOf,
   resolveDispatchModel,
   routeArmedFor,
   routeInCatalog,
+  routeWarningOf,
   selectionOf,
 } from "../src/host/task/session-model.js"
 import { registerSessionTools } from "../src/host/session-tools.js"
@@ -266,9 +269,53 @@ describe("the model catalog", () => {
       },
     })
     const started = Date.now()
-    const built = await modelCatalogOf(ctx)
-    expect(Date.now() - started).toBeLessThan(10_000)
+    const built = await modelCatalogOf(ctx, 50)
+    expect(Date.now() - started).toBeLessThan(1000)
     expect(built.providers).toEqual([{ provider: "fast", models: ["m-1"] }, { provider: "hangs", models: [] }])
+    // A hung provider's row answered empty *because it could not be read*, which is the
+    // fact `explainRoute` needs to distinguish "unknown" from "this provider offers none".
+    expect(explainRoute(built, "hangs", "m-1").answer).toBe("unknown")
+  })
+
+  it("does not grow the wall clock with the number of hung providers", async () => {
+    // Task 5: the client's `read` has a 15 s ceiling, so the catalog's wall clock must
+    // stay near ONE per-provider timeout rather than the sum of them. All 43 providers
+    // hang; a serial implementation would take 43 x 50 ms = 2.15 s and this bound catches
+    // it. 1500 ms leaves room for a slow two-core CI runner without admitting a serial
+    // regression.
+    const providers = Array.from({ length: 43 }, (_, index) => ({ id: `p-${index}` }))
+    const { ctx } = contextWith({
+      llm: {
+        listProviders: () => providers,
+        listConfigurableProviders: () => [],
+        listModels: () => new Promise(() => {}),
+      },
+    })
+    const started = Date.now()
+    const built = await modelCatalogOf(ctx, 50)
+    expect(Date.now() - started).toBeLessThan(1500)
+    expect(built.providers).toHaveLength(43)
+    expect(built.registryRead).toBe("ok")
+  })
+
+  it("answers a catalog of providers that all reject almost immediately", async () => {
+    // The other half of the bound: a synchronous failure has no timeout to wait out, so
+    // 43 rejecting providers must not add 43 timeouts' worth of wall clock. A serial
+    // implementation that awaited each one would pass the hung-provider test above only if
+    // it also skipped the timeout for settled promises - this one pins the near-zero case.
+    const providers = Array.from({ length: 43 }, (_, index) => ({ id: `p-${index}` }))
+    const { ctx } = contextWith({
+      llm: {
+        listProviders: () => providers,
+        listConfigurableProviders: () => [],
+        listModels: async () => { throw new Error("no adapter registered") },
+      },
+    })
+    const started = Date.now()
+    const built = await modelCatalogOf(ctx, 50)
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(built.providers.every((entry) => entry.models.length === 0)).toBe(true)
+    expect(explainRoute(built, "p-0", "m-1").answer).toBe("unknown")
   })
 
   it("asks the providers every time, so the list cannot go stale", async () => {
@@ -288,6 +335,120 @@ describe("the model catalog", () => {
     await modelCatalogOf(ctx)
     await modelCatalogOf(ctx)
     expect(calls).toBe(2)
+  })
+})
+
+describe("a route a dispatch named: reachable, unreachable, or could not be read", () => {
+  /**
+   * A catalog with one good provider, one the host declares but cannot read, and one
+   * that is genuinely empty and readable. The third is what makes "empty" ambiguous
+   * without the notes - and therefore why the last two cases below are the ones worth
+   * separating.
+   */
+  const mixed = {
+    registryRead: "ok",
+    providers: [
+      { provider: "deepseek-account", models: ["deepseek-chat", "deepseek-reasoner"] },
+      { provider: "broken", models: [] },
+      { provider: "logged-out", models: [] },
+    ],
+    notes: [
+      "broken: no adapter registered for provider \"broken\"",
+      "logged-out: not signed in",
+    ],
+    default: undefined,
+  }
+
+  it("says reachable when the provider lists the model", () => {
+    const answer = explainRoute(mixed, "deepseek-account", "deepseek-reasoner")
+    expect(answer.answer).toBe("reachable")
+    expect(answer.reason).toBe("")
+  })
+
+  it("says unreachable when the provider exists, was read, and does not offer it", () => {
+    // A usable, non-empty list that lacks the model is evidence: this is a typo or a
+    // model that was removed, and a dispatch naming it can be refused on the strength of it.
+    const answer = explainRoute(mixed, "deepseek-account", "gpt-4")
+    expect(answer.answer).toBe("unreachable")
+    expect(answer.reason).toContain("does not offer gpt-4")
+  })
+
+  it("says unreachable when no provider of that name is served at all", () => {
+    const answer = explainRoute(mixed, "nobody", "deepseek-chat")
+    expect(answer.answer).toBe("unreachable")
+    expect(answer.reason).toContain("no provider named nobody")
+  })
+
+  it("says unknown when the provider's list could not be read", () => {
+    // Empty `models` plus a note naming the provider: the list is empty because the read
+    // failed, which is not evidence either way about the model.
+    const broken = explainRoute(mixed, "broken", "deepseek-chat")
+    expect(broken.answer).toBe("unknown")
+    expect(broken.reason).toContain("could not be read")
+    expect(explainRoute(mixed, "logged-out", "deepseek-chat").answer).toBe("unknown")
+  })
+
+  it("treats a readable empty provider as offering nothing, not as unread", () => {
+    // The control for the case above: same empty list, no note - so the read succeeded and
+    // the provider really offers nothing. An unreachable answer is correct here, and a
+    // judgment that treated every empty list as unreadable would answer unknown instead.
+    const readable = { ...mixed, providers: [{ provider: "empty", models: [] }], notes: [] }
+    expect(explainRoute(readable, "empty", "m-1").answer).toBe("unreachable")
+  })
+
+  it("does not read a provider's absence as unreachable when the registry read failed", () => {
+    // The case a boolean could not see. `listProviders()` threw, so every provider - even
+    // one the host does serve - is absent from the roster. Refusing every model on that
+    // basis would turn one registry failure into a deployment-wide refusal.
+    const failed = { ...mixed, providers: [], registryRead: "failed", notes: ["listProviders() failed: offline"] }
+    expect(explainRoute(failed, "deepseek-account", "deepseek-chat").answer).toBe("unknown")
+    expect(explainRoute(failed, "deepseek-account", "deepseek-chat").reason).toContain("registry could not be read")
+  })
+
+  it("answers unknown for a catalog with no llm at all, rather than refusing every model", () => {
+    const { ctx } = contextWith({})
+    const built = modelCatalogOf(ctx)
+    return built.then((catalog) => {
+      expect(catalog.registryRead).toBe("failed")
+      expect(explainRoute(catalog, "deepseek-account", "deepseek-chat").answer).toBe("unknown")
+    })
+  })
+
+  it("matches a provider note by prefix, not by substring anywhere in the note", () => {
+    // A note that merely MENTIONS a provider must not be read as a note about it: the
+    // colon-anchored prefix is what keeps "deepseek-account" from matching a sentence
+    // about another provider whose id contains it.
+    const catalog = {
+      registryRead: "ok",
+      providers: [{ provider: "account", models: [] }],
+      notes: ["other-account: deepseek-account is not signed in"],
+      default: undefined,
+    }
+    expect(explainRoute(catalog, "account", "m-1").answer).toBe("unreachable")
+  })
+
+  it("says which of the three it is, in the sentence a caller reads", () => {
+    // The whole point of the three states: the two failures must not read alike. A caller
+    // told "cannot route to" is entitled to believe the host was asked and answered.
+    const unreachable = routeWarningOf(
+      explainRoute(mixed, "deepseek-account", "gpt-4"),
+      mixed,
+      "deepseek-account/gpt-4",
+    )
+    expect(unreachable).toContain("cannot route to")
+    expect(unreachable).toContain(describeRoutes(mixed))
+    expect(unreachable).not.toContain("could not be determined")
+
+    const unknown = routeWarningOf(
+      explainRoute(mixed, "broken", "deepseek-chat"),
+      mixed,
+      "broken/deepseek-chat",
+    )
+    expect(unknown).toContain("could not be determined")
+    // The reason is the note the catalog carries for THAT provider, so a caller is told
+    // why the read failed rather than that it merely did.
+    expect(unknown).toContain("no adapter registered")
+    expect(unknown).not.toContain("cannot route to")
   })
 })
 

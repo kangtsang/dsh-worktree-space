@@ -214,18 +214,21 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 工作区列表里的 `⋯` 菜单。对话框从上到下：
 
 1. **选择仓库**：勾选任务要参与的仓库，卡片上标着各仓库当前 HEAD 所在的分支与路径，底部有
-   **全选 / 清空** 和「已选择 N / M 个仓库」。**至少要选一个**。
-2. **任务名称**：会转成小写，除字母、数字、点、连字符和下划线以外的字符（空格、中文等）都换成连字符；
+   **全选 / 清空** 和「已选择 N / M 个仓库」。**至少要选一个**。卡片右侧的 **指定分支** 只给这个仓库的
+   新 worktree 定起点，**不是 checkout** —— 源仓库当前检出的分支不会变；改过之后该仓库不再跟随下面的
+   默认起点，面板里的「跟随默认分支起点」可以退回。
+2. **默认分支起点**（仓库列表下方，未选时显示「各自当前 HEAD」）：没有单独设置起点的仓库都从这里开始。
+   列表只列出**所有已勾选仓库共有**的分支 —— 一次创建给每个 worktree 同一个起点，某个仓库没有该分支
+   就会整次失败。字段名旁的 `?` 写着完整的优先级与例外。
+3. **任务名称**：会转成小写，除字母、数字、点、连字符和下划线以外的字符（空格、中文等）都换成连字符；
    它同时是任务空间的目录名和分支后缀。不合法时直接说出违反了哪一条。
-3. **分支前缀**：分支名就是前缀加任务名（默认 `task/`）。改成与当前默认不同的值时，下面出现
+4. **分支前缀**：分支名就是前缀加任务名（默认 `task/`）。改成与当前默认不同的值时，下面出现
    **设为默认分支前缀** —— 勾选后，点「创建并打开会话」时把这次的值写回插件设置。
-4. **Worktree Space 容器根目录**：界面已填好推荐值（**根工作空间的下一层** `worktree-space`），通常无需修改；
+5. **Worktree Space 容器根目录**：界面已填好推荐值（**根工作空间的下一层** `worktree-space`），通常无需修改；
    改动时同样出现 **设为默认…**，勾选后把这次的路径写回设置。容器根自身是 Git 仓库会被拒绝。
-5. **部署到 Docker**（默认不勾）：勾上后多出 **部署脚本** 输入框，留空则用
+6. **部署到 Docker**（默认不勾）：勾上后多出 **部署脚本** 输入框，留空则用
    `工作区/.worktree-space/deploy/deploy.sh`。这一格定的是「合并要不要冒烟这道闸门」，
    **只在创建时这一回落一次**，之后没有入口能补。
-6. **分支起点**：**各仓库当前 HEAD**（默认）或 **指定分支或提交**；指定时那个 ref 必须在**每一个**
-   选中的仓库里都存在，缺一个就被拒。
 7. **预览**：跟着上面的输入实时算出这次的**分支名**与**空间目录名**。
 8. 点 **创建并打开会话**：建完直接在该任务空间开一个会话。
 
@@ -453,7 +456,6 @@ worktree 里，可以就地处理。
 | --- | --- | --- | --- |
 | 插件槽位入口 | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
 | 侧边栏底部快捷入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
-| 交由 agent 解决冲突入口 | 显示 / 隐藏 | 显示 | 结束任务对话框里「交由 agent 提交」「交由 agent 解决冲突」两个入口；隐藏时走标准流程：自己提交、自己解决冲突，再点继续结束任务 |
 | 交由 agent 处理冲突和提交的会话使用完全权限 | 关 / 开 | **关** | 打开后，这两个会话开在**任务空间**上并立即置为「完全权限」（`danger-full-access`）；**代价是该会话此后可以写到这台机器上 DSH 进程能写的任何位置**，不再逐次询问。只影响之后开起的会话，结束任务对话框里可以就地切换。 |
 | 操作日志 | 开 / 关 | **开** | 容器根下 `worktree-space-log.jsonl` 的开关。关掉只是不再写新记录，磁盘上已有的日志原样保留 |
 | 扫描深度 | 1–5 层 | 3 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
@@ -1116,7 +1118,6 @@ data directory, which needs a DSH restart.
 | --- | --- | --- | --- |
 | Plugin slot entry | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
 | Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
-| Agent handoff entry | show / hide | show | The finish dialog's two entries, **Hand the commits to the agent** and **Hand the conflict to the agent**; hidden, the standard flow applies: commit and resolve the conflict yourself, then continue the finish |
 | Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened in the **task space** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters. |
 | Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
 | Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |

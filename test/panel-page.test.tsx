@@ -84,7 +84,7 @@ describe("the management page as a main panel", () => {
     // rather than by what needs attention — so the run reads that way here. It is the
     // same three buttons either way.
     expect(within(screen.getByRole("group", { name: t("filters") })).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("collapseAll")])
+      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("expandAll")])
 
     fireEvent.click(within(nav).getByRole("button", { name: t("viewTasks") }))
     expect(within(nav).getByRole("button", { name: t("viewTasks") }).getAttribute("aria-current")).toBe("true")
@@ -186,7 +186,7 @@ describe("the management page as a main panel", () => {
     expect(within(group).getAllByRole("button").map((button) => button.textContent))
       .toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
     expect(within(screen.getByRole("group", { name: t("filters") })).getAllByRole("button").map((button) => button.textContent))
-      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("collapseAll")])
+      .toEqual([t("filterAll"), t("filterWithWorktrees"), t("expandAll")])
     // The two runs are set off from each other, which the panel's own single run is not.
     expect(document.querySelectorAll(".dws-filter-separator")).toHaveLength(1)
     expect(screen.queryByRole("navigation", { name: t("worktreesTitle") })).toBeNull()
@@ -253,6 +253,8 @@ describe("the management page as a main panel", () => {
     await settle()
     // A repository's worktrees are one list of their own under the repository row —
     // the nesting the tree rail used to draw, said with the list instead of a line.
+    // The row starts folded like every other one, so this opens it first.
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleRepository")} alpha` }))
     const list = document.querySelector(".dws-worktree-list")
     expect(list).toBeTruthy()
     expect(list?.querySelectorAll(".dws-worktree").length).toBe(1)

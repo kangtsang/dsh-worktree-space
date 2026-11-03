@@ -44,8 +44,10 @@ import {
   applyRoute,
   currentSelectionOf,
   describeRoutes,
+  DISPATCH_CATALOG_TIMEOUT_MS,
+  explainRoute,
   modelCatalogOf,
-  routeInCatalog,
+  routeWarningOf,
   selectionOf,
 } from './task/session-model.js'
 
@@ -2250,7 +2252,9 @@ function sessionModel(ctx) {
 
       // No model named: this is the question "what is it on, and what could it be on".
       if (wanted === '') {
-        const catalog = await modelCatalogOf(ctx)
+        // An explicit switch, like a dispatch being validated: nobody is watching a spinner
+        // here, so it gets the longer 8 s budget rather than the configuration page's 5 s.
+        const catalog = await modelCatalogOf(ctx, DISPATCH_CATALOG_TIMEOUT_MS)
         const routes = []
         for (const group of catalog.providers) for (const model of group.models) routes.push(`${group.provider}/${model}`)
         const current = before === undefined ? '' : `${before.provider}/${before.model}`
@@ -2280,9 +2284,16 @@ function sessionModel(ctx) {
         throw new Error(`E4016: model must be "provider/model" (got ${JSON.stringify(wanted)}); `
           + 'call this action without `model` to list the routes this host can reach')
       }
-      const catalog = await modelCatalogOf(ctx)
-      if (!routeInCatalog(catalog, provider, model)) {
-        return unavailable(sessionId, `${wanted} is not a route this host can reach; available: ${describeRoutes(catalog)}`)
+      const catalog = await modelCatalogOf(ctx, DISPATCH_CATALOG_TIMEOUT_MS)
+      const explanation = explainRoute(catalog, provider, model)
+      if (explanation.answer !== 'reachable') {
+        // Two different answers, and this is an explicit switch, so both are refusals -
+        // but they have to say which one they are. "Not reachable" sends the caller to
+        // pick another route; "could not be read" sends them to try again later.
+        return unavailable(sessionId, explanation.answer === 'unknown'
+          ? `whether ${wanted} is a route this host can reach could not be determined, so the model was not changed: `
+            + `${explanation.reason}. Nothing was written to ${JSON.stringify(sessionId)}.`
+          : `${wanted} is not a route this host can reach: ${explanation.reason}. Available: ${describeRoutes(catalog)}`)
       }
       const effort = typeof args.reasoningEffort === 'string' && args.reasoningEffort.trim() !== ''
         ? args.reasoningEffort.trim()

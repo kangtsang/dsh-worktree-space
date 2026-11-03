@@ -153,6 +153,24 @@ export interface TaskRootSuggestion {
   repositories: SourceRepository[]
 }
 
+/**
+ * Answer of `task.branches`: the start points one repository can offer.
+ *
+ * Local branches keep Git's short names and remote tracking branches keep the
+ * `origin/` prefix, so the two are told apart by the name itself - which is also
+ * the ref `worktree add` resolves. `truncated` is a count, not a flag: it says
+ * how many more branches there are, so the dialog can name the number.
+ */
+export interface RepositoryBranches {
+  branches: string[]
+  truncated: number
+  /** Why the branches could not be read; absent when the read succeeded. */
+  reason?: string
+}
+
+/** Answer of `task.branches`, keyed by the repository path the caller asked about. */
+export type RepositoryBranchMap = Record<string, RepositoryBranches>
+
 /** Answer of `task.create`. */
 export interface CreateTaskResult {
   task: string
@@ -161,8 +179,12 @@ export interface CreateTaskResult {
   branch: string
   path: string
   tasksRoot: string
+  /**
+   * The commit the whole task started from; absent when each repository used its
+   * own HEAD or a start point of its own.
+   */
   baseRef?: string
-  repositories: Array<{ name: string; path: string }>
+  repositories: Array<{ name: string; path: string; baseRef?: string }>
 }
 
 /**
@@ -187,6 +209,11 @@ export interface AddRepositoriesResult {
     path: string
     /** The source repository it was cut from, wherever that is. */
     sourcePath: string
+    /**
+     * The ref this one started from, when it is not the one the task's own `baseRef`
+     * already names - an add can start each new repository somewhere different.
+     */
+    baseRef?: string
   }>
 }
 
@@ -248,6 +275,13 @@ export interface TaskInspection {
    * HEAD" from "a base this Host cannot name".
    */
   baseRef?: string
+  /**
+   * The repositories that started from a ref of their own rather than the one
+   * `baseRef` names, or from a ref at all when the task names none. Absent when
+   * every repository started from the task's base (or its own HEAD): a record made
+   * before per-repository start points existed carries no entries here.
+   */
+  startPoints?: Array<{ name: string; baseRef: string }>
   repositories: string[]
 }
 
@@ -375,8 +409,6 @@ export interface TaskPreference {
   archiveDocumentsStrategy?: ArchiveStrategy
   /** The root the `custom` strategy files into, empty when none is set. */
   archiveDocumentsDirectory: string
-  /** `show` when the finish offers the two agent entries, `hide` otherwise. */
-  handoffEntry: string
   /**
    * `on` when the sessions that a finish hands an agent are opened at the container root
    * with full access, `off` when each keeps the directory that reaches the git metadata

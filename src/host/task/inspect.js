@@ -10,7 +10,7 @@ import { CONTAINER_ARCHIVE_FOLDER } from './container.js'
 import { coded } from './codes.js'
 import { mapWithLimit, SCAN_CONCURRENCY } from './concurrency.js'
 import { discoverSourceRepos, isSourceRepository } from './discover.js'
-import { tryRunGit } from './git.js'
+import { runGit, tryRunGit } from './git.js'
 import { DEFAULT_BRANCH_PREFIX, validateBranchPrefix } from './naming.js'
 import { assertIsolated, isInside } from './paths.js'
 import { deliveryStateSummary } from './deploy.js'
@@ -174,6 +174,65 @@ async function currentBranchOf(subprocess, repoPath) {
   return branch === '' || branch === 'HEAD' ? undefined : branch
 }
 
+/** How many branches one repository may send back. */
+export const BRANCH_LIST_LIMIT = 100
+
+/**
+ * The branches a create dialog can offer as start points, for several
+ * repositories at once.
+ *
+ * Local branches only, from `refs/heads`, under Git's short names (`main`).
+ * Remote tracking branches are deliberately absent. A task's worktree has to be
+ * on a branch its own repository carries, so offering `origin/main` beside
+ * `main` would ask the caller to choose between two spellings of one history
+ * before they have any reason to know the difference - and the answer is the
+ * same either way once Git resolves the ref. A repository whose work belongs on
+ * a remote branch has that branch locally once it is checked out, which is also
+ * the only state in which a worktree can start from it without a detour.
+ *
+ * The answer is keyed by the path as the caller spelled it, so a dialog can
+ * match its rows without normalising either side. One repository that cannot
+ * be read answers with an empty list and a `reason`; the others are unaffected.
+ * Nothing throws: a branch list is a read, and a failed read is a state to
+ * show rather than an error to abandon the whole dialog over.
+ *
+ * Bounded rather than `Promise.all`, for the same reason `suggestTaskRoot` is:
+ * one repository is one `git.exe`, and forty of them at once spend their time
+ * competing to be created. `SCAN_CONCURRENCY` is the ceiling for both halves.
+ * @param subprocess - the profile's subprocess service.
+ * @param repoPaths - absolute repository paths.
+ * @param options - an abort signal, when the caller has one.
+ * @returns one entry per asked-for path.
+ */
+export async function branchesOfRepositories(subprocess, repoPaths, { signal } = {}) {
+  const answer = {}
+  const asked = []
+  for (const raw of repoPaths ?? []) {
+    const path = String(raw ?? '').trim()
+    if (path === '' || Object.hasOwn(answer, path)) continue
+    asked.push(path)
+  }
+  const entries = await mapWithLimit(asked, SCAN_CONCURRENCY, async (path) => {
+    let output
+    try {
+      output = await runGit(subprocess, path, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { signal })
+    } catch (error) {
+      return [path, { branches: [], truncated: 0, reason: error?.message ?? 'git could not be read' }]
+    }
+    const lines = output.split(/\r?\n/).filter((line) => line !== '')
+    // Deduplicated: `for-each-ref` can print one short name twice when two
+    // patterns overlap, and a list that offers the same branch twice is one a
+    // reader has to check rather than read.
+    const all = [...new Set(lines)]
+    return [path, {
+      branches: all.slice(0, BRANCH_LIST_LIMIT),
+      truncated: Math.max(0, all.length - BRANCH_LIST_LIMIT),
+    }]
+  })
+  for (const [path, entry] of entries) answer[path] = entry
+  return answer
+}
+
 
 export async function inspectTask(taskPath) {
   const path = String(taskPath ?? '').trim()
@@ -200,6 +259,12 @@ export async function inspectTask(taskPath) {
   // worktrees left is a task mid-archive.
   const details = await readTaskMetadata(path)
   if (details === undefined && repositories.length === 0) return notATask
+  // Each `{ name, baseRef }` the record carries on a repository of its own: written
+  // by the create and the add, and read back here so a per-entry base is a fact a
+  // caller can act on rather than a field nothing reads.
+  const ownBases = (Array.isArray(details?.repositories) ? details.repositories : [])
+    .filter((entry) => entry !== null && typeof entry === 'object' && typeof entry.baseRef === 'string' && entry.baseRef.trim() !== '')
+    .map((entry) => ({ name: entry.name, baseRef: entry.baseRef }))
   return {
     path,
     isTask: true,
@@ -213,6 +278,11 @@ export async function inspectTask(taskPath) {
     ...(details?.sourceRoot === undefined ? {} : { sourceRoot: details.sourceRoot }),
     ...(details?.baseRef === undefined || details.baseRef === null ? {} : { baseRef: details.baseRef }),
     ...(details?.createdAt === undefined ? {} : { createdAt: details.createdAt }),
+    // The start points that are not the one the task's own `baseRef` names, so a
+    // caller that read `baseRef` above is not left believing every worktree in this
+    // task was cut from it. Read from the same record the note is rendered from, and
+    // absent rather than empty when no repository has one of its own.
+    ...(ownBases.length === 0 ? {} : { startPoints: ownBases }),
     repositories: repositories.sort(),
   }
 }

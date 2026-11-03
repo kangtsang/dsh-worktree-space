@@ -159,16 +159,6 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
   },
   {
-    // The experimental part of the finish: the two entries that hand uncommitted work,
-    // and a merge conflict, to an agent. Shown is the default, so the row reads as a way
-    // to turn it off rather than as something to discover.
-    field: "handoffEntry",
-    label: t("entryHandoffLabel"),
-    fallback: "show",
-    hint: t("entryHandoffHint"),
-    choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
-  },
-  {
     // How much access those two entries get. Off is what the plugin has always done -
     // the session is opened where it can reach the repository's git metadata and asks
     // when it has to write outside that - and on is the arrangement that puts those
@@ -736,7 +726,7 @@ function TaskModelRow({ provider, model, catalog, loading, unavailable, onRetry,
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", "handoffEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
+  for (const field of ["panelEntry", "sidebarEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }

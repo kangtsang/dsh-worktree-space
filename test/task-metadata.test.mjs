@@ -133,8 +133,58 @@ describe('task metadata', () => {
     }
   })
 
-  it('renders without the deployment sections when the record predates them', () => {
-    // A container old enough to hold neither field renders no guidance that names
+  it('records a repository whose start point is its own, and says so in the note', () => {
+    // A per-entry `baseRef` is written because it is read: `inspectTask` returns it
+    // and the note prints it. A record whose top level says `develop` beside a
+    // repository saying `main` is the fact the feature exists to carry.
+    const metadata = taskMetadata({
+      task: 'login',
+      project: 'public',
+      tasksRoot: 'E:\\\\worktree-space',
+      sourceRoot: 'E:\\\\workspace\\\\public',
+      branch: 'task/login',
+      baseRef: 'develop',
+      repositories: [
+        { name: 'alpha', sourcePath: 'E:\\\\workspace\\\\public\\\\alpha' },
+        { name: 'beta', sourcePath: 'E:\\\\workspace\\\\public\\\\beta', baseRef: 'main' },
+      ],
+    })
+    expect(metadata.baseRef).toBe('develop')
+    expect(metadata.repositories[0]).not.toHaveProperty('baseRef')
+    expect(metadata.repositories[1]).toHaveProperty('baseRef', 'main')
+
+    const note = renderTaskMetadata(metadata)
+    expect(note).toContain('- Base: `develop`, for every repository that names no start point of its own')
+    expect(note).toContain('## Start points')
+    expect(note).toContain("Every repository not named below started from the task's base `develop`.")
+    expect(note).toContain('- `beta`: `main`')
+    // The repository that started from the task's own base has no line of its own,
+    // because the line above already answers for it.
+    expect(note).not.toContain('- `alpha`: `develop`')
+  })
+
+  it('names the repositories that started from their own HEAD when the task names no base', () => {
+    const metadata = taskMetadata({
+      task: 'login',
+      project: 'public',
+      tasksRoot: 'E:\\\\worktree-space',
+      sourceRoot: 'E:\\\\workspace\\\\public',
+      branch: 'task/login',
+      repositories: [
+        { name: 'alpha', sourcePath: 'E:\\\\workspace\\\\public\\\\alpha' },
+        { name: 'beta', sourcePath: 'E:\\\\workspace\\\\public\\\\beta', baseRef: 'main' },
+      ],
+    })
+    expect(metadata.baseRef).toBe(null)
+    const note = renderTaskMetadata(metadata)
+    expect(note).toContain('Every repository not named below started from its own HEAD.')
+    expect(note).toContain('- `beta`: `main`')
+    // A record a version before this field existed has no per-entry base at all,
+    // and the note must not invent a section for it.
+    expect(renderTaskMetadata({ ...metadata, repositories: [{ name: 'alpha', sourcePath: 'x' }] })).not.toContain('## Start points')
+  })
+
+  it('renders without the deployment sections when the record predates them', () => {    // A container old enough to hold neither field renders no guidance that names
     // an id or a policy: a session asked to guess either would guess worse than
     // no section at all.
     const { deploymentEnvId, delivery, ...legacy } = taskMetadata({

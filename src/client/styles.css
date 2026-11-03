@@ -13,7 +13,13 @@
      a `dws-manage-page`, and without the aliases here every `var(--wt-*)` inside it
      computes to nothing - which is how the update capsule came out with no border and no
      background in the panel while looking right in the dialog. */
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config {
+  /* The branch pickers' panel is in this list for the third time this note has been
+     needed: its panel is portalled to `document.body`, so it is a SIBLING of the dialog
+     that opened it, not a child. A portal moves the element in the DOM, not in the
+     cascade, so the panel inherited none of these aliases - `background: var(--wt-surface)`
+     was dropped whole and the list came out see-through, with the cards behind it reading
+     through the options. Any surface that leaves the dialog by portal belongs here. */
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
     --wt-muted: var(--dsw-alias-label-tertiary);
@@ -21,6 +27,13 @@
     --wt-surface: var(--dsw-alias-bg-layer-1);
     --wt-soft: var(--dsw-alias-bg-module-platform);
     --wt-hover: var(--dsw-alias-interactive-bg-hover);
+    /* The plugin's own blue - the icon's stroke, written out rather than aliased. It is
+       what a chosen repository, its tick and the field's bulk actions wear, so those three
+       read as one family. The alias theme's `state-business-primary` is a close blue but
+       not the mark's, and `brand-primary` is not a colour at all: it is the label ink
+       (near-black in the light theme), which is how a selection came out looking like a
+       heavier border. */
+    --wt-accent: #4d6bfe;
     --wt-danger: var(--dsw-alias-state-error-primary);
     /* Warnings wear one amber, the product's own rather than the alias theme's: brighter
        and more saturated than the alias amber, so an amber dot, label or notice holds
@@ -315,17 +328,26 @@
   .dws-skeleton-row > div span + span { width: 70%; height: 8px; }
 
   .dws-dialog-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
-  .dws-dialog-content { position: fixed; z-index: 1001; top: 50%; left: 50%; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); transform: translate(-50%, -50%); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }
+  /* Centred with auto margins instead of a translate, and that is not a style choice: the
+     branch pickers' panels are rendered INSIDE this element (a modal dialog's focus scope
+     takes focus back from anything outside its content, so a panel portalled to the body
+     could hold a list but never a search box) while keeping `position: fixed` so they are
+     painted over the body's clipping edge. A transform here would become the containing
+     block of those panels: they would be measured in this box's coordinates and cut off by
+     its `overflow: hidden`. Do not put a transform back on this rule. */
+  .dws-dialog-content { position: fixed; z-index: 1001; inset: 0; margin: auto; height: max-content; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }
   /* The create form carries more per row than a confirmation does, and fits a
      1080p viewport without scrolling at these numbers. It is the widest dialog
-     here: 690px was one and a half times a confirmation, and the form reads
-     better a tenth wider than that again — 759px, the number written out rather
-     than a factor, so the field rows keep the line they were laid out for. */
-  .dws-create-dialog { width: min(759px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+     here: 690px was one and a half times a confirmation, then 759px, and the
+     repository cards now carry a name, a branch and a path each on one line - so
+     it is a fifth wider again, 911px, the number written out rather than a factor,
+     so the field rows keep the line they were laid out for. */
+  .dws-create-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
   /* Archiving reports as much per repository as the create form does — branches,
-     merge targets, commit counts, leftovers — so it takes the width the create
-     form had before it was widened. */
-  .dws-finish-dialog { width: min(690px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+     merge targets, commit counts, source paths, leftovers — so it reads at the same
+     width: a row's path and its counts line up the same way in both dialogs, and one
+     dialog no longer opens narrower than the one it is opened from. */
+  .dws-finish-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
   /* The archive dialog stacks a status line, notices, options and a report. They
      ran into each other without a rhythm, so the body lays them out with one —
      the same everywhere, since giving sections extra space above only made the
@@ -495,8 +517,12 @@
   /* The management page in a dialog, for the footer's shortcut: the same page the main
      panel shows, in a window wide enough for two columns. It is a column of three
      bands — the dialog's heading, the page, and the dialog's own footer — so the
-     heading and the footer stay put while the page inside scrolls. */
-  .dws-manage-dialog { width: min(980px, calc(100vw - 32px)); height: 95dvh; max-height: 95dvh; }
+     heading and the footer stay put while the page inside scrolls.
+     Height is a share of the window, and 80% of it: at 95% the dialog covered everything
+     but the taskbar for a page that is a list of Workspaces, six of which fit in half
+     that height. The share is written as a percentage so the page keeps its proportions
+     on a taller screen; a list that outgrows it scrolls inside the dialog. */
+  .dws-manage-dialog { width: min(980px, calc(100vw - 32px)); height: 80dvh; max-height: 80dvh; }
   .dws-manage-heading { flex: none; padding: 22px 56px 0 24px; }
   /* The navigation belongs to the column this page scrolls in the panel, not to the top
      edge of a window: inside the dialog it is the left rail of the body below the
@@ -633,9 +659,14 @@
   /* Everything the source root holds, two to a row, with no inner scrollbar:
      the dialog's body scrolls instead when the whole form outgrows the screen. */
   .dws-repo-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  /* Two to a row, so a path has half the width: keep each on one line, with the
-     full value still available from the label's title. */
+  /* Two to a row, so half the width each: a card's text therefore runs to where its
+     own button starts and is cut with an ellipsis only there - the column narrows to
+     the button, it does not end at a fixed width. The full value stays on the label's
+     title, so hover has the rest. The branch gets the whole column instead of the
+     180px cap it wears in the repository list, where it shares its line with more; a
+     name too long for the column wraps to its own line before it is cut. */
   .dws-repo-choices .dws-check-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-repo-choices .dws-branch-label { max-width: 100%; }
   /* The picker is the cards and, under them, the run that reports and acts on the
      selection. The count leads that run and the actions close it, so the field reads
      "here is what there is / here is what you chose" without a line of chrome between. */
@@ -648,19 +679,37 @@
   .dws-check-count { color: var(--wt-secondary); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }
   .dws-picker-tools { display: inline-flex; align-items: center; gap: 8px; }
   .dws-picker-divider { width: 1px; height: 12px; background: var(--wt-line); }
+  /* The band that closes the repository list and names the field under it: the list's
+     count and bulk actions on the right, the next field's name and its `?` on the left.
+     One line and one baseline, because that field answers the question the list just
+     asked - where does every repository start. */
+  .dws-base-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; }
   /* A bulk action on a list is text, not a button: it sits inside the field it acts on
      and must not compete with the card's own click target or the dialog's footer. */
-  .dws-link-button { border: 0; border-radius: 6px; padding: 2px 4px; background: transparent; color: var(--dsw-alias-brand-primary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
+  .dws-link-button { border: 0; border-radius: 6px; padding: 2px 4px; background: transparent; color: var(--wt-accent); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
   .dws-link-button:hover { background: var(--wt-hover); }
+  .dws-link-button:disabled { color: var(--wt-muted); cursor: not-allowed; }
   .dws-link-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
-  /* A repository card: the checkbox and its copy side by side, the card owning the
-     hover and the ring so the whole row is one target. */
-  .dws-check-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); cursor: pointer; }
+  /* A repository card: the checkbox, its copy and the branch button side by side, the
+     card owning the hover and the ring so the whole row reads as one thing.
+
+     `cursor: pointer` is NOT on the card. It used to be, because the card was a
+     `<label>` and a click anywhere on it toggled the tick - but the card now holds a
+     button of its own, and a label forwards a click on any control inside it to its
+     input, so pressing that button also ticked the repository. The pointer therefore
+     sits on the two things that still toggle: the box and its text. The large click
+     target was not given up, it moved - the text is a label for the box. */
+  .dws-check-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); }
   .dws-check-option:hover { background: var(--wt-hover); }
-  /* A chosen repository says so three times over — a filled box, a brand border and a
+  .dws-check-option > .dws-check-copy { flex: 1 1 auto; cursor: pointer; }
+  /* A chosen repository says so three times over — a filled box, an accent border and a
      tinted surface — because the box alone is 16px in the corner of a card whose copy
-     is what the eye lands on. */
-  .dws-check-option:has(.dws-checkbox:checked) { border-color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
+     is what the eye lands on.
+     The accent is the product's blue, not `--dsw-alias-brand-primary`: that token is the
+     ink (near-black in the light theme, near-white in the dark one), so it drew a chosen
+     card in the same tone as unread text and read as a heavier border rather than as a
+     selection. */
+  .dws-check-option:has(.dws-checkbox:checked) { border-color: var(--wt-accent); background: var(--wt-soft); }
   .dws-check-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
   .dws-check-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }
   /* The delivery tick: one decision rather than a list of them, so it is a plain row
@@ -681,11 +730,11 @@
      size. */
   .dws-checkbox { appearance: none; display: grid; place-content: center; flex: none; width: 16px; height: 16px; margin: 2px 0 0; border: 1px solid var(--wt-muted); border-radius: 5px; background: transparent; cursor: pointer; transition: background .12s ease, border-color .12s ease; }
   .dws-checkbox::before { content: ""; width: 8px; height: 4px; margin-top: -2px; border-left: 2px solid var(--dsw-alias-label-primary-foreground); border-bottom: 2px solid var(--dsw-alias-label-primary-foreground); transform: rotate(-45deg) scale(0); transition: transform .12s ease; }
-  .dws-checkbox:checked { border-color: var(--dsw-alias-button-primary-fill); background: var(--dsw-alias-button-primary-fill); }
+  .dws-checkbox:checked { border-color: var(--wt-accent); background: var(--wt-accent); }
   .dws-checkbox:checked::before { transform: rotate(-45deg) scale(1); }
   /* Nothing chosen is a state the field reports in words, so the tick's tile stays empty
      and the border keeps the muted colour rather than pretending to be a third state. */
-  .dws-checkbox:indeterminate { border-color: var(--dsw-alias-button-primary-fill); background: var(--dsw-alias-button-primary-fill); }
+  .dws-checkbox:indeterminate { border-color: var(--wt-accent); background: var(--wt-accent); }
   .dws-checkbox:indeterminate::before { width: 8px; height: 2px; margin-top: 0; border: 0; border-radius: 1px; background: var(--dsw-alias-label-primary-foreground); transform: scale(1); }
   .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
   .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
@@ -753,6 +802,39 @@
      for its larger glyph. */
   .dws-finish-handoff-note > svg { flex: none; margin-top: 2px; color: inherit; }
   .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  /* The per-repository start-point button: text, like the bulk actions beside the
+     cards, because it opens a list rather than acting on the task. It is the only
+     thing in the card that is not a tick target, and saying so with a pointer is
+     what keeps the card's two jobs apart on screen. */
+  .dws-branch-button { flex: none; border: 1px solid var(--wt-line); border-radius: 6px; padding: 1px 6px; margin-top: 1px; background: var(--wt-surface); color: var(--wt-secondary); font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+  .dws-branch-button:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); background: var(--wt-hover); }
+  .dws-branch-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* Portalled to the body and placed from the button: the create dialog's body is a
+     scroller, and a panel inside it would be clipped at the card that opened it. */
+  /* The dialog sets `pointer-events: none` on the body while it is open, and this
+     panel is portalled there rather than into the dialog, so it names its own. */
+  .dws-branch-picker { pointer-events: auto; position: fixed; z-index: 1100; display: flex; flex-direction: column; gap: 6px; max-height: 320px; padding: 8px; border: 1px solid var(--wt-line); border-radius: 10px; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); font: inherit; font-size: 12px; }
+  /* The shared start point reads as a field rather than as a button: it stands in
+     the same column as the dialog's inputs, and its value is the field's value.
+     It is still a button in the markup because it opens a list. */
+  .dws-base-ref-button { display: flex; align-items: center; width: 100%; text-align: left; cursor: pointer; }
+  .dws-base-ref-button:disabled { cursor: not-allowed; opacity: .5; }
+  .dws-base-ref-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-base-ref-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-branch-search { width: 100%; min-height: 0; font-size: 12px; }
+  /* The list scrolls inside the panel, so a repository with a hundred branches does
+     not push the panel off the screen - and the search above it stays put. */
+  .dws-branch-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+  .dws-branch-options { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+  .dws-branch-option { width: 100%; border: 0; border-radius: 6px; padding: 3px 6px; background: transparent; color: var(--wt-text); font: inherit; font-size: 12px; line-height: 20px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+  .dws-branch-option:hover { background: var(--wt-hover); }
+  .dws-branch-option:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+  /* The one that is in force, and it says so with the same brand ink the chosen
+     card wears - the picker is one field of that card, not a menu of its own. */
+  .dws-branch-option-chosen { color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
+  /* "Reading" and "could not read" are states of one field, so they sit where the
+     list would with the panel's own note styling rather than in the dialog's error. */
+  .dws-branch-state { margin: 0; }
   /* The card's first line is the repository view's title row: the name, then the
      branch HEAD is on with the same icon, wrapping instead of overflowing. */
   .dws-check-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
@@ -863,14 +945,30 @@
   /* The branch a repository merges into, chosen in place: sized like the text it
      replaces rather than like a form field. */
   .dws-plan-target { width: auto; max-width: 100%; min-height: 26px; padding: 2px 6px; font-size: 12px; line-height: 18px; }
+  /* The branch picker is a button wearing the select's geometry: the row keeps the line
+     it had, and the list it opens carries the search box a native select cannot offer. */
+  .dws-plan-picker { display: inline-flex; align-items: center; gap: 4px; padding-right: 5px; text-align: left; cursor: pointer; }
+  .dws-plan-picker:disabled { cursor: not-allowed; }
+  .dws-plan-picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-plan-picker-caret { flex: none; color: var(--wt-muted); }
   /* Said before the merge rather than reported after it. */
   .dws-plan-detour { color: var(--wt-muted); }
-  /* The source repository, on a line of its own under its worktree: the row is a
-     flex line, so it has to claim the whole width or it joins the commits and the
-     dirty count. Set like the stray directories below it, which are directories in
-     the same sense and should not read as a different kind of thing. */
-  .dws-plan-source { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 2px; }
-  .dws-plan-source code { overflow: hidden; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  /* The checkout the merge runs in, and what the merge brings, on one flex line of its
+     own: the path first, the counts beside it, so a row spends one line on both. The
+     line takes the whole width because a path can be long; when it is, the counts wrap
+     under it and are still read after it. Set like the stray directories below, which
+     are directories in the same sense and should not read as a different kind of thing. */
+  .dws-plan-source-row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; margin-top: 2px; }
+  /* A path wider than the line breaks onto the next line instead of being cut: the
+     whole path is what this row is for, and an ellipsis hides the only part that says
+     which checkout the merge runs in. It breaks at any character, because a path has
+     no words to break at; the counts after it wrap underneath when it has taken the
+     line, and are still read after it. */
+  .dws-plan-source { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+  /* The label is two characters and its own words: it keeps its line while the path
+     beside it breaks, rather than splitting into "源仓" / "库：". */
+  .dws-plan-source > span { flex: none; white-space: nowrap; }
+  .dws-plan-source code { min-width: 0; overflow-wrap: anywhere; white-space: normal; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
   /* What cleaning the container would remove, shown before it is chosen. */
   .dws-plan-strays { display: grid; gap: 6px; margin-top: 14px; }
   .dws-plan-strays-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }

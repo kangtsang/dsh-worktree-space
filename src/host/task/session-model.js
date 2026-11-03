@@ -175,13 +175,88 @@ export function currentSelectionOf(ctx, session) {
  * @param ctx - the host plugin context.
  * @returns provider groups, in the order the registries gave them, and the default route.
  */
-export async function modelCatalogOf(ctx) {
+/**
+ * How long one provider's model list may take on the configuration page.
+ *
+ * 5 seconds, where it used to be 4. The measurement behind it: a real network call to the
+ * openrouter models endpoint took 511/536/561/596/727/1097 ms warm and 1519 ms cold, so
+ * 4 s left cold starts only about 2.6x of headroom. Five is the compromise a page can sit
+ * through - the row shows a "reading the model list" state while it waits - and stays well
+ * under the 15 s ceiling the client's own `read` puts on the request.
+ */
+export const CONFIG_CATALOG_TIMEOUT_MS = 5000
+
+/**
+ * How long one provider's model list may take when a dispatch is being validated.
+ *
+ * 8 seconds, for the opposite reason from the one above: nobody is watching a spinner here,
+ * and what is at stake is a refusal. A dispatch whose model lookup times out falls back to a
+ * warning (see `explainRoute`), but a slow-but-reachable route that got cut off would be
+ * reported as unreachable and refused outright - a wrong answer about a route the host can
+ * actually serve. The extra seconds buy that decision more evidence.
+ */
+export const DISPATCH_CATALOG_TIMEOUT_MS = 8000
+
+/**
+ * Every model this host can currently route to, grouped by provider.
+ *
+ * `timeoutMs` is required rather than defaulted, because the two callers want different
+ * numbers for reasons that are not interchangeable - a page that has to answer while someone
+ * watches, and a dispatch that would rather wait than refuse a route it can reach. A default
+ * would let a new call site silently inherit whichever of the two happened to be written
+ * first, and the choice is the whole point of having two.
+ *
+ * Two registries have to be asked, and asking one is the mistake this is written to
+ * avoid: `llm.listProviders()` is what adapter plugins register, and
+ * `llm.listConfigurableProviders()` is what the settings page declares. DSH's own
+ * documentation says configuration surfaces *merge* the two, so a catalog built from
+ * either alone is missing the other half's providers.
+ *
+ * ## It is async, and that is not a style choice
+ *
+ * `llm.listModels()` is declared `async listModels(provider): Promise<LlmModelInfo[]>`.
+ * An earlier version of this function called it synchronously and caught the result with
+ * `try/catch`, which looked correct and was not: the call **returns a promise**, so a
+ * provider without an adapter (`NO_ADAPTER`) rejects *after* the `try` block has already
+ * finished. Nothing was awaiting it, so the rejection became an unhandled rejection and
+ * took the whole host down - measured on a real instance, the boot log ends with
+ * `dsh: fatal load failure: LlmError: no adapter registered for provider "amazon-bedrock"`.
+ *
+ * So every provider's model list is awaited **inside** its own try/catch. One provider
+ * without an adapter is that provider's answer - it appears with an empty list and a note
+ * saying why - and never the deployment's failure.
+ *
+ * ## Why the wall clock does not grow with the number of providers
+ *
+ * Every provider is asked in parallel and each has its own timeout, so the whole catalog
+ * takes as long as the slowest single provider rather than the sum of them. That bound is
+ * what keeps the client's 15 s request ceiling out of reach on a deployment with many
+ * providers, and a test asserts it against a catalog whose providers all hang.
+ *
+ * Nothing here throws. A provider that is not logged in answers with nothing, a host with
+ * no `llm` at all answers nothing, and both are a deployment's shape rather than a reason
+ * to fail the call that asked what it could choose from.
+ * @param ctx - the host plugin context.
+ * @param timeoutMs - how long one provider's model list may take before its row answers
+ *   empty: {@link CONFIG_CATALOG_TIMEOUT_MS} for a page, {@link DISPATCH_CATALOG_TIMEOUT_MS}
+ *   for a dispatch being validated.
+ * @returns provider groups, in the order the registries gave them, the default route, the
+ *   notes, and whether the registry itself could be read.
+ */
+export async function modelCatalogOf(ctx, timeoutMs = DISPATCH_CATALOG_TIMEOUT_MS) {
   const llm = service(ctx, 'llm')
-  const empty = { providers: [], default: undefined, notes: [] }
-  if (llm === undefined) return { ...empty, notes: ['this deployment serves no llm registry'] }
+  const empty = { providers: [], default: undefined, notes: [], registryRead: 'ok' }
+  // No `llm` at all is the same shape as a registry that failed: nothing was read, and a
+  // reader that treats it as "complete, and this host offers nothing" would refuse every
+  // model on a deployment it simply could not ask.
+  if (llm === undefined) return { ...empty, registryRead: 'failed', notes: ['this deployment serves no llm registry'] }
   const notes = []
   const ids = []
   const seen = new Set()
+  // Whether the provider roster itself was read. Both registries feed it, so if either
+  // failed the roster is partial - which makes "this provider is absent" unreadable: the
+  // provider may well exist on a registry this call never got to see.
+  let registryRead = 'ok'
   const add = (id) => {
     if (typeof id !== 'string' || id === '' || seen.has(id)) return
     seen.add(id)
@@ -193,16 +268,18 @@ export async function modelCatalogOf(ctx) {
   try {
     const registered = llm.listProviders()
     if (Array.isArray(registered)) for (const entry of registered) add(entry?.id)
-    else notes.push('listProviders() did not answer with a list')
+    else { notes.push('listProviders() did not answer with a list'); registryRead = 'failed' }
   } catch (error) {
     notes.push(`listProviders() failed: ${messageOf(error)}`)
+    registryRead = 'failed'
   }
   try {
     const configurable = llm.listConfigurableProviders()
     if (Array.isArray(configurable)) for (const entry of configurable) add(entry?.provider)
-    else notes.push('listConfigurableProviders() did not answer with a list')
+    else { notes.push('listConfigurableProviders() did not answer with a list'); registryRead = 'failed' }
   } catch (error) {
     notes.push(`listConfigurableProviders() failed: ${messageOf(error)}`)
+    registryRead = 'failed'
   }
 
   const providers = await Promise.all(ids.map(async (provider) => {
@@ -213,13 +290,17 @@ export async function modelCatalogOf(ctx) {
       // whose credential check hangs would hold the whole catalog open, and the menu is
       // unusable until it answers. Per provider, so one slow route delays its own row and
       // nothing else.
-      const listed = await withTimeout(llm.listModels(provider), LIST_MODELS_TIMEOUT_MS, provider)
+      const listed = await withTimeout(llm.listModels(provider), timeoutMs, provider)
       if (Array.isArray(listed)) {
         for (const entry of listed) {
           const id = typeof entry === 'string' ? entry : typeof entry?.id === 'string' ? entry.id : ''
           if (id !== '' && !models.includes(id)) models.push(id)
         }
       } else {
+        // Every path that failed to read a provider writes a `${provider}: ` note, and
+        // that note is what `explainRoute` uses to tell "could not read this provider"
+        // from "this provider answered, and it offers nothing". A real empty array is
+        // the latter, so it writes no note and stays a usable (empty) model list.
         notes.push(`${provider}: listModels() did not answer with a list`)
       }
     } catch (error) {
@@ -230,11 +311,8 @@ export async function modelCatalogOf(ctx) {
     // a reader that hides it cannot tell "not logged in" from "not installed".
     return { provider, models }
   }))
-  return { providers, default: defaultRouteOf(ctx), notes }
+  return { providers, default: defaultRouteOf(ctx), notes, registryRead }
 }
-
-/** How long one provider's model list may take before its row is answered empty. */
-const LIST_MODELS_TIMEOUT_MS = 4000
 
 /**
  * A promise, given at most `ms` to settle.
@@ -336,6 +414,115 @@ export function describeRoutes(catalog, limit = 12) {
   }
   const head = routes.slice(0, limit).join(', ')
   return routes.length > limit ? `${head}, … (${routes.length} routes in total)` : head
+}
+
+/** The three answers {@link explainRoute} gives. */
+export const ROUTE_ANSWERS = ['reachable', 'unreachable', 'unknown']
+
+/**
+ * Whether one provider/model pair can be reached, in three answers rather than two.
+ *
+ * A boolean is not enough here, and the difference is what decides whether a dispatch is
+ * refused. `routeInCatalog` answers false for two things that are opposites:
+ *
+ *   - **the provider exists, was read, and does not offer this model** - a typo, or a
+ *     model that was removed. This is a fact, and a dispatch naming it should be refused.
+ *   - **the provider's model list could not be read at all** - no adapter, not logged in,
+ *     or the per-provider timeout fired. Nothing is known, and refusing on it would mean
+ *     a host that cannot answer refuses every model it has never heard of.
+ *
+ * Collapsing the two into one sentence ("this host cannot route to that model") made a
+ * deployment-wide outage and a spelling mistake look identical to the caller.
+ *
+ * What each answer is read from:
+ *
+ *   - `registryRead === 'failed'` - the provider roster itself was never fully read, so
+ *     even "this provider does not exist" is not evidence. Answer `unknown`.
+ *   - the provider is absent from the roster - `unreachable`.
+ *   - the provider is present and lists the model - `reachable`.
+ *   - the provider is present, its model list is empty, and a note names it as having
+ *     failed - `unknown`: the list is empty because the read failed, not because the
+ *     provider offers nothing.
+ *   - the provider is present with a **usable** (non-empty) list that lacks the model -
+ *     `unreachable`: the list was read and this model is genuinely not in it.
+ *
+ * The empty-and-failed case is why a note naming the provider is part of the judgment
+ * rather than decoration: an empty `models` on its own cannot say which of the last two
+ * it is.
+ * @param catalog - the catalog from {@link modelCatalogOf}.
+ * @param provider - the provider id.
+ * @param model - the model id.
+ * @returns `{ answer, reason }`; `reason` says why, and is empty when reachable.
+ */
+export function explainRoute(catalog, provider, model) {
+  if (catalog === null || catalog === undefined) {
+    return { answer: 'unknown', reason: 'the model catalog could not be read at all' }
+  }
+  // A partial roster makes every provider's absence meaningless: the provider may be on
+  // the half that failed. Without this, one registry read failure would turn every model
+  // on the deployment into a refusal.
+  if (catalog.registryRead === 'failed') {
+    return { answer: 'unknown', reason: noteLine(catalog, 'the provider registry could not be read') }
+  }
+  const group = (catalog.providers ?? []).find((entry) => entry.provider === provider)
+  if (group === undefined) {
+    return { answer: 'unreachable', reason: `no provider named ${provider} is served here` }
+  }
+  if (group.models.includes(model)) return { answer: 'reachable', reason: '' }
+  // An empty list on a provider that failed to be read is not a list of zero models.
+  if (group.models.length === 0 && noteFor(catalog, provider) !== undefined) {
+    return { answer: 'unknown', reason: `${provider}'s model list could not be read (${noteFor(catalog, provider)})` }
+  }
+  return { answer: 'unreachable', reason: `${provider} does not offer ${model}` }
+}
+
+/**
+ * The note a catalog carries about one provider, if it carries one.
+ *
+ * Notes come in two shapes and only one of them is about a provider: `${provider}: <why>`
+ * for a per-provider failure, and whole sentences about the catalog as a whole. Matching
+ * is anchored at the start and at the colon, so a provider whose id contains a colon or a
+ * space still matches only its own note.
+ * @param catalog - the catalog from {@link modelCatalogOf}.
+ * @param provider - the provider id.
+ * @returns the note's text after the prefix, or undefined when there is none.
+ */
+function noteFor(catalog, provider) {
+  const prefix = `${provider}: `
+  for (const note of catalog.notes ?? []) {
+    if (typeof note !== 'string' || !note.startsWith(prefix)) continue
+    const why = note.slice(prefix.length).trim()
+    if (why !== '') return why
+  }
+  return undefined
+}
+
+/** Why nothing could be read, with the catalog's own notes appended when it has any. */
+function noteLine(catalog, why) {
+  const notes = (catalog.notes ?? []).filter((note) => typeof note === 'string' && note.trim() !== '')
+  return notes.length === 0 ? why : `${why}: ${notes.join('; ')}`
+}
+
+/**
+ * The sentence to report when a route is not `reachable`, for the answer it was given.
+ *
+ * `unreachable` names the routes the host does offer, because the caller's next move is to
+ * pick one and the spelling is the whole problem. `unknown` says plainly that nothing could
+ * be read and gives the reason, because "unreachable" would be a claim this side cannot
+ * make - and a caller told "unreachable" is entitled to believe the host was asked and
+ * answered.
+ * @param explanation - what {@link explainRoute} answered.
+ * @param catalog - the catalog, for the routes an unreachable answer should list.
+ * @param wanted - the route as the caller spelled it, `provider/model`.
+ * @returns the sentence.
+ */
+export function routeWarningOf(explanation, catalog, wanted) {
+  if (explanation.answer === 'unknown') {
+    return `whether this host can reach ${wanted} could not be determined - the model catalog could not be read `
+      + `(${explanation.reason}), so the session was opened on its inherited model; use wts_session_tool action "model" `
+      + 'to set it once the session is live'
+  }
+  return `this host cannot route to ${wanted} (${explanation.reason}); available routes: ${describeRoutes(catalog)}`
 }
 
 /**

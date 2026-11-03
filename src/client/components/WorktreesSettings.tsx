@@ -120,7 +120,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
   const [error, setError] = useState("")
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("all")
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  // The rows the user has opened. Empty is the page's opening state: every foldable row
+  // starts folded, because these views are lists of repositories and one Workspace with a
+  // dozen under it unfolded would push the other Workspaces off the screen.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   // What each Workspace is, once asked: whether a task space can start there, and
   // how many repositories it would span. Filled when the view is opened.
   //
@@ -408,7 +411,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
   const pendingBadge = (commits: number | undefined) => commits
     ? <span className="dws-status dws-status-pending" title={t("pendingHint")}><span className="dws-status-dot" />{format(t("pending"), { count: String(commits) })}</span>
     : null
-  const toggleRepo = (path: string) => setCollapsed(previous => {
+  const toggleRepo = (path: string) => setExpanded(previous => {
     const next = new Set(previous)
     if (next.has(path)) next.delete(path); else next.add(path)
     return next
@@ -431,7 +434,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
   const taskRepositoryCount = tasks.reduce((count, task) => count + task.repositories.length, 0)
   const shownTaskRepositoryCount = visibleTasks.reduce((count, task) => count + visibleTaskRepositories(task).length, 0)
   // Declared before the fold button below, which reads it: the three views share one
-  // set of collapsed paths, and the Workspace rows are in it now that they expand.
+  // set of opened paths, and the Workspace rows are in it now that they expand.
   const workspaceItems = workspaces.list.getSnapshot().items as Workspace[]
   /**
    * Which Workspace owns each repository (`owner`), and which repositories each one
@@ -497,8 +500,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
    * @returns the repositories under it, in the order the scan returned them.
    */
   const repositoriesUnder = (workspace: Workspace) => owned.under.get(workspace.path) ?? []
-  // One set of collapsed paths drives both views, so the button beside the filters
-  // says what the next click does to all of them.
+  // One set of opened paths drives all three views, so the button beside the filters
+  // says what the next click does to everything on the page.
   const collapsiblePaths = [
     ...visibleRepos.filter(repo => repo.worktrees.length > 0).map(repo => repo.repoPath),
     ...visibleTasks.filter(task => task.repositories.length > 0).map(task => task.path),
@@ -510,8 +513,20 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
       return answer !== undefined && answer !== "checking" && answer !== "failed" && repositoriesUnder(workspace).length > 0
     }).map(workspace => workspace.path),
   ]
-  const everythingCollapsed = collapsiblePaths.length > 0 && collapsiblePaths.every(path => collapsed.has(path))
-  const toggleAll = () => setCollapsed(everythingCollapsed ? new Set() : new Set(collapsiblePaths))
+  // Whether every foldable row is open, which is what the button beside the filters
+  // turns on and off. An empty page has nothing open, so it offers to open everything.
+  const everythingExpanded = collapsiblePaths.length > 0 && collapsiblePaths.every(path => expanded.has(path))
+  const toggleAll = () => setExpanded(everythingExpanded ? new Set() : new Set(collapsiblePaths))
+  /**
+   * Whether a row is unfolded.
+   *
+   * The user's own clicks are the only thing that opens a row, and one exception: while a
+   * search is narrowing the page, the matches inside a row are shown, because a row kept
+   * for a repository that then hides it says the search found something it does not show.
+   * @param path - the row's own path, which is the key of the opened set.
+   * @returns whether the row's contents are on screen.
+   */
+  const isOpen = (path: string) => needle !== "" || expanded.has(path)
   // A search is asked two separate questions - which Workspaces to keep, and which
   // of each one's repositories to list inside it - so both read the one `needle`.
   const visibleWorkspaces = workspaceItems.filter(workspace => {
@@ -641,7 +656,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
     const text = view === "spaces" && value === "attention" ? t("filterWithWorktrees") : t(label)
     return <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{text}</button>
   })
-  const foldButton = <button type="button" className="dws-filter-fold" aria-pressed={everythingCollapsed} onClick={toggleAll}>{everythingCollapsed ? t("expandAll") : t("collapseAll")}</button>
+  const foldButton = <button type="button" className="dws-filter-fold" aria-pressed={everythingExpanded} onClick={toggleAll}>{everythingExpanded ? t("collapseAll") : t("expandAll")}</button>
   const divider = <span className="dws-filter-divider" aria-hidden="true">|</span>
   /** Between two runs rather than inside one, so it gets air on both sides. */
   const separator = <span className="dws-filter-divider dws-filter-separator" aria-hidden="true">|</span>
@@ -726,15 +741,15 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
         // beside the name counts the same list, so it has to be counted the same way.
         const listed = visibleWorktrees(repo)
         const canExpand = listed.length > 0
-        const expanded = canExpand && !collapsed.has(repo.repoPath)
+        const open = canExpand && isOpen(repo.repoPath)
         return <article className="dws-repo" key={repo.repoPath}>
           <header className="dws-repo-header">
-            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(repo.repoPath)} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(repo.repoPath)} aria-expanded={canExpand ? open : undefined} aria-label={`${t("toggleRepository")} ${repoName(repo.repoPath)}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
             <FolderGit size={24} className="dws-repo-icon" />
             <span className="dws-repo-heading"><span className="dws-repo-title"><h3>{repoName(repo.repoPath)}</h3><span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repo.currentBranch ?? t("detached")}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repo.currentBranch ?? t("detached")}</span></span>{listed.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span> : null}</span><span className="dws-repo-path" title={slashPath(repo.repoPath)}>{slashPath(repo.repoPath)}</span></span>
             {onCreate ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={`${t("workspaceCreate")} · ${repoName(repo.repoPath)}`} onClick={() => onCreate({ path: repo.repoPath, title: repoName(repo.repoPath) })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
           </header>
-          {expanded ? <div className="dws-worktree-list">
+          {open ? <div className="dws-worktree-list">
             {listed.map(row => {
               const state = row.checking ? "checking" : row.statusError ? "unavailable" : row.changedFiles ? "dirty" : row.prunable ? "prunable" : "clean"
               return <div className="dws-worktree" key={row.path}>
@@ -753,7 +768,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
         const listed = visibleTaskRepositories(task)
         return <article className="dws-task" key={task.path}>
         <header className="dws-task-header">
-          <button type="button" className="dws-chevron-toggle" disabled={listed.length === 0} onClick={() => toggleRepo(task.path)} aria-expanded={listed.length > 0 ? !collapsed.has(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>{listed.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+          <button type="button" className="dws-chevron-toggle" disabled={listed.length === 0} onClick={() => toggleRepo(task.path)} aria-expanded={listed.length > 0 ? isOpen(task.path) : undefined} aria-label={`${t("toggleTask")} ${task.name}`}>{listed.length > 0 ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
           <FolderClosed size={24} className="dws-task-icon" />
           <span className="dws-task-heading">
             <span className="dws-task-title">
@@ -770,7 +785,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
           <Button className="dws-button-ghost dws-finish-task" disabled={busy} onClick={() => finishClick(task)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
         <DeployCard api={api} path={task.path} />
-        {listed.length === 0 || !collapsed.has(task.path) ? <div className="dws-worktree-list">
+        {listed.length === 0 || isOpen(task.path) ? <div className="dws-worktree-list">
           {listed.map(repository => {
             const state = taskRepoStatus(repository)
             return <div className="dws-worktree" key={repository.path}>
@@ -821,7 +836,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
         // to show, so it stays closed - "cannot check" is already on its badge, and an
         // expandable row would promise a list that cannot be produced.
         const canExpand = spanned.length > 0
-        const expanded = canExpand && !collapsed.has(workspace.path)
+        const open = canExpand && isOpen(workspace.path)
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
             {/* A Workspace is a folder like a task is, and it wears the same closed one:
@@ -830,7 +845,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                 takes the chevron and the toggle the other two views' rows already use.
                 A Workspace holding nothing keeps the placeholder rather than a chevron
                 that would open onto an empty list. */}
-            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(workspace.path)} aria-expanded={canExpand ? expanded : undefined} aria-label={`${t("toggleWorkspace")} ${workspace.title}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
+            <button type="button" className="dws-chevron-toggle" disabled={!canExpand} onClick={() => toggleRepo(workspace.path)} aria-expanded={canExpand ? open : undefined} aria-label={`${t("toggleWorkspace")} ${workspace.title}`}>{canExpand ? <ChevronRight size={14} className="dws-chevron" /> : <span className="dws-chevron-placeholder" />}</button>
             <FolderClosed size={24} className="dws-repo-icon" />
             <span className="dws-repo-heading">
               <span className="dws-repo-title">
@@ -850,7 +865,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
               inside something". The icon is the repository view's own rather than the
               worktree's: these are repositories, and a repository shown here that wore
               a worktree's icon would be the one row in the panel wearing the wrong one. */}
-          {expanded ? <div className="dws-worktree-list">
+          {open ? <div className="dws-worktree-list">
             {spanned.map(repository => <div className="dws-worktree" key={repository.repoPath}>
               <FolderGit size={18} className="dws-tree-icon" aria-hidden="true" />
               <div className="dws-worktree-info">

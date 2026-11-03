@@ -95,7 +95,8 @@ export function sourceTaskIndexPath(sourceRoot, project, task) {
  * this reads. `taskPath` is added because the file sits under a different root than the
  * task space does, and a reader that cannot reach the space cannot act on the entry.
  *
- * `sessions` arrives **already normalized** - `{ sessionId, at?, role }` entries - and
+ * `sessions` arrives **already normalized** - `{ sessionId, at?, role }` entries, plus
+ * the optional `reportedAt`, `model` and `modelSource` a recorder may have written - and
  * is not re-parsed here: the recorder has `normalizeSessions` in hand, and a second
  * parser for one field shape is the drift this repository has been bitten by before.
  * @param taskPath - the task space's absolute path.
@@ -137,6 +138,11 @@ function indexOf(taskPath, metadata, sessions, previous) {
       // one that matters most - the archived copy is all a reader has once the task space
       // is gone, and its absence reads as "this session never reported".
       ...(entry.reportedAt === undefined ? {} : { reportedAt: entry.reportedAt }),
+      // Which model ran the task, and which level chose it. Same reason: the archived
+      // index is the only copy left after a finish, and "which model ran this" is asked
+      // afterwards. Absent rather than empty when the record never named one.
+      ...(entry.model === undefined ? {} : { model: entry.model }),
+      ...(entry.modelSource === undefined ? {} : { modelSource: entry.modelSource }),
     })),
     createdAt: created,
     updatedAt: localStamp(),

@@ -1,15 +1,15 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { AlertCircle, CircleQuestionMark, GitPullRequest, Loader2 } from "./icons"
 import { HoverHint } from "./HoverHint"
+import { BaseRefPicker } from "./BaseRefPicker"
+import { BranchPicker } from "./BranchPicker"
 import { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
 import { errorText } from "../lib/error-text"
 import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
-import type { TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
+import type { RepositoryBranchMap, TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
-
-type BaseMode = "head" | "named"
 
 /**
  * The one delivery decision a create makes: whether the task expects a deployment.
@@ -105,8 +105,23 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const [branchPrefix, setBranchPrefix] = useState("")
   const [tasksRoot, setTasksRoot] = useState("")
   const [selected, setSelected] = useState<string[]>([])
-  const [baseMode, setBaseMode] = useState<BaseMode>("head")
-  const [namedBase, setNamedBase] = useState("")
+  // The one branch every selected repository carries, chosen from the dialog's
+  // own field; empty means "each repository starts from its own HEAD", which is
+  // what an untouched dialog does.
+  const [uniformBase, setUniformBase] = useState("")
+  // The batch of branch lists the per-repository pickers read from, started when
+  // the dialog opens rather than when a picker is clicked. `undefined` is the
+  // "not asked yet" state and is deliberately different from an empty answer:
+  // a picker showing an empty list is read as "this repository has no branches".
+  const [branches, setBranches] = useState<RepositoryBranchMap | undefined>(undefined)
+  const [branchesLoading, setBranchesLoading] = useState(false)
+  const [branchesError, setBranchesError] = useState("")
+  const [branchesAttempt, setBranchesAttempt] = useState(0)
+  // Per-repository overrides, keyed by the repository's basename: that is what
+  // the tool-side `baseRefs` takes. Only a repository the user actually changed
+  // gets an entry, so an untouched one falls through to the dialog's own global
+  // default and then to its HEAD.
+  const [baseRefs, setBaseRefs] = useState<Record<string, string>>({})
   const [delivery, setDelivery] = useState<DeliveryChoice>(DEFAULT_DELIVERY)
   // The one deployment parameter this dialog does set: which file under the workspace's
   // `.worktree-space/deploy/` this task runs as its entry. It keeps its own name and the
@@ -123,8 +138,8 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
 
   useEffect(() => {
     setTaskName("")
-    setBaseMode("head")
-    setNamedBase("")
+    setUniformBase("")
+    setBaseRefs({})
     setRecovery(null)
     setSaveAsDefault(false)
     setSaveRootAsDefault(false)
@@ -175,6 +190,33 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     })
     return () => { alive = false }
   }, [api, target.path, loadAttempt])
+
+  // The per-repository start points, read as soon as the repositories are known
+  // rather than when a picker is first opened: a click that has to wait for a
+  // round trip opens a panel with nothing in it, and that emptiness reads as
+  // "this repository has no branches". The whole selection goes in one request,
+  // so N repositories cost one round trip rather than N.
+  //
+  // The error is kept beside the list rather than in the dialog's own error: it
+  // is about one field's reading, and it carries its own retry.
+  useEffect(() => {
+    if (suggestion === null) return undefined
+    const paths = suggestion.repositories.map((repository) => repository.path)
+    if (paths.length === 0) return undefined
+    let alive = true
+    setBranchesLoading(true)
+    setBranchesError("")
+    api.branches(paths).then((answer) => {
+      if (alive) setBranches(answer ?? {})
+    }).catch((reason) => {
+      // The list stays as it was: a failed refresh must not empty a picker that
+      // already had branches in it, and `branchesError` is what says so instead.
+      if (alive) setBranchesError(errorText(t, reason))
+    }).finally(() => {
+      if (alive) setBranchesLoading(false)
+    })
+    return () => { alive = false }
+  }, [api, suggestion, branchesAttempt])
 
   const repositories = suggestion?.repositories ?? []
   const suggestedPrefix = suggestion?.branchPrefix ?? FALLBACK_BRANCH_PREFIX
@@ -240,7 +282,49 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
   const prefixNoteClass = prefixProblem !== "" ? "dws-field-note dws-field-note-warning" : "dws-field-note"
   const sourceReady = suggestion !== null && repositories.length > 0
   const fieldsDisabled = busy || loading || !sourceReady || !!recovery
-  const baseRef = baseMode === "named" ? namedBase.trim() : ""
+  // The one start point every selected repository carries. A branch offered here
+  // has to exist in ALL of them, because a create passes one ref to every
+  // worktree: choosing a branch one repository lacks fails the whole call with
+  // E3002 rather than starting that repository somewhere else. So the list is the
+  // intersection, recomputed as the selection changes, and a choice that stops
+  // being common is dropped instead of being sent.
+  const commonBranches = (() => {
+    const chosen = repositories.filter((repository) => selected.includes(repository.path))
+    if (chosen.length === 0) return [] as string[]
+    let shared: string[] | undefined
+    for (const repository of chosen) {
+      // A repository whose list has not arrived yet contributes nothing: an
+      // intersection built from half the answers would offer a branch the rest
+      // may not have, which is the failure this list exists to prevent.
+      const entry = branches?.[repository.path]
+      if (entry === undefined) return [] as string[]
+      const names = new Set(entry.branches)
+      shared = shared === undefined ? [...names] : shared.filter((branch) => names.has(branch))
+      if (shared.length === 0) return [] as string[]
+    }
+    return (shared ?? []).sort((left, right) => left.localeCompare(right))
+  })()
+  // A uniform choice survives only while every selected repository still carries
+  // it. Losing one repository to an untick can take the branch out of the
+  // intersection, and sending it anyway is the E3002 this whole field avoids.
+  const uniformRef = uniformBase !== "" && commonBranches.includes(uniformBase) ? uniformBase : ""
+  // The global field keeps its old meaning: the default for every repository the
+  // user did not override below, corresponding to `baseRef`. The per-repository
+  // map is sent only for the ones that were actually changed.
+  const baseRef = uniformRef
+  // Only the overrides of repositories actually in the task are sent. A branch
+  // chosen and then unticked is kept on screen (decision 6) but is not a start
+  // point for a repository that will not have a worktree.
+  const sentBaseRefs = () => {
+    const sent: Record<string, string> = {}
+    for (const repository of repositories) {
+      if (!selected.includes(repository.path)) continue
+      const value = baseRefs[repository.name]
+      if (value !== undefined) sent[repository.name] = value
+    }
+    return Object.keys(sent).length === 0 ? undefined : sent
+  }
+  const effectiveBaseRefs = sentBaseRefs()
   // Whether this task deploys anywhere at all. It decides one thing in this dialog:
   // whether the deploy-script field is offered, because naming a script for a task
   // that deploys nowhere would say nothing. Every other delivery decision moved to
@@ -371,6 +455,13 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         tasksRoot: tasksRoot.trim(),
         repos: selected,
         baseRef: baseRef === "" ? undefined : baseRef,
+        // Per-repository overrides, and only the ones the user actually set: an
+        // untouched repository is deliberately absent, so it falls back to
+        // `baseRef` and then to its own HEAD rather than being pinned to a value
+        // the dialog merely displayed. A repository that has since been dropped
+        // from the selection carries no entry either - the value is kept while
+        // the box is cleared, but it is not sent for a repository not in the task.
+        ...(effectiveBaseRefs === undefined ? {} : { baseRefs: sentBaseRefs() }),
         branchPrefix: effectivePrefix,
         // The one delivery decision, sent flat rather than as a policy blob: the
         // Host reads it as the deployment target and records it. A target of `none`
@@ -488,33 +579,61 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         {/* Keyed and identified by position, not by name: with repositories coming from
             more than one level, two of them can share a basename, and a path is not
             something to put in an element id. The label still reads the name. */}
-        {repositories.map((repository, index) => <label key={repository.path} className="dws-check-option" htmlFor={`${id}-repo-${index}`}>
+        {/* A card, not a label. The card used to be one, so a click anywhere on
+            it toggled the tick - and that is what made the branch button below
+            unusable: a label forwards a click on any of its controls to the
+            input, so pressing it also ticked the repository. The text is still
+            its own target, through the label it keeps, and the button beside it
+            is one of its own. */}
+        {repositories.map((repository, index) => {
+          const chosen = baseRefs[repository.name]
+          // What the card says the repository starts from: the override when
+          // there is one, otherwise the branch it has checked out. An override
+          // that names the same branch reads as the current one, because it is.
+          const shown = chosen ?? repository.branch
+          return <div key={repository.path} className="dws-check-option">
           <input id={`${id}-repo-${index}`} className="dws-checkbox" type="checkbox" checked={selected.includes(repository.path)} onChange={(event) => toggleRepository(repository.path, event.target.checked)} />
           {/* The same name-then-branch line the repository view renders, so a
               repository reads the same wherever this plugin lists it. */}
-          <span className="dws-check-copy">
+          <label className="dws-check-copy" htmlFor={`${id}-repo-${index}`}>
             <span className="dws-check-name">
               <span className="dws-check-label">{repository.name}</span>
-              {repository.branch === undefined ? null : <span className="dws-branch-label" title={`${t("currentBranchLabel")}: ${repository.branch}`}><GitPullRequest size={12} /><span className="dws-branch-value">{repository.branch}</span></span>}
+              {shown === undefined ? null : <span className="dws-branch-label" title={`${t(chosen === undefined ? "currentBranchLabel" : "baseRefChosen")}: ${shown}`}><GitPullRequest size={12} /><span className="dws-branch-value">{shown}</span></span>}
+              {chosen === undefined ? null : <span className="dws-visually-hidden">{format(t("baseRefValue"), { branch: chosen })}</span>}
             </span>
             <span className="dws-check-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</span>
-          </span>
-        </label>)}
+          </label>
+          {/* Outside the label on purpose: a button inside one is a click that
+              toggles the tick as well. */}
+          <BranchPicker
+            repository={repository.name}
+            entry={branches?.[repository.path]}
+            // Reading until the batch answers. A repository with no entry and no
+            // error is one whose read has not come back, which is a waiting state
+            // and not "this repository has no branches".
+            loading={branchesLoading || (branches === undefined && branchesError === "")}
+            error={branchesError}
+            chosen={chosen}
+            current={repository.branch}
+            onChoose={(branch) => setBaseRefs((current) => {
+              // A cleared override is removed rather than recorded as empty:
+              // the map is "these repositories were overridden", and an entry
+              // saying "no override" is the same as no entry.
+              const next = { ...current }
+              if (branch === undefined) delete next[repository.name]
+              else next[repository.name] = branch
+              return next
+            })}
+            onRetry={() => setBranchesAttempt((attempt) => attempt + 1)}
+          />
+        </div>})}
       </div>
-      {/* The rule comes back only when it has something to say: with nothing chosen, the
-          sentence saying so sits where the actions would, so the field never grows a
-          second empty line. */}
-      <div className="dws-repo-picker-foot">
-        {selected.length === 0 ? <p id={`${id}-repositories-note`} className="dws-field-note">{t("repositoriesHint")}</p> : null}
-        <div className="dws-repo-actions">
-          <span className="dws-check-count" aria-live="polite">{format(t("repositoriesCountLabel"), { count: String(selected.length), total: String(repositories.length) })}</span>
-          <span className="dws-picker-tools">
-            <button type="button" className="dws-link-button" onClick={() => setAllRepositories(true)}>{t("selectAll")}</button>
-            <span className="dws-picker-divider" aria-hidden="true" />
-            <button type="button" className="dws-link-button" onClick={() => setAllRepositories(false)}>{t("selectNone")}</button>
-          </span>
-        </div>
-      </div>
+      {/* The rule comes back only when it has something to say. The count and the bulk
+          actions are not here any more: they close the field on the band the next field's
+          name sits on, so the list's own answer and that name share one line. */}
+      {selected.length === 0 ? <div className="dws-repo-picker-foot">
+        <p id={`${id}-repositories-note`} className="dws-field-note">{t("repositoriesHint")}</p>
+      </div> : null}
     </div>
   </fieldset>
 
@@ -633,19 +752,53 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     </div>
   </fieldset>
 
-  const base = <fieldset className="dws-field dws-base-fieldset" disabled={fieldsDisabled}>
-    <legend className="dws-field-legend"><span className="dws-field-label">{t("basedOn")}</span></legend>
-    <div className="dws-radio-group" role="radiogroup" aria-label={t("basedOn")}>
-      {(["head", "named"] as const).map((mode) => <label key={mode} htmlFor={`${id}-${mode}`} className="dws-radio-option" data-selected={baseMode === mode ? "true" : undefined}>
-        <input id={`${id}-${mode}`} className="dws-radio-input" type="radio" name={`${id}-base`} value={mode} checked={baseMode === mode} onChange={() => setBaseMode(mode)} />
-        <span className="dws-radio-copy"><span className="dws-radio-label">{t(mode === "head" ? "baseHead" : "baseNamed")}</span></span>
-      </label>)}
+  const base = <div className="dws-field dws-base-fieldset">
+    {/* The band that closes the repository list: the list's count and bulk actions on the
+        right, this field's name on the left. One line, because the field answers the
+        question the list just asked - where every repository starts - and a name on a row
+        of its own above a control standing right under the cards was one row too many. */}
+    <div className="dws-base-heading">
+      <span id={`${id}-base-label`} className="dws-field-label">{t("basedOn")}</span>
+      {/* The whole rule set behind the `?`, because the field answers one question at
+          two levels and the one sentence under the control can only carry the part a
+          reader needs before choosing. */}
+      <HoverHint label={t("baseRefRules")} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
+      <div className="dws-repo-actions">
+        <span className="dws-check-count" aria-live="polite">{format(t("repositoriesCountLabel"), { count: String(selected.length), total: String(repositories.length) })}</span>
+        <span className="dws-picker-tools">
+          <button type="button" className="dws-link-button" disabled={fieldsDisabled} onClick={() => setAllRepositories(true)}>{t("selectAll")}</button>
+          <span className="dws-picker-divider" aria-hidden="true" />
+          <button type="button" className="dws-link-button" disabled={fieldsDisabled} onClick={() => setAllRepositories(false)}>{t("selectNone")}</button>
+        </span>
+      </div>
     </div>
-    {baseMode === "named" ? <>
-      <Input className="dws-base-ref" value={namedBase} disabled={fieldsDisabled} onChange={(event) => setNamedBase(event.target.value)} placeholder={t("baseRefPlaceholder")} autoComplete="off" spellCheck={false} aria-label={t("baseNamed")} aria-describedby={`${id}-base-note`} />
-      <p id={`${id}-base-note`} className="dws-form-note">{t("baseRefHint")}</p>
-    </> : null}
-  </fieldset>
+    {/* The list holds the branches EVERY selected repository carries, because one
+        shared ref is what `baseRef` sends. A branch only some of them have would
+        fail the create at E3002, so the common set is the honest menu: a branch
+        that is not here cannot be used by every repository anyway. */}
+    <div className="dws-base-control" role="group" aria-labelledby={`${id}-base-label`}>
+      <BaseRefPicker
+        id={`${id}-uniform-base`}
+        value={uniformRef}
+        branches={commonBranches}
+        loading={branches === undefined || branchesLoading}
+        error={branchesError}
+        disabled={fieldsDisabled}
+        describedBy={`${id}-base-rules`}
+        onChoose={setUniformBase}
+        onRetry={() => setBranchesAttempt((attempt) => attempt + 1)}
+      />
+      {/* Said here, beside the field, because the two controls answer one question at
+          two levels: a card's own picker overrides this value for that repository, and
+          this value covers every repository the cards left alone. Without the sentence
+          the field reads as "the" start point, and a reader who has already switched one
+          card wonders why changing this one did not move it. */}
+      <p className="dws-form-note">{t("baseRefUniformHint")}</p>
+      {/* The hint's text, for a reader who cannot hover: same rules, in the field's own
+          description rather than in a bubble. */}
+      <span id={`${id}-base-rules`} className="dws-visually-hidden">{t("baseRefRules")}</span>
+    </div>
+  </div>
 
   const preview = <dl className="dws-preview" aria-live="polite" aria-atomic="true">
     <div className="dws-preview-row"><dt className="dws-preview-label">{t("branch")}</dt><dd className="dws-preview-value">{recovery?.branch ?? (taskBranch || "—")}</dd></div>
@@ -671,8 +824,8 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
               <p>{t("notSourceRoot")}</p>
               <Button type="button" className="dws-button-ghost" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{t("retry")}</Button>
             </div> : <div className="dws-form-fields">
-              {details}
               {base}
+              {details}
               {preview}
             </div>}
           </div>

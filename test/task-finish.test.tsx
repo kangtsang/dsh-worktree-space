@@ -53,7 +53,7 @@ function finishResult(overrides: Partial<FinishTaskResult> = {}): FinishTaskResu
   }
 }
 
-function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", handoffEntry = "show", fullAccess, config, widen, plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; handoffEntry?: string; fullAccess?: string; config?: any; widen?: () => Promise<unknown>; plan?: (built: any) => any } = {}) {
+function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, strays = [], items = [] as any[], archiveDirectory = "", archiveStrategy = "container", fullAccess, config, widen, plan }: { repos?: WorktreeList[]; result?: FinishTaskResult; changedFiles?: number | ((path: string) => number); strays?: { name: string; directory: boolean; documents: number; kind: "build" | "editor" | "content" }[]; items?: any[]; archiveDirectory?: string; archiveStrategy?: string; fullAccess?: string; config?: any; widen?: () => Promise<unknown>; plan?: (built: any) => any } = {}) {
   const statusFor = typeof changedFiles === "function" ? changedFiles : () => changedFiles
   const api = {
     scan: vi.fn().mockResolvedValue(scanAnswer(repos)),
@@ -62,14 +62,11 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     // page's classification is left unanswered rather than given a guess.
     classifyRoots: vi.fn(() => new Promise(() => {})),
     // What the Host has configured: the archive reads the shipped strategy unless a test
-    // asks for another one, its directory is empty unless a test sets one, and the agent
-    // entries are offered unless a test hides them, which is what a case about the
-    // standard flow does.
+    // asks for another one, and its directory is empty unless a test sets one.
     preferences: vi.fn().mockResolvedValue({
       defaultBranchPrefix: "task/",
       archiveDocumentsStrategy: archiveStrategy,
       archiveDocumentsDirectory: archiveDirectory,
-      handoffEntry,
       // Left out entirely unless a case asks for it, the way a Host that predates the
       // setting answers: the dialog has to read that as off.
       ...(fullAccess === undefined ? {} : { handoffFullAccess: fullAccess }),
@@ -184,6 +181,8 @@ describe("task view", () => {
 
     await user.click(screen.getByRole("button", { name: t("viewTasks") }))
     expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
+    // The task's repositories are inside its row, and every foldable row opens folded.
+    await user.click(screen.getByRole("button", { name: `${t("toggleTask")} antest` }))
     // The panel shows every path with forward slashes, whichever separator the host reported.
     expect(screen.getByText(container.replace(/\\/g, "/"))).toBeTruthy()
     expect(screen.getByText(branch)).toBeTruthy()
@@ -195,7 +194,7 @@ describe("task view", () => {
     const viewSwitch = screen.getByRole("group", { name: t("viewSwitch") })
     expect([...viewSwitch.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("viewWorkspaces"), t("viewRepositories"), t("viewTasks")])
     const foldRun = screen.getByRole("group", { name: t("filters") })
-    expect([...foldRun.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
+    expect([...foldRun.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("expandAll")])
     // The hand-made `spike` worktree shares no container with a matching branch.
     expect(taskArticles()).toHaveLength(1)
     expect(document.querySelector(".dws-summary")?.textContent).toContain(t("taskCount"))
@@ -222,7 +221,7 @@ describe("task view", () => {
     const filters = screen.getByRole("group", { name: t("filters") })
     // Every task holds worktrees, so that filter has nothing to say here; the fold
     // button shares the run, as it does in the panel.
-    expect([...filters.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
+    expect([...filters.querySelectorAll("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("expandAll")])
     expect(screen.getByRole("heading", { name: "antest" })).toBeTruthy()
     expect(screen.getByRole("heading", { name: "dirty" })).toBeTruthy()
 
@@ -438,11 +437,10 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(2))
   })
 
-  it("keeps the conflict on screen without the entries a Host does not offer", async () => {
+  it("keeps the conflict on screen, and offers to hand it to an agent", async () => {
     const user = userEvent.setup()
     const site = `${container}\\kratos-vue-admin`
     const next = setup({
-      handoffEntry: "hide",
       result: finishResult({
         failed: true,
         repositories: [
@@ -458,21 +456,20 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
 
     // What the finish stopped on is still the panel's subject: why the conflict is there,
-    // and the press that carries the finish on once it is committed by hand. The setting
-    // governs the offer to put an agent on it, not the situation itself.
+    // and the entry that puts an agent on it - part of the finish now rather than a
+    // setting a profile may hide.
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
     expect(screen.getByText(t("finishHandoffExplain"))).toBeTruthy()
     expect(screen.getByText(t("finishHandoffHint"))).toBeTruthy()
-    // Both entries are gone, and nothing opened a session on its own.
-    await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull())
+    // Offered, and nothing opened a session on its own.
+    expect(screen.getByRole("button", { name: t("finishAuthorizeConflict") })).toBeTruthy()
     expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull()
     expect(next.sessions.create).not.toHaveBeenCalled()
   })
 
-  it("says how to commit work nobody committed when the agent entry is hidden", async () => {
+  it("offers to hand uncommitted work to an agent, and keeps confirming out of reach until it is committed", async () => {
     const user = userEvent.setup()
     const next = setup({
-      handoffEntry: "hide",
       changedFiles: 1,
       result: finishResult({
         failed: true,
@@ -486,20 +483,20 @@ describe("finishing a task", () => {
     await user.click(screen.getByRole("button", { name: t("finishTask") }))
     await waitFor(() => expect(screen.getByText(t("finishCommitTitle"))).toBeTruthy())
 
-    // The finish stops on that work either way, so the line under the title says what is
-    // left to do about it - the standard flow's own sentence rather than the escalation
-    // an agent's commit needs - and confirming stays out of reach until it is done.
-    expect(screen.getByText(t("finishCommitManual"))).toBeTruthy()
-    expect(screen.queryByText(t("finishCommitEscalation"))).toBeNull()
-    await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeCommit") })).toBeNull())
+    // The finish stops on that work, so the line under the title says what the commit
+    // needs - the escalation an agent's commit asks for, since full access is off - the
+    // entry that hands it over is offered, and confirming stays out of reach until it is
+    // done.
+    expect(screen.getByText(t("finishCommitEscalation"))).toBeTruthy()
+    expect(screen.getByRole("button", { name: t("finishAuthorizeCommit") })).toBeTruthy()
     expect((screen.getByRole("button", { name: t("finishConfirmAction") }) as HTMLButtonElement).disabled).toBe(true)
     expect(next.sessions.create).not.toHaveBeenCalled()
   })
 
-  it("keeps a session it already opened on screen when the entries are hidden", async () => {
-    // The setting governs the offer, not the work: a repository handed to an agent stays
-    // that agent's until its merge is committed, so the way back to that conversation
-    // cannot disappear because a profile changed its mind about the entries.
+  it("keeps a session it already opened on screen", async () => {
+    // A session that is already on the work is the state of that work rather than an
+    // offer: a repository handed to an agent stays that agent's until its merge is
+    // committed, so the way back to that conversation stays on screen too.
     const site = `${container}\\kratos-vue-admin`
     saveFinishScene(container, {
       result: finishResult({
@@ -513,18 +510,17 @@ describe("finishing a task", () => {
       }),
       handoff: [{ name: "kratos-vue-admin", site, boundary: site, wide: false, kind: "conflict", sessionId: "session-1" as FinishSceneSession["sessionId"] }],
     })
-    setup({ handoffEntry: "hide" })
+    setup()
     // A task with a report left behind reopens its dialog with the page, so the panel is
     // what to wait for rather than the page's own controls: the report is on screen from
     // the start here.
     await waitFor(() => expect(screen.getByText(t("finishHandoffTitle"))).toBeTruthy())
 
-    // The session that is already on the work stays reported, with the way back to it:
-    // hiding the entries cannot strand a conversation the panel itself opened.
+    // The session that is already on the work stays reported, with the way back to it.
     expect(document.querySelector(".dws-finish-handoff-sessions li")?.textContent).toBe(`kratos-vue-admin${site.replace(/\\/g, "/")}`)
     expect(screen.getByRole("button", { name: t("finishHandoffOpen") })).toBeTruthy()
     expect(screen.getByText(format(t("finishHandoffAuthorized"), { count: "1", job: t("finishHandoffJobConflict") }))).toBeTruthy()
-    // What the switch governs is the entries themselves.
+    // The repository already on a session is not offered a second one.
     await waitFor(() => expect(screen.queryByRole("button", { name: t("finishAuthorizeConflict") })).toBeNull())
   })
 
@@ -961,7 +957,7 @@ describe("finishing a task", () => {
     await waitFor(() => expect(screen.getByText(format(t("planCommits"), { count: "2" }))).toBeTruthy())
     // The space is named by its directory, and each row carries its own target.
     expect(screen.getByText(t("taskDirectoryLabel")).parentElement?.textContent).toContain(container.replace(/\\/g, "/"))
-    expect([...document.querySelectorAll(".dws-plan-target")].map((select) => (select as HTMLSelectElement).value)).toEqual(["main", "develop"])
+    expect([...document.querySelectorAll(".dws-plan-target")].map((node) => node.textContent)).toEqual(["main", "develop"])
     expect(document.querySelector(".dws-remove-target")).toBeNull()
   })
 
@@ -1008,11 +1004,19 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.api.planTask).toHaveBeenCalledTimes(1))
 
     // Each repository offers the branch it is on first, then the alternatives the
-    // Host listed — the task branch itself is never among them.
-    const picker = screen.getByRole("combobox", { name: `${t("planTargetLabel")} · kratos-vue-admin` })
-    expect([...picker.querySelectorAll("option")].map((choice) => choice.textContent)).toEqual(["main", "develop"])
-
-    await user.selectOptions(picker, "develop")
+    // Host listed — the task branch itself is never among them. The list carries a
+    // search box, so a repository with dozens of branches can still be aimed at one.
+    const picker = screen.getByRole("button", { name: `${t("planTargetLabel")} · kratos-vue-admin` })
+    await user.click(picker)
+    const search = screen.getByRole("textbox", { name: t("baseRefPickerSearch") })
+    // The panel is rendered inside the dialog, so the dialog's focus scope leaves the
+    // search box alone; portalled to the body it could never keep focus, and the filter
+    // could not be typed into.
+    expect(document.activeElement).toBe(search)
+    expect([...document.querySelectorAll(".dws-branch-picker .dws-branch-options button")].map((node) => node.textContent)).toEqual(["main", "develop"])
+    fireEvent.change(search, { target: { value: "dev" } })
+    expect([...document.querySelectorAll(".dws-branch-picker .dws-branch-options button")].map((node) => node.textContent)).toEqual(["develop"])
+    await user.click(screen.getByRole("button", { name: "develop" }))
     await waitFor(() => expect(next.api.planTask).toHaveBeenCalledWith(expect.objectContaining({ targets: { "kratos-vue-admin": "develop" } })))
     // The preview follows the choice: the commits that branch would bring, and the
     // note that it is not the branch the source repository is on.
@@ -1027,7 +1031,7 @@ describe("finishing a task", () => {
     expect(next.api.doneTask).toHaveBeenCalledWith(expect.objectContaining({ merge: true, targets: { "kratos-vue-admin": "develop" } }))
     // The plan stays on screen as the record of what was done, so its choice is
     // read-only rather than pointing at a task space that no longer exists.
-    await waitFor(() => expect(screen.getByRole("combobox", { name: `${t("planTargetLabel")} · kratos-vue-admin` })).toHaveProperty("disabled", true))
+    await waitFor(() => expect(screen.getByRole("button", { name: `${t("planTargetLabel")} · kratos-vue-admin` })).toHaveProperty("disabled", true))
   })
 
   it("lists the user's own leftovers before the choice, and only summarises build noise", async () => {
@@ -1269,6 +1273,14 @@ describe("finishing a task", () => {
     expect(rows[0].querySelector(".dws-plan-source")?.textContent).toContain(t("planSourceRepository"))
     expect(rows[2].querySelector(".dws-plan-source")).toBeNull()
     expect(document.querySelectorAll(".dws-plan-source code")).toHaveLength(2)
+    // How far ahead the merge is sits on the same line as the checkout it comes from:
+    // the path first, the counts beside it, rather than a count on a line of its own.
+    const first = rows[0].textContent ?? ""
+    expect(first.indexOf(t("planSourceRepository"))).toBeLessThan(first.indexOf(format(t("planCommits"), { count: "1" })))
+    const sourceRow = rows[0].querySelector(".dws-plan-source-row")!
+    expect(sourceRow.querySelector(".dws-plan-source")).not.toBeNull()
+    expect(sourceRow.textContent).toContain(format(t("planCommits"), { count: "1" }))
+    expect(sourceRow.textContent).toContain(t("clean"))
   })
 
   it("turns red when abandoning a branch that still has commits", async () => {

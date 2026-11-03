@@ -36,9 +36,17 @@ const created = {
   ],
 }
 
+/** What `task.branches` answers for the two repositories the fixture holds. */
+const branchLists = () => ({
+  "/repo/alpha": { branches: ["main", "develop", "release/2.0"], truncated: 0 },
+  "/repo/beta": { branches: ["main", "hotfix"], truncated: 0 },
+})
+
 function setup(config?: any) {
   const api = {
     suggestRoot: vi.fn().mockResolvedValue(suggestion),
+    // Read as soon as the dialog opens, so every case needs the batch to answer.
+    branches: vi.fn().mockImplementation(() => Promise.resolve(branchLists())),
     createTask: vi.fn().mockResolvedValue(created),
     doneTask: vi.fn().mockResolvedValue({ task: "fix-login", path: created.path, repositories: [], containerRemoved: true, failed: false, warnings: [] }),
   }
@@ -122,8 +130,12 @@ describe("native task create flow", () => {
     // It reads "selected / total", so the total comes from what the dialog offered.
     expect(count()).toBe(format(t("repositoriesCountLabel"), { count: "2", total: String(offered().length) }))
     expect(offered().filter((box) => box.checked)).toHaveLength(2)
-    expect([...repoGroup().querySelectorAll("button")].map((button) => button.textContent))
+    // The bulk actions are the field's own; each card also has a branch button of
+    // its own, which is not one of them. They sit on the band under the cards, beside
+    // the name of the field that follows.
+    expect([...document.querySelectorAll(".dws-repo-actions button")].map((button) => button.textContent))
       .toEqual([t("selectAll"), t("selectNone")])
+    expect(repoGroup().querySelectorAll(".dws-check-option .dws-branch-button")).toHaveLength(2)
 
     // The preview shows what will be created and nothing that the form above
     // already says: the branch and the directory share its one line.
@@ -291,20 +303,33 @@ describe("native task create flow", () => {
     expect(next.onClose).toHaveBeenCalledTimes(1)
   })
 
-  it("retains accessible radios and uses the named ref the user typed", async () => {
+  it("starts every repository from its own HEAD until a shared branch is chosen", async () => {
     const next = setup()
     next.mount()
     await ready()
-    const head = screen.getByRole("radio", { name: new RegExp(t("baseHead")) })
-    const named = screen.getByRole("radio", { name: new RegExp(t("baseNamed")) })
-    expect(head).toHaveProperty("checked", true)
-    expect(head.getAttribute("name")).toBe(named.getAttribute("name"))
-    expect(head.id).not.toBe(named.id)
-    fireEvent.click(named)
-    fireEvent.change(screen.getByPlaceholderText(t("baseRefPlaceholder")), { target: { value: "origin/main" } })
+    await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+    // No shared branch chosen: the create names no baseRef at all, which is what
+    // "each repository starts from its own HEAD" means on the wire.
     fireEvent.change(nameField(), { target: { value: "Fix login" } })
     fireEvent.submit(form())
-    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ baseRef: "origin/main" })))
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ baseRef: undefined })))
+  })
+
+  it("offers only the branches every selected repository carries, and sends the chosen one", async () => {
+    // alpha carries main/develop/release/2.0 and beta carries main/hotfix, so the
+    // shared set is just main. A branch only one of them carries cannot be sent as
+    // `baseRef`: a create passes one ref to every worktree it cuts.
+    const next = setup()
+    next.mount()
+    await ready()
+    await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(t("baseRefEachOwnHead")) }))
+    const options = [...document.querySelectorAll(".dws-branch-picker .dws-branch-options button")].map((node) => node.textContent)
+    expect(options).toEqual(["main"])
+    fireEvent.click(screen.getByRole("button", { name: "main" }))
+    fireEvent.change(nameField(), { target: { value: "Fix login" } })
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ baseRef: "main" })))
   })
 
   it("starts the branch on the host's prefix and sends the prefix the user chose", async () => {
@@ -362,6 +387,244 @@ describe("native task create flow", () => {
     detached.mount()
     await ready()
     expect(document.querySelectorAll(".dws-check-option .dws-branch-label")).toHaveLength(0)
+  })
+
+  // The picker is per repository, so the branch button belongs to the card
+  // rather than to the field's bulk actions. A card that is still a label would
+  // forward a click on that button to the checkbox and tick the repository.
+  describe("a per-repository start point", () => {
+    /** Open the branch picker of the card whose name is given. */
+    const openPicker = (name: string) => {
+      const card = [...document.querySelectorAll(".dws-check-option")].find((node) => node.querySelector(".dws-check-label")?.textContent === name)!
+      fireEvent.click(card.querySelector(".dws-branch-button") as HTMLElement)
+      return card
+    }
+    const branchesPanel = () => document.querySelector(".dws-branch-picker") as HTMLElement
+    /** Click one of the panel's own buttons, by its text. */
+    const choose = (name: string) => {
+      const button = [...branchesPanel().querySelectorAll("button")].find((node) => node.textContent === name) as HTMLElement | undefined
+      expect(button, `no option named ${name}`).toBeDefined()
+      fireEvent.click(button!)
+    }
+
+    it("reads every selected repository's branches in one batch as the dialog opens", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalledTimes(1))
+      expect(next.api.branches).toHaveBeenCalledWith(["/repo/alpha", "/repo/beta"])
+    })
+
+    it("shows the checked-out branch until one is chosen, then shows the choice", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      // Both cards name the branch the suggestion said HEAD is on.
+      expect([...document.querySelectorAll(".dws-check-option .dws-branch-value")].map((node) => node.textContent)).toEqual(["main", "develop"])
+      openPicker("alpha")
+      // One flat list: the Host offers local branches only, so there is no
+      // second group for a reader to tell apart from the first.
+      expect(branchesPanel().querySelectorAll(".dws-branch-options")).toHaveLength(1)
+      choose("release/2.0")
+      expect(document.querySelector(".dws-check-option .dws-branch-value")?.textContent).toBe("release/2.0")
+      // The choice is the request's per-repository override; the untouched one is
+      // deliberately absent so it falls back to the global default.
+      fireEvent.change(nameField(), { target: { value: "fix-login" } })
+      fireEvent.submit(form())
+      await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        baseRef: undefined,
+        baseRefs: { alpha: "release/2.0" },
+      })))
+    })
+
+    it("focuses the picker's own search, which the dialog's focus scope must not take back", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      const search = screen.getByRole("textbox", { name: t("baseRefPickerSearch") }) as HTMLInputElement
+      // The panel is portalled out of the dialog's overlay; a modal dialog that still
+      // holds the focus scope pulls focus back to its own content on every focusin, so
+      // the search could never be typed into. Opening the list focuses it.
+      expect(document.activeElement).toBe(search)
+      fireEvent.change(search, { target: { value: "main" } })
+      expect(search.value).toBe("main")
+    })
+
+    it("filters the list by what is typed into the picker's own search", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      const search = screen.getByRole("textbox", { name: t("baseRefPickerSearch") })
+      fireEvent.change(search, { target: { value: "develop" } })
+      const options = [...branchesPanel().querySelectorAll(".dws-branch-options button")].map((node) => node.textContent)
+      expect(options).toEqual(["develop"])
+      fireEvent.change(search, { target: { value: "no-such-branch" } })
+      expect(branchesPanel().textContent).toContain("no-such-branch")
+      expect(branchesPanel().querySelectorAll(".dws-branch-options button")).toHaveLength(0)
+    })
+
+    it("names how many branches were left out rather than dropping them silently", async () => {
+      const next = setup()
+      next.api.branches.mockResolvedValue({ "/repo/alpha": { branches: ["main"], truncated: 7 }, "/repo/beta": { branches: [], truncated: 0 } })
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      expect(branchesPanel().textContent).toContain(format(t("baseRefTruncated"), { count: "7" }))
+    })
+
+    it("shows a reading state while the batch is in flight and never an empty list", async () => {
+      const next = setup()
+      let release: (value: Record<string, unknown>) => void = () => {}
+      const pending = new Promise<Record<string, unknown>>((resolve) => { release = resolve })
+      next.api.branches.mockReturnValue(pending)
+      next.mount()
+      await ready()
+      openPicker("alpha")
+      expect(branchesPanel().textContent).toContain(t("baseRefLoading"))
+      expect(branchesPanel().textContent).not.toContain(t("baseRefEmpty"))
+      release({ "/repo/alpha": { branches: ["main"], truncated: 0 }, "/repo/beta": { branches: [], truncated: 0 } })
+      await waitFor(() => expect(branchesPanel().textContent).toContain("main"))
+    })
+
+    it("offers a retry when the read fails, and a successful retry fills the list", async () => {
+      const next = setup()
+      next.api.branches
+        .mockRejectedValueOnce(new Error("connection lost"))
+        .mockResolvedValue(branchLists())
+      next.mount()
+      await ready()
+      // The failed read settles before the panel is opened, so what the panel
+      // shows is the error and its retry rather than a reading state.
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      expect(branchesPanel().textContent).toContain("connection lost")
+      expect(branchesPanel().textContent).toContain(t("baseRefRetry"))
+      fireEvent.click([...branchesPanel().querySelectorAll("button")].find((node) => node.textContent === t("baseRefRetry"))!)
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalledTimes(2))
+      expect(branchesPanel().textContent).toContain("release/2.0")
+    })
+
+    it("keeps a chosen branch when the repository is unticked and does not send it", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      choose("release/2.0")
+      fireEvent.click(screen.getByRole("checkbox", { name: /alpha/ }))
+      // The value is still on the card, not thrown away with the selection.
+      expect(document.querySelector(".dws-check-option .dws-branch-value")?.textContent).toBe("release/2.0")
+      fireEvent.change(nameField(), { target: { value: "fix-login" } })
+      fireEvent.submit(form())
+      await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        repos: ["/repo/beta"],
+      })))
+      expect(next.api.createTask.mock.calls[0][0]).not.toHaveProperty("baseRefs")
+    })
+
+    it("lets the text and the checkbox toggle the tick, but not the card or its button", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      const card = document.querySelector(".dws-check-option") as HTMLElement
+      const box = card.querySelector(".dws-checkbox") as HTMLInputElement
+      // The card is a div, not a label: clicking its blank space does nothing.
+      expect(card.tagName).toBe("DIV")
+      fireEvent.click(card)
+      expect(box.checked).toBe(true)
+      // The text is a label for the box, so it is still a click target.
+      fireEvent.click(card.querySelector(".dws-check-label") as HTMLElement)
+      expect(box.checked).toBe(false)
+      // Opening the picker does not toggle the tick either.
+      fireEvent.click(card.querySelector(".dws-branch-button") as HTMLElement)
+      expect(box.checked).toBe(false)
+      expect(document.querySelector(".dws-branch-picker")).not.toBeNull()
+    })
+
+    it("lets a chosen override go back to the dialog's global default", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      openPicker("alpha")
+      choose("release/2.0")
+      openPicker("alpha")
+      choose(t("baseRefReset"))
+      expect(document.querySelector(".dws-check-option .dws-branch-value")?.textContent).toBe("main")
+      fireEvent.change(nameField(), { target: { value: "fix-login" } })
+      fireEvent.submit(form())
+      await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        baseRef: undefined,
+      })))
+      expect(next.api.createTask.mock.calls[0][0]).not.toHaveProperty("baseRefs")
+    })
+
+    it("puts the shared start point under the repository list, and says how the two levels relate", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      // The shared value is the list's own default - it answers "where does this task
+      // start" for every repository the cards left alone - so it follows the list. The
+      // task's name and container are a different question and come after it.
+      const list = repoGroup()
+      const shared = document.querySelector(".dws-base-fieldset")!
+      const details = document.querySelector(".dws-details-fieldset")!
+      expect(list.compareDocumentPosition(shared) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(shared.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      // And it says which level wins, because the pickers on the cards above are the
+      // other half of this one question.
+      expect(shared.textContent).toContain(t("baseRefUniformHint"))
+      // The band that closes the list carries this field's name on the left and the
+      // list's own count and bulk actions on the right: one line, not two rows.
+      const heading = shared.querySelector(".dws-base-heading")!
+      expect(heading.querySelector(".dws-field-label")?.textContent).toBe(t("basedOn"))
+      expect(heading.querySelector(".dws-check-count")).not.toBeNull()
+      expect(heading.querySelectorAll(".dws-repo-actions button")).toHaveLength(2)
+    })
+
+    it("puts the whole rule set behind the hint beside the field's own name", async () => {
+      const user = userEvent.setup()
+      const next = setup()
+      next.mount()
+      await ready()
+      const shared = document.querySelector(".dws-base-fieldset")!
+      const hint = shared.querySelector(".dws-base-heading .dws-field-hint") as HTMLElement
+      expect(hint).not.toBeNull()
+      await user.hover(hint)
+      expect((await screen.findByRole("tooltip")).textContent).toBe(t("baseRefRules"))
+      // The same rules reach a reader who never hovers: the field's button names the
+      // hidden copy as its description.
+      const button = shared.querySelector(".dws-base-ref-button") as HTMLElement
+      const describedBy = button.getAttribute("aria-describedby")
+      expect(describedBy).not.toBeNull()
+      expect(document.getElementById(describedBy!)?.textContent).toBe(t("baseRefRules"))
+    })
+
+    it("sends the shared ref and the overrides together, each in its own role", async () => {
+      const next = setup()
+      next.mount()
+      await ready()
+      await waitFor(() => expect(next.api.branches).toHaveBeenCalled())
+      // The shared field offers the intersection over the ticked repositories.
+      // Both are ticked, so it is alpha's develop/release/2.0 against beta's
+      // hotfix ... minus main, which both carry. Choose the one they share.
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(t("baseRefEachOwnHead")) }))
+      fireEvent.click(screen.getByRole("button", { name: "main" }))
+      openPicker("beta")
+      choose("hotfix")
+      fireEvent.change(nameField(), { target: { value: "fix-login" } })
+      fireEvent.submit(form())
+      await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        baseRef: "main",
+        baseRefs: { beta: "hotfix" },
+      })))
+    })
   })
 
   it("submits the paths of repositories that sit below the source root", async () => {

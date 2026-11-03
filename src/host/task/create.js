@@ -17,7 +17,7 @@ import { findLinks, symlinksRefused } from './links.js'
 import { branchNameFor, DEFAULT_BRANCH_PREFIX, projectNameFor, validateBranchPrefix, validateRepositoryDirectoryName, validateTaskName } from './naming.js'
 import { assertIsolated, isInside, refuseDelete } from './paths.js'
 
-import { DEPLOY_DIR, DEPLOY_ROOT, TASK_OWNED_ENTRIES, isLinkedWorktree, readTaskMetadata, resolveTasksRoot, sourceDeployRootPath, taskDeployRootPath, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
+import { DEPLOY_DIR, DEPLOY_ROOT, TASK_OWNED_ENTRIES, isLinkedWorktree, ownStartPointsOf, readTaskMetadata, resolveTasksRoot, sourceDeployRootPath, startPointsFor, taskDeployRootPath, taskMetadata, taskSpacePath, writeTaskMetadata } from './shared.js'
 
 /** How many links a create-time warning names before it says how many more there are. */
 const LINK_NAMES_SHOWN = 3
@@ -400,6 +400,13 @@ export async function createTask(subprocess, options) {
     tasksRoot: requestedRoot,
     repos,
     baseRef,
+    // Per-repository start points, by repository NAME rather than path: `{
+    // 'repo-a': 'develop' }`. A name it carries wins over `baseRef`; a repository
+    // no name covers falls back to `baseRef`, and then to its own HEAD. So `baseRef`
+    // is the default for the repositories `baseRefs` leaves out, not a second mode
+    // beside it, and naming both is the ordinary way to say "everybody from
+    // `develop` except that one".
+    baseRefs,
     branchPrefix = DEFAULT_BRANCH_PREFIX,
     // A file path relative to the workspace, naming the entry under its
     // `.worktree-space/deploy/` directory. It travels into the task space under its own
@@ -545,11 +552,25 @@ export async function createTask(subprocess, options) {
       )
     }
   }
-  if (baseRef !== undefined && `${baseRef}`.trim() !== '') {
-    for (const repoPath of selected) {
-      if (!(await gitSucceeded(subprocess, repoPath, ['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]))) {
-        throw coded('E3002', `base '${baseRef}' not found in '${basename(repoPath)}'`)
-      }
+  // Every repository's own start point, resolved before anything is made: a ref
+  // that no repository carries, or a name `baseRefs` carries that this call does
+  // not select, is a request that does not add up and must fail here rather than
+  // halfway through a rollback.
+  const startPoints = startPointsFor(names, { baseRef, baseRefs })
+  // The ones that are not the task's own base, which is what the record writes and
+  // what this call reports back: the rest are already covered by the top-level
+  // `baseRef`, and repeating it on every entry would be a second place to keep in
+  // step with the first.
+  const ownBases = ownStartPointsOf(startPoints, baseRef)
+  for (const [index, repoPath] of selected.entries()) {
+    const start = startPoints.get(names[index])
+    if (start === undefined) continue
+    if (!(await gitSucceeded(subprocess, repoPath, ['rev-parse', '--verify', '--quiet', `${start}^{commit}`]))) {
+      // Named by repository and by ref, because the ref is now per repository:
+      // "base 'release' not found" alone does not say which repository's `release`
+      // was missing, and with `baseRefs` two repositories can be looking for two
+      // different ones.
+      throw coded('E3002', `base '${start}' not found in '${names[index]}'`, { repository: names[index], baseRef: start })
     }
   }
 
@@ -604,9 +625,14 @@ export async function createTask(subprocess, options) {
       // Read the source facts before the branch exists, so they describe the
       // checkout the worktree was cut from rather than the worktree itself.
       const facts = await sourceFacts(subprocess, repoPath)
-      const args = baseRef === undefined || `${baseRef}`.trim() === ''
+      // This repository's own start point, not the task's: the map was resolved
+      // and validated above, and it is what the branch below is cut from. An
+      // undefined answer is the same omission of an argument as before, so the
+      // command line is byte-for-byte what a create with no base produced.
+      const start = startPoints.get(names[index])
+      const args = start === undefined
         ? ['worktree', 'add', worktreePath, '-b', branch]
-        : ['worktree', 'add', worktreePath, '-b', branch, `${baseRef}`]
+        : ['worktree', 'add', worktreePath, '-b', branch, start]
       // Pushed BEFORE git runs, not after. `worktree add` creates the branch and the
       // directory and can then fail - a failed checkout, a hook, a lock, a full disk -
       // and a half-made worktree that is not in this list is one the rollback never
@@ -627,6 +653,8 @@ export async function createTask(subprocess, options) {
       tasksRoot,
       sourceRoot,
       branch,
+      // The start point shared by every repository that named none of its own;
+      // null when none was named, which is the shape a record has always used.
       baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
       delivery: policy,
       // Which entry under `.worktree-space/deploy/` this task runs, when the create named
@@ -637,6 +665,11 @@ export async function createTask(subprocess, options) {
         name: entry.name,
         sourcePath: entry.repoPath,
         branch,
+        // Written only where this repository's start point is not the one the
+        // top-level `baseRef` already states, so a record can never carry a top
+        // level saying one ref beside a repository saying another. `inspectTask`
+        // and the note rendered from this record both read it back.
+        ...(ownBases.has(entry.name) ? { baseRef: ownBases.get(entry.name) } : {}),
         ...(entry.sourceBranch === undefined ? {} : { sourceBranch: entry.sourceBranch }),
         ...(entry.startCommit === undefined ? {} : { startCommit: entry.startCommit }),
       })),
@@ -768,8 +801,16 @@ export async function createTask(subprocess, options) {
     branch,
     path: taskPath,
     tasksRoot,
+    // The start point every repository that named none of its own began from, which
+    // is the answer the caller gave and the one the record's top level carries. A
+    // repository's own start point is on its entry below rather than here: this field
+    // is the task's, and one repository differing does not make it any less so.
     baseRef: baseRef === undefined || `${baseRef}`.trim() === '' ? undefined : `${baseRef}`,
-    repositories: created.map((entry) => ({ name: entry.name, path: entry.path })),
+    repositories: created.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      ...(ownBases.has(entry.name) ? { baseRef: ownBases.get(entry.name) } : {}),
+    })),
     warnings,
   }
 }

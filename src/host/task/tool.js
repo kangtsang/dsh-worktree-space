@@ -17,9 +17,11 @@ import {
   applyRoute,
   currentSelectionOf,
   describeRoutes,
+  DISPATCH_CATALOG_TIMEOUT_MS,
+  explainRoute,
   modelCatalogOf,
   resolveDispatchModel,
-  routeInCatalog,
+  routeWarningOf,
 } from './session-model.js'
 
 /**
@@ -156,6 +158,15 @@ const OUTPUT_SCHEMA = {
           sessionId: { type: 'string', required: true },
           role: { type: 'string', required: true },
           at: { type: 'string', required: true },
+          /**
+           * The model this session was put on, as `provider/model`, and which level
+           * chose it. Optional and absent rather than empty, for the reason the two
+           * fields of the same name on the envelope are: a session opened before
+           * this existed, or one no model was decided for, is "not recorded" and an
+           * empty string would claim the question was asked and answered with none.
+           */
+          model: { type: 'string' },
+          modelSource: { type: 'string' },
         },
       },
     },
@@ -253,6 +264,32 @@ function envelope(action) {
     // No `model` / `modelSource` here on purpose: they are added only by a call that
     // opened a session and decided a model for it, so their absence carries meaning.
     repositories: [],
+  }
+}
+
+/**
+ * One recorded session as the value's `sessions` entry.
+ *
+ * The three actions that answer with sessions - `add`, `list` and `done` - are projected
+ * in one place, because a projection written three times is a projection that starts to
+ * disagree: `list` would name a model `done` leaves out, and a caller reading the two
+ * would be told the same task ran on nothing and on something.
+ *
+ * `at` is filled with an empty string rather than dropped, because the schema declares it
+ * required. `model` and `modelSource` are the other way round, and for the same reason
+ * they are optional in the schema: present exactly when the record says which model the
+ * session was put on, so a session with no model reads as "not recorded" instead of "a
+ * model was decided and it was none".
+ * @param entry - a session from {@link normalizeSessions}.
+ * @returns the projected row.
+ */
+function sessionRowOf(entry) {
+  return {
+    sessionId: entry.sessionId,
+    role: entry.role,
+    at: entry.at ?? '',
+    ...(entry.model === undefined ? {} : { model: entry.model }),
+    ...(entry.modelSource === undefined ? {} : { modelSource: entry.modelSource }),
   }
 }
 
@@ -658,35 +695,27 @@ export function setSessionPermission(session, mode) {
 }
 
 /**
- * Put a session this call just opened on a model, and say where the choice came from.
+ * Which model a dispatch would put its session on, and whether the host can reach it.
  *
- * Called from the one place every dispatch passes through, so both the `create` that hands
- * over a first job and the later `dispatch` decide this the same way. What it decides is
- * documented on `resolveDispatchModel`; what is worth saying here is what it does **not**
- * do.
+ * The first of the two halves a dispatch does with a model, and the only one that runs
+ * **before** anything is created: a route the host does not serve is refused with a code
+ * while the call still has no side effects to undo. That is the whole reason this is
+ * separate from {@link applyDispatchModel}; see the note on {@link dispatchToSession}.
  *
- * It does not fail the dispatch. The session is already open and the work is about to be
- * handed to it; a member that runs on the inherited model is the behaviour that shipped
- * before this feature existed, and refusing the handover over a model would lose the work
- * to make a point about the route. So every failure is an answer, and the caller reports
- * it as a warning.
+ * Resolving the route needs no session at all - it is the precedence on
+ * `resolveDispatchModel` over what the call named, what the Plugins page says, and what
+ * the leader is on - which is what makes it possible to do this first.
  *
- * It does not write when nothing was decided. A host that cannot say what the leader is on
- * (no projections, no default) leaves `route` undefined, and then no `model/selection` is
- * appended at all: the session keeps the route the controller gave it, which is the same
- * thing that happened before, and the record does not claim a model nobody chose. The same
- * silence does **not** apply when a model *was* decided on and could not be written - that
- * is a warning, because a leader that named a model and got nothing back would believe the
- * session is on it.
+ * The catalog is read with the dispatch timeout (8 s), not the configuration page's 5 s:
+ * nobody is watching a spinner here, and being wrong about a route costs a refusal.
  * @param ctx - the host plugin context.
  * @param exec - the tool run, for the dispatching session's own route.
- * @param sessionId - the session that was just opened.
  * @param request - the dispatch request; `model` is the call's own choice, when it made one.
- * @returns the route that was applied (if any), which level supplied it, and a warning
- *   sentence when something that was asked for could not be done.
+ * @returns the resolved route, which level supplied it, what {@link explainRoute} answered,
+ *   and the catalog it answered from.
+ * @throws a coded E4018 when the route is `unreachable`.
  */
-async function applyDispatchModel(ctx, exec, sessionId, request) {
-  const service = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined)
+async function prepareDispatchModel(ctx, exec, request) {
   // What the leader is on, read from its own durable projection rather than from
   // `agent.options`: that one is the constant captured at creation and is never written
   // back, so a leader that has itself been switched once would hand down its original
@@ -696,6 +725,52 @@ async function applyDispatchModel(ctx, exec, sessionId, request) {
   const inherited = caller?.session === undefined ? undefined : currentSelectionOf(ctx, caller.session)
   const configured = typeof request.configuredModel === 'function' ? request.configuredModel() : undefined
   const resolved = resolveDispatchModel({ request: request.model, configured, inherited })
+  if (resolved.route === undefined) {
+    return { route: undefined, source: resolved.source, explanation: { answer: 'reachable', reason: '' }, catalog: undefined }
+  }
+  const catalog = await modelCatalogOf(ctx, DISPATCH_CATALOG_TIMEOUT_MS)
+  const explanation = explainRoute(catalog, resolved.route.provider, resolved.route.model)
+  const wanted = `${resolved.route.provider}/${resolved.route.model}`
+  // Unreachable is the one answer that stops the call. It is a fact read off a catalog the
+  // host did answer - the provider exists and does not offer this model, or there is no
+  // such provider - so refusing here costs nothing and saves a task space, a branch, a
+  // session and a prompt that would all have been made for a route that cannot work.
+  if (explanation.answer === 'unreachable') {
+    throw coded('E4018', `this host cannot route to ${wanted}, so no task space or session was made: ${explanation.reason}. `
+      + `Available routes: ${describeRoutes(catalog)}`)
+  }
+  return { route: resolved.route, source: resolved.source, explanation, catalog }
+}
+
+/**
+ * Put a session this call just opened on the model {@link prepareDispatchModel} settled.
+ *
+ * The second half, and it runs after the session exists: writing a selection needs a live
+ * agent handle, which does not exist until the controller has created one. Everything that
+ * could have been decided earlier already was, and what is left is the writing.
+ *
+ * It does not fail the dispatch. The session is already open and the work is about to be
+ * handed to it; a member that runs on the inherited model is the behaviour that shipped
+ * before this feature existed, and refusing the handover over a model would lose the work
+ * to make a point about the route. So every failure here is an answer, reported as a
+ * warning - including `unknown`, which by now cannot fail cleanly.
+ *
+ * It does not write when nothing was decided. A host that cannot say what the leader is on
+ * (no projections, no default) leaves `route` undefined, and then no `model/selection` is
+ * appended at all: the session keeps the route the controller gave it, which is the same
+ * thing that happened before, and the record does not claim a model nobody chose. The same
+ * silence does **not** apply when a model *was* decided on and could not be written - that
+ * is a warning, because a leader that named a model and got nothing back would believe the
+ * session is on it.
+ * @param ctx - the host plugin context.
+ * @param sessionId - the session that was just opened.
+ * @param prepared - what {@link prepareDispatchModel} answered.
+ * @returns the route that was applied (if any), which level supplied it, and a warning
+ *   sentence when something that was asked for could not be done.
+ */
+async function applyDispatchModel(ctx, sessionId, prepared) {
+  const service = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined)
+  const { route, source, explanation, catalog } = prepared
   const agents = service('agents')
   const agent = agents !== undefined && typeof agents.get === 'function'
     ? (() => { try { return agents.get(sessionId) } catch { return undefined } })()
@@ -708,38 +783,36 @@ async function applyDispatchModel(ctx, exec, sessionId, request) {
     // nothing to have missed, and the answer stays quiet.
     return {
       route: undefined,
-      source: resolved.source,
-      warning: resolved.route === undefined
+      source,
+      warning: route === undefined
         ? ''
-        : `the session could not be put on ${resolved.route.provider}/${resolved.route.model}: this deployment serves no `
+        : `the session could not be put on ${route.provider}/${route.model}: this deployment serves no `
           + 'live-agent registry, so a model selection cannot be written to a session it just opened. Use '
           + 'wts_session_tool action "model" once the session is live.',
     }
   }
-  if (resolved.route === undefined) {
-    return { route: undefined, source: resolved.source, warning: '' }
+  if (route === undefined) {
+    return { route: undefined, source, warning: '' }
   }
-  // A route that is not in the catalog is refused rather than written: the session would
-  // fail at its first request with a provider error, and the leader would have no way to
-  // connect that back to the dispatch it made. The session still exists and still runs on
-  // what it was given, so this is a warning and not a failed dispatch.
-  const catalog = await modelCatalogOf(ctx)
-  if (!routeInCatalog(catalog, resolved.route.provider, resolved.route.model)) {
+  // `unknown` could not be refused cleanly - it was read before anything was made, but the
+  // session is open now and the work is about to be handed over. Degraded to a warning whose
+  // wording says the catalog could not be read rather than claiming the route is unreachable:
+  // a leader told "unreachable" is entitled to believe the host was asked and answered.
+  if (explanation.answer === 'unknown') {
     return {
       route: undefined,
-      source: resolved.source,
-      warning: `the session was opened on its inherited model instead of ${resolved.route.provider}/${resolved.route.model}, `
-        + `because this host cannot route to that model; available routes: ${describeRoutes(catalog)}`,
+      source,
+      warning: routeWarningOf(explanation, catalog, `${route.provider}/${route.model}`),
     }
   }
-  const applied = applyRoute(ctx, agent, resolved.route)
+  const applied = applyRoute(ctx, agent, route)
   if (applied.durable || applied.live) {
-    return { route: resolved.route, source: resolved.source, warning: '' }
+    return { route, source, warning: '' }
   }
   return {
     route: undefined,
-    source: resolved.source,
-    warning: `the session was opened on ${resolved.route.provider}/${resolved.route.model} in this call's answer, but the `
+    source,
+    warning: `the session was opened on ${route.provider}/${route.model} in this call's answer, but the `
       + 'selection could not be written to it; use wts_session_tool action "model" to set it once the session is live',
   }
 }
@@ -809,6 +882,57 @@ async function recordSessionModel(taskPath, sessionId, model) {
 }
 
 /**
+ * Why a session could not be opened, made readable when a preset was named.
+ *
+ * `controller.create` resolves the preset on the Host side. An unknown id throws a
+ * `RemoteError` coded `agent-preset/not-found`, whose `details.available` holds the
+ * preset ids the registry declares. That is a spelling mistake on the caller's part, and
+ * the useful answer is the list to pick from - not the generic "could not be opened"
+ * every other failure gets. A deployment that serves no preset registry, or an error of
+ * another kind, keeps the generic sentence with the original message appended.
+ * @param ctx - the host plugin context.
+ * @param preset - the id the call named, or undefined when it named none.
+ * @param error - what `controller.create` threw.
+ * @returns the reason to report to the caller.
+ */
+async function presetNotFoundReason(ctx, preset, error) {
+  const message = String(error?.message ?? error)
+  const generic = `the session could not be opened (${message})`
+  const isNotFound = preset !== undefined && (
+    error?.code === 'agent-preset/not-found'
+    || /agent-preset\/not-found/.test(message)
+  )
+  if (!isNotFound) return generic
+  // The registry's own error carries the roster it would have accepted. Reading it first
+  // is more honest than asking the service again: that second read could disagree with the
+  // one that just refused. A registry that serves `list()` is the fallback, for a Host
+  // whose error carries no details at all - and it is async on the registry this was
+  // written against, so both shapes are awaited.
+  const declared = Array.isArray(error?.details?.available)
+    ? error.details.available.filter((id) => typeof id === 'string' && id !== '')
+    : undefined
+  let named = declared
+  if (named === undefined) {
+    const registry = typeof ctx.get === 'function' ? ctx.get('agentPresets') : undefined
+    let listed
+    try {
+      listed = registry !== undefined && registry !== null && typeof registry.list === 'function'
+        ? await registry.list()
+        : undefined
+    } catch {
+      listed = undefined
+    }
+    named = Array.isArray(listed)
+      ? listed.map((entry) => (typeof entry === 'string' ? entry : entry?.id))
+      : []
+  }
+  const ids = named.filter((id) => typeof id === 'string' && id !== '')
+  const roster = ids.length > 0 ? ids.join(', ') : 'none declared'
+  return `the session could not be opened: agent preset "${preset}" is not one this host declares `
+    + `(available: ${roster}); ${message}`
+}
+
+/**
  * Open a session inside a task space and hand it one turn of work.
  *
  * Four steps, and each is a Host service a deployment may or may not serve: the task space
@@ -826,17 +950,30 @@ async function recordSessionModel(taskPath, sessionId, model) {
  * child, marked the same way, so that a mode a call delegated can be told apart from one the
  * user switched themselves.
  *
- * The model the session starts on is decided here too, and here **only**: `create` with a
- * prompt and `dispatch` both hand the work over through this function, so the precedence
- * documented on `resolveDispatchModel` holds for both without either call site having to
- * remember it. `request.model` is what this call named; `request.configuredModel` is read
- * lazily, so the Plugins page's value at the moment of the dispatch is what applies rather
- * than the one captured when the plugin loaded.
+ * The model the session starts on is decided in two steps, and the split is the point:
+ *
+ *   1. **before this function is called** - {@link prepareDispatchModel} resolves the route
+ *      and reads the catalog. A route the host does not serve is refused there, with E4018,
+ *      while the call still has nothing to undo.
+ *   2. **here, once the session exists** - {@link applyDispatchModel} writes the selection.
+ *      It cannot happen earlier because writing needs a live agent handle, which only
+ *      exists after `controller.create` returned.
+ *
+ * Merging the two would put the refusal back on the far side of the side effects - a task
+ * space, worktrees, a branch and a session all made for a route that cannot work, and a
+ * caller told the call failed. That is the shape 1.3.9 fixed from the other end ("created
+ * it, then answered with a schema error"), so the two halves stay apart.
+ *
+ * The resolution itself is common to both paths, so the precedence documented on
+ * `resolveDispatchModel` holds without either call site having to remember it.
+ * `request.configuredModel` is read lazily, so the Plugins page's value at the moment of
+ * the dispatch is what applies rather than the one captured when the plugin loaded.
  * @param ctx - the host plugin context.
  * @param exec - the tool run context.
  * @param request - the task space, the work, the permission the call named, the model the
- *   call named, the configured model as a getter, and whether to watch the session for
- *   abnormal turn ends (`watch`, on unless the call says false).
+ *   call named, the configured model as a getter, the resolved model from
+ *   {@link prepareDispatchModel}, and whether to watch the session for abnormal turn ends
+ *   (`watch`, on unless the call says false).
  * @param watcher - the plugin's session watcher, when the entry made one.
  * @returns the session id (empty when none was opened), what the caller should be told,
  *   and which model the session was put on (`{ route, source, warning }`).
@@ -853,9 +990,18 @@ async function dispatchToSession(ctx, exec, request, watcher) {
         + 'Worktree Space panel ("Create and open") instead',
     }
   }
+  // An explicit preset rides along on the same request the controller already takes it on
+  // (`wts_session_tool create` passes it the same way), so a dispatch composes the session
+  // from it rather than from the deployment default.
+  const preset = typeof request.agentPreset === 'string' && request.agentPreset.trim() !== ''
+    ? request.agentPreset.trim()
+    : undefined
   // Handed a Workspace by the caller - a create that has just registered one - this does not
   // look it up again; the fallback is for the caller that has none to hand over.
   let place = request.place === undefined ? { cwd: request.taskPath } : request.place
+  if (preset !== undefined) {
+    place = { ...place, agentPreset: preset }
+  }
   let reason = ''
   const registry = workspaceRegistryOf(ctx)
   if (request.place === undefined && registry !== undefined) {
@@ -866,7 +1012,11 @@ async function dispatchToSession(ctx, exec, request, watcher) {
     } else if (typeof registry.resolveByPath === 'function') {
       const record = await registry.resolveByPath(request.taskPath)
       if (record !== undefined && record !== null && typeof record.id === 'string' && record.id !== '') {
-        place = { workspaceId: record.id }
+        // Replaced rather than merged: a Workspace id and a cwd are two ways of naming
+        // where the session goes, and the controller's own create takes the id as the one
+        // that attaches it to the group. Keeping both would hand it two answers to one
+        // question.
+        place = { workspaceId: record.id, ...(preset === undefined ? {} : { agentPreset: preset }) }
       }
     }
   }
@@ -875,7 +1025,11 @@ async function dispatchToSession(ctx, exec, request, watcher) {
     const created = await controller.create(place)
     sessionId = typeof created?.sessionId === 'string' ? created.sessionId : ''
   } catch (error) {
-    return { sessionId: '', reason: `the session could not be opened (${String(error?.message ?? error)})` }
+    // An unknown preset is the one failure here worth its own sentence. The Host's registry
+    // throws `agent-preset/not-found` and names the presets it does declare in the error's
+    // details, so the caller can be told which id was wrong and what it could have been -
+    // a bare "the session could not be opened" would send them to guess at a spelling.
+    return { sessionId: '', reason: await presetNotFoundReason(ctx, preset, error) }
   }
   if (sessionId === '') {
     return { sessionId: '', reason: 'the session service answered without a session id, so no session was opened' }
@@ -884,19 +1038,18 @@ async function dispatchToSession(ctx, exec, request, watcher) {
   if (mode !== undefined && typeof sessions?.get === 'function') {
     setSessionPermission(sessions.get(sessionId), mode)
   }
-  // The model this session starts on, decided in one place for the same reason the
-  // permission is: every dispatch passes through here, so a call site cannot forget it.
+  // The model this session starts on, written here because writing needs the live agent the
+  // controller just returned. The decision was made by `prepareDispatchModel` before any of
+  // this existed; see the note on this function for why the two are not one step.
   //
-  // The order is the feature (see `resolveDispatchModel`): what this call named, then what
-  // the Plugins page says, then what the dispatching session is on. It is applied through
-  // the session's own durable `model/selection` rather than by reopening the session on a
-  // route, because the session has just been created and the selection is what its first
-  // request reads.
+  // It is applied through the session's own durable `model/selection` rather than by
+  // reopening the session on a route, because the session has just been created and the
+  // selection is what its first request reads.
   //
   // A failure here never fails the dispatch: the session is open and the work is about to
   // be handed over, and a member running on the inherited model is the behaviour that
   // existed before this feature. The answer says what happened either way.
-  const model = await applyDispatchModel(ctx, exec, sessionId, request)
+  const model = await applyDispatchModel(ctx, sessionId, request.prepared)
   try {
     // The Host's prompt request is a typed shape whose fields are required, and its own client
     // (`Session.prompt` in the session-controller) is the reference for one: a freshly minted
@@ -1526,13 +1679,19 @@ export function registerTaskTool(ctx, options = {}) {
       sourceRoot: { type: 'string', description: 'Directory holding the repositories. Required for suggest-root and create.' },
       tasksRoot: { type: 'string', description: 'Container for task spaces: beside the repositories\' directory, never inside it or a parent of it. Omit for the recommendation.' },
       repos: { type: 'array', items: { type: 'string' }, description: 'Repository paths as suggest-root reports them (create, add). Omit for every discovered. A bare name is read as relative to sourceRoot, so it only names a repository sitting directly in it.' },
-      baseRef: { type: 'string', description: 'Start point (create, add). Omit for each repository HEAD.' },
+      baseRef: { type: 'string', description: 'Start point (create, add) for every repository that names none of its own. Omit for each repository HEAD.' },
+      baseRefs: {
+        type: 'object',
+        additionalProperties: true,
+        description: 'Per-repository start points by repository NAME (create, add), e.g. {"repo-a":"develop"}. A name here wins over baseRef; repositories it leaves out fall back to baseRef, then to their own HEAD. A name that is not one of the selected repositories is refused (E4019).',
+      },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for task/.' },
       deployTarget: { type: 'string', enum: ['docker', 'none'], description: 'Deployed for acceptance (create). Ask the user before anything is created or dispatched: it is settled on the create and cannot be added or changed afterwards. "none" is the default and has no gate; "docker" needs something to deploy with, or the create is refused (E4015).' },
       deployScript: { type: 'string', description: 'Deploy entry (create): a path relative to the workspace, under its .worktree-space/deploy/ directory; anything outside is refused (E4014). Omitted it is .worktree-space/deploy/deploy.sh. Only with deployTarget docker.' },
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create, default true).' },
       merge: { type: 'boolean', description: 'REQUIRED for done: true lands the branches, false leaves them. There is no default (E7006).' },
       prompt: { type: 'string', description: 'The work itself (create, dispatch): what to do, where, and what counts as done. It must stand alone - the session shares no context with this conversation. Leave out reporting requirements, source-checkout rules and deploy-acceptance steps: those are supplied for every dispatched task, and repeating them only makes the brief harder to read.' },
+      agentPreset: { type: 'string', description: '(create, dispatch) Agent preset id to compose the session from. Applies to the session a create with a prompt or a dispatch opens; a create without a prompt opens none. Omit for the deployment default. An unknown id is reported with the presets this host declares.' },
       model: { type: 'string', description: '(create, dispatch) Model the session runs on, as "provider/model" - the ids `wts_session_tool action "model"` lists. Omit it and the session starts on the model the Plugins page names for task sessions, or on this conversation\'s model when that names none.' },
       reasoningEffort: { type: 'string', description: '(create, dispatch) Reasoning effort for the model named in `model`. Omit for the provider\'s own default. Has no effect without `model`.' },
       permission: { type: 'string', enum: ['inherit', 'workspace-write', 'danger-full-access'], description: 'What the session opened here may write (create, dispatch). Default inherit; danger-full-access is refused (E4012) unless the user granted it.' },
@@ -1607,6 +1766,22 @@ export function registerTaskTool(ctx, options = {}) {
           const requested = typeof args.permission === 'string' && args.permission.trim() !== '' ? args.permission.trim() : 'inherit'
           refuseUngrantedFullAccess(requested, configuredFullAccess())
         }
+        // The model, settled BEFORE the worktrees are cut. A create that cut them first and
+        // then found the route unreachable would leave a task space, a branch and a session
+        // behind a call that reports a failure - the same shape as the bug that made a
+        // successful dispatch answer with only a schema error, seen from the other end.
+        // Nothing exists to undo at this point, so an unreachable route is refused outright
+        // (E4018) and a route that could not be read is carried forward as a warning.
+        //
+        // A create with no prompt opens no session, so it decides no model either: there is
+        // nothing to validate a route against.
+        const willDispatch = typeof args.prompt === 'string' && args.prompt.trim() !== ''
+        const prepared = willDispatch
+          ? await prepareDispatchModel(ctx, exec, {
+            model: parseModelArg(args.model, args.reasoningEffort),
+            configuredModel,
+          })
+          : undefined
         // The one delivery decision this call makes: whether the task expects a
         // deployment. It is a plain argument now, not a JSON policy blob, so the
         // schema's own enum refuses a bad value before this line and the value
@@ -1621,6 +1796,10 @@ export function registerTaskTool(ctx, options = {}) {
           tasksRoot: args.tasksRoot,
           repos: Array.isArray(args.repos) ? args.repos : undefined,
           baseRef: typeof args.baseRef === 'string' ? args.baseRef : undefined,
+          // Keyed by repository name, and winning over `baseRef` where it names one:
+          // a task spanning several repositories usually cannot share a single ref
+          // name across all of them, which is what made `baseRef` alone unusable there.
+          baseRefs: args.baseRefs,
           branchPrefix: typeof args.branchPrefix === 'string' ? args.branchPrefix : undefined,
           deployScript: typeof args.deployScript === 'string' ? args.deployScript : undefined,
           configuredRoot: configuredRoot(),
@@ -1696,8 +1875,9 @@ export function registerTaskTool(ctx, options = {}) {
             prompt: args.prompt,
             requested,
             watch,
-            model: parseModelArg(args.model, args.reasoningEffort),
-            configuredModel,
+            agentPreset: typeof args.agentPreset === 'string' ? args.agentPreset : undefined,
+            // Settled above, before the worktrees were cut; only the write happens now.
+            prepared,
             ...(record === undefined || record === null || typeof record.id !== 'string' || record.id === ''
               ? {}
               : { place: { workspaceId: record.id } }),
@@ -1753,6 +1933,7 @@ export function registerTaskTool(ctx, options = {}) {
           // because `addTaskRepositories` compares it against the task space.
           repositories: Array.isArray(args.repos) ? args.repos.map(absolutePath) : [],
           baseRef: typeof args.baseRef === 'string' && args.baseRef.trim() !== '' ? args.baseRef.trim() : undefined,
+          baseRefs: args.baseRefs,
         })
         const value = envelope(action)
         value.task = result.task
@@ -1769,7 +1950,7 @@ export function registerTaskTool(ctx, options = {}) {
         const sessions = normalizeSessions(recorded?.sessions ?? recorded?.sessionId)
         if (sessions.length > 0) {
           value.sessionId = sessions[sessions.length - 1].sessionId
-          value.sessions = sessions.map((entry) => ({ sessionId: entry.sessionId, role: entry.role, at: entry.at ?? '' }))
+          value.sessions = sessions.map(sessionRowOf)
         }
         value.summary = summarize(action, value)
         return value
@@ -1789,7 +1970,7 @@ export function registerTaskTool(ctx, options = {}) {
           // are the task's, not a repository's, which is why they are reported
           // once per task and not once per row.
           for (const entry of [...(task.sessions ?? [])].reverse()) {
-            value.sessions.push({ sessionId: entry.sessionId, role: entry.role, at: entry.at ?? '' })
+            value.sessions.push(sessionRowOf(entry))
           }
           const state = task.delivery ?? { url: null, lastSmoke: null }
           value.deployment.push({
@@ -1935,7 +2116,7 @@ export function registerTaskTool(ctx, options = {}) {
         const recordedSessions = normalizeSessions(beforeFinish?.sessions ?? beforeFinish?.sessionId)
         if (recordedSessions.length > 0) {
           value.sessionId = recordedSessions[recordedSessions.length - 1].sessionId
-          value.sessions = recordedSessions.map((entry) => ({ sessionId: entry.sessionId, role: entry.role, at: entry.at ?? '' }))
+          value.sessions = recordedSessions.map(sessionRowOf)
         }
         value.summary = summarize(action, value)
         return value
@@ -1967,6 +2148,15 @@ export function registerTaskTool(ctx, options = {}) {
         // Asked here, before the session is opened: a dispatch that refused after opening
         // one would leave a session in the task space with no work and nothing recording it.
         refuseUngrantedFullAccess(requested, configuredFullAccess())
+        // The model, settled BEFORE the session is opened. This call does not create the task
+        // space - it already exists - but it does create a session, and a session made for a
+        // route that cannot work is a side effect the caller has no way to take back. So the
+        // same rule as a create: an unreachable route is refused here (E4018), and one that
+        // could not be read is carried forward as a warning.
+        const prepared = await prepareDispatchModel(ctx, exec, {
+          model: parseModelArg(args.model, args.reasoningEffort),
+          configuredModel,
+        })
         // Same default as a create: watch unless the call says not to.
         const watch = args.watchSession !== false
         const value = envelope(action)
@@ -1985,11 +2175,9 @@ export function registerTaskTool(ctx, options = {}) {
           prompt,
           requested,
           watch,
-          // Same precedence as a create that hands over a first job, because both go
-          // through the same resolver: this call, then the Plugins page, then this
-          // conversation's own model.
-          model: parseModelArg(args.model, args.reasoningEffort),
-          configuredModel,
+          agentPreset: typeof args.agentPreset === 'string' ? args.agentPreset : undefined,
+          // Settled above, before the session was opened; only the write happens now.
+          prepared,
         }, sessionWatch)
         value.sessionId = opened.sessionId
         if (opened.reason !== '') value.warnings.push(opened.reason)

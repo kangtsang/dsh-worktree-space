@@ -477,6 +477,64 @@ describe("a session's final report", () => {
     }
   })
 
+  it("keeps the model through normalization and through the reportedAt writeback", async () => {
+    // Task 1: `normalizeSessions` rebuilds each entry, so a field it does not name is
+    // silently dropped on read. `markSessionReported` writes back through exactly those
+    // entries, so the bug erased `model` and `modelSource` from the file the first time a
+    // session reported. The same rebuild happens in the source root's index.
+    expect(normalizeSessions([{
+      sessionId: "s-1",
+      at: "2026-01-01 00:00:00",
+      role: "task",
+      model: "buddy/glm-5.3-flash",
+      modelSource: "request",
+    }])).toEqual([{
+      sessionId: "s-1",
+      at: "2026-01-01 00:00:00",
+      model: "buddy/glm-5.3-flash",
+      modelSource: "request",
+      role: "task",
+    }])
+    // Same shape rule as `at` / `reportedAt`: a non-string or empty value stays absent
+    // rather than becoming a field that reads as "a model was decided, but unnamed".
+    expect(normalizeSessions([{ sessionId: "s-2", model: "", modelSource: 7 }])[0])
+      .not.toHaveProperty("model")
+    expect(normalizeSessions([{ sessionId: "s-2", model: "", modelSource: 7 }])[0])
+      .not.toHaveProperty("modelSource")
+
+    const f = await fixture({ sessions: [{
+      sessionId: "s-member",
+      at: "2026-01-01 00:00:00",
+      role: "task",
+      model: "buddy/glm-5.3-flash",
+      modelSource: "request",
+    }] })
+    try {
+      expect(await markSessionReported(f.taskPath, "s-member")).toBe(true)
+
+      const recordFile = join(f.taskPath, PLUGIN_ROOT, "worktree-space.json")
+      const after = JSON.parse(await readFile(recordFile, "utf8"))
+      expect(after.sessions[0]).toMatchObject({
+        sessionId: "s-member",
+        model: "buddy/glm-5.3-flash",
+        modelSource: "request",
+        reportedAt: expect.stringMatching(STAMP),
+      })
+
+      // The index outlives the task space: a finish archives this copy, and a model
+      // dropped here is gone for good once the task space is removed.
+      const entry = JSON.parse(await readFile(f.indexFile, "utf8")).sessions
+        .find((one) => one.sessionId === "s-member")
+      expect(entry).toMatchObject({
+        model: "buddy/glm-5.3-flash",
+        modelSource: "request",
+        reportedAt: expect.stringMatching(STAMP),
+      })
+    } finally {
+      await f.cleanup()
+    }
+  })
+
   it("is written into the source root's index too, which is the copy a finish archives", async () => {
     // Without this the report is recorded in a file a `done` removes, and the archived index -
     // the only copy left - still says the session never reported.

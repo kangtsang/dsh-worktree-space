@@ -85,6 +85,8 @@ export const ERROR_CODES = {
   E4015: 'create.js - the task is set to deploy but nothing in the source root or its repositories can deploy it',
   E4016: 'tool.js - a dispatch named a model that is not a "provider/model" pair',
   E4017: 'session-tools.js - a model switch was asked for a session that is not a member of a task the caller leads',
+  E4018: 'tool.js - a create or dispatch named a model this host was read as not serving, so nothing was created or dispatched',
+  E4019: 'shared.js - baseRefs names a repository this call does not select, so the request asks for a start point no worktree would use',
 
   // --- E5xxx finishing and merging ----------------------------------------
   E5001: 'archive.js - a merge is still standing, so nothing was finished',

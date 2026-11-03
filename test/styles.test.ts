@@ -12,7 +12,7 @@ const styles = readFileSync(new URL("../src/client/styles.css", import.meta.url)
  * drops the declaration whole. So the list is pinned as written, and adding a
  * surface to it is a decision this file makes the reader look at.
  */
-const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config"
+const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker"
 
 /** One rule's declarations, by its exact selector. */
 function rule(selector: string) {
@@ -66,10 +66,36 @@ describe("floating panel surface", () => {
 
   it("gives the create form room while confirmations stay narrow", () => {
     expect(rule(".dws-dialog-content")).toContain("width: min(460px, calc(100vw - 32px))")
-    // A tenth wider than the 690px that was one and a half times the
-    // confirmation width; the archive dialog kept the 690px.
-    expect(rule(".dws-create-dialog")).toContain("width: min(759px, calc(100vw - 32px))")
-    expect(rule(".dws-finish-dialog")).toContain("width: min(690px, calc(100vw - 32px))")
+    // A fifth wider than the 759px that was a tenth wider than the 690px of one and a
+    // half confirmations: the repository cards carry a name, a branch and a path each.
+    expect(rule(".dws-create-dialog")).toContain("width: min(911px, calc(100vw - 32px))")
+    // The finish dialog reports the same per-repository detail, so it reads at the same
+    // width rather than opening narrower than the dialog it is opened from.
+    expect(rule(".dws-finish-dialog")).toContain("width: min(911px, calc(100vw - 32px))")
+    // A card's text column narrows to its own button and is cut only there, so the
+    // branch is no longer capped at the width it wears in the repository list.
+    expect(rule(".dws-repo-choices .dws-branch-label")).toContain("max-width: 100%")
+  })
+
+  it("gives the management dialog a share of the window rather than all of it", () => {
+    // 95% covered everything but the taskbar for a page that is a list of Workspaces, six
+    // of which fit in half that height. The height stays a percentage, so the page keeps
+    // its proportions on a taller screen; a list that outgrows it scrolls inside.
+    const dialog = rule(".dws-manage-dialog")
+    expect(dialog).toContain("height: 80dvh")
+    expect(dialog).toContain("max-height: 80dvh")
+  })
+
+  it("wraps a finished row's source path rather than cutting it", () => {
+    // The row exists to say which checkout the merge runs in; an ellipsis would hide
+    // exactly that. A path wider than the line breaks onto the next one instead, and
+    // the counts that follow wrap under it.
+    const path = rule(".dws-plan-source code")
+    expect(path).toContain("white-space: normal")
+    expect(path).toContain("overflow-wrap: anywhere")
+    expect(path).not.toContain("text-overflow: ellipsis")
+    // The label beside it is two characters; it keeps its line while the path breaks.
+    expect(rule(".dws-plan-source > span")).toContain("white-space: nowrap")
   })
 
   it("keeps the create form inside a 1080p viewport without scrolling", () => {
@@ -123,6 +149,18 @@ describe("floating panel surface", () => {
     expect(TOKEN_SCOPE).toContain(".dws-panel")
     const scope = rule(TOKEN_SCOPE)
     for (const token of ["--wt-surface", "--wt-line", "--wt-secondary"]) expect(scope).toContain(`${token}:`)
+  })
+
+  it("paints the branch picker's panel, which the dialog's scope cannot reach", () => {
+    // Both pickers portal their panel to `document.body` to escape the dialog body's
+    // scroller, so the panel is a sibling of the dialog rather than a child of it. Custom
+    // properties are inherited through the DOM, not through the React tree, so the panel
+    // had none of the aliases: `background: var(--wt-surface)` was dropped whole and the
+    // branch list came out see-through - the repository cards behind it read through the
+    // options. Declaring the aliases here is what makes the panel a surface of its own,
+    // wherever the portal happens to land it.
+    expect(TOKEN_SCOPE).toContain(".dws-branch-picker")
+    expect(rule(".dws-branch-picker")).toContain("background: var(--wt-surface)")
   })
 
   it("draws one navigation for both hosts of the page", () => {
@@ -196,7 +234,16 @@ describe("floating panel surface", () => {
     // A chosen repository used to be a small filled square — the same mark a selected
     // radio wears — which read as a bullet rather than as a box someone ticked.
     const checked = rule(".dws-checkbox:checked")
-    expect(checked).toContain("background: var(--dsw-alias-button-primary-fill)")
+    // The tick wears the product's blue. It was the primary button's fill, which follows
+    // `brand-primary` — the label ink, near-black in the light theme — so a chosen card
+    // and its tick were drawn in the same tone as unread text.
+    expect(checked).toContain("background: var(--wt-accent)")
+    // The accent is the plugin mark's own blue, written out: the alias theme's
+    // business colour is a close blue but not the icon's, and `brand-primary` is the
+    // label ink, which is what drew a chosen card in a heavier black.
+    expect(rule(TOKEN_SCOPE)).toContain("--wt-accent: #4d6bfe")
+    // The field's bulk actions are links in that same blue, not in the label ink.
+    expect(rule(".dws-link-button")).toContain("color: var(--wt-accent)")
     // The tick is two borders of a rotated box, so it needs no mask or glyph to load.
     const tick = rule(".dws-checkbox::before")
     expect(tick).toContain("border-left:")
@@ -204,8 +251,11 @@ describe("floating panel surface", () => {
     expect(tick).toContain("rotate(-45deg)")
     // Both states of the tick are drawn, so a chosen repository cannot render empty.
     expect(rule(".dws-checkbox:checked::before")).toContain("scale(1)")
-    // The whole card is the state, not only its corner: a chosen one is bordered and tinted.
-    expect(rule(".dws-check-option:has(.dws-checkbox:checked)")).toContain("background: var(--wt-soft)")
+    // The whole card is the state, not only its corner: a chosen one is bordered and tinted,
+    // and the border is the accent rather than the ink that read as a heavier hairline.
+    const chosenCard = rule(".dws-check-option:has(.dws-checkbox:checked)")
+    expect(chosenCard).toContain("background: var(--wt-soft)")
+    expect(chosenCard).toContain("border-color: var(--wt-accent)")
   })
 
   it("sizes every status dot once, whatever colour it wears", () => {

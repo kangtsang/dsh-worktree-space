@@ -122,6 +122,14 @@ it did not start with. Do **not** create a second task for it, and do not run
   it may be under another source root, or on another volume entirely.
 - `baseRef` is optional. Omitted, each repository starts from its own HEAD; pass the
   task's own `baseRef` to have them start from what the task started from.
+- `baseRefs` is optional, and is how a call gives one repository a start point of
+  its own: it maps a **repository name** (not a path) to a ref, and a name it carries
+  wins over `baseRef` for that repository. The ones it leaves out start from
+  `baseRef`, or from their own HEAD when no `baseRef` was given either. Naming both
+  is the ordinary way to say "everybody from `develop` except that one". A name in
+  it that this call does not select is refused (E4019) rather than ignored, so a
+  misspelled one cannot quietly do nothing - check it against the names `list`
+  reports. The same parameter works on `create`.
 - The new repository joins the branch the task is already on, and the task's
   metadata records where its source repository lives.
 - Nothing is removed from a task this way. There is no "remove a repository"

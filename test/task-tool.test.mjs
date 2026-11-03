@@ -16,6 +16,9 @@ import { SCAN_CONCURRENCY } from "../src/host/task/concurrency.js"
  */
 const recordAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.json")
 
+/** The note rendered from that record, beside it. */
+const noteAt = (taskPath) => join(taskPath, PLUGIN_ROOT, "worktree-space.md")
+
 /** Minimal subprocess double replying empty output to every git call. */
 const quietSubprocess = {
   spawn: () => ({
@@ -289,6 +292,16 @@ function expectEnvelopeShape(schema, value) {
     expectObjectShape(rowSchema, row)
     expectNoUndeclaredKeys(rowSchema, row, "repository row")
   }
+  // The sessions a list, an add or a done answers with are checked against their own
+  // declared shape for the same reason the rows are: `additionalProperties: false` on
+  // `sessions.items` means a model field the schema never named would fail the Host's
+  // validation of the whole result - which is exactly how `model` on the envelope was
+  // discovered.
+  const sessionSchema = schema.properties.sessions.items
+  for (const row of value.sessions) {
+    expectObjectShape(sessionSchema, row)
+    expectNoUndeclaredKeys(sessionSchema, row, "session row")
+  }
 }
 
 describe("registerTaskTool", () => {
@@ -519,7 +532,21 @@ describe("registerTaskTool", () => {
       .rejects.not.toMatchObject({ code: "E7007" })
   })
 
-  it("describes force as unavailable, so the model is not asked to try it", () => {
+  it("declares a per-repository start point where baseRef alone cannot serve", () => {
+    const { ctx, captured } = toolContext()
+    registerTaskTool(ctx)
+    const properties = captured[0].parameters.properties
+    // The two are additive rather than exclusive: `baseRef` is the default for the
+    // repositories `baseRefs` leaves out, so naming both is the ordinary way to say
+    // "everybody from develop except that one".
+    expect(properties.baseRef.type).toBe("string")
+    expect(properties.baseRef.description).toMatch(/every repository that names none of its own/)
+    expect(properties.baseRefs.type).toBe("object")
+    expect(properties.baseRefs.description).toMatch(/wins over baseRef/)
+    expect(properties.baseRefs.description).toMatch(/E4019/)
+  })
+
+  it("declares force as unavailable, so the model is not asked to try it", () => {
     const { ctx, captured } = toolContext()
     registerTaskTool(ctx)
     expect(captured[0].parameters.properties.force.description).toMatch(/Refused here/)
@@ -747,6 +774,22 @@ describe("registerTaskTool", () => {
     } finally {
       await rm(container, { recursive: true, force: true })
       await rm(join(container, "..", "multi-worktree-tool-add-elsewhere"), { recursive: true, force: true })
+    }
+  })
+
+  it("hands per-repository start points from the tool through to the record", async () => {
+    // The model-facing tool and the /api endpoints drive the same create, so the
+    // mapping has to reach the record from either route. `creatingSubprocess` answers
+    // every rev-parse with success, which is what a repo that carries both refs does.
+    const { value, cleanup } = await createOnce({}, { baseRef: "develop", baseRefs: { alpha: "main" } }, {}, { keep: true })
+    try {
+      const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
+      expect(record.baseRef).toBe("develop")
+      expect(record.repositories[0]).toEqual(expect.objectContaining({ name: "alpha", baseRef: "main" }))
+      // The note a session reads says it too, so the fact is not buried in the JSON.
+      expect(await readFile(noteAt(value.container), "utf8")).toContain("`alpha`: `main`")
+    } finally {
+      await cleanup()
     }
   })
 
@@ -1072,6 +1115,180 @@ describe("registerTaskTool", () => {
       expectEnvelopeShape(captured[0].output.schema, value)
     } finally {
       await rm(container, { recursive: true, force: true })
+    }
+  })
+
+  it("reports each recorded session's model in list", async () => {
+    // Task 2: the schema declares `model` / `modelSource` optional on each sessions row,
+    // and the three actions that answer with sessions (add, list, done) all project them
+    // through `sessionRowOf`. The old value named only sessionId/role/at, so a caller
+    // could not say which model ran the task - and until Task 1 the normalizer had
+    // already dropped them from the record. `list` is the one that reads a whole record;
+    // `expectEnvelopeShape` checks the declared shape on every action's rows.
+    const { ctx, captured } = toolContext()
+    const container = await mkdtemp(join(tmpdir(), "multi-worktree-model-sessions-"))
+    const taskPath = join(container, PROJECT, "login")
+    const worktree = join(taskPath, "alpha")
+    try {
+      await mkdir(worktree, { recursive: true })
+      await writeFile(join(worktree, ".git"), "gitdir: /elsewhere\n")
+      await mkdir(join(taskPath, PLUGIN_ROOT), { recursive: true })
+      await writeFile(recordAt(taskPath), JSON.stringify({
+        task: "login", project: PROJECT, branch: "task/login",
+        sessions: [
+          { sessionId: "s-old", role: "task", at: "2026-01-01T00:00:00Z" },
+          {
+            sessionId: "s-model",
+            role: "task",
+            at: "2026-01-02T00:00:00Z",
+            model: "buddy/glm-5.3-flash",
+            modelSource: "request",
+          },
+        ],
+      }, null, 2) + "\n")
+
+      registerTaskTool(ctx)
+      const definition = captured[0]
+      const sessionProps = definition.output.schema.properties.sessions.items.properties
+      expect(sessionProps.model).toMatchObject({ type: "string" })
+      expect(sessionProps.modelSource).toMatchObject({ type: "string" })
+      expect(sessionProps.model.required).not.toBe(true)
+      expect(sessionProps.modelSource.required).not.toBe(true)
+
+      // `list` reads the record through `taskSessionsOf`, so both entries come back with
+      // the model only on the one that carries it.
+      const listed = await definition.execute({ action: "list", tasksRoot: container }, {})
+      expect(listed.sessions.find((entry) => entry.sessionId === "s-model")).toMatchObject({
+        model: "buddy/glm-5.3-flash",
+        modelSource: "request",
+      })
+      expect(listed.sessions.find((entry) => entry.sessionId === "s-old")).not.toHaveProperty("model")
+      expectEnvelopeShape(definition.output.schema, listed)
+    } finally {
+      await rm(container, { recursive: true, force: true })
+    }
+  })
+
+  it("declares agentPreset, and hands it to the session a create opens", async () => {
+    // Task 3: `wts_session_tool create` already took a preset, but a task space had no way
+    // to ask for one - `dispatchToSession` built its `place` from a cwd or a workspace id
+    // and nothing else. The preset travels on the same request the controller already
+    // accepts it on.
+    const created = []
+    const { value, captured } = await createOnce(
+      { sessionController: { create: async (place) => { created.push(place); return { sessionId: "session-1" } }, prompt: async () => ({}) } },
+      { prompt: "build it", agentPreset: "task-runner" },
+    )
+    expect(captured[0].parameters.properties.agentPreset).toMatchObject({ type: "string" })
+    expect(created).toHaveLength(1)
+    expect(created[0].agentPreset).toBe("task-runner")
+    // The directory still has to be named, or the session would have nowhere to work.
+    expect(typeof created[0].cwd === "string" ? created[0].cwd : created[0].workspaceId).toBeTruthy()
+    expect(value.sessionId).toBe("session-1")
+  })
+
+  it("hands the preset through on a dispatch to a task space that already exists", async () => {
+    const fixture = await taskSpaceFixture()
+    const created = []
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async (place) => { created.push(place); return { sessionId: "session-2" } }, prompt: async () => ({}) },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", agentPreset: "task-runner" },
+        {},
+      )
+      expect(created[0].agentPreset).toBe("task-runner")
+      expect(value.sessionId).toBe("session-2")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("opens no session with a preset when a create names no prompt", async () => {
+    // The preset composes a session, and a create without a prompt opens none: carrying it
+    // into the request anyway would be a field with nothing to apply to.
+    const created = []
+    await createOnce(
+      { sessionController: { create: async (place) => { created.push(place); return { sessionId: "session-1" } }, prompt: async () => ({}) } },
+      { agentPreset: "task-runner" },
+    )
+    expect(created).toEqual([])
+  })
+
+  it("names the available presets when the one a dispatch asked for does not exist", async () => {
+    // Task 3: unknown preset. The Host's registry throws `agent-preset/not-found` and
+    // carries the ids it does declare in `details.available`. Swallowing it into "the
+    // session could not be opened" would leave the caller guessing at a spelling, so the
+    // reason names the roster.
+    const fixture = await taskSpaceFixture()
+    const error = Object.assign(new Error('Unknown agent preset: task-runner'), {
+      code: "agent-preset/not-found",
+      details: { agentPreset: "task-runner", available: ["default", "reviewer"] },
+    })
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async () => { throw error }, prompt: async () => ({}) },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", agentPreset: "task-runner" },
+        {},
+      )
+      // Reported as a warning, not a thrown failure: the dispatch carries on and says so,
+      // which is how every other "could not open a session" answer behaves.
+      expect(value.sessionId).toBe("")
+      const said = value.warnings.join(" ")
+      expect(said).toContain("agent preset")
+      expect(said).toContain("task-runner")
+      expect(said).toContain("available: default, reviewer")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("falls back to the preset registry's list when the failure carries no roster", async () => {
+    // A Host whose error has no `details` - the reason must still name what it does
+    // declare rather than degrade to a bare failure sentence.
+    const fixture = await taskSpaceFixture()
+    const error = Object.assign(new Error("Unknown agent preset: task-runner"), {
+      code: "agent-preset/not-found",
+    })
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async () => { throw error }, prompt: async () => ({}) },
+      agentPresets: { list: async () => [{ id: "default" }, { id: "reviewer" }] },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", agentPreset: "task-runner" },
+        {},
+      )
+      expect(value.warnings.join(" ")).toContain("available: default, reviewer")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("keeps the generic reason when the session failed for something other than a preset", async () => {
+    // The readable sentence is only for a preset the host does not declare. Any other
+    // failure keeps its own message, so a preset typo cannot be blamed for a dead service.
+    const fixture = await taskSpaceFixture()
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: { create: async () => { throw new Error("session service is offline") }, prompt: async () => ({}) },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", agentPreset: "task-runner" },
+        {},
+      )
+      const said = value.warnings.join(" ")
+      expect(said).toContain("session service is offline")
+      expect(said).not.toContain("is not one this host declares")
+    } finally {
+      await fixture.cleanup()
     }
   })
 
@@ -2194,10 +2411,11 @@ describe("registerTaskTool", () => {
      * The new session's own agent is served by `agents`, because that is what a model
      * switch is written to: the controller created the session, and the selection lands on
      * the agent behind it.
-     * @param options - the configured model the entry would pass, and the caller's route.
+     * @param options - the configured model the entry would pass, the caller's route, and
+     *   an optional `llm` service double that stands in for a catalog that could not be read.
      * @returns the tool, the appended events, and the run context for the caller.
      */
-    async function modelDispatch({ configuredModel, callerRoute } = {}) {
+    async function modelDispatch({ configuredModel, callerRoute, llm } = {}) {
       const fixture = await taskSpaceFixture()
       const appended = []
       const services = {
@@ -2218,7 +2436,7 @@ describe("registerTaskTool", () => {
             }
             : undefined),
         },
-        llm: {
+        llm: llm ?? {
           listProviders: () => [{ id: "deepseek-account" }, { id: "codearts" }],
           listConfigurableProviders: () => [],
           listModels: (provider) => (provider === "codearts"
@@ -2363,25 +2581,83 @@ describe("registerTaskTool", () => {
       }
     })
 
-    it("says so rather than silently keeping the inherited model when the route is unreachable", async () => {
-      // A route the host cannot reach would fail at the member's first request with a
-      // provider error, and the leader would have no way to connect that back to this
-      // call. The dispatch still succeeds - the session is open and the work is handed
-      // over - so this is a warning naming what happened.
+    it("refuses an unreachable route BEFORE opening anything, so nothing was made", async () => {
+      // Task 5. A route the host cannot reach is a fact, read off a catalog it did answer,
+      // so it is refused while the call still has no side effects to undo. The old shape
+      // created the session and then warned: the leader was told the dispatch succeeded and
+      // the member ran on a different model, which is the same "success that answered with
+      // an error" shape 1.3.9 fixed from the other end.
       const { tool, appended, run, fixture } = await modelDispatch()
       try {
-        const value = await tool.execute(
+        await expect(tool.execute(
           { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go", model: "codearts/nope" },
           run,
-        )
+        )).rejects.toThrow(/E4018/)
+        // Nothing was written to any session, because none was opened.
         expect(selectionsIn(appended)).toEqual([])
-        // Absent rather than empty: the dispatch opened a session but no model was applied,
-        // so `model` says nothing at all. An empty string would claim the question was
-        // answered with "none", which is a different statement from "no model was decided".
-        expect(value.model).toBeUndefined()
-        expect(value.modelSource).toBeUndefined()
-        expect(value.warnings.join(" ")).toContain("cannot route to that model")
-        expect(value.warnings.join(" ")).toContain("codearts/gw-1")
+        // And the reason names the routes the host does offer, so the caller's next move is
+        // a spelling it can copy rather than a guess.
+      } finally {
+        await fixture.cleanup()
+      }
+    })
+
+    it("refuses an unreachable route on a create before it cuts a single worktree", async () => {
+      // The same rule on the other action, and the stronger case: a create cuts a task
+      // space, worktrees and a branch. Refusing after that would leave all of it behind a
+      // call that reports a failure.
+      const appended = []
+      const services = {
+        workspaceRegistry: { resolveByPath: async () => ({ id: "ws-login", title: "kratos-admin" }), create: async (path, title) => ({ path, title }) },
+        sessionController: { create: async () => ({ sessionId: "session-1" }), prompt: async () => ({}) },
+        sessions: { get: () => ({ append: () => {} }) },
+        agents: { get: (id) => (id === "session-1" ? { id, session: { header: { id, cwd: "/tmp" }, append: (t, d) => appended.push({ type: t, data: d }) } } : undefined) },
+        llm: {
+          listProviders: () => [{ id: "codearts" }],
+          listConfigurableProviders: () => [],
+          listModels: () => [{ id: "gw-1" }],
+        },
+        sandboxPolicy: { overrideOf: () => "workspace-write" },
+      }
+      const source = await sourceFixture()
+      const container = await mkdtemp(join(tmpdir(), "multi-worktree-model-refuse-"))
+      try {
+        const { ctx, captured } = toolContext(creatingSubprocess, services)
+        registerTaskTool(ctx)
+        await expect(captured[0].execute(
+          { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, prompt: "go", model: "codearts/nope" },
+          {},
+        )).rejects.toThrow(/E4018/)
+        // The container is empty: no project layer, no task space, no worktree.
+        expect(await readdir(container)).toEqual([])
+      } finally {
+        await source.cleanup()
+        await rm(container, { recursive: true, force: true })
+      }
+    })
+
+    it("degrades a route it could not read to a warning, and says it could not be read", async () => {
+      // The other answer `explainRoute` gives. A provider whose model list could not be
+      // read is not evidence that the model is missing, so the dispatch goes ahead and
+      // warns - and the warning has to say "could not be read", not "cannot route to",
+      // because the two mean different things to a caller: one is "try again later", the
+      // other is "pick another model".
+      const { tool, run, fixture } = await modelDispatch({
+        llm: {
+          listProviders: () => [{ id: "broken" }],
+          listConfigurableProviders: () => [],
+          listModels: async () => { throw new Error("no adapter registered") },
+        },
+        callerRoute: { provider: "broken", model: "m-1" },
+      })
+      try {
+        const value = await tool.execute(
+          { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+          run,
+        )
+        const said = value.warnings.join(" ")
+        expect(said).toContain("could not be determined")
+        expect(said).not.toContain("cannot route to")
       } finally {
         await fixture.cleanup()
       }

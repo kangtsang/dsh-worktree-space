@@ -87,7 +87,7 @@ function services(workspaces: Array<{ workspaceId: string; path: string; title: 
  * that draws the directory row under it, so the preview shows the card at its fullest.
  */
 function configForm(defaultBranchPrefix = "task/") {
-  const value = { panelEntry: "show", sidebarEntry: "show", handoffEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix, tasksRootStrategy: "custom", tasksRootDirectory: "E:\\worktree-space", archiveDocumentsStrategy: "custom", archiveDocumentsDirectory: "E:\\archived-docs" }
+  const value = { panelEntry: "show", sidebarEntry: "show", scanDepth: 3, maxScanDirectories: 3000, defaultBranchPrefix, tasksRootStrategy: "custom", tasksRootDirectory: "E:\\worktree-space", archiveDocumentsStrategy: "custom", archiveDocumentsDirectory: "E:\\archived-docs" }
   return { getSnapshot: () => ({ status: "ready", value }), subscribe: () => () => {}, set: vi.fn(async () => true) }
 }
 

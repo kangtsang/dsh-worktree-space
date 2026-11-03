@@ -499,6 +499,178 @@ describe("addTaskRepositories", () => {
     }
   })
 
+  it("cuts each repository from the start point its own name carries", async () => {
+    // The point of the whole change: one repository's start point can differ from the
+    // rest, and the ref each repository is asked for is the one its own name names.
+    const fixture = await taskFixture(["gamma", "beta"])
+    const { subprocess, calls } = addSucceeds(fixture.taskPath)
+    try {
+      await addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+        baseRefs: { gamma: "develop", beta: "main" },
+      })
+      expect(fixture.adds(calls)).toEqual([
+        ["worktree", "add", join(fixture.taskPath, "gamma"), "-b", BRANCH, "develop"],
+        ["worktree", "add", join(fixture.taskPath, "beta"), "-b", BRANCH, "main"],
+      ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("falls back to baseRef for the repositories baseRefs leaves out", async () => {
+    // `baseRef` is the default for the unnamed ones, not a second mode beside
+    // `baseRefs`: naming both is the way to say "everybody from develop except that
+    // one", and a repository named with a blank value falls back the same way.
+    const fixture = await taskFixture(["gamma", "beta"])
+    const { subprocess, calls } = addSucceeds(fixture.taskPath)
+    try {
+      await addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+        baseRef: "develop",
+        baseRefs: { gamma: "main", beta: "  " },
+      })
+      expect(fixture.adds(calls)).toEqual([
+        ["worktree", "add", join(fixture.taskPath, "gamma"), "-b", BRANCH, "main"],
+        ["worktree", "add", join(fixture.taskPath, "beta"), "-b", BRANCH, "develop"],
+      ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("starts a repository baseRefs leaves out from its own HEAD when no base was named", async () => {
+    const fixture = await taskFixture(["gamma", "beta"])
+    const { subprocess, calls } = addSucceeds(fixture.taskPath)
+    try {
+      await addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+        baseRefs: { gamma: "main" },
+      })
+      // No last argument: the same command line an add with no base at all has
+      // always produced, so a repository that was not named starts where it would
+      // have started before this parameter existed.
+      expect(fixture.adds(calls)).toEqual([
+        ["worktree", "add", join(fixture.taskPath, "gamma"), "-b", BRANCH, "main"],
+        ["worktree", "add", join(fixture.taskPath, "beta"), "-b", BRANCH],
+      ])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a repository baseRefs names that this call does not add", async () => {
+    // A misspelled name silently falling back to the default would be the hardest
+    // failure to notice in the whole feature: the caller asked for a start point and
+    // believes it was applied to a worktree that was cut from somewhere else.
+    const fixture = await taskFixture(["gamma"])
+    const { subprocess, calls } = addSucceeds(fixture.taskPath)
+    try {
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+        baseRefs: { gamma: "main", delta: "main" },
+      })).rejects.toMatchObject({ code: "E4019" })
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+        baseRefs: { delta: "main" },
+      })).rejects.toThrow(/'delta'.*'gamma'/s)
+      // Refused before anything is made, and before a single guard has run.
+      expect(fixture.adds(calls)).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("names the repository whose own start point is missing", async () => {
+    // Two repositories can now be looking for two different refs, so "the base is
+    // missing" has to say which repository's was missing.
+    const fixture = await taskFixture(["gamma", "beta"])
+    const { subprocess } = subprocessMock({
+      "show-ref --verify --quiet refs/heads/task/login": { exitCode: 1 },
+      "rev-parse --verify --quiet release^{commit}": { exitCode: 1 },
+      "rev-parse --abbrev-ref HEAD": ({ cwd }) => (cwd.startsWith(fixture.taskPath) ? BRANCH : "main"),
+      "status --porcelain": "",
+    })
+    try {
+      await expect(addTaskRepositories(subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma, fixture.repo.beta],
+        baseRefs: { gamma: "release", beta: "main" },
+      })).rejects.toThrow(/base 'release' not found in 'gamma'/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("records the start point an added repository was cut from, without touching the task's own", async () => {
+    // The per-entry `baseRef` is written because two readers read it - `inspectTask`
+    // and the note - and it is compared against the base the RECORD carries, so a
+    // task that says `main` and gains a repository from `release` says `release` on
+    // that entry rather than claiming the worktree came from `main`.
+    const fixture = await taskFixture()
+    const recorded = await fixture.readMetadata()
+    await writeFile(fixture.metadataPath, `${JSON.stringify({ ...recorded, baseRef: "main" }, null, 2)}\n`, "utf8")
+    try {
+      const result = await addTaskRepositories(addSucceeds(fixture.taskPath).subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+        baseRefs: { gamma: "release" },
+      })
+      const after = await fixture.readMetadata()
+      expect(after.baseRef).toBe("main")
+      expect(after.repositories.find((entry) => entry.name === "gamma")).toMatchObject({ name: "gamma", baseRef: "release" })
+      // And the note a session reads says it, so a reader is not told the task began
+      // at `main` and left to discover one repository did not.
+      expect(await readFile(noteAt(fixture.taskPath), "utf8")).toContain("`gamma`: `release`")
+      // The base this call used is still reported to its caller.
+      expect(result.baseRef).toBeUndefined()
+      expect(result.repositories).toEqual([{ name: "gamma", path: join(fixture.taskPath, "gamma"), sourcePath: fixture.repo.gamma, baseRef: "release" }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("writes no per-entry base for a repository that started from the task's", async () => {
+    // The other half of the same rule: a record whose top level says `main` must not
+    // also say `main` on every entry, which would be two places to keep in step and
+    // the only way for them to end up disagreeing.
+    const fixture = await taskFixture()
+    const recorded = await fixture.readMetadata()
+    await writeFile(fixture.metadataPath, `${JSON.stringify({ ...recorded, baseRef: "main" }, null, 2)}\n`, "utf8")
+    try {
+      await addTaskRepositories(addSucceeds(fixture.taskPath).subprocess, {
+        task: TASK,
+        project: PROJECT,
+        tasksRoot: fixture.container,
+        repositories: [fixture.repo.gamma],
+        baseRefs: { gamma: "main" },
+      })
+      const after = await fixture.readMetadata()
+      expect(after.repositories.find((entry) => entry.name === "gamma")).not.toHaveProperty("baseRef")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("accepts a base every repository has", async () => {
     const fixture = await taskFixture()
     // The base resolves in the repository and then names the commit the new branch

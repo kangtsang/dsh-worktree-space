@@ -110,7 +110,7 @@ describe("WorktreesSettings discovery controls", () => {
     await settled()
     const filters = within(screen.getByRole("group", { name: t("filters") }))
     // The same two filters the task view offers, and the fold button shares their run.
-    expect([...filters.getAllByRole("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("collapseAll")])
+    expect([...filters.getAllByRole("button")].map((button) => button.textContent)).toEqual([t("filterAll"), t("filterAttention"), t("expandAll")])
     expect(filters.getByRole("button", { name: t("filterAll") }).getAttribute("aria-pressed")).toBe("true")
     expect(visibleRepositories()).toEqual(["alpha", "beta", "empty"])
     await user.click(filters.getByRole("button", { name: t("filterAttention") }))
@@ -151,6 +151,9 @@ describe("WorktreesSettings discovery controls", () => {
     // The count is asked for against the branch the source checkout sits on, which
     // is where finishing merges; it is what the row reports beside "no changes".
     expect(next.api.status).toHaveBeenCalledWith("/pending", "main-pending", expect.anything())
+    // The count sits on the worktree row inside the repository, so that row is opened
+    // first; every row starts folded.
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleRepository")} pending` }))
     expect(screen.getByText(format(t("pending"), { count: "4" })).closest(".dws-status-pending")).toBeTruthy()
   })
 
@@ -162,29 +165,35 @@ describe("WorktreesSettings discovery controls", () => {
     await ready()
     fireEvent.click(screen.getByRole("button", { name: t("viewTasks") }))
 
-    // In the task view the count rides the task's own row and the repository row under
-    // it, so a task reads as needing attention while collapsed.
+    // In the task view the count rides the task's own row while it is folded, and the
+    // repository row under it once opened, so a task reads as needing attention either way.
+    expect(screen.getAllByText(format(t("pending"), { count: "4" }))).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleTask")} antest` }))
     const badges = screen.getAllByText(format(t("pending"), { count: "4" }))
     expect(badges).toHaveLength(2)
     expect(badges.every(badge => badge.closest(".dws-status-pending"))).toBe(true)
     expect(screen.getAllByText(t("clean")).length).toBeGreaterThan(0)
   })
 
-  it("collapses and expands each repository with accessible state without rescanning", async () => {
+  it("opens and folds each repository with accessible state without rescanning", async () => {
     const next = setup({ repos })
     next.mount()
     await settled()
     const user = userEvent.setup()
-    const collapse = screen.getByRole("button", { name: `${t("toggleRepository")} alpha` })
-    expect(collapse.getAttribute("aria-expanded")).toBe("true")
-    await user.click(collapse)
+    // Folded to begin with: a page of Workspaces stays readable only if none of them
+    // opens onto its repositories on its own.
+    const toggle = () => screen.getByRole("button", { name: `${t("toggleRepository")} alpha` })
+    expect(toggle().getAttribute("aria-expanded")).toBe("false")
     expect(screen.queryByText("task/feature")).toBeNull()
-    expect(screen.getByText("fix/payments")).toBeTruthy()
-    const expand = screen.getByRole("button", { name: `${t("toggleRepository")} alpha` })
-    expect(expand.getAttribute("aria-expanded")).toBe("false")
-    await user.click(expand)
+    expect(screen.queryByText("fix/payments")).toBeNull()
+    await user.click(toggle())
+    expect(toggle().getAttribute("aria-expanded")).toBe("true")
     expect(screen.getByText("task/feature")).toBeTruthy()
-    expect(screen.getByRole("button", { name: `${t("toggleRepository")} alpha` }).getAttribute("aria-expanded")).toBe("true")
+    // Only that row opened: the other repository is still folded.
+    expect(screen.queryByText("fix/payments")).toBeNull()
+    await user.click(toggle())
+    expect(toggle().getAttribute("aria-expanded")).toBe("false")
+    expect(screen.queryByText("task/feature")).toBeNull()
     expect(next.api.scan).toHaveBeenCalledTimes(1)
   })
 

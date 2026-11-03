@@ -11,7 +11,8 @@ import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSes
 import type { ConfigFormLike } from "./PluginConfigCard"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions, SessionTarget } from "@deepseek-ai/dsh-api-session-controller/client"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Select } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
+import { TargetBranchPicker } from "./TargetBranchPicker"
 
 interface ArchiveTaskDialogProps {
   /** Absolute path of the task container to archive. Either entry point knows it. */
@@ -125,16 +126,6 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   const [handoff, setHandoff] = useState<FinishSceneSession[]>(() => readFinishScene(path)?.handoff ?? [])
   const [authorizing, setAuthorizing] = useState(false)
   const [handoffError, setHandoffError] = useState("")
-  /**
-   * Whether the Host's configuration offers the two agent entries.
-   *
-   * Shown until the Host says otherwise, which is the setting's own default: the entries
-   * are the finish this plugin has been shipping, and a profile that would rather do the
-   * commit and the conflict resolution itself turns them off. It governs the entries and
-   * the notice that explains them, and nothing else - a session that was already opened
-   * stays on screen, because that is the state of the work rather than an offer.
-   */
-  const [handoffEntry, setHandoffEntry] = useState(true)
   /**
    * Whether the sessions this dialog opens are opened with full access.
    *
@@ -268,22 +259,19 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
 
   /**
    * What the Host has configured, once it answers: the root archived documents are
-   * filed under together with the directory that may narrow it, and whether the agent
-   * entries are offered at all.
+   * filed under together with the directory that may narrow it.
    *
    * Read rather than assumed, and it arrives after the first paint: the folder the
    * shipped default computes is on screen until then, so the row never shows an empty
    * path while it waits. Both halves of the preference are read together, because the
    * strategy names the root and the directory only narrows it - a directory on its own
    * says nothing about where the documents would land. A Host that answers nothing
-   * leaves that default folder in place, which is the same answer the schema gives, and
-   * leaves the entries shown, which is what the setting defaults to.
+   * leaves that default folder in place, which is the same answer the schema gives.
    */
   useEffect(() => {
     let live = true
     void api.preferences().then((served) => {
       if (!live) return
-      setHandoffEntry(served?.handoffEntry !== "hide")
       // Anything but an explicit `on` is off, which covers an older Host that answers
       // without the field: such a Host opens each session on the boundary that reaches
       // the metadata, and that is what off means here.
@@ -949,43 +937,46 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 ? <span>{entry.target === undefined ? "" : `→ ${entry.target}`}</span>
                 : <>
                   <span aria-hidden="true">→</span>
-                  <Select
-                    className="dws-plan-target"
-                    aria-label={`${t("planTargetLabel")} · ${entry.name}`}
+                  <TargetBranchPicker
+                    label={`${t("planTargetLabel")} · ${entry.name}`}
+                    options={candidates(entry)}
                     // Read-only once the task is finished: the plan stays on screen
                     // as the record of what was done, but nothing here still points
                     // at a task space that no longer exists.
                     disabled={optionsDisabled || result !== null}
                     value={targets[entry.name] ?? entry.target ?? ""}
-                    onChange={(event) => chooseTarget(entry.name, event.target.value)}
-                  >
-                    {candidates(entry).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
-                  </Select>
+                    onChoose={(branch) => chooseTarget(entry.name, branch)}
+                  />
                 </>}
-              {/* Left out rather than printed as a number when the Host could not
-                  count: it omits the field instead of reporting a zero it never
-                  counted, so `String` here would have written "undefined commits"
-                  beside a row whose own error line is what says why. The headline
-                  above still carries a total, because there the Host keeps one. */}
-              {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
-              <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
               {/* Saying it before the merge, not after: a target the source
                   repository is not on is merged in a checkout of its own. */}
               {entry.target !== undefined && entry.target !== entry.checkedOut
                 ? <span className="dws-plan-detour">{t("planTemporaryWorktree")}</span>
                 : null}
               {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
-              {/* Which repository this worktree is a checkout of. It is the half of
-                  the write boundary the narrowest session in the task space cannot
-                  reach on its own, and it is the directory a merge runs in when the
-                  target is not the branch standing here - so it is named next to the
-                  row rather than left to be inferred from the worktree's own name.
-                  Omitted only while the Host cannot say: an empty line would read as
-                  "there is none", which is not what a missing field means. */}
-              {entry.mainRepo === undefined || entry.mainRepo === "" ? null : <span className="dws-plan-source">
-                <span>{t("planSourceRepository")}</span>
-                <code title={slashPath(entry.mainRepo)}>{slashPath(entry.mainRepo)}</code>
-              </span>}
+              {/* The checkout this merge runs in, and what it brings, on one line: the
+                  path first, the counts beside it. They used to be stacked, so every row
+                  spent a line on a count that would have fitted beside the path.
+                  Naming the checkout is not decoration: it is the half of the write
+                  boundary the narrowest session in the task space cannot reach on its
+                  own, and it is the directory a merge runs in when the target is not the
+                  branch standing here - so it is named rather than left to be inferred
+                  from the worktree's own name, and omitted only while the Host cannot
+                  say: an empty line would read as "there is none", which is not what a
+                  missing field means.
+                  The commit count is left out rather than printed as a number when the
+                  Host could not count - it omits the field instead of reporting a zero it
+                  never counted, so `String` here would have written "undefined commits"
+                  beside a row whose own error line is what says why. The headline above
+                  still carries a total, because there the Host keeps one. */}
+              <span className="dws-plan-source-row">
+                {entry.mainRepo === undefined || entry.mainRepo === "" ? null : <span className="dws-plan-source">
+                  <span>{t("planSourceRepository")}</span>
+                  <code title={slashPath(entry.mainRepo)}>{slashPath(entry.mainRepo)}</code>
+                </span>}
+                {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
+                <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
+              </span>
             </li>)}
           </ul> : null}
           {/* What "clean other content" would remove, listed before the choice
@@ -1078,10 +1069,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   than beside the rows it already produced. It is a plain button, without the
                   warning colour or a glyph of its own: handing the work over is not a hazard,
                   and the title above it already says what is waiting. */}
-              {handoffEntry && phase === "commit" && needsCommit.length > 0
+              {phase === "commit" && needsCommit.length > 0
                 ? <Button disabled={authorizing || busy || running} onClick={() => void authorizeCommit()}>{t("finishAuthorizeCommit")}</Button>
                 : null}
-              {handoffEntry && phase === "conflict" && needsConflict.length > 0
+              {phase === "conflict" && needsConflict.length > 0
                 ? <Button disabled={authorizing || busy || running} onClick={() => void authorizeConflict()}>{t("finishAuthorizeConflict")}</Button>
                 : null}
             </div>
@@ -1109,12 +1100,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
             <p className="dws-finish-handoff-access-note">{t(config === undefined ? "handoffAccessNoForm" : "handoffAccessScope")}</p>
             {accessError !== "" ? <p className="dws-finish-handoff-access-note is-error" role="status">{accessError}</p> : null}
             {/* Said before the session exists, because it is what the user has to do once
-                it does: the approval a commit may need is not this dialog's to give. A
-                Host that offers no such entry says the same thing about doing it by hand
-                here, so the line is there either way - the finish stops on this work
-                whether or not an agent may be put on it. */}
+                it does: the approval a commit may need is not this dialog's to give - the
+                finish stops on this work until a session may be put on it. */}
             {phase === "commit"
-              ? <p className="dws-finish-handoff-hint">{t(handoffEntry ? (fullAccess ? "finishCommitFullAccess" : "finishCommitEscalation") : "finishCommitManual")}</p>
+              ? <p className="dws-finish-handoff-hint">{t(fullAccess ? "finishCommitFullAccess" : "finishCommitEscalation")}</p>
               : null}
             {shownHandoff.length > 0 ? <>
               {/* What the sessions are for is said once, not on every row: the job is the
