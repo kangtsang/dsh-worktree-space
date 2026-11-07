@@ -2,24 +2,26 @@
 
 # Worktree Space
 
-**简体中文** · [English](#english) · [更新日志](docs/CHANGELOG.md)
+**简体中文** · [English](#english) · [更新日志](https://github.com/kangtsang/dsh-worktree-space/blob/main/docs/CHANGELOG.md) · [<img src="https://cdn.simpleicons.org/github/6e7781" width="16" height="16" alt="GitHub"> GitHub](https://github.com/kangtsang/dsh-worktree-space)
 
 Worktree Space：一任务一空间，工作多路并行。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。建空间时可以定下**这个任务要不要部署验收**，勾了它，一条通过的冒烟记录就是收尾合并的闸门。任务结束时把任务分支合并回目标分支、移除 worktree，并把空间里遗留的文档归档到指定目录；也可以把未处理的提交和合并冲突交给一个 agent 会话处理。
 
-两条路各有侧重，可以只看其中一条：**在面板上手动点完全程**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[进阶用法](#-进阶用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
+两种使用方式：**在UI界面上使用**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[进阶用法](#-进阶用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 [![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![total downloads](https://img.shields.io/npm/dt/dsh-worktree-space?label=total%20downloads)](https://www.npmjs.com/package/dsh-worktree-space)
 [![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
 [![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
 
+📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV1iM466VEz2)
+
+<img src="docs/img/why-worktree-space.png" alt="Worktree Space使用理由" width="960">
 <img src="docs/img/isolation-model.png" alt="Worktree Space隔离模型" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
-
-📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV14Zxt6tEGb)
 
 ## 📑 目录
 
@@ -244,7 +246,7 @@ worktree 与分支一起，不会留半个任务在那儿。
 
 ### 🗂️ 管理 Worktree Space
 
-<img src="docs/img/manage-worktree-space.png" alt="管理页面：工作区 / Git 仓库 / 任务空间三个视图" width="960">
+<img src="docs/img/manage-worktree-space.png" alt="管理页面：工作区 / Git 仓库 / 任务空间三个视图" width="800">
 
 打开 **管理页面**，两种形态：
 
@@ -566,21 +568,23 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 
 # Worktree Space (English)
 
-**English** · [简体中文](#chinese) · [Changelog](docs/CHANGELOG.md)
+**English** · [简体中文](#chinese) · [Changelog](https://github.com/kangtsang/dsh-worktree-space/blob/main/docs/CHANGELOG.md) · [<img src="https://cdn.simpleicons.org/github/6e7781" width="16" height="16" alt="GitHub"> GitHub](https://github.com/kangtsang/dsh-worktree-space)
 
 Worktree Space: One task, one space — work on parallel tracks. A task that involves one or more Git repositories goes into its own task space directory, where each participating repository gets a worktree on one shared task branch; the task space registers itself as a DSH workspace and sessions start working inside it, so several tasks can run in parallel without interfering with one another. When the space is created you settle **whether this task deploys for acceptance** — tick it, and a passing smoke record becomes the gate the finishing merge has to clear. When a task is finished its branch is merged back into the target branch, the worktrees are removed, and whatever documents were left in the space are filed into a directory you choose; uncommitted work and merge conflicts can instead be handed to an agent session.
 
-The two routes differ in emphasis and you can read only one of them: **clicking through the whole thing on the panel** ([Usage](#-usage)) or **letting an agent orchestrate it with the tools** ([Advanced](#-advanced-letting-an-agent-orchestrate-end-to-end)). The full step-by-step instructions, the failure paths and the error codes live in the [Worktree Space manual](USAGE.md).
+Two ways to use it: **through the UI** ([Usage](#-usage)), or **letting an agent orchestrate it with the tools** ([Advanced](#-advanced-letting-an-agent-orchestrate-end-to-end)). The full step-by-step instructions, the failure paths and the error codes live in the [Worktree Space manual](USAGE.md).
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
 [![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![total downloads](https://img.shields.io/npm/dt/dsh-worktree-space?label=total%20downloads)](https://www.npmjs.com/package/dsh-worktree-space)
 [![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
 [![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
 
 
+<img src="docs/img/why-worktree-space.png" alt="Why use Worktree Space" width="960">
 <img src="docs/img/isolation-model.png" alt="Worktree Space Isolation Model" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
 
@@ -863,7 +867,7 @@ half task is left behind.
 
 ### 🗂️ Manage a Worktree Space
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Workspaces, Git repositories and Task spaces views" width="960">
+<img src="docs/img/manage-worktree-space.png" alt="The management page: Workspaces, Git repositories and Task spaces views" width="800">
 
 Open the **management page** — two ways in:
 

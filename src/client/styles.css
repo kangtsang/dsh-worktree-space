@@ -138,10 +138,6 @@
      to stay out of the heading row's layout, or the pill would sit inside a block box
      and lose its place on the title's baseline. */
   .dws-update-pill-hint { display: inline-flex; align-items: center; flex: none; }
-  /* The Plugins-detail form. It shares a row with the page's own outline buttons, so it
-     matches their height and type rather than the heading row's: 13px is what that row's
-     buttons use, and the padding keeps the capsule the same height as their box. */
-  .dws-update-pill-compact { padding: 4px 10px; font-size: 13px; line-height: 18px; }
   .dws-update-pill-version { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dsw-alias-state-warn-primary); }
   /* The copied state. The label is what changes, so the width would jump when it swaps
      between "新版本" and "已复制" - a fixed minimum keeps the capsule from twitching

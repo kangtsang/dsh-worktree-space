@@ -41,12 +41,7 @@ const COPIED_MS = 1600
  * element. A second button beside the title competes with the title for the reader's
  * attention, and the copy is a convenience for a reader who has already decided.
  */
-/**
- * @param props.compact - the Plugins-detail form: it sits in a row of small outline
- * buttons beside uninstall, so it takes that row's height and type size instead of the
- * heading row's.
- */
-export function UpdatePill({ compact = false }: { compact?: boolean } = {}) {
+export function UpdatePill() {
   const t = useT()
   const newer = useNewerVersion()
   const [copied, setCopied] = useState(false)
@@ -81,7 +76,7 @@ export function UpdatePill({ compact = false }: { compact?: boolean } = {}) {
   return (
     <HoverHint label={tip} className="dws-update-pill-hint" delayMs={80}>
       <a
-        className={compact ? "dws-update-pill dws-update-pill-compact" : "dws-update-pill"}
+        className="dws-update-pill"
         data-copied={copied ? "true" : "false"}
         href={RELEASE_NOTES_URL}
         target="_blank"

@@ -50,7 +50,7 @@ describe("WorktreePlugin compatibility", () => {
 
     // The panel row joins the footer shortcut, and the card that fills the Plugins
     // page's configuration section for this bundle stays either way.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action", "plugins.bundle.config", "plugins.detail.actions"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action", "plugins.bundle.config"])
   })
 
   it("keeps the panel row when the configuration hides the footer shortcut", () => {
@@ -58,7 +58,7 @@ describe("WorktreePlugin compatibility", () => {
     WorktreePlugin.apply(context(registeredSlots, served({ panelEntry: "show", sidebarEntry: "hide" })) as any)
 
     // Hiding a shortcut may not hide the way in: the panel row stays.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config", "plugins.detail.actions"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config"])
   })
 
   it("registers neither entry when the configuration asks for neither, but keeps the page", () => {
@@ -68,16 +68,16 @@ describe("WorktreePlugin compatibility", () => {
     // Both ways in hidden, so neither slot is registered — but the `main` panel is:
     // the row is a preference, the page itself is what the id means, and hiding a row
     // must not leave the shell with a selection it cannot resolve.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config", "plugins.detail.actions"])
+    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config"])
   })
 })
 
-describe("the Plugins-detail capsule registration", () => {
+describe("the Plugins-page registrations", () => {
   /**
    * A list slot takes `id`; a keyed slot takes `key`. Putting a `key` on a list slot is
    * accepted by the register call and then never dispatched - the component simply never
-   * renders, with no error anywhere. That is what happened to this capsule: three builds
-   * were verified against a page that showed nothing.
+   * renders, with no error anywhere. The configuration card is keyed, and this helper
+   * records what each registration actually carried so that mistake stays caught.
    */
   function registrationsOf(name: string) {
     const options: Array<Record<string, unknown>> = []
@@ -99,13 +99,10 @@ describe("the Plugins-detail capsule registration", () => {
     return options.filter((option) => option.name === name)
   }
 
-  it("registers with an id, which is what a list slot dispatches on", () => {
-    const actions = registrationsOf("plugins.detail.actions")
-    expect(actions).toHaveLength(1)
-    expect(actions[0]).toHaveProperty("id")
-    expect(actions[0]).not.toHaveProperty("key")
-    // Stable, and namespaced, so two plugins cannot collide on the same row.
-    expect(String((actions[0] as { id?: unknown }).id)).toContain("dsh-worktree-space")
+  it("adds nothing to the Plugins detail page", () => {
+    // The update pill lives in this plugin's own surfaces; the detail page is the
+    // Host's, and the plugin no longer contributes a row to it.
+    expect(registrationsOf("plugins.detail.actions")).toHaveLength(0)
   })
 
   it("keeps the keyed configuration card on a key, because that slot is keyed", () => {

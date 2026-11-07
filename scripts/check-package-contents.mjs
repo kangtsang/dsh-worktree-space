@@ -101,6 +101,7 @@ const expected = [
   "docs/img/isolation-model.png",
   "docs/img/manage-worktree-space.png",
   "docs/img/user-story-flow.png",
+  "docs/img/why-worktree-space.png",
   "docs/img/new-worktree-space.png",
   "docs/store-evidence.md",
   "docs/store-evidence.json",
