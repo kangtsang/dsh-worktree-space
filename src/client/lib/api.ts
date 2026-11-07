@@ -17,6 +17,7 @@ import type {
   TaskPreference,
   TaskRootSuggestion,
   WorktreeStatus,
+  UpstreamStatus,
 } from "./types"
 
 export const CHANNEL = "/api"
@@ -114,6 +115,21 @@ export function createWorktreeApi(connection: ConnectionService) {
      * merges - and is optional: without it the answer carries no commit count.
      */
     status: (path: string, target?: string, signal?: AbortSignal) => read<WorktreeStatus>("worktree.status", target ? { path, target } : { path }, signal),
+
+    /**
+     * How a source checkout compares with its remote-tracking branch.
+     *
+     * A separate question from {@link status}: a task's worktree is measured against
+     * the local branch a finish would merge into, while a source repository is
+     * measured against what its remote already has. A repository tracked by nobody
+     * answers `upstream: null`, which is ordinary rather than a failure.
+     *
+     * `fetch` asks the Host to refresh the remote-tracking refs first, which costs a
+     * network round trip. Leave it off for the answer the row shows on arrival, and
+     * ask again with it once the reader is already looking at numbers.
+     */
+    upstream: (path: string, signal?: AbortSignal, fetch = false) =>
+      read<UpstreamStatus>("worktree.upstream", fetch ? { path, fetch: true } : { path }, signal),
 
     /** Whether a workspace can hold a task, and which repositories it would span. */
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),

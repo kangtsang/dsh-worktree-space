@@ -29,17 +29,6 @@ const CREATE_PATHS = [
   "M12 5v14",
 ]
 
-/**
- * Lucide's `folder-open`, for the item that shows a Workspace in the file manager.
- *
- * A folder rather than an arrow-out-of-a-box: the row sits next to "New Worktree
- * Space", whose glyph is a folder's sibling, and the two are about the same thing -
- * the directory itself - which keeps them readable as a pair.
- */
-const OPEN_PATHS = [
-  "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2",
-]
-
 /** One Lucide glyph as an SVG element string, stroked in the current colour. */
 const iconSvg = (paths: string[]) => `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="${VIEW_BOX}" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths.map((d) => `<path d="${d}" stroke="currentColor" stroke-width="${STROKE}"/>`).join("")}</svg>`
 
@@ -48,9 +37,6 @@ export const archiveIconSvg = iconSvg(ARCHIVE_PATHS)
 
 /** Lucide's `plus`, for the item that starts a task space. */
 export const createIconSvg = iconSvg(CREATE_PATHS)
-
-/** Lucide's `folder-open`, for the item that shows a directory in the file manager. */
-export const openFolderIconSvg = iconSvg(OPEN_PATHS)
 
 /**
  * The glyph for an IDE entry: Lucide's `code-xml`, a pair of angle brackets.

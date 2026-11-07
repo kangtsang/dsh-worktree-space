@@ -1273,14 +1273,18 @@ describe("finishing a task", () => {
     expect(rows[0].querySelector(".dws-plan-source")?.textContent).toContain(t("planSourceRepository"))
     expect(rows[2].querySelector(".dws-plan-source")).toBeNull()
     expect(document.querySelectorAll(".dws-plan-source code")).toHaveLength(2)
-    // How far ahead the merge is sits on the same line as the checkout it comes from:
-    // the path first, the counts beside it, rather than a count on a line of its own.
+    // The counts answer a question about the merge, so they sit on the branch line
+    // above the checkout - not beside the source repository, which names a directory.
     const first = rows[0].textContent ?? ""
-    expect(first.indexOf(t("planSourceRepository"))).toBeLessThan(first.indexOf(format(t("planCommits"), { count: "1" })))
+    expect(first.indexOf(t("planSourceRepository"))).toBeGreaterThan(first.indexOf(format(t("planCommits"), { count: "1" })))
     const sourceRow = rows[0].querySelector(".dws-plan-source-row")!
     expect(sourceRow.querySelector(".dws-plan-source")).not.toBeNull()
-    expect(sourceRow.textContent).toContain(format(t("planCommits"), { count: "1" }))
-    expect(sourceRow.textContent).toContain(t("clean"))
+    // Nothing but the path is down here.
+    expect(sourceRow.textContent).not.toContain(format(t("planCommits"), { count: "1" }))
+    expect(sourceRow.textContent).not.toContain(t("clean"))
+    // And the row as a whole still carries both, so the move lost nothing.
+    expect(first).toContain(format(t("planCommits"), { count: "1" }))
+    expect(first).toContain(t("clean"))
   })
 
   it("turns red when abandoning a branch that still has commits", async () => {

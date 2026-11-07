@@ -232,7 +232,11 @@ describe("WorktreesSettings", () => {
     await waitFor(() => expect(screen.getByText("feature")).toBeTruthy())
     // A worktree row is informational: its controls live on the repository header above it.
     expect(document.querySelectorAll(".dws-worktree button")).toHaveLength(0)
-    expect([...document.querySelectorAll(".dws-worktree-title")].some(node => node.textContent?.includes("main"))).toBe(false)
+    // The main worktree is not a row of its own - it is the base every row here is
+    // measured against, so its path never appears. Its branch name still does, as
+    // the base branch each row names.
+    expect([...document.querySelectorAll(".dws-worktree-title")].some(node => node.textContent?.includes(t("baseBranchLabel")))).toBe(true)
+    expect(document.querySelectorAll(".dws-worktree")).toHaveLength(1)
     expect(next.workspaces.create).not.toHaveBeenCalled()
   })
 

@@ -9,8 +9,12 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 两条路各有侧重，可以只看其中一条：**在面板上手动点完全程**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[进阶用法](#-进阶用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
-![License](https://img.shields.io/badge/license-MIT-22c55e)
+[![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
+[![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
 
 <img src="docs/img/isolation-model.png" alt="Worktree Space隔离模型" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
@@ -569,8 +573,13 @@ Worktree Space: One task, one space — work on parallel tracks. A task that inv
 The two routes differ in emphasis and you can read only one of them: **clicking through the whole thing on the panel** ([Usage](#-usage)) or **letting an agent orchestrate it with the tools** ([Advanced](#-advanced-letting-an-agent-orchestrate-end-to-end)). The full step-by-step instructions, the failure paths and the error codes live in the [Worktree Space manual](USAGE.md).
 
 ![DeepSeek Harness Plugin](https://img.shields.io/badge/DeepSeek%20Harness-Plugin-7c5cff)
-![License](https://img.shields.io/badge/license-MIT-22c55e)
+[![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
+[![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
+[![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
+
 
 <img src="docs/img/isolation-model.png" alt="Worktree Space Isolation Model" width="960">
 <img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">

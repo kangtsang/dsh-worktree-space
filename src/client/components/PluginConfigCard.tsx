@@ -11,6 +11,16 @@ const DEPTHS = [1, 2, 3, 4, 5]
 /** Directory caps the control offers. */
 const DIRECTORY_LIMITS = [500, 1000, 2000, 3000, 5000, 10000]
 
+/**
+ * The fetch timeout values a user can pick, in seconds.
+ *
+ * A list rather than a free number: the setting is a judgement about how slow a
+ * remote is, and the difference between 7 and 8 seconds is not one anybody makes on
+ * purpose. The Host's schema accepts anything in range, so a hand-written value
+ * still works - this is only what the card offers.
+ */
+const FETCH_TIMEOUTS = [3, 5, 8, 15, 30, 60]
+
 /** One choice in a row: either a copy key or a literal shown as it stands. */
 interface Choice {
   value: string
@@ -26,8 +36,18 @@ interface ChoiceField {
   fallback: string
   /** Numeric fields are written as numbers: the Host validates them against `z.number()`. */
   numeric?: boolean
+  /** Boolean fields are written as `true`/`false`; the two choices spell `on`/`off`. */
+  boolean?: boolean
   /** What the setting is for, shown under the label in the plugin's own grey. */
   hint?: string
+  /**
+   * Whether this row is worth showing under the values chosen so far.
+   *
+   * Used for a setting that only means something while another is on - a fetch
+   * timeout under a fetch that is switched off is a question with no answer, and
+   * leaving it on screen invites the reader to wonder what it times.
+   */
+  shownWhen?: (chosen: Record<string, string>) => boolean
   choices: Choice[]
 }
 
@@ -189,6 +209,25 @@ const fieldsFor = (t: (key: string) => string): Field[] => [
     numeric: true,
     hint: t("maxScanDirectoriesHint"),
     choices: DIRECTORY_LIMITS.map((limit) => ({ value: String(limit), text: String(limit) })),
+  },
+  {
+    field: "autoFetchRemote",
+    label: t("autoFetchRemote"),
+    fallback: "on",
+    boolean: true,
+    hint: t("autoFetchRemoteHint"),
+    choices: [{ value: "on", key: "configOn" }, { value: "off", key: "configOff" }],
+  },
+  {
+    // Only meaningful while the fetch above is on, so it is hidden otherwise - a
+    // timeout for something that never runs is a question with no answer.
+    field: "fetchTimeoutSeconds",
+    label: t("fetchTimeoutSeconds"),
+    fallback: "8",
+    numeric: true,
+    hint: t("fetchTimeoutSecondsHint"),
+    choices: FETCH_TIMEOUTS.map((seconds) => ({ value: String(seconds), text: format(t("fetchTimeoutOption"), { seconds: String(seconds) }) })),
+    shownWhen: (chosen) => (chosen.autoFetchRemote ?? "on") === "on",
   },
   {
     // The one row that is neither a choice nor a single string. A list of
@@ -726,18 +765,27 @@ function TaskModelRow({ provider, model, catalog, loading, unavailable, onRetry,
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
+  for (const field of ["panelEntry", "sidebarEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "autoFetchRemote", "fetchTimeoutSeconds", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
   return values
 }
 
-/** The served section as strings: the Host resolves numbers and the copy shows text. */
+/**
+ * The served section as strings: the Host resolves numbers and the copy shows text.
+ *
+ * A boolean is spelled `on`/`off` rather than `true`/`false`, because the switch it
+ * drives offers exactly those two words. Left as `String(value)` the control would
+ * find no matching choice and grow a fifth pill reading "true".
+ */
 function textOf(section: unknown): Record<string, string> {
   if (section === null || typeof section !== "object") return {}
   const entries = Object.entries(section as Record<string, unknown>)
-  return Object.fromEntries(entries.map(([key, value]) => [key, value === undefined || value === null ? "" : String(value)]))
+  return Object.fromEntries(entries.map(([key, value]) => [
+    key,
+    value === undefined || value === null ? "" : typeof value === "boolean" ? (value ? "on" : "off") : String(value),
+  ]))
 }
 
 /**
@@ -873,7 +921,7 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
     }
   }, [open])
   if (form === undefined) return null
-  const pick = (field: string, choice: Choice, numeric?: boolean) => {
+  const pick = (field: string, choice: Choice, numeric?: boolean, boolean?: boolean) => {
     setOpen(null)
     // Shown at once, and the sidebar follows through the same store.
     setPreview(field, choice.value)
@@ -883,7 +931,7 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
     // handled by the callback below, so without the `catch` a dropped connection
     // left the pending value set for good: this row and the sidebar's entry-visibility
     // both read it, and nothing on screen said the setting was never in force.
-    void form.set(field, numeric ? Number(choice.value) : choice.value).then((accepted) => {
+    void form.set(field, numeric ? Number(choice.value) : boolean ? choice.value === "on" : choice.value).then((accepted) => {
       if (accepted) return
       setPreview(field, undefined)
       setNotice(t("configNotSaved"))
@@ -899,9 +947,19 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
   // like a setting being ignored.
   const strategy = chosen[ARCHIVE_STRATEGY_FIELD] ?? served[ARCHIVE_STRATEGY_FIELD] ?? ARCHIVE_STRATEGY_FALLBACK
   const tasksRootStrategy = chosen[TASKS_ROOT_STRATEGY_FIELD] ?? served[TASKS_ROOT_STRATEGY_FIELD] ?? TASKS_ROOT_STRATEGY_FALLBACK
-  const shown = (field: Field) => field.field === "archiveDocumentsDirectory"
-    ? strategy === "custom"
-    : field.field === TASKS_ROOT_DIRECTORY_FIELD ? tasksRootStrategy === "custom" : true
+  const shown = (field: Field) => {
+    // A row that names its own condition is answered by that condition, with the
+    // pending choice first so it appears the moment the switch is flipped. Only a
+    // choice row can carry one - a text or list row has no dependent setting.
+    if (field.kind !== "text" && field.kind !== "list" && field.shownWhen !== undefined) {
+      const pending: Record<string, string> = {}
+      for (const [key, value] of Object.entries({ ...served, ...chosen })) pending[key] = String(value)
+      return field.shownWhen(pending)
+    }
+    return field.field === "archiveDocumentsDirectory"
+      ? strategy === "custom"
+      : field.field === TASKS_ROOT_DIRECTORY_FIELD ? tasksRootStrategy === "custom" : true
+  }
   return <div className="dws-plugin-config" ref={card}>
     {notice === null ? null : <div className="dws-config-toast" role="status">{notice}</div>}
     {fieldsFor(t).filter(shown).map((field) => {
@@ -912,6 +970,7 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
         return <ListFieldRow key={field.field} field={field.field} removedField={REMOVED_SCAN_DIRECTORIES_FIELD} label={field.label} hint={field.hint} builtIn={field.builtIn} form={form} notify={setNotice} />
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
+      const fieldBoolean = field.boolean === true
       const current = chosen[name] ?? served[name] ?? fallback
       // A value in force that the list does not offer joins it, so the control
       // shows what is set rather than the nearest preset.
@@ -930,7 +989,7 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
           {open === name ? <div className="dws-plugin-config-menu" role="menu">
             {all.map((choice) => <button type="button" role="menuitem" key={choice.value} className="dws-plugin-config-item"
               data-selected={choice.value === current ? "true" : "false"}
-              onClick={() => pick(name, choice, numeric)}>
+              onClick={() => pick(name, choice, numeric, fieldBoolean)}>
               <span className="dws-plugin-config-item-label">{labelOf(choice)}</span>
               {choice.value === current ? <Check size={16} strokeWidth={1} aria-hidden="true" /> : null}
             </button>)}

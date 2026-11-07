@@ -15,7 +15,6 @@ const zh: Dict = {
   workspaceCannot: "没有 Git 仓库，无法创建任务空间",
   workspaceUnreadable: "无法检查",
   workspaceCreate: "新建 Worktree Space",
-  workspaceReveal: "在文件管理器中打开",
   workspaceRevealIn: "用 {ide} 打开",
   workspaceOpenIn: "在应用中打开",
   workspaceOpenInApp: "用 {app} 打开",
@@ -52,10 +51,26 @@ const zh: Dict = {
   // the one the repository has checked out, as opposed to the branches its
   // worktrees carry.
   currentBranchLabel: "当前分支",
+  branchLabel: "分支",
   // A task's branch is not a repository's checked-out branch: it is the one the
   // task was filed under, and every repository in the task carries it. Labelling it
   // "current" would say it belongs to one checkout, which is a different thing.
   taskBranchLabel: "任务分支",
+  baseBranchLabel: "基线分支",
+  remoteBranchLabel: "远端分支",
+  noRemoteBranch: "未跟踪远端",
+  aheadLabel: "领先",
+  behindLabel: "落后",
+  aheadHint: "任务分支领先基线分支 {count} 个提交",
+  behindHint: "基线分支领先任务分支 {count} 个提交",
+  upstreamAheadHint: "当前分支领先远端跟踪分支 {count} 个提交",
+  upstreamBehindHint: "远端跟踪分支领先当前分支 {count} 个提交",
+  upstreamCommittedHint: "当前分支相对远端跟踪分支新增 {insertions} 行、删除 {deletions} 行",
+  upstreamWorkingHint: "工作区里尚未提交的部分：新增 {insertions} 行、删除 {deletions} 行",
+  committedChangesLabel: "已提交变更",
+  workingChangesLabel: "未提交变更",
+  committedChangesHint: "任务分支相对基线分支累计新增 {insertions} 行、删除 {deletions} 行",
+  workingChangesHint: "工作区里尚未提交的部分：新增 {insertions} 行、删除 {deletions} 行",
   deliveryGateContinue: "继续",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -305,6 +320,20 @@ const zh: Dict = {
   entrySidebarLabel: "侧边栏底部快捷入口",
   configShow: "显示",
   configHide: "隐藏",
+  configOn: "开启",
+  configOff: "关闭",
+  autoFetchRemote: "自动拉取远端分支",
+  autoFetchRemoteHint: "打开页面时先对该仓库执行 git fetch，再比较领先/落后与增删行数，这样数字反映远端此刻的状态；关闭后只与本地已有的远端跟踪引用比较。fetch 只更新远端跟踪引用，不改动工作区和本地分支。",
+  fetchTimeoutSeconds: "拉取超时",
+  fetchTimeoutSecondsHint: "单个仓库的 fetch 超过这个时间就放弃，改用本地已有的远端引用比较；各仓库独立计时，一个仓库超时不影响其它仓库。",
+  fetchTimeoutOption: "{seconds} 秒",
+  upstreamNotFetched: "未拉取",
+  upstreamFetchOff: "自动拉取已关闭，显示的是本地已有的远端引用",
+  upstreamFetchFailedLabel: "拉取失败",
+  fetchFailedUnreachable: "无法连接远端，显示的是本地已有的远端引用",
+  fetchFailedDenied: "没有被远端接受的凭据，显示的是本地已有的远端引用",
+  fetchFailedTimeout: "拉取超时，显示的是本地已有的远端引用",
+  fetchFailedGeneric: "没能刷新远端引用，显示的是本地已有的远端引用",
   configSaved: "设置已更新",
   configNotSaved: "宿主未接受该设置",
   configSave: "保存",
@@ -355,6 +384,7 @@ const zh: Dict = {
   viewTasksDescription: "展示任务空间（Worktree Space）列表和状态，可选择任务空间结束任务。",
   worktrees: "Worktree Space",
   feedbackLink: "使用反馈",
+  videoLink: "视频介绍",
 
   // ── F1 · 通用按钮与状态 ──────────────────────────────────────
   retry: "重试",
@@ -455,7 +485,6 @@ const en: Dict = {
   workspaceCannot: "No Git repository here, so no task space can be created",
   workspaceUnreadable: "Could not check",
   workspaceCreate: "New Worktree Space",
-  workspaceReveal: "Show in file manager",
   workspaceRevealIn: "Open in {ide}",
   workspaceOpenIn: "Open in app",
   workspaceOpenInApp: "Open in {app}",
@@ -488,7 +517,23 @@ const en: Dict = {
   worktreeCountHint: "{count} worktrees",
   summaryTasksHint: "{tasks} task spaces and {worktrees} worktrees in total.",
   currentBranchLabel: "Current branch",
+  branchLabel: "Branch",
   taskBranchLabel: "Task branch",
+  baseBranchLabel: "Base branch",
+  remoteBranchLabel: "Remote branch",
+  noRemoteBranch: "No upstream",
+  aheadLabel: "Ahead",
+  behindLabel: "Behind",
+  aheadHint: "{count} commits ahead of the base branch",
+  behindHint: "{count} commits behind the base branch",
+  upstreamAheadHint: "{count} commits ahead of the remote-tracking branch",
+  upstreamBehindHint: "{count} commits behind the remote-tracking branch",
+  upstreamCommittedHint: "This branch adds {insertions} lines and removes {deletions} against the remote-tracking branch",
+  upstreamWorkingHint: "Not committed yet: {insertions} lines added, {deletions} removed",
+  committedChangesLabel: "Committed changes",
+  workingChangesLabel: "Uncommitted changes",
+  committedChangesHint: "The task branch adds {insertions} lines and removes {deletions} against the base branch",
+  workingChangesHint: "Not committed yet: {insertions} lines added, {deletions} removed",
   deliveryGateContinue: "Continue",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -735,6 +780,20 @@ const en: Dict = {
   entrySidebarLabel: "Shortcut in the sidebar footer",
   configShow: "Show",
   configHide: "Hide",
+  configOn: "On",
+  configOff: "Off",
+  autoFetchRemote: "Fetch remotes automatically",
+  autoFetchRemoteHint: "Opening the page runs git fetch in each repository before comparing ahead/behind and line counts, so the numbers reflect what the remote has right now; off compares against the remote-tracking refs already on disk. A fetch updates those refs only - it never touches the working tree or a local branch.",
+  fetchTimeoutSeconds: "Fetch timeout",
+  fetchTimeoutSecondsHint: "A repository's fetch is abandoned after this long and the comparison falls back to the local refs. Each repository is timed on its own, so one slow remote does not hold up the others.",
+  fetchTimeoutOption: "{seconds} s",
+  upstreamNotFetched: "not fetched",
+  upstreamFetchOff: "Fetching is off, so this compares against the remote refs already on disk",
+  upstreamFetchFailedLabel: "fetch failed",
+  fetchFailedUnreachable: "Could not reach the remote; these are the remote refs already on disk",
+  fetchFailedDenied: "The remote refused the credentials; these are the remote refs already on disk",
+  fetchFailedTimeout: "The fetch timed out; these are the remote refs already on disk",
+  fetchFailedGeneric: "Could not refresh the remote refs; these are the ones already on disk",
   configSaved: "Setting updated",
   configNotSaved: "The host refused that setting",
   configSave: "Save",
@@ -785,6 +844,7 @@ const en: Dict = {
   viewTasksDescription: "Lists the task spaces (Worktree Spaces) and their status; select one to finish the task.",
   worktrees: "Worktree Space",
   feedbackLink: "Feedback",
+  videoLink: "Video introduction",
 
   // ── F1 · 通用按钮与状态 ──────────────────────────────────────
   retry: "Retry",
@@ -915,6 +975,32 @@ const getSnapshot = () => {
 export function useT() {
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
   return t
+}
+
+/**
+ * The language the interface is currently in.
+ *
+ * Read for the one thing a translated string cannot express: whether a piece of
+ * content exists at all. The dictionaries hold both languages, so a key resolves
+ * either way - but the introduction video is only in Chinese, and offering it in
+ * the English interface would hand a reader a video they cannot follow.
+ *
+ * Measured against what the locale service reports rather than against which
+ * dictionary `t` happened to reach for: the two agree today, and asking the
+ * service is the one that keeps agreeing if a third language is ever added.
+ * @returns the current language tag, `"zh"` when nothing reports one.
+ */
+export function useLanguage(): string {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const reported = snapshot && typeof snapshot === "object"
+    ? (snapshot as { language?: unknown; locale?: unknown }).language ?? (snapshot as { locale?: unknown }).locale
+    : snapshot
+  return typeof reported === "string" && reported !== "" ? reported.toLowerCase() : "zh"
+}
+
+/** Whether a language tag names Chinese, which is the only one with videos here. */
+export function isChinese(language: string) {
+  return language.startsWith("zh")
 }
 
 export function format(template: string, values: Record<string, string>) {

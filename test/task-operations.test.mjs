@@ -2303,6 +2303,74 @@ describe("finishTask", () => {
     }
   })
 
+  it("stands the merge in the worktree when the target moved past the rehearsal", async () => {
+    // Rehearsal and the real merge are two commands. A commit that lands on the target
+    // between them is in neither the rehearsal nor its answer, so the real merge conflicts
+    // on work nobody rehearsed: git aborts it, and without the retry below the repository
+    // comes back as a plain failure with no conflict to hand an agent.
+    const fixture = await taskFixture()
+    const alphaPath = join(fixture.taskPath, "alpha")
+    const standing = new Set()
+    let rehearsals = 0
+    const { subprocess, calls } = subprocessMock({
+      ...fixture.handlers,
+      // The target is not contained in the task branch, so both worktrees rehearse.
+      "merge-base --is-ancestor main task/login": { exitCode: 1 },
+      "rev-parse HEAD": "bbbb",
+      // alpha: the first rehearsal is clean, and the second one - made after the real
+      // merge failed - is the conflict this test is about. beta rehearses as usual.
+      "merge --no-ff --no-edit main": ({ cwd }) => {
+        if (!fixture.worktrees.has(cwd) || cwd !== alphaPath) return ""
+        rehearsals += 1
+        if (rehearsals === 1) return ""
+        standing.add(cwd)
+        return { exitCode: 1, stderr: "CONFLICT (content): Merge conflict in src/a.ts\n" }
+      },
+      "reset --hard bbbb": "",
+      // The real merge: alpha conflicts on the commit that arrived after the rehearsal,
+      // beta goes through.
+      "merge --no-ff --no-edit task/login": ({ cwd }) => (cwd === fixture.mainRepos.alpha
+        ? { exitCode: 1, stderr: "CONFLICT (content): Merge conflict in src/a.ts\n" }
+        : ""),
+      "merge --abort": "",
+      // What git answers: the aborted real merge left nothing behind, and the retried
+      // rehearsal leaves its own merge standing in the worktree.
+      "rev-parse --verify --quiet MERGE_HEAD": ({ cwd }) => (standing.has(cwd) ? "" : { exitCode: 1 }),
+      "diff --name-only -z --diff-filter=U": ({ cwd }) => (standing.has(cwd) ? "src/a.ts\0" : ""),
+      "worktree remove": ({ args }) => {
+        rmSync(args[2], { recursive: true, force: true })
+        return ""
+      },
+    })
+    try {
+      const result = await fixture.finish(subprocess, { task: "login", merge: true, target: "main" })
+
+      expect(result.failed).toBe(true)
+      const alpha = result.repositories.find((entry) => entry.name === "alpha")
+      // The same shape a rehearsal conflict has: a standing merge in the task's own
+      // worktree, its files, and nothing removed - which is what lets the panel offer the
+      // handoff instead of asking the user to finish again and hope.
+      expect(alpha).toMatchObject({
+        merged: false,
+        removed: false,
+        conflict: true,
+        mergeInProgress: true,
+        mergeSite: alphaPath,
+        conflictedFiles: ["src/a.ts"],
+      })
+      expect(alpha.error).toMatch(/CONFLICT/)
+      // The retry came after the real merge failed, not instead of it.
+      const realMerge = calls.findIndex((call) => call.cwd === fixture.mainRepos.alpha && call.key === "merge --no-ff --no-edit task/login")
+      const retried = calls.findIndex((call, index) => index > realMerge && call.cwd === alphaPath && call.key === "merge --no-ff --no-edit main")
+      expect(realMerge).toBeGreaterThan(-1)
+      expect(retried).toBeGreaterThan(realMerge)
+      // And the repository that lost nothing still went through.
+      expect(result.repositories.find((entry) => entry.name === "beta")).toMatchObject({ merged: true, removed: true })
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("merges a branch whose conflicted merge an agent resolved and committed", async () => {
     const fixture = await taskFixture()
     const { subprocess, keys } = subprocessMock({

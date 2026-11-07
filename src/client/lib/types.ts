@@ -18,6 +18,12 @@ export interface Worktree {
   changedFiles?: number
   /** Commits on this worktree's HEAD that the merge target does not have yet. */
   commits?: number
+  /** Commits the merge target has that this worktree does not. */
+  behind?: number
+  /** Lines the commits ahead of the target add and remove. */
+  committedChanges?: LineChanges
+  /** Lines the working tree changes add and remove, uncommitted. */
+  workingChanges?: LineChanges
   statusError?: string
   /**
    * The page is reading this row's status right now, so there is no answer to show
@@ -33,7 +39,57 @@ export interface WorktreeStatus {
   changedFiles: number
   /** Absent when no target was named, or git could not resolve the one named. */
   commits?: number
+  /** Commits the named target has that this worktree does not. */
+  behind?: number
+  /** Lines the commits ahead of the target add and remove; absent without a target. */
+  committedChanges?: LineChanges
+  /** Lines the working tree changes add and remove, uncommitted. */
+  workingChanges?: LineChanges
   output: string
+}
+
+/**
+ * How a source checkout compares with its remote-tracking branch.
+ *
+ * `upstream` is null when the branch tracks nothing - an ordinary state for a local
+ * branch, and one that has to be distinguishable from "nothing has changed".
+ */
+export interface UpstreamStatus {
+  upstream: string | null
+  /**
+   * Whether this answer came after a successful fetch, so the numbers are against
+   * what the remote had a moment ago rather than against the last fetch.
+   */
+  fetched?: boolean
+  /**
+   * Whether the configuration asked for a fetch at all. `false` with `fetched: false`
+   * is the reader's own choice, not a fault - and the two have to look different.
+   */
+  fetchEnabled?: boolean
+  /**
+   * Present only when a fetch was asked for and succeeded: whether it moved any
+   * remote-tracking ref. `false` means the numbers on screen already describe the
+   * remote, so a repaint would change nothing.
+   */
+  changed?: boolean
+  /** Why the fetch did not happen, when it was tried and failed or timed out. */
+  fetchError?: string
+  commits?: number
+  behind?: number
+  committedChanges?: LineChanges
+  workingChanges?: LineChanges
+}
+
+/**
+ * How many lines a set of changes adds and removes.
+ *
+ * Two numbers rather than a preformatted string: the panel colours them separately
+ * (green for what arrives, red for what goes), and a string would have had to be
+ * parsed back apart to do it.
+ */
+export interface LineChanges {
+  insertions: number
+  deletions: number
 }
 
 /**

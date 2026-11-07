@@ -420,6 +420,57 @@ async function mergeIntoBranch(subprocess, mainRepo, branch, target) {
 
 
 /**
+ * Stand a merge in the task worktree when the target moved under the finish.
+ *
+ * The finish rehearses a merge before it makes one: the target is merged into the task
+ * branch first, so a conflict is raised where an agent can resolve it, and the final merge
+ * into the source repository is expected to be a formality. Rehearsal and merge are two
+ * commands rather than one, so a commit that lands on the target between them can make the
+ * final merge conflict on work nobody rehearsed. Git aborts that one (`mergeIntoBranch`
+ * does), which leaves nothing standing to hand over - and the finish would report the
+ * repository as a plain failure, with no conflict for the panel to offer an agent on.
+ *
+ * So the same merge is made once more in the task's own worktree, and left standing if it
+ * conflicts: the finish then answers with the conflict it is, at the site the finish is
+ * meant to resolve conflicts in, and the retry the user would otherwise have to make is
+ * the one that just happened.
+ *
+ * Only when the target has moved past the branch since the rehearsal, and only after the
+ * two checks above found nothing standing. A clean retry is undone and the caller's failure
+ * stands, because that failure was something else - a lock, a checkout that moved - and
+ * inventing a conflict would send the reader after markers that do not exist.
+ * @param subprocess - the profile's subprocess service.
+ * @param worktreePath - the task's own checkout, where a conflict belongs.
+ * @param branch - the task branch, what the target is merged into.
+ * @param target - the branch the failed final merge was aimed at.
+ * @returns whether a merge was left standing in the worktree.
+ */
+async function standTheMergeInTheWorktree(subprocess, worktreePath, branch, target) {
+  if (typeof target !== 'string' || target === '') return false
+  if (await gitSucceeded(subprocess, worktreePath, ['merge-base', '--is-ancestor', target, branch])) return false
+  let base
+  try {
+    base = await runGit(subprocess, worktreePath, ['rev-parse', 'HEAD'])
+  } catch {
+    return false
+  }
+  try {
+    await runGit(subprocess, worktreePath, ['merge', '--no-ff', '--no-edit', target])
+  } catch {
+    // Left standing on purpose: unresolved, at the site the panel hands an agent.
+    if (await mergeInProgress(subprocess, worktreePath)) return true
+    await gitSucceeded(subprocess, worktreePath, ['merge', '--abort'])
+    return false
+  }
+  // Clean, so the target moving was not what stopped the final merge. The rehearsal is not
+  // this side's to keep - it would leave a merge commit in the branch ahead of the one the
+  // finish records - so it is undone and the caller's own failure stands.
+  await gitSucceeded(subprocess, worktreePath, ['reset', '--hard', base])
+  return false
+}
+
+
+/**
  * Record what a plan or a finish could not do.
  *
  * Both carry on past a repository that stopped and report it in that
@@ -1337,9 +1388,18 @@ async function finishTaskLocked(subprocess, options) {
         // source checkout is the user's own and `mergeIntoBranch` refuses that as E5004
         // above, but asking here costs one `rev-parse` and keeps this answer the same
         // whichever path reached it.
-        const standingInWorktree = !dirtyCheckout && await mergeInProgress(subprocess, worktreePath)
-        const standingInMain = !dirtyCheckout && !standingInWorktree && mainRepo !== ''
+        let standingInWorktree = !dirtyCheckout && await mergeInProgress(subprocess, worktreePath)
+        let standingInMain = !dirtyCheckout && !standingInWorktree && mainRepo !== ''
           && await mergeInProgress(subprocess, mainRepo)
+        // Nothing standing and the target has moved past the branch: this failure is the
+        // one conflict the rehearsal could not have seen, made while the final merge was
+        // being started. Making that merge again in the worktree - and leaving it standing
+        // - is what turns a plain failure into the conflict it is, with the merge at the
+        // site an agent resolves conflicts in.
+        if (!dirtyCheckout && !standingInWorktree && !standingInMain
+          && await standTheMergeInTheWorktree(subprocess, worktreePath, branch, outcome.target)) {
+          standingInWorktree = true
+        }
         outcome.mergeInProgress = standingInWorktree || standingInMain
         outcome.conflict = outcome.mergeInProgress
         if (outcome.mergeInProgress) {
@@ -1353,9 +1413,11 @@ async function finishTaskLocked(subprocess, options) {
         // aborted where it ran (`mergeIntoBranch` aborts its own merge in the source
         // checkout, and drops the temporary worktree it made for any other target).
         //
-        // An `merge --abort` here would therefore only ever hit a checkout where this
-        // call started nothing - and a checkout where the user has a merge of their own
-        // standing is exactly such a checkout. Aborting that one discards a resolution
+        // The one merge this catch starts is the retried rehearsal above, and it is left
+        // standing on purpose - that is the state being reported. Nothing else here is
+        // aborted: an `merge --abort` at this point would only ever hit a checkout where
+        // this call started nothing - and a checkout where the user has a merge of their
+        // own standing is exactly such a checkout. Aborting that one discards a resolution
         // they may have written and staged by hand, with no reflog entry and no stash
         // behind it. This used to be unconditional, and it was the one irreversible loss
         // in this file.

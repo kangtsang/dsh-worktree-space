@@ -27,7 +27,7 @@ import { createWorktreeApi } from "./lib/api"
 import { previewValue, subscribePreview } from "./lib/config-preview"
 import { installLocale, NS, t } from "./lib/i18n"
 import { alertIconSvg, closeIconSvg } from "./lib/menu-icons"
-import { type OpenCapability, openDirectoryWith, probeOpening, revealDirectory } from "./lib/open-in-app"
+import { type OpenCapability, openDirectoryWith, probeOpening } from "./lib/open-in-app"
 import { canPickDirectory, pickDirectory } from "./lib/directory-picker"
 import { cleanPath } from "./lib/paths"
 import type { SourceRootClassification, Workspace } from "./lib/types"
@@ -108,7 +108,7 @@ export const WorktreePlugin = {
   // `remote.directoryPicker` readable. Declared rather than read opportunistically:
   // cordis throws on a service that is not injected, and the guarded read that swallowed
   // that throw made every host capability answer "unavailable" - which is how the
-  // workspace menu came out with no reveal entry on a machine that has one.
+  // workspace menu came out with no "open in application" row on a machine that has one.
   inject: ["slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout", "remote", "remote.session", "remote.directoryPicker"],
   apply(ctx: WorktreeClientContext) {
     ctx.effect(installStyles, "dsh-worktree-space styles")
@@ -236,20 +236,11 @@ export const WorktreePlugin = {
         void probeOpening(ctx).then((answer) => { if (live) setCapability(answer) })
         return () => { live = false }
       }, [])
-      // A failure notice about one press on a menu that has already closed. Both actions
-      // go through the host's own open-in-app capability, so a failure here means the
+      // A failure notice about one press on a menu that has already closed. The action
+      // goes through the host's own open-in-app capability, so a failure here means the
       // host declined rather than that this side built the wrong command - which is the
       // whole reason the command-building code is gone.
       const [revealFailure, setRevealFailure] = useState<{ message: string; detail?: string } | null>(null)
-      const reveal = useCallback((path: string) => {
-        void (async () => {
-          if (await revealDirectory(ctx, path)) {
-            setRevealFailure(null)
-            return
-          }
-          setRevealFailure({ message: t("workspaceRevealFailed"), detail: t("workspaceRevealUnavailable") })
-        })()
-      }, [t])
       const openIn = useCallback((path: string, application: string) => {
         void (async () => {
           if (await openDirectoryWith(ctx, path, application)) {
@@ -278,7 +269,7 @@ export const WorktreePlugin = {
         return () => { openCreate = () => {}; openArchive = () => {}; openManage = () => {} }
       }, [])
       return <>
-        <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} onReveal={reveal} onOpenIn={openIn} capability={capability} />
+        <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} onOpenIn={openIn} capability={capability} />
         {revealFailure === null ? null : (
           // A card rather than a toast: the host exposes no general notice surface - its
           // own `RowToast` is a closed union of sidebar events - so this one carries the

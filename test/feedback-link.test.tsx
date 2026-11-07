@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { WorktreesPage } from "../src/client/components/WorktreePanel"
 import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
-import { ISSUES_URL } from "../src/client/lib/links"
+import { ISSUES_URL, VIDEO_URL } from "../src/client/lib/links"
 
 /**
  * Every prop the components read on mount has to be answered - a missing one throws
@@ -54,7 +54,15 @@ describe("the plugin description carries a feedback link", () => {
     // description, not a newline inside it - the host wraps both in one <p>.
     expect(description!.querySelector(".dws-usage-flow")?.textContent).toContain("使用流程")
 
-    const link = description!.querySelector<HTMLAnchorElement>("a.dws-feedback-link")
+    // The flow line ends with two links in Chinese: the video first, then the
+    // feedback link. Both wear the same class, so each is picked out by its text.
+    const links = [...description!.querySelectorAll<HTMLAnchorElement>("a.dws-feedback-link")]
+    expect(links.map(link => link.textContent), "the video, then the feedback link").toEqual(["视频介绍", "使用反馈"])
+    const video = links[0]
+    expect(video.getAttribute("href")).toBe(VIDEO_URL)
+    expect(video.getAttribute("target")).toBe("_blank")
+    expect(video.getAttribute("rel")).toContain("noreferrer")
+    const link = links[1]
     expect(link, "the feedback link follows that description").not.toBeNull()
     expect(link!.getAttribute("href")).toBe(ISSUES_URL)
     expect(link!.textContent).toBe("使用反馈")
@@ -65,8 +73,8 @@ describe("the plugin description carries a feedback link", () => {
     // as punctuation belonging to the sentence it was attached to, and the copy now
     // ends on a bracket, so the link needs its own air.
     expect(description!.querySelector(".dws-feedback-sep"), "no separator is rendered").toBeNull()
-    expect(description!.textContent, "the link follows the sentence directly")
-      .toMatch(/销毁任务空间）\s+使用反馈$/)
+    expect(description!.textContent, "the links follow the sentence directly")
+      .toMatch(/销毁任务空间）\s+视频介绍\s+使用反馈$/)
   })
 
   it("is not on the tab description, which names the current view", async () => {
@@ -88,10 +96,44 @@ describe("the plugin description carries a feedback link", () => {
     // The link was once left off this host on purpose. That was wrong: the panel is
     // the way most readers reach the page, and the one place they want to report a
     // problem from is the place that offered no way to do it.
-    const link = sidebar!.querySelector<HTMLAnchorElement>("a.dws-feedback-link")
-    expect(link, "the panel's heading carries the same feedback link the dialog does").not.toBeNull()
-    expect(link!.getAttribute("href")).toBe(ISSUES_URL)
-    expect(link!.textContent).toBe("使用反馈")
+    const link = sidebar!.querySelectorAll<HTMLAnchorElement>("a.dws-feedback-link")
+    expect(link.length, "the panel's heading carries both links in Chinese").toBe(2)
+    expect(link[1].getAttribute("href")).toBe(ISSUES_URL)
+    expect(link[1].textContent).toBe("使用反馈")
+  })
+
+  it("offers the video only in Chinese, because it has no English narration", async () => {
+    // The dictionaries hold both languages, so the key resolves either way - but the
+    // video itself is Chinese, and a reader in the English interface cannot follow it.
+    // This pins the guard rather than the string: the link is absent, not renamed. The
+    // same test also proves the key still exists in both dictionaries, so offering the
+    // video in another language later is a matter of the guard, not of a missing string.
+    const { installLocale, NS } = await import("../src/client/lib/i18n")
+    const registered: Record<string, Record<string, Record<string, string>>> = {}
+    // One object, not a fresh one per call: `useSyncExternalStore` compares snapshots
+    // by identity, so a new object each time re-renders forever.
+    const snapshot = { language: "en" }
+    const locale = {
+      register: (ns: string, dictionaries: any) => { registered[ns] = dictionaries; return () => {} },
+      bind: (ns: string) => (key: string) => registered[ns]?.en?.[key] ?? key,
+      subscribe: () => () => {},
+      getSnapshot: () => snapshot,
+    }
+    const dispose = installLocale({ get: (name: string) => (name === "locale" ? locale : undefined) })
+    try {
+      const s = stubs()
+      // The manage dialog is where the description is rendered; WorktreesSettings alone
+      // omits it unless asked for a heading, and the app never does.
+      render(<WorktreeManagePanel api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} onClose={vi.fn()} />)
+      await settle()
+      expect(document.body.querySelector("a[href='" + VIDEO_URL + "']"), "English offers no video link").toBeNull()
+      expect(document.body.querySelector("a.dws-feedback-link")?.getAttribute("href")).toBe(ISSUES_URL)
+
+      expect(registered[NS].zh.videoLink).toBe("视频介绍")
+      expect(registered[NS].en.videoLink).toBe("Video introduction")
+    } finally {
+      dispose()
+    }
   })
 
   // WorktreesSettings renders its own <h2> + description header when `heading` is set,
@@ -115,6 +157,12 @@ describe("the plugin description carries a feedback link", () => {
     const byName = screen.getAllByRole("link", { name: "使用反馈" })
     expect(byName).toHaveLength(1)
     expect(byName[0].getAttribute("href")).toBe(ISSUES_URL)
+    // The video is reachable the same way, and is a distinct name rather than a second
+    // "使用反馈" - two links with one name would be one link a screen reader cannot tell
+    // from the other.
+    const video = screen.getAllByRole("link", { name: "视频介绍" })
+    expect(video).toHaveLength(1)
+    expect(video[0].getAttribute("href")).toBe(VIDEO_URL)
   })
 
   it("says 使用反馈 in Chinese and Feedback in English", async () => {

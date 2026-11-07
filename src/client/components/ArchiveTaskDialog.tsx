@@ -948,34 +948,36 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                     onChoose={(branch) => chooseTarget(entry.name, branch)}
                   />
                 </>}
+              {/* What this worktree brings, on the branch line rather than beside the
+                  source repository. The two counts answer a question about the
+                  merge - how far ahead it is and whether anything is left
+                  uncommitted - so they belong with the branch and its target, which
+                  is the sentence they qualify. The source repository below names a
+                  directory, and a count sitting there read as a property of that
+                  directory instead. */}
+              {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
+              <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
               {/* Saying it before the merge, not after: a target the source
                   repository is not on is merged in a checkout of its own. */}
               {entry.target !== undefined && entry.target !== entry.checkedOut
                 ? <span className="dws-plan-detour">{t("planTemporaryWorktree")}</span>
                 : null}
               {entry.error ? <span className="dws-finish-error">{entry.error}</span> : null}
-              {/* The checkout this merge runs in, and what it brings, on one line: the
-                  path first, the counts beside it. They used to be stacked, so every row
-                  spent a line on a count that would have fitted beside the path.
-                  Naming the checkout is not decoration: it is the half of the write
-                  boundary the narrowest session in the task space cannot reach on its
-                  own, and it is the directory a merge runs in when the target is not the
-                  branch standing here - so it is named rather than left to be inferred
-                  from the worktree's own name, and omitted only while the Host cannot
-                  say: an empty line would read as "there is none", which is not what a
-                  missing field means.
-                  The commit count is left out rather than printed as a number when the
-                  Host could not count - it omits the field instead of reporting a zero it
-                  never counted, so `String` here would have written "undefined commits"
-                  beside a row whose own error line is what says why. The headline above
-                  still carries a total, because there the Host keeps one. */}
+              {/* The checkout this merge runs in, on a line of its own. Naming it is not
+                  decoration: it is the half of the write boundary the narrowest session
+                  in the task space cannot reach on its own, and it is the directory a
+                  merge runs in when the target is not the branch standing here - so it
+                  is named rather than left to be inferred from the worktree's own name,
+                  and omitted only while the Host cannot say: an empty line would read as
+                  "there is none", which is not what a missing field means.
+                  The two counts that used to share this line now sit on the branch line
+                  above, because they answer a question about the merge rather than about
+                  the directory named here. */}
               <span className="dws-plan-source-row">
                 {entry.mainRepo === undefined || entry.mainRepo === "" ? null : <span className="dws-plan-source">
                   <span>{t("planSourceRepository")}</span>
                   <code title={slashPath(entry.mainRepo)}>{slashPath(entry.mainRepo)}</code>
                 </span>}
-                {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
-                <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
               </span>
             </li>)}
           </ul> : null}

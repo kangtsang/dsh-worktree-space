@@ -73,7 +73,7 @@ async function until(check: () => boolean, { attempts = 200 } = {}) {
   for (let attempt = 0; attempt < attempts && !check(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10))
 }
 
-function setup({ canHost = true, isTask = false, items = [workspace], apps = [] as Array<{ id: string; name: string; icon?: string }>, fileManager = true } = {}) {
+function setup({ canHost = true, isTask = false, items = [workspace], apps = [] as Array<{ id: string; name: string; icon?: string }> } = {}) {
   const api = {
     inspectTask: vi.fn().mockResolvedValue({ path: workspace.path, isTask, task: "antest", tasksRoot: "E:\\worktree-space", repositories: [] }),
     // The workspace menu asks the Host which IDEs this machine has. Empty by default,
@@ -83,10 +83,9 @@ function setup({ canHost = true, isTask = false, items = [workspace], apps = [] 
   const canCreate = vi.fn().mockReturnValue(canHost)
   const onCreate = vi.fn()
   const onArchive = vi.fn()
-  const onReveal = vi.fn()
   const onOpenIn = vi.fn()
-  const view = render(<WorkspaceMenuEntries api={api as any} workspaces={workspaces as any} canCreate={canCreate} onCreate={onCreate} onArchive={onArchive} onReveal={onReveal} onOpenIn={onOpenIn} capability={{ available: fileManager, applications: apps }} />)
-  return { api, canCreate, onCreate, onArchive, onReveal, onOpenIn, view }
+  const view = render(<WorkspaceMenuEntries api={api as any} workspaces={workspaces as any} canCreate={canCreate} onCreate={onCreate} onArchive={onArchive} onOpenIn={onOpenIn} capability={{ available: true, applications: apps }} />)
+  return { api, canCreate, onCreate, onArchive, onOpenIn, view }
 }
 
 afterEach(() => {
@@ -113,7 +112,7 @@ describe("this plugin's entries in the workspace menu", () => {
     expect(next.canCreate).toHaveBeenCalledWith(workspace)
     expect(menu.contains(ownItem(t("workspaceCreate")))).toBe(true)
     // Between the shell's own rows rather than after them: rename, ours, delete.
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
     // Carrying the glyph the management panel's own create button wears - Lucide's
     // plus, two paths on its 24-unit grid.
     expect(ownItem(t("workspaceCreate"))?.querySelectorAll("svg path")).toHaveLength(2)
@@ -141,7 +140,7 @@ describe("this plugin's entries in the workspace menu", () => {
     const menu = openMenu()
 
     await until(() => ownItem(t("archiveWorkspace")) !== null)
-    expect(rowLabels(menu)).toEqual(["rename", t("archiveWorkspace"), t("workspaceReveal"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("archiveWorkspace"), "delete"])
     // The shell's own archive glyph, which is what its session rows use.
     expect(ownItem(t("archiveWorkspace"))?.querySelectorAll("svg path")).toHaveLength(3)
 
@@ -154,29 +153,25 @@ describe("this plugin's entries in the workspace menu", () => {
     setup({ canHost: true, isTask: true })
     const menu = openMenu()
 
-    await until(() => ownItems().length === 3)
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("archiveWorkspace"), t("workspaceReveal"), "delete"])
+    await until(() => ownItems().length === 2)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("archiveWorkspace"), "delete"])
     // One wrapper each, all hanging off the shell's own list.
-    expect(new Set(ownItems().map((item) => item.parentElement)).size).toBe(3)
+    expect(new Set(ownItems().map((item) => item.parentElement)).size).toBe(2)
     expect(new Set(ownItems().map((item) => item.parentElement?.parentElement)).size).toBe(1)
   })
 
-  it("offers only the reveal entry when the Workspace holds no repositories and is no task container", async () => {
-    // The reveal entry is unconditional: every Workspace is a directory, and opening
-    // it is a fact about the row rather than about what the directory holds. The two
-    // task entries are the ones that depend on classification.
+  it("adds nothing to a Workspace that holds no repositories and is no task container", async () => {
+    // Both of this plugin's entries depend on classification: neither can be started
+    // from a directory that holds no repositories, and neither can be finished where
+    // there is no task container. The Host's own rows (rename, reveal, delete) are
+    // what such a row keeps.
     const next = setup({ canHost: false, isTask: false })
     const menu = openMenu()
 
     await waitFor(() => expect(next.api.inspectTask).toHaveBeenCalledTimes(1))
-    await until(() => ownItem(t("workspaceReveal")) !== null)
-    expect(ownItems()).toHaveLength(1)
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceReveal"), "delete"])
-
-    ownItem(t("workspaceReveal"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    expect(next.onReveal).toHaveBeenCalledExactlyOnceWith(workspace.path)
-    expect(next.onCreate).not.toHaveBeenCalled()
-    expect(next.onArchive).not.toHaveBeenCalled()
+    await until(() => next.api.inspectTask.mock.calls.length > 0, { attempts: 20 })
+    expect(ownItems()).toHaveLength(0)
+    expect(rowLabels(menu)).toEqual(["rename", "delete"])
   })
 
   it("puts the applications in a submenu that opens on hover, not on a click", async () => {
@@ -201,7 +196,6 @@ describe("this plugin's entries in the workspace menu", () => {
     expect(rowLabels(menu)).toEqual([
       "rename",
       t("workspaceCreate"),
-      t("workspaceReveal"),
       t("workspaceOpenIn"),
       "delete",
     ])
@@ -212,7 +206,6 @@ describe("this plugin's entries in the workspace menu", () => {
     parent?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     expect(document.querySelector("[data-dws-submenu]")).toBeNull()
     expect(next.onOpenIn).not.toHaveBeenCalled()
-    expect(next.onReveal).not.toHaveBeenCalled()
 
     // Hovering does.
     parent?.dispatchEvent(new Event("pointerenter"))
@@ -331,31 +324,32 @@ describe("this plugin's entries in the workspace menu", () => {
     // that opens onto nothing.
     setup({ canHost: true, apps: [] })
     const menu = openMenu()
-    await until(() => ownItem(t("workspaceReveal")) !== null)
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
+    await until(() => ownItem(t("workspaceCreate")) !== null)
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
     expect(document.querySelector("[data-dws-submenu]")).toBeNull()
   })
 
-  it("offers no file-manager entry on a machine that has none", async () => {
-    // A headless server, or a deployment whose Host cannot reach a desktop at all: the
-    // probe answers `available: false` and the entry is not offered, rather than being
-    // offered and failing on every press.
-    const next = setup({ canHost: false, isTask: false, fileManager: false })
+  it("leaves the file-manager entry to the Host, which ships one of its own", async () => {
+    // The Host's `ui-open-in-app` registers a Workspace-targeted reveal row, so this
+    // plugin adds no second entry that does the same thing under different wording.
+    // What the menu shows for a directory that holds no repositories is the shell's
+    // own rows and nothing from here.
+    const next = setup({ canHost: false, isTask: false })
     const menu = openMenu()
 
-    await until(() => ownItems().length >= 1)
+    await until(() => next.api.inspectTask.mock.calls.length > 0, { attempts: 20 })
     expect(next.api.inspectTask).toHaveBeenCalled()
-    expect(ownItem(t("workspaceReveal"))).toBeNull()
+    expect(ownItems()).toHaveLength(0)
     expect(rowLabels(menu)).toEqual(["rename", "delete"])
   })
 
-  it("offers the applications even when there is no file manager", async () => {
-    // The two are independent: a Host that can launch an application on a directory has
-    // no reason to need a file manager as well.
+  it("offers the applications whatever the Host says about a file manager", async () => {
+    // Opening a directory with an editor does not need a file manager: the Host's
+    // application catalog and its file-manager route are separate capabilities, and
+    // the menu reads only the former.
     const next = setup({
       canHost: false,
       isTask: false,
-      fileManager: false,
       apps: [{ id: "idea", name: "IntelliJ IDEA" }],
     })
     const menu = openMenu()
@@ -396,7 +390,7 @@ describe("this plugin's entries in the workspace menu", () => {
     // thing here that says which row that was.
     ownItem(t("workspaceCreate"))?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     expect(next.onCreate).toHaveBeenCalledExactlyOnceWith({ path: second.path, title: second.title })
-    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), t("workspaceReveal"), "delete"])
+    expect(rowLabels(menu)).toEqual(["rename", t("workspaceCreate"), "delete"])
   })
 
   it("takes its entries back when the plugin goes away", async () => {

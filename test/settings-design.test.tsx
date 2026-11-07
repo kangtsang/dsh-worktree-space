@@ -154,24 +154,28 @@ describe("WorktreesSettings discovery controls", () => {
     // The count sits on the worktree row inside the repository, so that row is opened
     // first; every row starts folded.
     fireEvent.click(screen.getByRole("button", { name: `${t("toggleRepository")} pending` }))
-    expect(screen.getByText(format(t("pending"), { count: "4" })).closest(".dws-status-pending")).toBeTruthy()
+    // An ahead/behind pair now, not a lone "pending" badge: the row says how far it is
+    // from the base branch it names, and how much it carries.
+    expect(screen.getByText("↑ 4")).toBeTruthy()
+    expect(screen.getByText(t("committedChangesLabel"))).toBeTruthy()
   })
 
   it("reports the commits a clean task has not merged back, on the task and on its repository", async () => {
     const taskRow = worktree("/spaces/antest/alpha", "feat/antest")
     const next = setup({ repos: [repository("alpha", [taskRow])] })
-    next.api.status.mockImplementation(async (path: string) => path === taskRow.path ? { ...clean, commits: 4 } : clean)
+    next.api.status.mockImplementation(async (path: string) => path === taskRow.path ? { ...clean, commits: 4, behind: 1 } : clean)
     next.mount()
     await ready()
     fireEvent.click(screen.getByRole("button", { name: t("viewTasks") }))
 
-    // In the task view the count rides the task's own row while it is folded, and the
-    // repository row under it once opened, so a task reads as needing attention either way.
-    expect(screen.getAllByText(format(t("pending"), { count: "4" }))).toHaveLength(1)
+    // The task's row summarises what its repositories carry: an ahead/behind pair
+    // rather than a per-repository badge, because the detail is one click away.
+    expect(screen.getByText("↑ 4")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: `${t("toggleTask")} antest` }))
-    const badges = screen.getAllByText(format(t("pending"), { count: "4" }))
-    expect(badges).toHaveLength(2)
-    expect(badges.every(badge => badge.closest(".dws-status-pending"))).toBe(true)
+    // Opened, the repository row carries its own pair and the base branch it is
+    // measured against - the task the summary is made of.
+    expect(screen.getAllByText("↑ 4")).toHaveLength(2)
+    expect(screen.getAllByText("↓ 1").length).toBeGreaterThan(0)
     expect(screen.getAllByText(t("clean")).length).toBeGreaterThan(0)
   })
 

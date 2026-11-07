@@ -7,12 +7,16 @@ const plugin = readFileSync(`${ROOT}src/client/plugin.tsx`, "utf8")
 const styles = readFileSync(`${ROOT}src/client/styles.css`, "utf8")
 
 /**
- * The failure card that reports a directory that would not open.
+ * The failure card that reports a directory that would not open with an application.
  *
  * Asserted against the source rather than by rendering: the overlay component needs the
  * whole shell around it - workspace service, plugin config, session service - and a
  * harness that invented all of them would be testing the harness. What is worth pinning
  * is the four properties below, each of which was wrong or missing at some point.
+ *
+ * The card outlived the file-manager entry it was first built for: revealing a directory
+ * is the Host's own row now, but opening one with an application is still this plugin's,
+ * and a Host that declines that request still has to say so somewhere.
  */
 describe("the failure card for opening a directory", () => {
   it("stays until dismissed instead of disappearing on a timer", () => {

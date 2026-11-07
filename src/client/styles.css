@@ -34,6 +34,10 @@
        (near-black in the light theme), which is how a selection came out looking like a
        heavier border. */
     --wt-accent: #4d6bfe;
+    /* Line counts read green-for-added and red-for-removed, the two colours a diff
+       uses. Green is the theme's own success token - the same one the clean status
+       dot wears - so a "+12" and a clean repository read as the same kind of fact. */
+    --wt-success: var(--dsw-alias-state-success-primary);
     --wt-danger: var(--dsw-alias-state-error-primary);
     /* Warnings wear one amber, the product's own rather than the alias theme's: brighter
        and more saturated than the alias amber, so an amber dot, label or notice holds
@@ -266,7 +270,7 @@
   .dws-repo-heading { display: block; flex: 1; min-width: 0; }
   .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }
   .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
-  .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }
+  .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 260px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }
   .dws-branch-label > svg { flex: none; }
   .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
   .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
@@ -289,6 +293,30 @@
   .dws-worktree-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; min-width: 0; }
   .dws-worktree-title strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 20px; }
   .dws-worktree-path { overflow-wrap: anywhere; margin-top: 2px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  /* The line counts, in the two colours a change is read in: what arrives is green,
+     what goes is red. Fixed-width digits so two rows with different numbers still
+     line up down the column. */
+  .dws-worktree-changes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 2px; }
+  .dws-changes-label { color: var(--wt-muted); font-size: 11px; line-height: 18px; }
+  .dws-lines, .dws-ahead-behind { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; font-size: 11px; line-height: 18px; }
+  /* The task row carries both pairs side by side, so each needs air from the other
+     rather than reading as one run of symbols. */
+  .dws-task-title .dws-ahead-behind, .dws-task-title .dws-lines { gap: 8px; padding: 0 2px; }
+  .dws-task-title .dws-ahead-behind { margin-left: 2px; }
+  .dws-line-add, .dws-ahead { color: var(--wt-success); }
+  /* Behind is amber, not red: the base branch having commits this one lacks is
+     ordinary - it means someone else moved - and red would read as an error the
+     task has to fix. Red is kept for the lines a change removes. */
+  .dws-line-del { color: var(--wt-danger); }
+  .dws-behind { color: var(--wt-warn); }
+  /* The name in front of a branch glyph, so the icon is not the only thing saying
+     which branch is which. */
+  .dws-branch-name { color: var(--wt-muted); font-size: 11px; white-space: nowrap; }
+  /* A worktree row's own branch was a plain <strong> before it gained a label; it
+     keeps that weight, and the label beside it stays muted so the ref is still the
+     thing the eye lands on. */
+  .dws-worktree-branch .dws-branch-value { color: var(--wt-text); font-weight: 500; font-size: 13px; }
+  .dws-line-none { color: var(--wt-muted); font-size: 11px; }
   .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }
   /* 7.5px on an 18px line: the dot is a state cue read before the label beside it, so it
      is sized to be seen rather than hinted at. `border-radius: 50%` on a square that small
@@ -298,6 +326,14 @@
   /* Only a stale worktree record, which asks for a cleanup, keeps the warning
      colour; a status the page could not read is worth an amber note, not red. */
   .dws-status-unavailable { color: var(--wt-warn); }
+  /* Numbers measured against refs a previous fetch left behind: amber, because they
+     are not wrong, only older than they look. */
+  .dws-status-stale { color: var(--wt-warn); }
+  .dws-status-stale .dws-status-dot { color: var(--wt-warn); }
+  /* Fetching switched off: neutral, because nothing failed - the reader chose this.
+     Amber here would report their own setting back to them as a fault. */
+  .dws-status-idle { color: var(--wt-muted); }
+  .dws-status-idle .dws-status-dot { color: var(--wt-muted); }
   .dws-status-prunable { color: var(--wt-danger); }
   .dws-status-dirty .dws-status-dot, .dws-status-zero .dws-status-dot { color: var(--wt-warn); }
   /* Committed work waiting to be merged back wears the same amber as uncommitted

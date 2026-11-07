@@ -1,7 +1,7 @@
 import { useEffect } from "react"
 import type { createWorktreeApi } from "../lib/api"
 import { format, useT } from "../lib/i18n"
-import { archiveIconSvg, chevronIconSvg, createIconSvg, ideIconSvg, openFolderIconSvg } from "../lib/menu-icons"
+import { archiveIconSvg, chevronIconSvg, createIconSvg, ideIconSvg } from "../lib/menu-icons"
 import type { Workspace, WorkspacesService } from "../lib/types"
 import type { OpenCapability, OpenTarget } from "../lib/open-in-app"
 import { OWNER_ITEM, OWN_MENU_ITEM, OWN_SUBMENU, WORKSPACE_ROW, WORKSPACE_ROW_TRIGGER, workspaceIdFromRowKey } from "../lib/workspace-menu"
@@ -49,14 +49,6 @@ interface WorkspaceMenuEntriesProps {
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
   /** Called with the task container's path when the finish item is chosen. */
   onArchive: (path: string) => void
-  /**
-   * Called with a Workspace's path when the reveal item is chosen.
-   *
-   * The caller owns what happens after: opening is a Host call that can fail in ways
-   * worth reporting (no file manager, a directory since deleted), and reporting is the
-   * panel's own surface, not a menu item's.
-   */
-  onReveal: (path: string) => void
   /** Called with a path and a Host application id when one is chosen from the submenu. */
   onOpenIn: (path: string, application: string) => void
   /**
@@ -87,7 +79,7 @@ interface WorkspaceMenuEntriesProps {
  * Owns no shell structure: the marker and the items it inserted are removed on
  * disposal, so the adaptation is HMR-safe.
  */
-export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onArchive, onReveal, onOpenIn, capability }: WorkspaceMenuEntriesProps) {
+export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onArchive, onOpenIn, capability }: WorkspaceMenuEntriesProps) {
   const t = useT()
 
   useEffect(() => {
@@ -140,24 +132,21 @@ export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onA
      * `canCreate` is the same classification the composer's own button reads, so
      * the two ways into a task space cannot disagree about where one can start.
      *
-     * The reveal entry follows, and only when the Host says it can hand a path to a
-     * desktop: an entry for something that cannot open anything fails on every press,
-     * and a menu is the wrong place to report that.
-     *
      * The applications are a SUBMENU rather than a row each. The Host reports whatever
      * the machine has installed - three editors on one machine, none on another - and a
      * flat list would push the shell's own rename and delete off the menu on a machine
      * with a full toolchain.
+     *
+     * There is no file-manager entry here. The Host ships one itself (`ui-open-in-app`
+     * registers a Workspace-targeted "reveal" row), so adding our own put two rows in
+     * the same menu that did the same thing under different wording.
      */
-    const entriesFor = (workspace: Workspace, isTask: boolean, apps: readonly OpenTarget[], fileManager: boolean): MenuEntry[] => [
+    const entriesFor = (workspace: Workspace, isTask: boolean, apps: readonly OpenTarget[]): MenuEntry[] => [
       ...(canCreate(workspace)
         ? [{ icon: createIconSvg, label: t("workspaceCreate"), choose: () => onCreate({ path: workspace.path, title: workspace.title }) }]
         : []),
       ...(isTask
         ? [{ icon: archiveIconSvg, label: t("archiveWorkspace"), choose: () => onArchive(workspace.path) }]
-        : []),
-      ...(fileManager
-        ? [{ icon: openFolderIconSvg, label: t("workspaceReveal"), choose: () => onReveal(workspace.path) }]
         : []),
       ...(apps.length === 0
         ? []
@@ -483,7 +472,7 @@ export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onA
           } catch {
             isTask = false
           }
-          const entries = entriesFor(workspace, isTask, capability?.applications ?? [], capability?.available === true)
+          const entries = entriesFor(workspace, isTask, capability?.applications ?? [])
           if (!active || entries.length === 0 || !menu.isConnected) continue
           insert(menu, entries)
         }
@@ -513,7 +502,7 @@ export function WorkspaceMenuEntries({ api, workspaces, canCreate, onCreate, onA
       observer.disconnect()
       for (const item of document.querySelectorAll(`[${OWN_MENU_ITEM}]`)) item.remove()
     }
-  }, [api, workspaces, canCreate, onCreate, onArchive, onReveal, onOpenIn, capability, t])
+  }, [api, workspaces, canCreate, onCreate, onArchive, onOpenIn, capability, t])
 
   return null
 }

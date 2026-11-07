@@ -2,6 +2,17 @@
 export const ISSUES_URL = "https://github.com/kangtsang/dsh-worktree-space/issues"
 
 /**
+ * The plugin's own introduction video.
+ *
+ * Sits beside {@link ISSUES_URL} rather than in the component, because both are
+ * places outside this plugin that a reader may want to go, and the description
+ * line is the only place either one is offered. A reader who just arrived has a
+ * question the flow sentence does not answer - what this looks like in use - and
+ * a two-minute video answers it faster than the paragraph above does.
+ */
+export const VIDEO_URL = "https://www.bilibili.com/video/BV1iM466VEz2"
+
+/**
  * An acceptance URL the card may render, or nothing.
  *
  * The Host has this same rule (`acceptanceUrl` in `src/host/task/deploy.js`) and is

@@ -1,14 +1,21 @@
 import { cleanPath, containerRootOf, nameOf, parentOf, projectOf } from "./paths"
-import type { Worktree, WorktreeList } from "./types"
+import type { LineChanges, Worktree, WorktreeList } from "./types"
 
 /** One repository inside a task container, with the status the page already read. */
 export interface TaskRepository {
   name: string
   path: string
   branch?: string
-  changedFiles: number
-  /** Commits on this worktree's branch that its merge target does not have yet. */
+  /** The branch this repository's checkout sits on, which a merge would go into. */
+  baseBranch?: string
+  /** Commits this worktree is ahead of the base branch, and behind it. */
   commits: number
+  behind: number
+  /** Lines the commits ahead of the base add and remove. */
+  committedChanges?: LineChanges
+  /** Lines still uncommitted. */
+  workingChanges?: LineChanges
+  changedFiles: number
   locked: boolean
   /** Git keeps the record but the directory is gone. */
   prunable: boolean
@@ -38,11 +45,19 @@ export interface TaskGroup {
   tasksRoot: string
   /** The shared branch, when every repository agrees on one. */
   branch?: string
+  /** The branch the merge would go into, when the repositories agree on one. */
+  baseBranch?: string
   repositories: TaskRepository[]
   /** Uncommitted files across the task; a removal without `force` keeps these. */
   changedFiles: number
   /** Commits waiting to be merged back, across the task's repositories. */
   commits: number
+  /** Commits the base branches have that the task does not, added up. */
+  behind: number
+  /** Lines the task's commits add and remove, added up across repositories. */
+  committedChanges?: LineChanges
+  /** Lines still uncommitted, added up across repositories. */
+  workingChanges?: LineChanges
   lockedRepositories: number
   prunableRepositories: number
   /** Repositories whose status the page is still reading. */
@@ -95,6 +110,7 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
             repositories: [],
             changedFiles: 0,
             commits: 0,
+            behind: 0,
             lockedRepositories: 0,
             prunableRepositories: 0,
             checkingRepositories: 0,
@@ -115,12 +131,20 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
       const unknown = !checking && statusError !== undefined && statusError !== ""
       const changedFiles = worktree.changedFiles ?? 0
       const commits = worktree.commits ?? 0
+      const behind = worktree.behind ?? 0
       entry.group.repositories.push({
         name: nameOf(worktree.path),
         path: worktree.path,
         branch: worktree.branch,
+        // The branch the source checkout sits on is the one a merge would go into;
+        // it is already on the list this row came from (filled in from the main
+        // worktree) rather than asked for again.
+        baseBranch: repo.currentBranch,
         changedFiles,
         commits,
+        behind,
+        committedChanges: worktree.committedChanges,
+        workingChanges: worktree.workingChanges,
         locked: worktree.locked,
         prunable: worktree.prunable,
         checking,
@@ -128,6 +152,15 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
       })
       entry.group.changedFiles += changedFiles
       entry.group.commits += commits
+      entry.group.behind += behind
+      // Summed only when at least one repository reported them: a task whose
+      // repositories all failed to answer has no line counts, and a zero would claim
+      // "nothing changed" about a read that never happened.
+      const add = (current: LineChanges | undefined, next: LineChanges | undefined) => next === undefined
+        ? current
+        : { insertions: (current?.insertions ?? 0) + next.insertions, deletions: (current?.deletions ?? 0) + next.deletions }
+      entry.group.committedChanges = add(entry.group.committedChanges, worktree.committedChanges)
+      entry.group.workingChanges = add(entry.group.workingChanges, worktree.workingChanges)
       if (worktree.locked) entry.group.lockedRepositories += 1
       if (worktree.prunable) entry.group.prunableRepositories += 1
       if (checking) entry.group.checkingRepositories += 1
@@ -139,6 +172,10 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
   for (const task of tasks) {
     const branches = new Set(task.repositories.map((repository) => repository.branch))
     task.branch = branches.size === 1 ? task.repositories[0]?.branch : undefined
+    // The branch a finish would merge into, when every repository agrees on one -
+    // the same "no single answer, so say nothing" rule the task branch follows.
+    const bases = new Set(task.repositories.map((repository) => repository.baseBranch))
+    task.baseBranch = bases.size === 1 ? task.repositories[0]?.baseBranch : undefined
     task.repositories.sort((left, right) => left.name.localeCompare(right.name))
   }
   // Project first, then task: two projects may each hold a task of the same name,

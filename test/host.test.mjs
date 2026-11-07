@@ -318,7 +318,7 @@ describe("worktree porcelain parser", () => {
 describe("worktree RPC contract", () => {
   it("registers only exact shared API routes for every endpoint", () => {
     expect([...handleFor().routes.keys()].sort()).toEqual([
-      "worktree.scan", "worktree.cached", "worktree.status",
+      "worktree.scan", "worktree.cached", "worktree.status", "worktree.upstream",
       "task.classify-root", "task.classify-roots", "task.suggest-root", "task.branches", "task.create", "task.add-repositories", "task.list", "task.inspect", "task.plan", "task.done", "task.deploy-status", "task.deploy-destroy", "task.deploy-up", "task.deploy-smoke", "task.preference", "task.handoff-access", "task.handoff-open", "task.models",
     ].map((endpoint) => `/api/dsh-worktree-space/${endpoint}`).sort())
   })
@@ -651,15 +651,110 @@ describe("worktree RPC contract", () => {
     expect((await handleFor({}, { handoffFullAccess: "off" })("task.preference")).value).toMatchObject({ handoffFullAccess: "off" })
   })
 
+  it("compares a source checkout with its remote-tracking branch", async () => {
+    const handler = handleFor({
+      "rev-parse --abbrev-ref main@{upstream}": "origin/main\n",
+      "rev-list --left-right --count origin/main...HEAD": "3\t1",
+      "diff --shortstat origin/main": "1 file changed, 7 insertions(+), 2 deletions(-)\\n",
+      "diff --shortstat HEAD": "1 file changed, 4 deletions(-)\\n",
+    })
+
+    expect((await handler("worktree.upstream", { path: "/repo", target: "main" })).value)
+      .toMatchObject({
+        upstream: "origin/main",
+        commits: 1,
+        behind: 3,
+        committedChanges: { insertions: 7, deletions: 2 },
+        workingChanges: { insertions: 0, deletions: 4 },
+      })
+  })
+
+  it("answers a branch that tracks nothing with a null upstream, not an error", async () => {
+    // The ordinary state of a local branch. git echoes the expression back when it
+    // cannot resolve it, and that echo is not a ref name to show a reader.
+    const handler = handleFor({ "rev-parse --abbrev-ref main@{upstream}": "main@{upstream}\n" })
+    expect((await handler("worktree.upstream", { path: "/repo", target: "main" })).value)
+      .toMatchObject({ upstream: null })
+  })
+
+  it("does not fetch when the setting is off, and compares the local refs", async () => {
+    // The switch is what stands between a page that reads the remote and one that
+    // reads whatever the last manual fetch left. With it off, `fetch` is never asked
+    // for, and the answer says so rather than implying the refs are current.
+    const asked = []
+    const handler = handleFor({
+      "rev-parse --abbrev-ref main@{upstream}": "origin/main\n",
+      "rev-list --left-right --count origin/main...HEAD": "0\t0",
+    }, { autoFetchRemote: { get: () => false } }, asked)
+
+    const value = (await handler("worktree.upstream", { path: "/repo", target: "main" })).value
+    expect(value).toMatchObject({ upstream: "origin/main", fetched: false })
+    expect(asked.some((call) => call.startsWith("fetch"))).toBe(false)
+  })
+
+  it("skips the comparison when a fetch moved no remote-tracking ref", async () => {
+    // A fetch that brings nothing new is the common case on a repository nobody else
+    // pushes to. The three reads after it would compute the numbers the caller already
+    // has, so they are not run at all - and the answer says `changed: false` so the
+    // caller can skip a repaint that would change nothing.
+    const asked = []
+    const handler = handleFor({
+      "for-each-ref --format=%(refname) %(objectname) refs/remotes/": "refs/remotes/origin/main abc123\n",
+      "fetch --quiet --no-tags": "",
+      "rev-parse --abbrev-ref @{upstream}": "origin/main\n",
+      // Deliberately absent: an answer that reaches for these would come back blank
+      // and the assertions below would not notice.
+      "rev-list --left-right --count origin/main...HEAD": "9\t9",
+    }, { autoFetchRemote: { get: () => true } }, asked)
+
+    const value = (await handler("worktree.upstream", { path: "/repo", fetch: true })).value
+    expect(value).toMatchObject({ upstream: "origin/main", fetched: true, changed: false })
+    // The comparison never ran: no rev-list, and no numbers to report.
+    expect(asked.some((call) => call.startsWith("rev-list"))).toBe(false)
+    expect(value).not.toHaveProperty("commits")
+    expect(value).not.toHaveProperty("behind")
+  })
+
+  it("still answers the comparison when the fetch fails or times out", async () => {
+    // A slow or unreachable remote is the ordinary case this switch has to survive.
+    // The reads below the fetch used to share its aborted signal, so a fetch that hit
+    // its deadline made `rev-parse` answer nothing and the row read "no upstream
+    // tracked" about a branch that tracks one perfectly well.
+    const asked = []
+    const handler = handleFor({
+      "fetch --quiet --no-tags": { stdout: "", stderr: "fatal: could not read from remote", exitCode: 128 },
+      "rev-parse --abbrev-ref @{upstream}": "origin/main\n",
+      "rev-list --left-right --count origin/main...HEAD": "1\t2",
+      "diff --shortstat origin/main": "1 file changed, 9 insertions(+)\n",
+      "diff --shortstat HEAD": "",
+    }, { autoFetchRemote: { get: () => true } }, asked)
+
+    // `fetch: true` is what asks for the refresh; the first call the panel makes omits
+    // it and reads the refs already on disk.
+    const value = (await handler("worktree.upstream", { path: "/repo", fetch: true })).value
+    expect(value).toMatchObject({ upstream: "origin/main", fetched: false, commits: 2, behind: 1 })
+    expect(value.fetchError).toContain("could not read from remote")
+    expect(asked).toContain("rev-parse --abbrev-ref @{upstream}")
+  })
+
   it("counts the commits a worktree carries back when a target is named", async () => {
     const handler = handleFor({
       "status --short --branch": "## feat/antest",
-      "rev-list --count develop..HEAD": "4",
+      // `--left-right --count develop...HEAD` prints "<behind> <ahead>".
+      "rev-list --left-right --count develop...HEAD": "2\t4",
+      "diff --shortstat develop": "2 files changed, 12 insertions(+), 3 deletions(-)\n",
+      "diff --shortstat HEAD": "1 file changed, 5 insertions(+)\n",
     })
 
     expect((await handler("worktree.status", { path: "/repo", target: "develop" })).value)
-      .toMatchObject({ changedFiles: 0, commits: 4 })
-    // No target, or one git cannot resolve, leaves the count out rather than
+      .toMatchObject({
+        changedFiles: 0,
+        commits: 4,
+        behind: 2,
+        committedChanges: { insertions: 12, deletions: 3 },
+        workingChanges: { insertions: 5, deletions: 0 },
+      })
+    // No target, or one git cannot resolve, leaves the counts out rather than
     // claiming a clean branch: the page shows nothing instead of a wrong zero.
     expect((await handler("worktree.status", { path: "/repo" })).value).not.toHaveProperty("commits")
     expect((await handler("worktree.status", { path: "/repo", target: "ghost" })).value).not.toHaveProperty("commits")

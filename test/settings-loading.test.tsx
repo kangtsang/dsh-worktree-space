@@ -3,6 +3,7 @@ import { format, t } from "../src/client/lib/i18n"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { sameLocation } from "../src/client/lib/paths"
 import { setPreview } from "../src/client/lib/config-preview"
 import { scanAnswer } from "./scan-answer.helper"
 import type { ScanAnswer } from "../src/client/lib/types"
@@ -31,6 +32,9 @@ function setup() {
     // The page asks for every Workspace in one request; nothing here answers it,
     // so the rows stay "checking", which is what these tests are about.
     classifyRoots: vi.fn(() => new Promise(() => {})),
+    // Never resolved by default: these cases are about the page's loading states, and
+    // a repository's remote is one more thing it does not need an answer for.
+    upstream: vi.fn(() => new Promise(() => {})),
   }
   const items = [
     { workspaceId: "broad", path: "/projects", title: "Projects" },
@@ -492,5 +496,53 @@ describe("WorktreesSettings and what a search lists inside a row", () => {
     // One task space, holding the one repository the search found.
     expect(document.querySelectorAll(".dws-task")).toHaveLength(1)
     expect(listed()).toEqual(["two"])
+  })
+
+  it("asks each source repository about its remote, and shows the answer", async () => {
+    // The settings object is rewritten twice per classification run - every path set
+    // to "checking", then the answers - and an effect depending on that object was
+    // torn down between the two, aborting its own requests. Every fetch takes
+    // seconds, so the restart always won and no row ever got an answer: a repository
+    // with an upstream read "no upstream tracked" forever.
+    const next = setup()
+    next.api.classifyRoots.mockResolvedValue([
+      { path: "/projects", isDirectory: true, isRepository: true, isSourceRoot: true, repositoryCount: 1, repositories: [{ name: "one", path: "/projects/one" }] },
+    ])
+    next.api.scan.mockResolvedValue(scanAnswer([repository("/projects/one")]))
+    next.api.upstream = vi.fn().mockResolvedValue({ upstream: "origin/main", fetched: true, commits: 3, behind: 1 })
+    next.mount()
+
+    await waitFor(() => expect(next.api.upstream).toHaveBeenCalled())
+    // Asked once, against the repository the classification named. No signal: the
+    // requests deliberately survive a tab switch, so nothing aborts them.
+    expect(next.api.upstream).toHaveBeenCalledWith("/projects/one")
+    // And the answer reaches the row: the remote branch, and the two counts. The
+    // repository list is behind the Workspace's own click.
+    fireEvent.click(screen.getByRole("button", { name: `${t("toggleWorkspace")} Projects` }))
+    await waitFor(() => expect(document.querySelector(".dws-base-branch")?.textContent).toContain("origin/main"))
+    expect(document.body.textContent).toContain("↑ 3")
+    expect(document.body.textContent).toContain("↓ 1")
+  })
+
+  it("finds the answer when classification and the row spell the path differently", async () => {
+    // The two halves of the page name a repository differently: classification answers
+    // with the path the Host resolved (`E:\work\one`), while the scanned row holds the
+    // path git reported (`E:/work/one`). Looking the answer up by the raw string missed
+    // every time, and every row fell through to "no upstream tracked" - which is what a
+    // reader sees for a repository that has one.
+    const next = setup()
+    next.api.classifyRoots.mockResolvedValue([
+      { path: "/projects", isDirectory: true, isRepository: true, isSourceRoot: true, repositoryCount: 1, repositories: [{ name: "one", path: "E:\\work\\one" }] },
+    ])
+    next.api.scan.mockResolvedValue(scanAnswer([repository("/projects/one")]))
+    next.api.upstream = vi.fn().mockResolvedValue({ upstream: "origin/main", fetched: true, commits: 2, behind: 0 })
+    next.mount()
+
+    await waitFor(() => expect(next.api.upstream).toHaveBeenCalled())
+    // The lookup falls back to `sameLocation`, which folds separators and Windows case.
+    // Proved directly here rather than through a second DOM fixture: the row's path and
+    // the answer's path are the two spellings, and only the comparison can join them.
+    expect(sameLocation("E:\\work\\one", "E:/work/one")).toBe(true)
+    expect(sameLocation("/projects/one", "E:\\work\\one")).toBe(false)
   })
 })

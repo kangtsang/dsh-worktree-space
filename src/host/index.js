@@ -24,7 +24,7 @@ import { CONFIG_CATALOG_TIMEOUT_MS, installRouteHook, modelCatalogOf } from './t
 export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
-const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status']
+const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status', 'worktree.upstream']
 const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.branches', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open', 'task.models']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
@@ -351,6 +351,40 @@ let tasksRootStrategyReference
  * session is running has to reach the create that follows it.
  */
 let tasksRootDirectoryReference
+
+/**
+ * Whether opening the page refreshes each source repository from its remote.
+ *
+ * Read as a live reference rather than captured: the setting is a switch on a page
+ * that stays open, so the request after it is flipped has to obey the new answer.
+ */
+let autoFetchReference
+
+/** How long one repository's fetch may take, in seconds, as configured. */
+let fetchTimeoutReference
+
+/**
+ * Whether a remote refresh is on, defaulting to on when nothing says otherwise.
+ *
+ * The default matters: a panel that never fetches reports ahead/behind against
+ * whatever the last manual fetch left behind, and a reader takes that number at face
+ * value. Off is the deliberate choice for a slow or metered remote.
+ * @returns whether to fetch before comparing.
+ */
+export function configuredAutoFetch() {
+  const value = autoFetchReference?.get()
+  return value === undefined ? true : value === true
+}
+
+/**
+ * How long one fetch may run before it is abandoned.
+ * @returns seconds, clamped to the range the schema allows.
+ */
+export function configuredFetchTimeoutSeconds() {
+  const value = Number(fetchTimeoutReference?.get())
+  if (!Number.isFinite(value)) return 8
+  return Math.min(120, Math.max(1, Math.round(value)))
+}
 
 /**
  * The branch prefix a request that names none should use.
@@ -779,6 +813,29 @@ export const Config = z.object({
   removedScanDirectories: z.array(z.string()).max(10000).default([]).volatile()
     .description('Built-in directory names the scan descends into again.'),
   /**
+   * Whether opening the panel refreshes each source repository from its remote.
+   *
+   * On by default because the alternative is worse than a stale number: a panel that
+   * never fetches reports ahead/behind against whatever the last manual `git fetch`
+   * left behind, which is a comparison the reader will take at face value. Fetching
+   * writes nothing but the remote-tracking refs, so it is a read of the remote rather
+   * than a change to the repository.
+   *
+   * Off is for a machine where reaching the remote is slow, metered, or asks for
+   * credentials - the panel then compares against the local refs and says so.
+   */
+  autoFetchRemote: z.boolean().default(true).volatile()
+    .description('Whether opening the page refreshes each source repository from its remote before comparing commits.'),
+  /**
+   * How long one repository's fetch may take before it is abandoned.
+   *
+   * Per repository rather than for the whole page: one unreachable remote must not
+   * cost the reader every other repository's answer, so each is bounded on its own
+   * and the ones that answered keep their numbers.
+   */
+  fetchTimeoutSeconds: z.number().min(1).max(120).step(1).default(8).volatile()
+    .description('Seconds one repository\'s fetch may take before it is abandoned and the local refs are used instead.'),
+  /**
    * The branch prefix every new task space starts from.
    *
    * It is the one setting both halves of this plugin write: the configuration card
@@ -935,6 +992,10 @@ export function apply(ctx, config = {}) {
   // Kept as the live reference, not its value: a prefix saved from the Web UI
   // reaches the running entry through this same accessor.
   branchPrefixReference = config.defaultBranchPrefix
+  // The remote refresh the panel asks for: read live, because it is toggled while the
+  // page is open and the next request has to obey the new answer.
+  autoFetchReference = config.autoFetchRemote
+  fetchTimeoutReference = config.fetchTimeoutSeconds
   // Likewise for the archive destination: the settings card writes it and the
   // archive dialog reads it, both through this entry rather than its snapshot.
   archiveDirectoryReference = config.archiveDocumentsDirectory
@@ -1203,28 +1264,205 @@ export function apply(ctx, config = {}) {
       const path = absolutePath(payload.path)
       if (!path) throw coded('E4005', 'Worktree path is required.')
       const target = typeof payload.target === 'string' ? payload.target.trim() : ''
-      // Two independent questions, asked together. The commit count is a range
-      // over refs and never reads the status output, so running it after the
-      // status was pure queueing.
-      const [output, ahead] = await Promise.all([
+      // Three questions, asked together. The two counts are ranges over refs and
+      // never read the status output, so running them after the status was pure
+      // queueing. `rev-list --left-right --count target...HEAD` answers ahead and
+      // behind in one process; asking twice would have doubled the cost of every
+      // worktree on every refresh.
+      const [output, counted, diffstat, workstat] = await Promise.all([
         runGit(ctx.subprocess, path, ['status', '--short', '--branch'], { signal }),
-        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['rev-list', '--count', `${target}..HEAD`], { signal }),
+        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['rev-list', '--left-right', '--count', `${target}...HEAD`], { signal }),
+        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', target], { signal }),
+        // The working tree's own line counts, uncommitted included: `--shortstat`
+        // against HEAD is what the panel shows as "not committed yet".
+        tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal }),
       ])
       const lines = output ? output.split(/\r?\n/) : []
-      // What this worktree would carry back: everything on its HEAD the named branch
-      // does not have. The caller names that branch, because the page already knows
-      // which one the source checkout sits on - the branch finishing would merge
-      // into. No name, or one git cannot resolve, leaves the count out rather than
-      // claiming zero commits.
-      const commits = Number.parseInt(ahead, 10)
+      // What this worktree would carry back, and what the target carries that it
+      // does not. The caller names that branch, because the page already knows which
+      // one the source checkout sits on - the branch finishing would merge into. No
+      // name, or one git cannot resolve, leaves both counts out rather than claiming
+      // zero.
+      //
+      // `--left-right` prints "<behind> <ahead>" for `target...HEAD`, so the columns
+      // are read in that order rather than git's left-to-right = this-side reading.
+      const counts = counted.trim().split(/\s+/)
+      const behind = Number.parseInt(counts[0], 10)
+      const commits = Number.parseInt(counts[1], 10)
+      // `1 file changed, 12 insertions(+), 3 deletions(-)`; either half is absent
+      // when only one kind of change happened.
+      const insertions = /(\d+) insertion/.exec(diffstat)
+      const deletions = /(\d+) deletion/.exec(diffstat)
+      const workInsertions = /(\d+) insertion/.exec(workstat)
+      const workDeletions = /(\d+) deletion/.exec(workstat)
       const status = {
         branchLine: lines.find((line) => line.startsWith('## ')) ?? '',
         changedFiles: lines.filter((line) => line && !line.startsWith('## ')).length,
         ...(Number.isFinite(commits) ? { commits } : {}),
+        ...(Number.isFinite(behind) ? { behind } : {}),
+        ...(diffstat.trim() === '' ? {} : {
+          committedChanges: {
+            insertions: insertions === null ? 0 : Number.parseInt(insertions[1], 10),
+            deletions: deletions === null ? 0 : Number.parseInt(deletions[1], 10),
+          },
+        }),
+        ...(workstat.trim() === '' ? {} : {
+          workingChanges: {
+            insertions: workInsertions === null ? 0 : Number.parseInt(workInsertions[1], 10),
+            deletions: workDeletions === null ? 0 : Number.parseInt(workDeletions[1], 10),
+          },
+        }),
         output,
       }
       rememberStatus(path, status)
       return status
+    })
+
+    if (endpoint === 'worktree.upstream') return recover(async () => {
+      // The remote-tracking branch a source checkout is measured against.
+      //
+      // Asked on its own endpoint rather than folded into `worktree.status` because
+      // the two answer different questions: a worktree is compared with a local
+      // branch the finish would merge into, while a source repository is compared
+      // with whatever its remote already has. Naming the upstream is the part git
+      // does not make cheap - `rev-parse --abbrev-ref @{upstream}` fails outright on
+      // a branch nobody tracks, which is ordinary rather than an error.
+      const path = absolutePath(payload.path)
+      if (!path) throw coded('E4005', 'Worktree path is required.')
+      const target = typeof payload.target === 'string' ? payload.target.trim() : ''
+      // Refresh this repository from its remote first, when the caller asked for it.
+      //
+      // Fetching is a second request rather than part of the first, and that is the
+      // point: the comparison against the refs already on disk is what the row shows
+      // on arrival, and it costs one `git` per repository. A fetch is a network round
+      // trip per repository, so making the first answer wait for it left every row
+      // blank for as long as the slowest remote took - for numbers that were usually
+      // about to be the same ones. The panel asks with `fetch: true` afterwards and
+      // repaints only the two counts that a fetch can move.
+      //
+      // The fetch is bounded on its own and its failure is not the request's failure.
+      // A machine that cannot reach the remote still has local refs worth comparing,
+      // and the answer says which of the two it is - `fetched: false` beside numbers
+      // that are then explicitly against the last known state.
+      let fetched = false
+      let fetchError = ''
+      // Whether a fetch was even attempted. Reported so the panel can tell the two
+      // ways of showing local-ref numbers apart: "the switch is off, so nobody tried"
+      // is a choice the reader made, while "it was tried and failed" is a fault worth
+      // an amber mark. One word of state, and without it the two read identically.
+      // What the remote-tracking refs pointed at before the fetch.
+      //
+      // One `for-each-ref` over `refs/remotes/` is the cheap way to answer "did the
+      // fetch change anything": it prints the branches and their commits, and a fetch
+      // that brought nothing new leaves it byte-for-byte identical. That is the common
+      // case - a repository nobody else pushed to - and the three reads below would
+      // then return exactly the numbers the caller already has.
+      const remoteRefs = () => tryRunGit(ctx.subprocess, path, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes/'], { signal })
+      let beforeRefs = ''
+      const autoFetch = configuredAutoFetch()
+      const wanted = payload.fetch === true && autoFetch
+      if (wanted) beforeRefs = (await remoteRefs()).trim()
+      if (wanted) {
+        const timeoutSeconds = configuredFetchTimeoutSeconds()
+        try {
+          // Its own deadline, and its own controller: the request's own signal may be
+          // the page closing, but a fetch that runs long must not also take out the
+          // reads below it. Sharing one signal is what made a slow remote answer
+          // "no upstream tracked" - the fetch exhausted the deadline, and `rev-parse`
+          // was then handed an already-aborted signal and answered nothing.
+          const fetchController = new AbortController()
+          const forward = () => fetchController.abort()
+          if (signal !== undefined) {
+            if (signal.aborted) fetchController.abort()
+            else signal.addEventListener('abort', forward, { once: true })
+          }
+          try {
+            await runGit(
+              ctx.subprocess,
+              path,
+              // `--quiet` because a fetch that succeeds prints progress to stderr, and
+              // none of it belongs in an audit record; `--no-tags` because tags are not
+              // what this comparison reads and fetching them is the expensive half on
+              // a repository with many.
+              ['fetch', '--quiet', '--no-tags'],
+              { signal: fetchController.signal, timeoutMs: timeoutSeconds * 1000, log: false },
+            )
+            fetched = true
+          } finally {
+            signal?.removeEventListener('abort', forward)
+          }
+        } catch (error) {
+          // Kept as a short sentence rather than a stack: the reader is told the
+          // numbers below are the local ones, and the reason is the diagnosis.
+          fetchError = `${error?.message ?? error}`.split(/\r?\n/)[0].slice(0, 200)
+        }
+      }
+      // The request's own signal is what the reads answer to - not the fetch's, which
+      // has already done its worst by here.
+      signal?.throwIfAborted()
+      // Did the fetch actually move a remote-tracking ref? A `fetch` that brought
+      // nothing new leaves them identical, and the three reads below would then
+      // compute the numbers the caller already has. Reported so a caller that asked
+      // for a refresh can tell "the remote has nothing new" from "here are new
+      // numbers" and skip a repaint that would change nothing.
+      const unmoved = wanted && fetched && beforeRefs !== '' && (await remoteRefs()).trim() === beforeRefs
+      // `@{upstream}` alone reads the current branch's configured upstream; naming a
+      // branch (`<branch>@{upstream}`) is for asking about one the checkout is not on.
+      // The empty name is `@{upstream}` with no branch in front of it - spelled that
+      // way because `""@{upstream}` is not an expression git can resolve at all.
+      const expression = target === '' ? '@{upstream}' : `${target}@{upstream}`
+      const upstream = await tryRunGit(ctx.subprocess, path, ['rev-parse', '--abbrev-ref', expression], { signal })
+      const name = upstream.trim()
+      // `HEAD` or an empty answer both mean "this branch tracks nothing": git echoes
+      // the expression back when it cannot resolve it, and that is not a ref name to
+      // show a reader.
+      if (name === '' || name === 'HEAD' || name.includes('@{')) return { upstream: null, fetched, fetchEnabled: autoFetch, ...(fetchError === '' ? {} : { fetchError }) }
+      // The inexpensive answer first: a fetch that moved no remote-tracking ref means
+      // the numbers below are exactly the ones the caller already holds, so they are
+      // not computed at all. This is the whole point of the `changed` flag - the
+      // caller skips a repaint, and the Host skips three `git` processes with it.
+      // `commits`/`behind`/`committedChanges` are left out rather than guessed: the
+      // caller keeps what it has, and a zero here would claim "in step with the
+      // remote" about a comparison nobody ran.
+      if (unmoved) return { upstream: name, fetched, changed: false, fetchEnabled: autoFetch }
+      const counted = await tryRunGit(ctx.subprocess, path, ['rev-list', '--left-right', '--count', `${name}...HEAD`], { signal })
+      const counts = counted.trim().split(/\s+/)
+      const behind = Number.parseInt(counts[0], 10)
+      const ahead = Number.parseInt(counts[1], 10)
+      const diffstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', name], { signal })
+      const insertions = /(\d+) insertion/.exec(diffstat)
+      const deletions = /(\d+) deletion/.exec(diffstat)
+      const workstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal })
+      const workInsertions = /(\d+) insertion/.exec(workstat)
+      const workDeletions = /(\d+) deletion/.exec(workstat)
+      return {
+        upstream: name,
+        // Whether the numbers below are against a remote this request just read, or
+        // against the refs a previous fetch left behind. The panel says which.
+        fetched,
+        // Whether the configuration asked for a fetch at all. Without it "nobody
+        // tried" and "it was tried and failed" are indistinguishable on screen.
+        fetchEnabled: autoFetch,
+        // False only when a fetch was asked for, succeeded, and moved no
+        // remote-tracking ref. Absent otherwise, because "no answer to a question
+        // nobody asked" is not the same as "nothing changed".
+        ...(wanted && fetched ? { changed: !unmoved } : {}),
+        ...(fetchError === '' ? {} : { fetchError }),
+        ...(Number.isFinite(ahead) ? { commits: ahead } : {}),
+        ...(Number.isFinite(behind) ? { behind } : {}),
+        ...(diffstat.trim() === '' ? {} : {
+          committedChanges: {
+            insertions: insertions === null ? 0 : Number.parseInt(insertions[1], 10),
+            deletions: deletions === null ? 0 : Number.parseInt(deletions[1], 10),
+          },
+        }),
+        ...(workstat.trim() === '' ? {} : {
+          workingChanges: {
+            insertions: workInsertions === null ? 0 : Number.parseInt(workInsertions[1], 10),
+            deletions: workDeletions === null ? 0 : Number.parseInt(workDeletions[1], 10),
+          },
+        }),
+      }
     })
 
     if (endpoint === 'task.classify-root') return recover(async () => {

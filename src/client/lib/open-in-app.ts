@@ -137,27 +137,6 @@ async function catalog(): Promise<readonly OpenTarget[]> {
 }
 
 /**
- * Reveal a directory in the machine's file manager.
- *
- * `action: 'reveal'` is the Host's file-manager navigation; without it the same call
- * would hand the path to the default application instead, which for a directory is not
- * what the menu entry means.
- * @param ctx - the client root.
- * @param path - the directory, absolute.
- * @returns whether the Host accepted it.
- */
-export async function revealDirectory(ctx: CtxLike, path: string): Promise<boolean> {
-  const remote = remoteOf(ctx)
-  if (remote === undefined) return false
-  try {
-    const result = await remote.openWorkspacePath({ path, action: "reveal" })
-    return result.ok
-  } catch {
-    return false
-  }
-}
-
-/**
  * Open a directory with one application from the catalog.
  *
  * The remote is tried first because a registered application id is what it takes; a

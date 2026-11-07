@@ -37,7 +37,7 @@ describe("WorktreePlugin compatibility", () => {
     // nested namespace is declared separately: `remote` alone does not make
     // `remote.session` readable. Without these the plugin still renders, but every host
     // capability answers "unavailable" - which is what left the workspace menu with no
-    // reveal entry on a machine that has one.
+    // "open in application" row on a machine that has one.
     expect(WorktreePlugin.inject).toEqual([
       "slots", "connection", "locale", "workspaces", "uiWorkspace", "sessions", "layout",
       "remote", "remote.session", "remote.directoryPicker",
