@@ -55,10 +55,10 @@ dsh plugin --profile web add dsh-worktree-space
 
 - [Node.js](https://nodejs.org) `>=22.19.0`
 - [Git](https://git-scm.com)：所有 worktree 与分支操作都由它执行，不随插件分发，需在 `PATH` 上
-- DSH `>=0.2.0-rc.1 <0.3.0-0`，即 0.2.x（下界自 `0.2.0-rc.1` 起，不含 0.3.0 线的预发布）
+- DSH `>=0.2.1-rc.1 <0.3.0-0`，即 0.2.x（下界自 `0.2.1-rc.1` 起，不含 0.3.0 线的预发布）
 - 客户端：**网页端与桌面端均可用**；桌面端由人工验证，命令行矩阵未覆盖
 
-**五个官方版本逐个实测通过**：`0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`、`0.2.1-rc.3`，
+**五个 DSH 版本逐个实测通过**：`0.2.2-rc.1`、`0.2.1-rc.5`、`0.2.1-rc.4`、`0.2.1-rc.3`、`0.2.1-rc.2`，
 每个版本都用**该版本自己**的 DSH CLI 在一次性 profile 里跑通了安装、启动、卸载、回滚。这套验证覆盖的是
 **命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。逐条记录见
 [`docs/store-evidence.md`](docs/store-evidence.md)。
@@ -124,10 +124,13 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— 在任务空间里
   改代码，不会动到源码检出。
 - **管理页面**，分三个视图（入口见「管理 Worktree Space」一节）：
-  - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库；
+  - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库。每个源码仓库带一行
+    `远端分支：<分支>` + 领先/落后提交数（`↑` / `↓`）+ 这些提交的增删行数，工作区头部是它下面
+    所有仓库的合计；
   - **Git 仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree；
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理），
-    任务行下面就是它的部署卡片。
+    任务行下面就是它的部署卡片。任务行显示**任务分支**与整个任务的合计，展开后每个仓库显示自己的
+    **基线分支**与那一份数字。
 - **给任务补仓库**：任务进行到一半才发现少一个仓库时，在任务行上点「添加仓库」—— 候选就是 Git 仓库视图里
   那一列，任务已经有的不会重复列出；也可以直接填一个仓库目录，它会注册成工作区，因此同样进入 Git 仓库视图。
   新仓库在任务现有分支上开 worktree，起点默认各仓库当前的 HEAD，也可指定分支或提交。新仓库可以位于不同目录
@@ -468,6 +471,8 @@ worktree 里，可以就地处理。
 | 操作日志 | 开 / 关 | **开** | 容器根下 `worktree-space-log.jsonl` 的开关。关掉只是不再写新记录，磁盘上已有的日志原样保留 |
 | 扫描深度 | 1–5 层 | 3 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
 | 最大遍历目录数 | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | 一次扫描最多读取的目录数；超了会停下来并提示哪些没看到 |
+| 自动拉取远端分支 | 开 / 关 | **开** | 打开管理页时在后台对每个源码仓库执行 `git fetch --quiet --no-tags`，随后按拉到的远端跟踪引用算领先/落后。**fetch 只更新远端跟踪引用，不动工作区与本地分支**；关掉后只与本地已有的引用比较。远端没有新提交时不重算也不重绘 |
+| 拉取超时 | 3 / 5 / 8 / 15 / 30 / 60 秒 | 8 秒 | 单个仓库的 fetch 超过这个时间就放弃、改用本地已有的引用；各仓库独立计时，一个仓库超时不影响其它仓库。远端较慢或走代理时调大 |
 | 工作区仓库扫描忽略目录 | 任意目录名列表 | 内置 25 个 | 扫描永远不会进入这些名字的目录。插件自带 25 个：各语言的依赖与编译输出目录（`node_modules`、`target`、`__pycache__`、`Pods` 等），加上插件自己的任务容器名 `worktree-space`、`dsh-worktree-space`。可以添加自己的，也可以把内置的放回来 —— **放回内置项需要二次确认**，因为代价落在下一次扫描上。名字不区分大小写；点右侧「编辑」打开对话框，可搜索、增删，保存后才写入配置 |
 | 默认分支前缀 | 任意文本 | `task/` | 新建任务空间时默认用的前缀；在新建对话框里改动并勾选「设为默认分支前缀」，点创建时一并写回这里 |
 | Worktree Space 容器根目录 | 默认 / 指定目录 | **默认** | 新建任务空间默认放哪。**推荐用默认**：它按下面的规则从源码根推导，落在根工作空间的下一层，因此同一根工作区下的所有项目——无论各自埋得多深——都会落进同一个容器。若改用指定目录，而它与仓库目录没有公共祖先，agent 处理提交与冲突的会话需要手动提权 |
@@ -623,12 +628,12 @@ top right.
 - [Node.js](https://nodejs.org) `>=22.19.0`
 - [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
   plugin, and has to be on `PATH`
-- DSH `>=0.2.0-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.0-rc.1`, excluding the 0.3.0 line's prereleases)
+- DSH `>=0.2.1-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.1-rc.1`, excluding the 0.3.0 line's prereleases)
 - Clients: **both the web client and the desktop client work**; the desktop client was verified by
   hand, the command-line matrix does not cover it
 
-**All five official releases were verified one by one** — `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`,
-`0.2.1-rc.2` and `0.2.1-rc.3` — each against **its own** DSH CLI, in a disposable profile, through
+**All five DSH releases were verified one by one** — `0.2.2-rc.1`, `0.2.1-rc.5`, `0.2.1-rc.4`,
+`0.2.1-rc.3` and `0.2.1-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
 install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
 the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
 matrix. The per-release record is in
@@ -716,10 +721,14 @@ the repository that stopped it, and merges once that session has resolved it.
   source checkouts.
 - **A management page**, with three views (the ways in are listed under Manage a Worktree Space):
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
-    each one has;
+    each one has. Every source repository carries `Remote branch: <branch>` with the commits
+    ahead and behind (`↑` / `↓`) and the lines those commits add and remove; the Workspace
+    header carries the sum over its repositories;
   - **Git repositories** lists every Git repository found and the worktrees linked to it;
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
-    whether it is locked or prunable), with that task's deployment card under its row.
+    whether it is locked or prunable), with that task's deployment card under its row. A task
+    row carries the **task branch** and the whole task's totals; opened, each repository shows
+    its own **base branch** and that repository's figures.
 - **Add a repository to a task** from its row, when the work turns out to need one the task
   did not start with. The candidates are the Git repository view's own list, minus the ones the
   task already has; a repository directory can also be typed in, and it is registered as a
@@ -1148,6 +1157,8 @@ data directory, which needs a DSH restart.
 | Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
 | Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
 | Scan directory limit | 500 / 1000 / 2000 / 3000 / 5000 / 10000 | 2000 | How many directories one scan may read; past it, the scan stops and says what it did not reach |
+| Fetch remotes automatically | on / off | **on** | Opening the management page runs `git fetch --quiet --no-tags` per source repository in the background, then compares against the refs it brought. **A fetch updates the remote-tracking refs only — never the working tree or a local branch.** Off compares against the refs already on disk. A fetch that brings nothing new neither recomputes nor repaints |
+| Fetch timeout | 3 / 5 / 8 / 15 / 30 / 60 seconds | 8 seconds | A repository's fetch that runs past this is given up on and the local refs are used instead. Each repository is timed on its own, so one slow remote does not hold up the others. Raise it for a slow remote or a proxy |
 | Directories the scan skips | any list of directory names | the plugin's 25 | A scan never descends into directories with these names. The plugin ships 25: dependency and build-output directories across languages — `node_modules`, `target`, `__pycache__`, `Pods` and the rest — plus this plugin's own task container, under both names it takes, `worktree-space` and `dsh-worktree-space`. You can add your own, and you can put one of those back. **Restoring a built-in one asks first**, because the cost lands on the next scan rather than in the dialog. Names are matched without regard to case; the Edit button on the right opens a dialog to search, add and remove, and nothing is written until it is saved |
 | Default branch prefix | any text | `task/` | The prefix a new task space starts from; changing it in the create dialog and ticking Set as the default branch prefix writes it back here when the space is created |
 | Worktree Space container root | default / custom directory | **default** | Where new task spaces go. **The default is the recommended choice**: it is derived from the source root by the rule above and lands one level below the root workspace, so every project under that root workspace falls into the same container however deep its own directory sits. A custom directory that shares no common ancestor with the repositories makes the session that hands commits and conflicts to an agent ask for authorisation by hand |

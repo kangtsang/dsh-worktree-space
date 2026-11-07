@@ -125,3 +125,18 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES = [
 export const DEFAULT_IGNORED_SCAN_DIRECTORY_SET = new Set(
   DEFAULT_IGNORED_SCAN_DIRECTORIES.map((name) => name.toLowerCase()),
 )
+
+/**
+ * How long one repository's `git fetch` may take before it is given up on.
+ *
+ * Not a scan bound, but it lives here for the same reason the two above do: the
+ * configuration schema states this number as its default, the prose in the README
+ * states it too, and a test has to be able to read it back from both. A literal
+ * `8` in the schema is a number nobody can compare against anything.
+ *
+ * Eight seconds is measured rather than picked: a fetch that has not answered by
+ * then is on a remote that is unreachable or behind a proxy that is not going to
+ * come back, and the row already has local refs worth comparing. Waiting longer
+ * costs the reader a blank row for a number that is usually about to be unchanged.
+ */
+export const DEFAULT_FETCH_TIMEOUT_SECONDS = 8

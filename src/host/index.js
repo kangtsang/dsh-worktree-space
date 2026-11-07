@@ -120,6 +120,7 @@ import {
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
   DEFAULT_IGNORED_SCAN_DIRECTORY_SET,
   DEFAULT_SCAN_DEPTH,
+  DEFAULT_FETCH_TIMEOUT_SECONDS,
   MAX_SCAN_DIRECTORIES,
   MAX_SCAN_DIRECTORIES_CEILING,
   MIN_SCAN_DEPTH,
@@ -833,7 +834,7 @@ export const Config = z.object({
    * cost the reader every other repository's answer, so each is bounded on its own
    * and the ones that answered keep their numbers.
    */
-  fetchTimeoutSeconds: z.number().min(1).max(120).step(1).default(8).volatile()
+  fetchTimeoutSeconds: z.number().min(1).max(120).step(1).default(DEFAULT_FETCH_TIMEOUT_SECONDS).volatile()
     .description('Seconds one repository\'s fetch may take before it is abandoned and the local refs are used instead.'),
   /**
    * The branch prefix every new task space starts from.

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { DEFAULT_SCAN_DEPTH, MAX_SCAN_DIRECTORIES } from "../src/host/index.js"
+import { DEFAULT_FETCH_TIMEOUT_SECONDS, DEFAULT_SCAN_DEPTH, MAX_SCAN_DIRECTORIES } from "../src/host/index.js"
 import { DEFAULT_IGNORED_SCAN_DIRECTORIES } from "../src/client/lib/scan-ignore"
 
 /**
@@ -62,6 +62,7 @@ const STATED = [
     depth: /\| 扫描深度 \|[^|]*\|\s*(\d+)\s*层\s*\|/,
     directories: /\| 最大遍历目录数 \|[^|]*\|\s*(\d+)\s*\|/,
     ignored: /\| 工作区仓库扫描忽略目录 \|[^|]*\|\s*内置 (\d+) 个\s*\|/,
+    fetchTimeout: /\| 拉取超时 \|[^|]*\|\s*(\d+)\s*秒\s*\|/,
   },
   {
     // The English half of the same file, after the merge anchor.
@@ -71,6 +72,7 @@ const STATED = [
     depth: /\| Scan depth \|[^|]*\|\s*(\d+)\s*levels\s*\|/,
     directories: /\| Scan directory limit \|[^|]*\|\s*(\d+)\s*\|/,
     ignored: /\| Directories the scan skips \|[^|]*\|\s*the plugin's (\d+)\s*\|/,
+    fetchTimeout: /\| Fetch timeout \|[^|]*\|\s*(\d+)\s*seconds\s*\|/,
   },
   {
     file: "docs/PERMISSIONS.md",
@@ -105,6 +107,16 @@ describe("the defaults the documents state", () => {
       const stated = readPart(file, after).match(directories)
       expect(stated, `${named} no longer states a directory limit where this test can read it`).not.toBeNull()
       expect(Number(stated[1]), `${named} states a directory limit the plugin does not ship`).toBe(MAX_SCAN_DIRECTORIES)
+    },
+  )
+
+  it.each(STATED.filter((entry) => entry.fetchTimeout))(
+    "$label states the fetch timeout the plugin ships",
+    ({ file, after, label, fetchTimeout }) => {
+      const named = label ?? file
+      const stated = readPart(file, after).match(fetchTimeout)
+      expect(stated, `${named} no longer states a fetch timeout where this test can read it`).not.toBeNull()
+      expect(Number(stated[1]), `${named} states a fetch timeout the plugin does not ship`).toBe(DEFAULT_FETCH_TIMEOUT_SECONDS)
     },
   )
 

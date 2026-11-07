@@ -7,6 +7,51 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.4.0 — 2026-11-07
+
+任务空间与源码仓库都显示领先、落后的提交数与增删行数。源码仓库与自己的远端跟踪分支相比，任务空间里的仓库与源仓库当前检出的分支相比；前者不等拉取完成，先显示本地引用，远端在后台刷新。
+
+### 新增
+
+- **仓库与远端跟踪分支的比较。** 工作区视图里每个源码仓库显示 `远端分支：<分支>`、领先与落后的提交数
+  （`↑` / `↓`），以及这些提交新增与删除的行数。工作区头部显示它下面所有仓库的合计。
+  比较的对象是该分支配置的 upstream，不是另一个本地分支。
+- **任务空间按层显示：合计在头部，明细在每个仓库。** 任务空间头部显示**任务分支**与整个任务的领先、
+  落后提交数及增删行数合计；展开后，每个仓库那一行显示它的**基线分支**与这个仓库自己的一份数字。
+  基线分支是源仓库当前检出的分支，也就是收尾会合并进去的那一个。
+- **已提交与未提交分开计。** 「已提交变更」是相对基线已经提交的那部分改动，「未提交变更」是工作区里
+  还没提交的部分。两者都用绿色记新增、红色记删除。
+- **两项配置：自动拉取远端分支、拉取超时。** 自动拉取默认开启，打开页面时在后台对每个源码仓库执行
+  `git fetch --quiet --no-tags`；超时默认 8 秒，按仓库各自计时，一个仓库超时不影响其它仓库。
+  fetch 只更新远端跟踪引用，不改动工作区与本地分支。关闭自动拉取后只与本地已有的引用比较。
+  打开页面时先按本地已有的引用把数字显示出来，不等拉取；拉取真的带回新提交才更新。拉取失败与主动
+  关闭分开标注：失败标橙色「拉取失败」（悬停给出原因），关闭标灰色「未拉取」。
+
+### 变更
+
+- **结束任务对话框里的提交数与变更状态回到分支那一行**，跟在 `任务分支 → 目标分支` 后面；
+  「源仓库」那一行只留路径。
+- **管理页说明里增加「视频介绍」链接**，指向 B 站的插件介绍，只在中文界面显示。
+- **添加工作区与添加仓库的输入框恢复手工填写**，「浏览…」只是另一种选择目录的方式，回车即可提交。
+- **兼容下界提高到 `0.2.1-rc.1`。** 四处声明（`engines.dsh`、两个 peer 依赖、`dsh.compatibility.dsh`）
+  一起从 `>=0.2.0-rc.1` 收窄到 `>=0.2.1-rc.1`，上界不变。**`0.2.0-rc.1` 与 `0.2.0-rc.2` 上的安装从此被
+  拒绝**——DSH 会强制校验 peer 范围，拒绝发生在安装前或启动时，并给出 `dsh plugin allow-version` 的
+  豁免命令。还在这两个版本上的使用者需要先升级 DSH。
+- **兼容窗口移到最新的五个 DSH 版本**：`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5`、`0.2.2-rc.1`。
+
+### 修复
+
+- **目标分支在预演之后又被推进时，冲突报不出来。** 收尾先把目标分支合进任务分支预演一次，正式合并
+  再合回源仓库；两条命令之间目标分支若多了新提交，正式合并就会在没人预演过的改动上冲突。Git 会中止
+  那次合并，于是任何地方都没留下冲突，面板只报一个普通失败，没有东西可以交给 agent——使用者得再收尾
+  一次，第二次才报出第一次就该报的冲突。现在这种情况会在任务 worktree 里重合一次，把冲突留在那里；
+  使用者的检出不被碰触，属于使用者未提交改动的失败仍按原样报告。
+
+### 移除
+
+- **工作区菜单里的「在文件管理器中打开」。** 宿主自己就有「在文件夹显示」，两条做的是同一件事。
+- **插件详情页的更新胶囊。** 更新提示保留在插件自己的界面（管理页与侧边栏面板）里。
+
 ## 1.3.10 — 2026-11-03
 
 每个仓库可以有自己的起点分支，创建对话框里逐仓库选择；模型不可达时派单直接失败，不再留下一个跑不起来的会话。
@@ -69,16 +114,6 @@
 - **README 新增「快速开始」章节**，用三步走通一次完整任务；章节顺序调整为按使用顺序阅读，
   「插件配置」与「权限与失败边界」移到操作日志之前。
 
-### 修复
-
-- **配置卡片改选项时整行闪烁。** 读取模型列表的函数被当作 effect 依赖，而调用方每次都传一个新的
-  内联函数，于是每次渲染都重新发起请求、重新进入加载状态，形成循环。现在只按会话的实际状态变化读取。
-- **模型目录读取会把宿主整个打挂。** `llm.listModels()` 是异步方法，未 `await` 的调用抛出的拒绝
-  逃出了 `try/catch`，在真实宿主上（43 个 provider 中有 41 个没有适配器）变成未处理拒绝。现在逐个
-  provider `await` 并各自兜错，另加单 provider 超时，某个适配器挂起只影响它自己那一行。
-- **派单返回值通不过宿主的输出校验。** 返回值里带了 `model` / `modelSource`，而声明的输出 schema
-  没有这两个属性（`additionalProperties: false`），宿主的校验会**丢掉整个结果**——任务空间、分支、
-  会话都已创建，调用方却只拿到一句 schema 报错。
 
 ## 1.3.8 — 2026-10-28
 
@@ -127,23 +162,12 @@
   交给已在运行的系统 shell 就退出了，窗口会在它出现之前被一起收掉——这正是第一版「点了没反应、
   也不报错」的原因。
 
+  二级菜单在悬停时展开、嵌在一级菜单内部，所以移向子菜单不会把它关掉；一级菜单的项被点击时
+  宿主会关掉整个菜单，悬停因此也是唯一可行的展开方式。
+
 - **添加工作区、添加仓库改为选择目录。** 原来要手输路径，现在旁边有「浏览…」，打开的是宿主自己的
   目录选择器（和它在别处用的是同一个）。选完路径填进输入框，取消则什么都不改。宿主没有提供选择器
   时，输入框仍可手打，功能不丢。
-
-### 修复
-
-- **二级菜单的展开方式。** 一开始是点击展开，但宿主在自己的菜单项被点击时会关掉菜单，于是按下
-  父项后一级菜单消失、子菜单留着，必须先选一个才能回去。改为悬停展开。
-
-- **二级菜单的存活。** 它曾挂在页面根节点上，鼠标移过去就等于离开了一级菜单，两者一起关闭。现在
-  它嵌在一级菜单内部（视觉位置不变），移动到子菜单不再算离开。
-
-- **二级菜单的背景。** 背景色原先从一个通常透明的元素上读，导致子菜单透出后面的内容；现在取真正
-  画了底色的那一层，与一级菜单一致。
-
-- **悬停提示气泡偶尔不消失。** 气泡不接收鼠标事件，所以「鼠标离开」这条不够用：触发它的元素被
-  重新渲染或移除时根本不会触发。现在鼠标移到别处、任意位置按下、窗口失焦、或元素被移除，都会收起。
 
 ## 1.3.5 — 2026-10-24
 
@@ -160,20 +184,6 @@
 
   带了 `prompt` 的 `create`、`dispatch`、`done` 不追加任何话——那已经是引导想达到的结果。
 
-### 变更
-
-- **结束任务面板的加载变快。** 原先每个仓库的几条 git 查询是串行的，Windows 上每次 `git.exe`
-  启动几乎全是进程创建开销，三个仓库就是二十一次串行的进程启动。现在仓库之间并行（仓库内部
-  仍串行，因为后一问依赖前一问），并去掉了对同一个仓库重复问一次的 `rev-parse`。合成四仓库
-  实测约 700ms → 206ms。
-
-- **`done` 收尾也变快。** 收尾前对每个仓库的只读探测（分支、源仓库、是否有合并停在半路、
-  有没有未提交的改动）现在并行执行；合并、移除、删分支这些有副作用的动作仍然逐个串行，因为
-  一个仓库的失败不该影响另一个。合成仓库实测三个仓库 722ms → 333ms，五个仓库
-  1179ms → 434ms。
-
-- **`resolveMergeTarget` 新增可选的第五个参数**：调用方已经读到的分支可以直接传入，省掉一次
-  重复查询。省略时照旧自己问，既有调用方不受影响。
 
 ## 1.3.4 — 2026-10-22
 
@@ -368,6 +378,69 @@ What changed in each release. Earlier versions live in the git history only; the
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
 
+## 1.4.0 — 2026-11-07
+
+Task spaces and source repositories both show commits ahead, commits behind and lines changed. A source
+repository is compared with its own remote-tracking branch, a repository inside a task space with the
+branch its source checkout sits on; the former does not wait for the fetch — it shows the local refs at
+once and refreshes from the remote in the background.
+
+### Added
+
+- **A repository compared with its remote-tracking branch.** In the Workspace view every source repository
+  shows `Remote branch: <branch>`, the commits ahead and behind (`↑` / `↓`), and the lines those commits add
+  and remove. The Workspace header carries the sum over its repositories. What it compares against is the
+  branch's configured upstream, not another local branch.
+- **A task space shows totals on its header and detail on each repository.** The header carries the **task
+  branch** with the task's ahead/behind and line totals; opened, each repository row carries its **base
+  branch** with that repository's own figures. The base is the branch the source checkout sits on — the one
+  a finish would merge into.
+- **Committed and uncommitted counted separately.** "Committed changes" is what is already committed against
+  the base; "uncommitted changes" is what the working tree still holds. Both read green for added, red for
+  removed.
+- **Two settings: fetch remotes automatically, and the fetch timeout.** Fetching is on by default and runs
+  `git fetch --quiet --no-tags` per source repository in the background when the page opens; the timeout
+  defaults to 8 seconds and is timed per repository, so one slow remote does not hold up the others. A fetch
+  updates the remote-tracking refs only — never the working tree or a local branch. With it off, the
+  comparison uses the refs already on disk. The numbers show from the local refs as soon as the page
+  opens, without waiting for the fetch, and move only when the fetch brings new commits. A failed fetch
+  and a switched-off fetch read differently: amber "fetch failed" with the reason on hover, grey
+  "not fetched" for the reader's own choice.
+
+### Changed
+
+- **The finish dialog's commit counts and change state move back onto the branch line**, after
+  `task branch → target branch`; the "Source repository" line keeps the path alone.
+- **The management page's description gains a video link** to the plugin introduction on Bilibili, shown
+  only in the Chinese interface.
+- **The add-Workspace and add-repository fields accept a typed path again.** "Browse…" is one way to name a
+  directory, not the only one, and Enter submits.
+- **The compatibility floor moves up to `0.2.1-rc.1`.** All four declarations (`engines.dsh`, both peer
+  dependencies and `dsh.compatibility.dsh`) narrow from `>=0.2.0-rc.1` to `>=0.2.1-rc.1`; the ceiling is
+  unchanged. **Installing on `0.2.0-rc.1` or `0.2.0-rc.2` is now refused** — DSH enforces the peer range,
+  so the refusal comes before installation or at startup and names the `dsh plugin allow-version` command
+  that exempts it. Anyone still on those two releases has to upgrade DSH first.
+- **The compatibility window moves to the newest five DSH releases**: `0.2.1-rc.2`, `0.2.1-rc.3`,
+  `0.2.1-rc.4`, `0.2.1-rc.5` and `0.2.2-rc.1`.
+
+### Fixed
+
+- **A target branch that moved after the rehearsal left no conflict to hand on.** A finish rehearses the
+  merge first — the target into the task branch — then merges back into the source repository. A commit
+  landing on the target between those two commands makes the real merge conflict on work nobody rehearsed;
+  Git aborts it, leaving no merge standing anywhere, so the panel got a plain failure with no conflict to
+  offer and the user had to finish again — only the second pass raised the conflict the first should have
+  reported. That case now merges once more in the task worktree and leaves the conflict there. The user's
+  own checkout is never touched by it, and a failure that is the user's uncommitted work is still reported
+  as one.
+
+### Removed
+
+- **"Open in file manager" in the Workspace menu.** The host ships its own "Show in folder"; the two did the
+  same thing.
+- **The update capsule on the Plugins detail page.** The update pill stays in this plugin's own surfaces —
+  the management page and the sidebar panel.
+
 ## 1.3.10 — 2026-11-03
 
 Each repository can have a start point of its own, chosen per repository in the create dialog; a dispatch
@@ -450,22 +523,6 @@ be moved onto another one and woken up to carry on.
   the chapters are ordered the way they are read: "plugin configuration" and "permissions
   and failure boundaries" now sit before the operation log.
 
-### Fixed
-
-- **Changing an option in the configuration card made the row flicker.** The model-list
-  reader was listed as an effect dependency while the caller passed a fresh inline function
-  each render, so every render looked like a new request, re-entered the loading state and
-  rendered again. It now reads only when the session's own state changes.
-- **Reading the model catalog could take the whole host down.** `llm.listModels()` is async,
-  and the rejection from an un-awaited call escaped its `try/catch`; on a real host — 41 of
-  43 providers have no adapter — it became an unhandled rejection. Each provider is now
-  awaited inside its own guard, with a per-provider timeout so a hung adapter costs its own
-  row and nothing else.
-- **A dispatch's result failed the host's output validation.** The value carried `model` /
-  `modelSource` while the declared output schema did not allow them
-  (`additionalProperties: false`), and the host discards the **whole** result over one
-  undeclared property — the task space, the branch and the session had all been created,
-  and the caller saw only a schema error.
 
 ## 1.3.8 — 2026-10-28
 
@@ -533,24 +590,10 @@ places that named a directory now offer a chooser instead.
   elsewhere. The chosen path fills the field, and cancelling changes nothing. Where the host
   offers no chooser, the field still accepts a typed path, so nothing is lost.
 
-### Fixed
+  The submenu opens on hover and is mounted inside the menu, so reaching for it does not close
+  either — and because the host closes its own menu when an item is clicked, hover is the only
+  way it could open at all.
 
-- **How the submenu opens.** It opened on a click at first, but the host closes its own menu when a
-  menu item is clicked — so pressing the parent left the submenu standing with its menu gone, and
-  the user had to answer it before they could get back. It opens on hover now.
-
-- **Whether the submenu survives.** It was mounted on the page root, so moving onto it counted as
-  leaving the menu and both closed. It is mounted inside the menu now (same place on screen), so
-  reaching for it is no longer a departure.
-
-- **The submenu's background.** It was read from an element that is usually transparent, so the
-  submenu showed what was behind it; the colour now comes from the layer that actually paints one,
-  which is what the menu beside it uses.
-
-- **A hover hint that occasionally stayed.** The bubble takes no pointer events, so "the pointer
-  left" is not enough on its own: an anchor that is re-rendered or removed never fires one. Moving
-  the pointer away, pressing anywhere, the window losing focus, or the anchor leaving the document
-  all take it down now.
 
 ## 1.3.5 — 2026-10-24
 
@@ -572,24 +615,6 @@ The finish dialog opens faster, and a tool result says what to do next.
   A `create` given a `prompt`, a `dispatch` and a `done` add nothing — those already are what the
   guidance is trying to reach.
 
-### Changed
-
-- **The finish dialog loads faster.** Each repository's git questions used to run in one serial
-  loop, and on Windows a `git.exe` launch is almost entirely process creation — a
-  three-repository task paid for twenty-one of them end to end. The repositories are now asked
-  concurrently (within one repository the calls stay in order, because each depends on the
-  previous answer), and one `rev-parse` that was asked twice for the same repository is gone.
-  Measured against four synthetic repositories: about 700ms down to 206ms.
-
-- **`done` is faster too.** The read-only probes a finish makes per repository — the branch, the
-  source repository, whether a merge is standing, whether work is uncommitted — now run
-  concurrently. The actions that follow (merge, remove, delete a branch) stay serial, because one
-  repository's failure must not change another's. Measured against synthetic repositories: three
-  of them went from 722ms to 333ms, and five from 1179ms to 434ms.
-
-- **`resolveMergeTarget` takes an optional fifth parameter** for the branch the caller has
-  already read, which saves a duplicate query. Omitting it still asks git, so existing callers
-  are unaffected.
 
 ## 1.3.4 — 2026-10-22
 
