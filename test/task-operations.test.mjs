@@ -3511,9 +3511,14 @@ describe("planTask", () => {
       // worktree already holds. `feat/login` is the task branch and is checked out
       // in the task's own worktree, so it can never be a target.
       "for-each-ref --format=%(refname:short) refs/heads": "other\nmain\nfeat/login\ndevelop\n",
-      // `alpha` is three commits ahead of develop, `beta` one.
-      "rev-list --count develop..HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "3\n" : "1\n",
-      "rev-list --count main..HEAD": "",
+      // `alpha` is three commits ahead of develop and two behind it, `beta` one ahead
+      // and none behind. One call answers both directions, which is why the reply is
+      // `<behind> <ahead>` rather than a single number.
+      "rev-list --left-right --count develop...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "2\t3\n" : "0\t1\n",
+      // The two line pairs the panel draws: the commits against the target, and the
+      // working tree against HEAD. `alpha` carries both, `beta` neither.
+      "diff --shortstat develop": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 41 insertions(+), 67 deletions(-)\n" : "",
+      "diff --shortstat HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 12 insertions(+), 5 deletions(-)\n" : "",
     }
     return { root, taskPath, handlers, cleanup: () => rm(root, { recursive: true, force: true }) }
   }
@@ -3526,7 +3531,7 @@ describe("planTask", () => {
 
       // The target is the branch the source repository has checked out, even though
       // `origin/HEAD` and a local `main` both exist to be found.
-      expect(plan).toMatchObject({ task: "login", project: PROJECT, path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "develop", changedFiles: 2, commits: 4 })
+      expect(plan).toMatchObject({ task: "login", project: PROJECT, path: fixtureUnderTest.taskPath, tasksRoot: fixtureUnderTest.root, mergeTarget: "develop", changedFiles: 2, commits: 4, behind: 2 })
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
       expect(byName.alpha).toEqual({
         name: "alpha",
@@ -3540,9 +3545,19 @@ describe("planTask", () => {
         // The task branch is not offered, and the branch the repository is on leads.
         branches: ["develop", "main", "other"],
         commits: 3,
+        // The direction the dialog could not state before: the target gained two
+        // commits while this task was being worked on.
+        behind: 2,
         changedFiles: 2,
+        // The same two pairs the task view draws, read from the same two commands.
+        committedChanges: { insertions: 41, deletions: 67 },
+        workingChanges: { insertions: 12, deletions: 5 },
       })
-      expect(byName.beta).toMatchObject({ branch: "feat/login", target: "develop", checkedOut: "develop", branches: ["develop", "main", "other"], commits: 1, changedFiles: 0 })
+      // A repository that carries nothing reports no line pair at all, which is how the
+      // dialog tells "nothing changed" from "this could not be read".
+      expect(byName.beta).toMatchObject({ branch: "feat/login", target: "develop", checkedOut: "develop", branches: ["develop", "main", "other"], commits: 1, behind: 0, changedFiles: 0 })
+      expect(byName.beta).not.toHaveProperty("committedChanges")
+      expect(byName.beta).not.toHaveProperty("workingChanges")
       // The mainline is never asked about: naming it is what made the dialog and
       // the merge disagree.
       expect(keys().filter((key) => key.includes("origin/HEAD") || key.includes("refs/heads/main"))).toEqual([])
@@ -3555,7 +3570,11 @@ describe("planTask", () => {
     const fixtureUnderTest = await fixture()
     const { subprocess } = subprocessMock({
       ...fixtureUnderTest.handlers,
-      "rev-list --count main..HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "7\n" : "2\n",
+      // The chosen target has its own counts, in both directions: choosing a branch is
+      // choosing which comparison the row is showing, so `behind` follows the choice
+      // rather than staying on the default target's number.
+      "rev-list --left-right --count main...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "5\t7\n" : "1\t2\n",
+      "diff --shortstat main": ({ cwd }) => basename(cwd) === "alpha" ? " 1 file changed, 9 insertions(+), 3 deletions(-)\n" : "",
     })
     try {
       const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root, targets: { alpha: "main" } })
@@ -3563,7 +3582,8 @@ describe("planTask", () => {
       const byName = Object.fromEntries(plan.repositories.map((entry) => [entry.name, entry]))
       // The chosen branch, the count that goes with it, and the note that it is not
       // the branch the source repository is on — everything the second click needs.
-      expect(byName.alpha).toMatchObject({ target: "main", checkedOut: "develop", commits: 7 })
+      expect(byName.alpha).toMatchObject({ target: "main", checkedOut: "develop", commits: 7, behind: 5 })
+      expect(byName.alpha.committedChanges).toEqual({ insertions: 9, deletions: 3 })
       // A repository left alone keeps its own default.
       expect(byName.beta).toMatchObject({ target: "develop", commits: 1 })
     } finally {
@@ -3607,7 +3627,7 @@ describe("planTask", () => {
       ...fixtureUnderTest.handlers,
       // `alpha` answers with nothing at all, which is what a failed `rev-list` looks
       // like: `tryRunGit` swallows the failure and hands back an empty string.
-      "rev-list --count develop..HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : "1\n"),
+      "rev-list --left-right --count develop...HEAD": ({ cwd }) => (basename(cwd) === "alpha" ? "" : "0\t1\n"),
     })
     try {
       const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root })

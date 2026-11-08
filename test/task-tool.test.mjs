@@ -1408,6 +1408,66 @@ describe("registerTaskTool", () => {
     }
   })
 
+  it("writes the title the brief opens with, so the sidebar row is not the derived one", async () => {
+    // Two failures make this worth doing explicitly. DSH derives an untouched title from the
+    // first human message by taking its first five words and cutting them to 40 bytes, and
+    // `【WTS Dispatch】kratos-admin/task/login` is two words - so the derivation reaches into
+    // the brief's body and the row reads `...login -`. And that derived title is a `fallback`
+    // source, which a user's own rename replaces outright; the explicit one is `user`, the
+    // source the service treats as final.
+    const fixture = await taskSpaceFixture()
+    const renamed = []
+    const prompts = []
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: {
+        create: async () => ({ sessionId: "session-1" }),
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+      },
+      agents: { get: (id) => (id === "session-1" ? { session: { id: "session-1" } } : undefined) },
+      sessionTitle: { rename: (session, title) => { renamed.push([session.id, title]) } },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(renamed).toEqual([["session-1", `【WTS Dispatch】${PROJECT}/task/login`]])
+      // The same string, not two spellings of it: the row and the instruction have to agree,
+      // or the marker stops identifying anything.
+      expect(prompts[0].content[0].text.split("\n")[0]).toBe(`【WTS Dispatch】${PROJECT}/task/login`)
+      expect(value.warnings).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("dispatches normally when the deployment serves no title service", async () => {
+    // A minimal profile serves neither `sessionTitle` nor `agents`. That is a composition
+    // choice, not a failure of this call: the session still gets its work, and its row falls
+    // back to the title DSH derives. Reporting it as a warning would tell every such
+    // deployment that each dispatch went wrong.
+    const fixture = await taskSpaceFixture()
+    const prompts = []
+    const { ctx, captured } = toolContext(fixture.subprocess, {
+      sessionController: {
+        create: async () => ({ sessionId: "session-1" }),
+        prompt: async (request) => { prompts.push(request); return { accepted: true } },
+      },
+    })
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: PROJECT, tasksRoot: fixture.container, prompt: "go" },
+        { agent: { session: { id: "session-caller" } } },
+      )
+      expect(prompts[0].content[0].text).toContain(`【WTS Dispatch】${PROJECT}/task/login`)
+      expect(value.warnings).toEqual([])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
   it("hands a deploying task's session the completion line, and only a deploying one", async () => {
     // The fence is settled at create, and this brief is the last moment its completion line
     // can be stated: a session that was never told is free to report written code as a

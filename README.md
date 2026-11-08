@@ -19,9 +19,11 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 
 📺 **视频介绍**：[Worktree Space 插件介绍（B 站）](https://www.bilibili.com/video/BV1iM466VEz2)
 
-<img src="docs/img/why-worktree-space.png" alt="Worktree Space使用理由" width="960">
-<img src="docs/img/isolation-model.png" alt="Worktree Space隔离模型" width="960">
-<img src="docs/img/user-story-flow.png" alt="Worktree Space使用流程" width="960">
+![Worktree Space使用理由](docs/img/why-worktree-space.png)
+
+![Worktree Space隔离模型](docs/img/isolation-model.png)
+
+![Worktree Space使用流程](docs/img/user-story-flow.png)
 
 ## 📑 目录
 
@@ -216,7 +218,7 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 
 ### ➕ 创建 Worktree Space
 
-<img src="docs/img/new-worktree-space.png" alt="新建 Worktree Space 对话框" width="720">
+![新建 Worktree Space 对话框](docs/img/new-worktree-space.png)
 
 > 术语：**源码根**＝交给插件的工作区目录：它自己是一个 Git 仓库，或者它作为顶层目录装着若干 Git 仓库。
 
@@ -249,7 +251,7 @@ worktree 与分支一起，不会留半个任务在那儿。
 
 ### 🗂️ 管理 Worktree Space
 
-<img src="docs/img/manage-worktree-space.png" alt="管理页面：工作区 / Git 仓库 / 任务空间三个视图" width="800">
+![管理页面：工作区 / Git 仓库 / 任务空间三个视图](docs/img/manage-worktree-space.png)
 
 打开 **管理页面**，两种形态：
 
@@ -285,7 +287,7 @@ DSH 实例的内存里，实例关闭时随之清空。
 
 ### 🏁 结束 Worktree Space
 
-<img src="docs/img/finish-task.png" alt="结束任务对话框" width="720">
+![结束任务对话框](docs/img/finish-task.png)
 
 在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框打开时先把**计划**读一遍
 （不信任打开它的那一行），逐个仓库列出：当前分支、**要合并到哪条分支**（可以换）、领先几个提交、
@@ -589,9 +591,11 @@ Two ways to use it: **through the UI** ([Usage](#-usage)), or **letting an agent
 [![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
 
 
-<img src="docs/img/why-worktree-space.png" alt="Why use Worktree Space" width="960">
-<img src="docs/img/isolation-model.png" alt="Worktree Space Isolation Model" width="960">
-<img src="docs/img/user-story-flow.png" alt="Worktree Space User Story" width="960">
+![Why use Worktree Space](docs/img/why-worktree-space.png)
+
+![Worktree Space Isolation Model](docs/img/isolation-model.png)
+
+![Worktree Space User Story](docs/img/user-story-flow.png)
 
 ## 📑 Contents
 
@@ -832,7 +836,7 @@ full instructions for each step, the failures you can meet and what to do after 
 
 ### ➕ Create a Worktree Space
 
-<img src="docs/img/new-worktree-space.png" alt="The New Worktree Space dialog" width="720">
+![The New Worktree Space dialog](docs/img/new-worktree-space.png)
 
 > Terms: the **source root** is the Workspace directory whose Git repositories the plugin recognises:
 > the source root is itself a Git repository, or it is the top-level directory holding several Git
@@ -876,7 +880,7 @@ half task is left behind.
 
 ### 🗂️ Manage a Worktree Space
 
-<img src="docs/img/manage-worktree-space.png" alt="The management page: Workspaces, Git repositories and Task spaces views" width="800">
+![The management page: Workspaces, Git repositories and Task spaces views](docs/img/manage-worktree-space.png)
 
 Open the **management page** — two ways in:
 
@@ -920,7 +924,7 @@ the gate is raising the environment and running the smoke.
 
 ### 🏁 Finish a Worktree Space
 
-<img src="docs/img/finish-task.png" alt="The Finish task dialog" width="720">
+![The Finish task dialog](docs/img/finish-task.png)
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu. The
 dialog reads the **plan** once more when it opens — it does not trust the row that opened it — and

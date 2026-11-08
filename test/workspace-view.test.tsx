@@ -177,4 +177,37 @@ describe("WorktreesSettings workspace view", () => {
     expect(document.querySelectorAll(".dws-repo")).toHaveLength(3)
     expect(screen.queryByText("Notes")).toBeTruthy()
   })
+
+  it("counts uncommitted lines in the Workspace's one pair, not only the committed half", async () => {
+    // The row has space for one pair, so the pair has to be the whole story: a Workspace
+    // whose repositories hold 30 committed and 7 uncommitted lines reads +37, not +30.
+    // Reporting only the committed half made the collapsed row disagree with the
+    // repositories it was summarising.
+    const next = setup((path) => {
+      // The repositories the root spans are what the upstream read is asked for, so the
+      // fixture has to name them: an empty list means nothing is compared and the row
+      // has no pair to draw.
+      if (path === "/projects") {
+        return {
+          path, isRepository: false, isSourceRoot: true, repositoryCount: 2,
+          repositories: [{ name: "one", path: "/projects/one" }, { name: "two", path: "/projects/two" }],
+        }
+      }
+      return { path, isRepository: false, isSourceRoot: false, repositoryCount: 0, repositories: [] }
+    })
+    next.api.upstream = vi.fn().mockImplementation(async (repoPath: string) => (
+      repoPath === "/projects/one"
+        ? { upstream: "origin/main", fetched: false, commits: 1, behind: 0, committedChanges: { insertions: 20, deletions: 4 }, workingChanges: { insertions: 5, deletions: 1 } }
+        : { upstream: "origin/main", fetched: false, commits: 0, behind: 2, committedChanges: { insertions: 10, deletions: 2 }, workingChanges: { insertions: 2, deletions: 3 } }
+    ))
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+    await waitFor(() => expect(document.querySelectorAll(".dws-repo")).toHaveLength(3))
+
+    const projects = [...document.querySelectorAll(".dws-repo")].find((row) => (row.textContent || "").includes("Projects"))!
+    const pair = projects.querySelector(".dws-lines") as HTMLElement
+    // 20 + 5 + 10 + 2 = 37 added, 4 + 1 + 2 + 3 = 10 removed.
+    expect(pair.textContent).toBe("+37−10")
+    expect(pair.getAttribute("title")).toBe(format(t("totalChangesHint"), { insertions: "37", deletions: "10" }))
+  })
 })

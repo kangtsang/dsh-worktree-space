@@ -12,7 +12,7 @@ import { coded, warned } from './codes.js'
 import { SCAN_CONCURRENCY, mapWithLimit } from './concurrency.js'
 import { assertDeliveryGate, deliveryGatePreview, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
-import { gitSucceeded, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { gitSucceeded, parseShortstat, parseWorktrees, runGit, tryRunGit } from './git.js'
 import { findLinks, symlinksRefused } from './links.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, isInside, refuseDelete, samePathLocation } from './paths.js'
@@ -616,15 +616,23 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   // below relies on: E1006 has to stop the plan rather than become a row.
   const repositories = await mapWithLimit(worktrees, SCAN_CONCURRENCY, async (worktreePath) => {
     const name = basename(worktreePath)
-    const branch = await tryRunGit(subprocess, worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD'])
-    const status = await tryRunGit(subprocess, worktreePath, ['status', '--short', '--branch'])
+    // Three questions about the worktree itself, and none of them depends on another
+    // answer: the branch, what is uncommitted, and the worktree list the source
+    // repository is read out of. Asked one after the other they cost three `git.exe`
+    // launches, and on Windows a launch is almost entirely process creation - which is
+    // why the dialog's read is measured in launches rather than in git's own work.
+    const [branch, status, porcelain] = await Promise.all([
+      tryRunGit(subprocess, worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']),
+      tryRunGit(subprocess, worktreePath, ['status', '--short', '--branch']),
+      tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain']),
+    ])
     const lines = status === '' ? [] : status.split(/\r?\n/)
     const changed = lines.filter((line) => line !== '' && !line.startsWith('## ')).length
     const plan = { name, path: worktreePath, mainRepo: '', branch, changedFiles: changed, branches: [] }
 
-    const porcelain = await tryRunGit(subprocess, worktreePath, ['worktree', 'list', '--porcelain'])
     const listed = parseWorktrees(porcelain)
-    const mainRepo = listed.find((row) => row.isMain)?.path ?? ''
+    const main = listed.find((row) => row.isMain)
+    const mainRepo = main?.path ?? ''
     plan.mainRepo = mainRepo
     if (mainRepo === '') plan.error = 'cannot locate the source repository'
     else if (!ownsRepo(mainRepo)) {
@@ -640,23 +648,56 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
         { path: worktreePath, mainRepo, sourceRoot: recordedSourceRoot, repositories: recordedRepos },
       )
     } else {
-      const checkedOut = await tryRunGit(subprocess, mainRepo, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      if (checkedOut !== '' && checkedOut !== 'HEAD') plan.checkedOut = checkedOut
-      // Offered even when no target resolves on its own: a repository sitting on a
-      // detached HEAD has no default, but naming one of these still merges.
-      plan.branches = await mergeCandidates(subprocess, mainRepo, listed, branch, plan.checkedOut)
+      // The source checkout's own branch is already on the porcelain - `branch
+      // refs/heads/<name>` is what `rev-parse --abbrev-ref HEAD` there would report - so
+      // asking git again would be a launch spent to learn what is in hand. A detached
+      // checkout prints `detached` instead and leaves this undefined, which is the same
+      // "no branch to name" the old call answered as `HEAD`.
+      const checkedOut = main.branch ?? ''
+      if (checkedOut !== '') plan.checkedOut = checkedOut
+      // The candidates and the target answer different questions and neither waits on
+      // the other, so they are asked together. The target's own refusal is caught here
+      // rather than left to reject the pair: the picker still needs the candidates that
+      // the same round produced, and a target git refused is a row with an error on it,
+      // not a plan without a picker.
+      const [branches, resolved] = await Promise.all([
+        // Offered even when no target resolves on its own: a repository sitting on a
+        // detached HEAD has no default, but naming one of these still merges.
+        mergeCandidates(subprocess, mainRepo, listed, branch, checkedOut),
+        resolveMergeTarget(subprocess, mainRepo, targets?.[name], branch, checkedOut)
+          .then((target) => ({ target }), (error) => ({ error })),
+      ])
+      plan.branches = branches
       try {
-        // `checkedOut` handed over rather than read again: this branch already asked
-        // `rev-parse --abbrev-ref HEAD` one call ago, and the same question to the same
-        // repository is a process launch spent to learn what is in hand.
-        plan.target = await resolveMergeTarget(subprocess, mainRepo, targets?.[name], branch, checkedOut)
+        if (resolved.error !== undefined) throw resolved.error
+        plan.target = resolved.target
+        // All three measurements depend only on the target, so they are taken in one
+        // round rather than three: `rev-list` for the two directions, and the two
+        // `diff --shortstat` the panel draws - the commits against the target, and the
+        // working tree against HEAD. Three launches become one round of three.
+        //
+        // One call answers both directions: `rev-list --left-right --count
+        // target...HEAD` prints "<behind> <ahead>", which is the same call the panel
+        // makes, so a task's row and this dialog cannot disagree about the two numbers.
+        // `behind` is what the target gained while the task was being worked on, and it
+        // is measured against the target chosen here - a different choice in the
+        // dialog's picker re-reads the plan, so the number follows the choice.
+        const [counted, diffstat, workstat] = await Promise.all([
+          tryRunGit(subprocess, worktreePath, ['rev-list', '--left-right', '--count', `${plan.target}...HEAD`]),
+          tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', plan.target]),
+          tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', 'HEAD']),
+        ])
         // Left out rather than claimed as zero when git will not answer the count:
         // "no commits" is a fact about the branch, and a repository that could not be
         // asked is not one holding none. This is the rule the status endpoint follows
         // for the same number, and the two answers sit side by side on one page.
-        const ahead = await tryRunGit(subprocess, worktreePath, ['rev-list', '--count', `${plan.target}..HEAD`])
-        const counted = Number.parseInt(ahead, 10)
-        if (Number.isFinite(counted)) plan.commits = counted
+        const columns = counted.trim().split(/\s+/)
+        const behind = Number.parseInt(columns[0], 10)
+        const ahead = Number.parseInt(columns[1], 10)
+        if (Number.isFinite(behind)) plan.behind = behind
+        if (Number.isFinite(ahead)) plan.commits = ahead
+        if (diffstat.trim() !== '') plan.committedChanges = parseShortstat(diffstat)
+        if (workstat.trim() !== '') plan.workingChanges = parseShortstat(workstat)
       } catch (error) {
         plan.error = error.message
       }
@@ -673,6 +714,28 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   // rather than counted as nothing - and the top level keeps its number, because
   // the dialog prints it as the headline of what this would bring.
   const commits = repositories.reduce((sum, row) => sum + (row.commits ?? 0), 0)
+  // The same rule for the two new totals: a repository git would not answer for is
+  // left out rather than counted as zero. `behind` sums across repositories because
+  // each one is measured against its own target, and the headline is what the whole
+  // task is behind by. The line totals follow the panel's own two pairs.
+  const behind = repositories.reduce((sum, row) => sum + (row.behind ?? 0), 0)
+  const committedChanges = repositories.reduce((sum, row) => {
+    if (row.committedChanges === undefined) return sum
+    sum.insertions += row.committedChanges.insertions
+    sum.deletions += row.committedChanges.deletions
+    return sum
+  }, { insertions: 0, deletions: 0 })
+  const workingChanges = repositories.reduce((sum, row) => {
+    if (row.workingChanges === undefined) return sum
+    sum.insertions += row.workingChanges.insertions
+    sum.deletions += row.workingChanges.deletions
+    return sum
+  }, { insertions: 0, deletions: 0 })
+  // Absent rather than a zero pair when nothing was measured, which is how the panel
+  // tells "nothing has changed" from "this could not be read" - the rule `worktree.status`
+  // already follows for the same two fields.
+  const measuredCommitted = repositories.some((row) => row.committedChanges !== undefined)
+  const measuredWorking = repositories.some((row) => row.workingChanges !== undefined)
 
   await auditOutcome(repositories, [], 'plan')
   // What the delivery gate would say about a merge of this task, computed here rather than
@@ -682,7 +745,21 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   // then refused at the finish with no way for the user to answer. One judgement, one place:
   // the same function the refusal itself uses.
   const gate = await deliveryGatePreview(await readTaskMetadata(taskPath), taskPath)
-  return { task, project: projectName, path: taskPath, tasksRoot: tasksRoot.trim(), mergeTarget, changedFiles, commits, repositories, strays, gate }
+  return {
+    task,
+    project: projectName,
+    path: taskPath,
+    tasksRoot: tasksRoot.trim(),
+    mergeTarget,
+    changedFiles,
+    commits,
+    behind,
+    ...(measuredCommitted ? { committedChanges } : {}),
+    ...(measuredWorking ? { workingChanges } : {}),
+    repositories,
+    strays,
+    gate,
+  }
 }
 
 

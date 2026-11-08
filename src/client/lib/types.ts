@@ -373,6 +373,12 @@ export interface TaskPlanRepository {
    * happened, so a missing count is shown by leaving it out.
    */
   commits?: number
+  /** Commits the target has that this branch does not: what it gained meanwhile. */
+  behind?: number
+  /** Lines the commits ahead of the target add and remove; absent without a target. */
+  committedChanges?: LineChanges
+  /** Lines the working tree changes add and remove, uncommitted. */
+  workingChanges?: LineChanges
   changedFiles: number
   error?: string
 }
@@ -410,6 +416,12 @@ export interface TaskPlan {
   mergeTarget?: string
   changedFiles: number
   commits: number
+  /** Commits the targets have that the task branches do not, summed. */
+  behind: number
+  /** Lines the commits ahead of their targets add and remove, summed; absent when unread. */
+  committedChanges?: LineChanges
+  /** Lines the working trees change, uncommitted, summed; absent when unread. */
+  workingChanges?: LineChanges
   repositories: TaskPlanRepository[]
   /** What the container holds besides its worktrees. */
   strays: TaskPlanStray[]

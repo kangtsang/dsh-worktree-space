@@ -603,8 +603,31 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
     t(fullAccess ? "finishPromptScopeFullAccess" : wide ? "finishPromptScopeWide" : "finishPromptScopeTight"),
     { boundary: slashPath(boundary) },
   )
+  /**
+   * The `<project>/<branch>` label a session's first line carries.
+   *
+   * The first line is also the session's title: DSH derives an untouched title from the
+   * first human message, so what stands there is what the sidebar shows. Hence the branch
+   * is named in full - `task/` is a configured prefix, so `<project>/<task>` does not say
+   * which branch any particular repository is on, and a session works on a branch.
+   *
+   * The branch comes from the batch rather than from the plan, because repositories in one
+   * task space may sit on different branches. A batch shares one session and is normally
+   * one repository; when it is more, the first repository's branch names the session, which
+   * is what that session's own `{repositories}` list then spells out per repository.
+   *
+   * Nothing here truncates: DSH cuts a title at its own byte budget, and the first line
+   * stays whole so a reader can see what the cut title lost.
+   */
+  const taskLabel = (project: string, branch: string) => {
+    const named = project.trim()
+    const ref = branch.trim()
+    if (named === "") return ref
+    return ref === "" ? named : `${named}/${ref}`
+  }
   const commitPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean, fullAccess: boolean) => format(t("finishCommitPrompt"), {
     task: plan?.task ?? "",
+    branch: taskLabel(plan?.project ?? "", entries[0]?.branch ?? ""),
     scope: scopeLine(boundary, wide, fullAccess),
     repositories: entries.map((entry) => format(t("finishCommitRepository"), {
       name: entry.name,
@@ -614,6 +637,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
   })
   const conflictPromptFor = (entries: HandoffTarget[], boundary: string, wide: boolean, fullAccess: boolean) => format(t("finishHandoffPrompt"), {
     task: plan?.task ?? "",
+    branch: taskLabel(plan?.project ?? "", entries[0]?.branch ?? ""),
     scope: scopeLine(boundary, wide, fullAccess),
     repositories: entries.map((entry) => format(t("finishHandoffRepository"), {
       name: entry.name,
@@ -808,6 +832,19 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
       // this dialog opened earlier keeps the access it was given then - the switch governs
       // what is opened next, and nothing here reaches into a conversation already under way.
       const granted = batch.fullAccess && (reused || await widenSession(sessionId))
+      const text = textFor(batch.entries, batch.boundary, batch.wide, granted)
+      // The title is the brief's own first line, taken from the text rather than rebuilt
+      // from the same pieces: a marker written twice is a marker that drifts, and the row
+      // and the instruction have to say the same thing. Renamed before the prompt, because
+      // the automatic title is derived when the first user message lands - a `user`-sourced
+      // title set first is what stops that derivation from running at all.
+      //
+      // A session this dialog opened on an earlier press keeps the title it was given then;
+      // rewriting it would be a second decision about a conversation already under way.
+      //
+      // Probed like every other optional verb here: a Host old enough not to serve
+      // `Session.rename` still gets its work, and the row falls back to the derived title.
+      const title = text.split("\n")[0] ?? ""
       try {
         // A session opens blank, so this is its first turn rather than a steer, and the
         // reference is a handle for the length of the call - not something to keep: the
@@ -815,7 +852,11 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
         // batch rides in that one turn, so a shared session is not queued a message per
         // repository and its agent can settle the whole list in a single pass.
         await sessions.using(sessionId, { source: "controllerOperation" }, async (reference) => {
-          await reference.binding.session.prompt([{ type: "text", text: textFor(batch.entries, batch.boundary, batch.wide, granted) }], "queue")
+          const renaming = reference.binding.session.rename
+          if (!reused && title !== "" && typeof renaming === "function") {
+            await renaming.call(reference.binding.session, title).catch(() => undefined)
+          }
+          await reference.binding.session.prompt([{ type: "text", text }], "queue")
         })
         for (const entry of batch.entries) opened.push({ name: entry.name, site: entry.site, boundary: batch.boundary, wide: batch.wide, fullAccess: granted, kind, sessionId })
       } catch (reason: any) {
@@ -918,14 +959,62 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
           {/* What there is to archive, before anything is chosen. The branch each
               repository merges into is per repository and named on its own row, so it
               is not summarised here: one line would have to pick one of them. */}
-          {plan !== null && result === null ? <p className="dws-dialog-status" role="status">
-            <span>{plan.changedFiles > 0 ? format(t("dirty"), { count: String(plan.changedFiles) }) : t("clean")}</span>
-            <span aria-hidden="true">·</span>
-            <span>{format(t("planCommits"), { count: String(plan.commits) })}</span>
-            <span aria-hidden="true">·</span>
-            <span>{t("taskDirectoryLabel")}</span>
-            <code title={slashPath(path)}>{slashPath(path)}</code>
-          </p> : null}
+          {/* Two lines: the directory the task space is, then what it carries. The path
+              is long and would otherwise push the counts onto a wrapped second line at
+              whatever width happened to break - which put the numbers somewhere the eye
+              did not expect. Breaking it deliberately puts the directory on its own line
+              and leaves the counts a line of their own to be read as one phrase. */}
+          {plan !== null && result === null ? <div className="dws-dialog-status" role="status">
+            <p className="dws-dialog-status-path">
+              <span>{t("taskDirectoryLabel")}</span>
+              <code title={slashPath(path)}>{slashPath(path)}</code>
+            </p>
+            {/* The same two pairs the task view draws, against the same targets: how far
+                the branches are ahead and behind, then the lines each side carries. The
+                counts replace the commit total that used to stand here, because "2
+                commits" and "↑2 ↓4" are the same fact with the direction kept - and the
+                direction is what a merge needs. */}
+            <p className="dws-dialog-status-counts">
+              {/* The label names both directions the arrows stand for, so a reader who
+                  has never seen `↑`/`↓` does not have to hover to learn which is which.
+                  The hints name the target branch rather than the base branch: this
+                  dialog compares a worktree with the branch it would merge into, and the
+                  picker on each row can make those two different branches. */}
+              <span className="dws-changes-label">{t("planAheadBehindLabel")}</span>
+              <span className="dws-ahead-behind" title={`${format(t("planAheadHint"), { count: String(plan.commits) })} · ${format(t("planBehindHint"), { count: String(plan.behind ?? 0) })}`}>
+                <span className="dws-ahead">↑ {plan.commits}</span>
+                <span className="dws-behind">↓ {plan.behind ?? 0}</span>
+              </span>
+              <span aria-hidden="true">·</span>
+              {/* The two pairs carry the same labels the task view gives them, so the line
+                  says which pair is which rather than leaving two runs of signed numbers
+                  to be told apart by position. The committed pair is absent when nothing
+                  measured it, and so is the label that would introduce it. */}
+              {plan.committedChanges === undefined ? null : <>
+                <span className="dws-changes-label">{t("committedChangesLabel")}</span>
+                <span className="dws-lines" title={format(t("committedChangesHint"), { insertions: String(plan.committedChanges.insertions), deletions: String(plan.committedChanges.deletions) })}>
+                  <span className="dws-line-add">+{plan.committedChanges.insertions}</span>
+                  <span className="dws-line-del">−{plan.committedChanges.deletions}</span>
+                </span>
+                <span aria-hidden="true">·</span>
+              </>}
+              {/* Nothing uncommitted reads as the same sentence the task view uses for it,
+                  rather than as a label with no numbers after it. */}
+              {plan.changedFiles === 0
+                ? <span>{t("clean")}</span>
+                : <>
+                  <span className="dws-changes-label" title={plan.workingChanges === undefined
+                    ? format(t("dirty"), { count: String(plan.changedFiles) })
+                    : format(t("planWorkingHint"), { count: String(plan.changedFiles), insertions: String(plan.workingChanges.insertions), deletions: String(plan.workingChanges.deletions) })}>
+                    {t("workingChangesLabel")}
+                  </span>
+                  {plan.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("planWorkingHint"), { count: String(plan.changedFiles), insertions: String(plan.workingChanges.insertions), deletions: String(plan.workingChanges.deletions) })}>
+                    <span className="dws-line-add">+{plan.workingChanges.insertions}</span>
+                    <span className="dws-line-del">−{plan.workingChanges.deletions}</span>
+                  </span>}
+                </>}
+            </p>
+          </div> : null}
           {/* Each repository's branch, the branch it would merge into, and how far
               ahead it is — the per-repository detail behind the totals above. The
               target is choosable where the Host offered branches to choose from. */}
@@ -955,8 +1044,36 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   is the sentence they qualify. The source repository below names a
                   directory, and a count sitting there read as a property of that
                   directory instead. */}
-              {entry.commits === undefined ? null : <span>{format(t("planCommits"), { count: String(entry.commits) })}</span>}
-              <span>{entry.changedFiles > 0 ? format(t("dirty"), { count: String(entry.changedFiles) }) : t("clean")}</span>
+              {entry.commits === undefined && entry.behind === undefined ? null : <span className="dws-ahead-behind" title={`${format(t("planAheadHint"), { count: String(entry.commits ?? 0) })} · ${format(t("planBehindHint"), { count: String(entry.behind ?? 0) })}`}>
+                <span className="dws-ahead">↑ {entry.commits ?? 0}</span>
+                <span className="dws-behind">↓ {entry.behind ?? 0}</span>
+              </span>}
+              {/* The committed pair beside the ahead/behind counts, the way the task
+                  view draws them, under the same label. The uncommitted pair replaces
+                  the bare file count, and the file count moves into that pair's own
+                  hint. Label and pair are siblings rather than nested: nesting put the
+                  pair inside an element whose colour was already set, and the two
+                  coloured halves then inherited it instead of their own. */}
+              {entry.committedChanges === undefined ? null : <>
+                <span className="dws-changes-label" title={format(t("committedChangesHint"), { insertions: String(entry.committedChanges.insertions), deletions: String(entry.committedChanges.deletions) })}>{t("committedChangesLabel")}</span>
+                <span className="dws-lines" title={format(t("committedChangesHint"), { insertions: String(entry.committedChanges.insertions), deletions: String(entry.committedChanges.deletions) })}>
+                  <span className="dws-line-add">+{entry.committedChanges.insertions}</span>
+                  <span className="dws-line-del">−{entry.committedChanges.deletions}</span>
+                </span>
+              </>}
+              {entry.changedFiles > 0
+                ? <>
+                  <span className="dws-changes-label" title={entry.workingChanges === undefined
+                    ? format(t("dirty"), { count: String(entry.changedFiles) })
+                    : format(t("planWorkingHint"), { count: String(entry.changedFiles), insertions: String(entry.workingChanges.insertions), deletions: String(entry.workingChanges.deletions) })}>
+                    {t("workingChangesLabel")}
+                  </span>
+                  {entry.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("planWorkingHint"), { count: String(entry.changedFiles), insertions: String(entry.workingChanges.insertions), deletions: String(entry.workingChanges.deletions) })}>
+                    <span className="dws-line-add">+{entry.workingChanges.insertions}</span>
+                    <span className="dws-line-del">−{entry.workingChanges.deletions}</span>
+                  </span>}
+                </>
+                : <span>{t("clean")}</span>}
               {/* Saying it before the merge, not after: a target the source
                   repository is not on is merged in a checkout of its own. */}
               {entry.target !== undefined && entry.target !== entry.checkedOut

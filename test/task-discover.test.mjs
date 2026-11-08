@@ -5,6 +5,7 @@ import { basename, join } from "node:path"
 import {
   discoverSourceRepos,
   isSourceRepository,
+  recordedSourceRepositories,
   resolveSourceRepos,
 } from "../src/host/task/discover.js"
 
@@ -279,6 +280,88 @@ describe("resolveSourceRepos with repositories below the root", () => {
       await expect(resolveSourceRepos(root, ["alpha"])).rejects.toThrow(/not a source repository/)
     } finally {
       await cleanup()
+    }
+  })
+})
+
+describe("recordedSourceRepositories", () => {
+  /** Write the record a create leaves, at the path the plugin reads it from. */
+  async function taskSpace(root, name, repositories) {
+    const directory = join(root, name)
+    await mkdir(join(directory, ".worktree-space"), { recursive: true })
+    await writeFile(
+      join(directory, ".worktree-space", "worktree-space.json"),
+      JSON.stringify({ version: 1, task: name, project: "proj", tasksRoot: root, repositories }, null, 2),
+    )
+    return directory
+  }
+
+  it("reads the source repositories a task space records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-recorded-"))
+    try {
+      const alpha = join(root, "alpha")
+      const beta = join(root, "beta")
+      await mkdir(join(alpha, ".git"), { recursive: true })
+      await mkdir(join(beta, ".git"), { recursive: true })
+      // The container itself is not a repository: its worktrees carry `.git` as a file,
+      // which is the whole reason a scan of it used to come back empty.
+      const space = await taskSpace(root, "coupon", [
+        { name: "alpha", sourcePath: alpha, branch: "task/coupon" },
+        { name: "beta", sourcePath: beta, branch: "task/coupon" },
+      ])
+      await mkdir(join(space, "alpha"), { recursive: true })
+      await writeFile(join(space, "alpha", ".git"), "gitdir: ../../alpha/.git/worktrees/alpha\n")
+
+      // The fix in one assertion: pointed at a task space, discovery finds no
+      // repository of its own, and the record supplies the ones that report its
+      // worktrees.
+      expect(await discoverSourceRepos(space)).toEqual([])
+      expect((await recordedSourceRepositories(space)).sort()).toEqual([alpha, beta].sort())
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves out a recorded source that is gone or no longer a repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-recorded-"))
+    try {
+      const alpha = join(root, "alpha")
+      await mkdir(join(alpha, ".git"), { recursive: true })
+      // A linked worktree makes the same point as a missing directory: the record
+      // states what was true when the space was made, and this is what says so now.
+      const linked = join(root, "linked")
+      await mkdir(linked, { recursive: true })
+      await writeFile(join(linked, ".git"), "gitdir: ../alpha/.git/worktrees/linked\n")
+      const space = await taskSpace(root, "coupon", [
+        { name: "alpha", sourcePath: alpha },
+        { name: "gone", sourcePath: join(root, "gone") },
+        { name: "linked", sourcePath: linked },
+        { name: "blank", sourcePath: "   " },
+        { name: "nosource" },
+      ])
+
+      expect(await recordedSourceRepositories(space)).toEqual([alpha])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("answers nothing for a directory that is not a task space", async () => {
+    const root = await mkdtemp(join(tmpdir(), "multi-worktree-recorded-"))
+    try {
+      expect(await recordedSourceRepositories(root)).toEqual([])
+      expect(await recordedSourceRepositories(join(root, "missing"))).toEqual([])
+      // A record without a `repositories` array - the shape an older create left - is
+      // read as "nothing recorded" rather than as an error.
+      const legacy = join(root, "legacy")
+      await mkdir(join(legacy, ".worktree-space"), { recursive: true })
+      await writeFile(
+        join(legacy, ".worktree-space", "worktree-space.json"),
+        JSON.stringify({ version: 0, task: "legacy", branch: "task/legacy" }),
+      )
+      expect(await recordedSourceRepositories(legacy)).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

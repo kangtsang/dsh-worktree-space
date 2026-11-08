@@ -377,6 +377,55 @@ describe("worktree RPC contract", () => {
     }
   })
 
+  it("finds a registered task space through the sources its record names", async () => {
+    // A task container holds no repository of its own - its worktrees carry `.git`
+    // as a file - so a scan pointed at one used to answer an empty list while the
+    // same directory showed in the Workspace view.
+    const root = await mkdtemp(join(tmpdir(), "dsh-worktree-space-space-"))
+    try {
+      const source = join(root, "source", "alpha")
+      await mkdir(join(source, ".git"), { recursive: true })
+      const space = join(root, "container", "mall-project", "coupon")
+      await mkdir(join(space, ".worktree-space"), { recursive: true })
+      await mkdir(join(space, "alpha"), { recursive: true })
+      await writeFile(join(space, "alpha", ".git"), "gitdir: ../../../../source/alpha/.git/worktrees/alpha\n")
+      await writeFile(
+        join(space, ".worktree-space", "worktree-space.json"),
+        JSON.stringify({ version: 1, task: "coupon", project: "mall-project", tasksRoot: join(root, "container"), repositories: [{ name: "alpha", sourcePath: source, branch: "task/coupon" }] }),
+      )
+      // The same source repository also carries a sibling task's worktree. It is in
+      // no Workspace and its source root is in none either, so nothing the caller
+      // registered accounts for it.
+      const sibling = join(root, "container", "mall-project", "flash-sale", "alpha")
+      await mkdir(sibling, { recursive: true })
+      const handler = handleFor({
+        "worktree list --porcelain": [
+          `worktree ${source}`, "HEAD abc", "branch refs/heads/main", "",
+          `worktree ${join(space, "alpha")}`, "HEAD bbb", "branch refs/heads/task/coupon", "",
+          `worktree ${sibling}`, "HEAD ccc", "branch refs/heads/task/flash-sale", "",
+        ].join("\n"),
+      })
+
+      const scanned = (await handler("worktree.scan", { paths: [space] })).value
+      expect(scanned.lists).toHaveLength(1)
+      expect(scanned.lists[0].worktrees.map((worktree) => worktree.path)).toEqual([
+        source,
+        join(space, "alpha"),
+      ])
+
+      // Registering the source root instead is a statement about all of its
+      // worktrees, so the same scan keeps the sibling task's row.
+      const walked = (await handler("worktree.scan", { paths: [source] })).value
+      expect(walked.lists[0].worktrees.map((worktree) => worktree.path)).toEqual([
+        source,
+        join(space, "alpha"),
+        sibling,
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   // The create dialog asks for every selected repository's start points in one
   // batch as it opens. Local branches only, short-named, and the 100-branch
   // ceiling is reported as a count.

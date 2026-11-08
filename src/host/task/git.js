@@ -386,6 +386,30 @@ export async function gitSucceeded(subprocess, cwd, args, options) {
 }
 
 /**
+ * Lines a `--shortstat` line adds and removes.
+ *
+ * `git diff --shortstat` prints ` 1 file changed, 12 insertions(+), 3 deletions(-)`,
+ * and either half is absent when only one kind of change happened - a file added
+ * outright has insertions and no deletions. So each is parsed on its own and a missing
+ * half is a real zero, which is why this returns an object rather than `undefined` for
+ * an empty answer: the caller has already decided that an unreadable answer is no answer.
+ *
+ * One function because two endpoints read the same line - `worktree.status` for the
+ * panel's per-repository rows, and `task.plan` for the finish dialog's - and the two
+ * numbers sitting one click apart have to be the same number.
+ * @param shortstat - git's `--shortstat` output, possibly empty.
+ * @returns the two counts, either of which may be zero.
+ */
+export function parseShortstat(shortstat) {
+  const insertions = /(\d+) insertion/.exec(shortstat)
+  const deletions = /(\d+) deletion/.exec(shortstat)
+  return {
+    insertions: insertions === null ? 0 : Number.parseInt(insertions[1], 10),
+    deletions: deletions === null ? 0 : Number.parseInt(deletions[1], 10),
+  }
+}
+
+/**
  * Pick the branch new work should start from, preferring the remote's own
  * default and then the conventional names.
  * @param subprocess - the profile's subprocess service.

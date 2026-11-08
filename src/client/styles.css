@@ -962,6 +962,14 @@
   .dws-finish-repos li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
   .dws-finish-repos strong { font-size: 12px; font-weight: 500; }
   .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  /* The counts wear the same colours they wear in the task view, so one pair of numbers
+     reads the same way on both pages. `.dws-finish-repos span` above is a descendant
+     selector and would otherwise win over the single-class colour rules below it - which
+     is exactly what happened: the pairs rendered, in one flat grey. */
+  .dws-finish-repos .dws-line-add, .dws-finish-repos .dws-ahead { color: var(--wt-success); }
+  .dws-finish-repos .dws-line-del { color: var(--wt-danger); }
+  .dws-finish-repos .dws-behind { color: var(--wt-warn); }
+  .dws-finish-repos .dws-changes-label { color: var(--wt-muted); font-size: 12px; }
   .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
   /* A conflicted merge the host already aborted: told in the user's language, in the
      danger colour because it is an unfinished task the user has to go and resolve,
@@ -971,8 +979,16 @@
   .dws-finish-log summary { cursor: pointer; }
   .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
   /* What there is to archive, stated above everything the dialog asks. */
-  .dws-dialog-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
-  .dws-dialog-status code { min-width: 0; overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+  /* Two lines by construction: the directory, then the counts. `role="status"` sits on
+    this block rather than on one line, so a reader announcing the change still hears
+    the whole answer in one breath. */
+ .dws-dialog-status { display: grid; gap: 4px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+ .dws-dialog-status-path, .dws-dialog-status-counts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0; min-width: 0; }
+ .dws-dialog-status code { min-width: 0; overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+ /* The pairs keep the task view's own spacing, so a label and its numbers stay one
+    phrase rather than reading as two items in the row's 6 px rhythm. */
+ .dws-dialog-status .dws-ahead-behind, .dws-dialog-status .dws-lines { gap: 8px; }
+ .dws-dialog-status .dws-changes-label { margin-left: 2px; }
   .dws-plan { margin-top: 12px; }
   /* The branch a repository merges into, chosen in place: sized like the text it
      replaces rather than like a form field. */

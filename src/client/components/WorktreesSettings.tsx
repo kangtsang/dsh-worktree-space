@@ -107,6 +107,24 @@ function fetchFailureText(error: string, t: (key: string) => string) {
 }
 
 /**
+ * The two line totals of a group, added into one pair.
+ *
+ * A collapsed row answers "how much is this carrying" in one number, so the committed
+ * and uncommitted halves are summed rather than drawn as two pairs: the pair is a
+ * magnitude, and splitting it made the row say the same thing twice. Either half may be
+ * absent - git could not measure it - and the other still counts, which is why this adds
+ * whatever is there rather than requiring both.
+ * @param group - the task or Workspace whose totals are being drawn.
+ * @returns the summed pair.
+ */
+function totalLines(group: { committedChanges?: LineChanges; workingChanges?: LineChanges }): LineChanges {
+  return {
+    insertions: (group.committedChanges?.insertions ?? 0) + (group.workingChanges?.insertions ?? 0),
+    deletions: (group.committedChanges?.deletions ?? 0) + (group.workingChanges?.deletions ?? 0),
+  }
+}
+
+/**
  * The line counts under a worktree row, in the order a finish reads them.
  *
  * Committed first, because that is what a merge would carry; the uncommitted half
@@ -1030,9 +1048,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                 <span className="dws-ahead">↑ {task.commits}</span>
                 <span className="dws-behind">↓ {task.behind}</span>
               </span> : null}
-              {task.committedChanges === undefined ? null : <span className="dws-count dws-lines" title={format(t("committedChangesHint"), { insertions: String(task.committedChanges.insertions), deletions: String(task.committedChanges.deletions) })}>
-                <span className="dws-line-add">+{task.committedChanges.insertions}</span>
-                <span className="dws-line-del">−{task.committedChanges.deletions}</span>
+              {task.committedChanges === undefined && task.workingChanges === undefined ? null : <span className="dws-count dws-lines" title={format(t("totalChangesHint"), { insertions: String(totalLines(task).insertions), deletions: String(totalLines(task).deletions) })}>
+                <span className="dws-line-add">+{totalLines(task).insertions}</span>
+                <span className="dws-line-del">−{totalLines(task).deletions}</span>
               </span>}
               {/* The same hint the repository rows carry: both numbers answer "how many
                   worktrees", one under a repository and one under a task space. */}
@@ -1130,9 +1148,11 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
           all.read += 1
           all.ahead += answer.commits ?? 0
           all.behind += answer.behind ?? 0
-          if (answer.committedChanges === undefined) return all
-          all.insertions += answer.committedChanges.insertions
-          all.deletions += answer.committedChanges.deletions
+          // Both halves, summed into the one pair the row draws - the same rule the task
+          // row follows, so a Workspace's number means what a task's number means.
+          if (answer.committedChanges === undefined && answer.workingChanges === undefined) return all
+          all.insertions += (answer.committedChanges?.insertions ?? 0) + (answer.workingChanges?.insertions ?? 0)
+          all.deletions += (answer.committedChanges?.deletions ?? 0) + (answer.workingChanges?.deletions ?? 0)
           all.lines += 1
           return all
         }, { read: 0, ahead: 0, behind: 0, insertions: 0, deletions: 0, lines: 0 })
@@ -1164,7 +1184,10 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                       <span className="dws-ahead">↑ {totals.ahead}</span>
                       <span className="dws-behind">↓ {totals.behind}</span>
                     </span> : null}
-                    {totals.lines > 0 ? <span className="dws-lines" title={format(t("upstreamCommittedHint"), { insertions: String(totals.insertions), deletions: String(totals.deletions) })}>
+                    {/* One pair for the root, committed and uncommitted together - the
+                        same rule the task row follows, and the reason the hint says
+                        "together" rather than naming only the committed half. */}
+                    {totals.lines > 0 ? <span className="dws-lines" title={format(t("totalChangesHint"), { insertions: String(totals.insertions), deletions: String(totals.deletions) })}>
                       <span className="dws-line-add">+{totals.insertions}</span>
                       <span className="dws-line-del">−{totals.deletions}</span>
                     </span> : null}
@@ -1185,9 +1208,12 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                       <span className="dws-ahead">↑ {asTask.commits}</span>
                       <span className="dws-behind">↓ {asTask.behind}</span>
                     </span> : null}
-                    {asTask.committedChanges === undefined ? null : <span className="dws-lines" title={format(t("committedChangesHint"), { insertions: String(asTask.committedChanges.insertions), deletions: String(asTask.committedChanges.deletions) })}>
-                      <span className="dws-line-add">+{asTask.committedChanges.insertions}</span>
-                      <span className="dws-line-del">−{asTask.committedChanges.deletions}</span>
+                    {/* One pair here too, committed and uncommitted together: this row
+                        is the task row seen from another view, and the two have to read
+                        the same number for the same directory. */}
+                    {asTask.committedChanges === undefined && asTask.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("totalChangesHint"), { insertions: String(totalLines(asTask).insertions), deletions: String(totalLines(asTask).deletions) })}>
+                      <span className="dws-line-add">+{totalLines(asTask).insertions}</span>
+                      <span className="dws-line-del">−{totalLines(asTask).deletions}</span>
                     </span>}
                     {/* A count of worktrees, not of repositories: this directory holds one
                         worktree per repository, and "holds no Git repository" was a verdict

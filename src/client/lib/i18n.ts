@@ -63,6 +63,19 @@ const zh: Dict = {
   behindLabel: "落后",
   aheadHint: "任务分支领先基线分支 {count} 个提交",
   behindHint: "基线分支领先任务分支 {count} 个提交",
+  /**
+   * The finish dialog's own pair of hints, and why it cannot reuse the two above.
+   *
+   * The task view compares a worktree with the branch its source checkout sits on - the
+   * base branch. The finish dialog compares it with the branch it would merge into, which
+   * the user can pick per repository, so the two are different branches as soon as anyone
+   * chooses one. Saying "base branch" here would name the wrong branch in exactly the case
+   * the picker exists for.
+   */
+  planAheadHint: "任务分支比目标分支多 {count} 个提交",
+  planBehindHint: "目标分支比任务分支多 {count} 个提交",
+  /** The pair's label, naming both directions the arrows stand for. */
+  planAheadBehindLabel: "领先/落后",
   upstreamAheadHint: "当前分支领先远端跟踪分支 {count} 个提交",
   upstreamBehindHint: "远端跟踪分支领先当前分支 {count} 个提交",
   upstreamCommittedHint: "当前分支相对远端跟踪分支新增 {insertions} 行、删除 {deletions} 行",
@@ -70,7 +83,25 @@ const zh: Dict = {
   committedChangesLabel: "已提交变更",
   workingChangesLabel: "未提交变更",
   committedChangesHint: "任务分支相对基线分支累计新增 {insertions} 行、删除 {deletions} 行",
+  /**
+   * The collapsed task row's one pair, hovered.
+   *
+   * It is the committed and uncommitted halves added together, because a collapsed row
+   * answers "how much is this carrying" once rather than twice. The hint says so, or the
+   * number would read as the committed half alone and disagree with the repositories
+   * listed below it.
+   */
+  totalChangesHint: "已提交与未提交合计：新增 {insertions} 行、删除 {deletions} 行",
   workingChangesHint: "工作区里尚未提交的部分：新增 {insertions} 行、删除 {deletions} 行",
+  /**
+   * The finish dialog's uncommitted summary, hovered.
+   *
+   * The row shows the two line counts and drops the file count, so the file count is
+   * kept here rather than lost: "how many lines" is what the reader compares against
+   * the committed pair beside it, and "how many files" is the second question a hover
+   * is the right place to answer.
+   */
+  planWorkingHint: "未提交变更：{count} 个文件，新增 {insertions} 行、删除 {deletions} 行",
   deliveryGateContinue: "继续",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -211,7 +242,7 @@ const zh: Dict = {
   finishAuthorizeConflict: "交由 agent 解决冲突",
   finishCommitEscalation: "提交会改动源仓库的 .git 目录，可能需要提权：请手动转到该会话里批准提权。",
   finishCommitFullAccess: "提交会改动源仓库的 .git 目录。完全权限已打开：会话开在容器根，写那里不会再请你授权——那也等于整台机器的写权限。",
-  finishCommitPrompt: "任务空间「{task}」里有未提交的变更。请把它们全部提交到各自的任务分支，一次做完：\n{repositories}\n{scope}\n逐个仓库读一遍变更再提交：提交信息用该仓库已有提交的语言和风格，说清改了什么、为什么改。\n不要 push，不要动其它仓库或任务空间，也不要合并任何分支——把分支合并回目标分支由插件执行。\n都提交完请简述每个仓库提交了什么。",
+  finishCommitPrompt: "【WTS Commit】{branch}\n任务空间「{task}」里有未提交的变更。请把它们全部提交到各自的任务分支，一次做完：\n{repositories}\n{scope}\n逐个仓库读一遍变更再提交：提交信息用该仓库已有提交的语言和风格，说清改了什么、为什么改。\n不要 push，不要动其它仓库或任务空间，也不要合并任何分支——把分支合并回目标分支由插件执行。\n都提交完请简述每个仓库提交了什么。",
   finishCommitRepository: "- {name}：worktree {site}，分支 {branch}",
   finishHandoffTitle: "发生合并冲突，请处理后重新结束任务。",
   finishConflictDone: "合并冲突已处理完成，可以继续结束任务。",
@@ -248,7 +279,7 @@ const zh: Dict = {
   finishContinue: "继续结束任务",
   finishContinueWaiting: "等待 agent 处理完成",
   finishHandoffOpen: "打开会话",
-  finishHandoffPrompt: "任务空间「{task}」里有没做完的 Git 合并，需要你在各自的 worktree 里解决冲突：\n{repositories}\n{scope}\n逐个仓库解决：读两边的变更、弄清各自想做什么，写出同时保留双方意图的版本；不要随手选一边，也不要丢掉任何一边的变更。\n解决后请自己完成这次合并提交：git add 之后用一条说清你如何取舍的提交信息 git commit。不要 push，不要动其它仓库或任务空间，也不要删除分支——把分支合并回目标分支由插件执行。\n完成后请说明你改了哪些文件、为什么这样改。",
+  finishHandoffPrompt: "【WTS Conflict】{branch}\n任务空间「{task}」里有没做完的 Git 合并，需要你在各自的 worktree 里解决冲突：\n{repositories}\n{scope}\n逐个仓库解决：读两边的变更、弄清各自想做什么，写出同时保留双方意图的版本；不要随手选一边，也不要丢掉任何一边的变更。\n解决后请自己完成这次合并提交：git add 之后用一条说清你如何取舍的提交信息 git commit。不要 push，不要动其它仓库或任务空间，也不要删除分支——把分支合并回目标分支由插件执行。\n完成后请说明你改了哪些文件、为什么这样改。",
   finishHandoffRepository: "- {name}：worktree {site}，分支 {branch}，把 {target} 合进来时的这些冲突文件：{files}",
   finishGitOutput: "Git 输出",
   finishContainerRemoved: "任务空间已删除。",
@@ -526,6 +557,9 @@ const en: Dict = {
   behindLabel: "Behind",
   aheadHint: "{count} commits ahead of the base branch",
   behindHint: "{count} commits behind the base branch",
+  planAheadHint: "{count} commits the task branch has that the target does not",
+  planBehindHint: "{count} commits the target has that the task branch does not",
+  planAheadBehindLabel: "Ahead/behind",
   upstreamAheadHint: "{count} commits ahead of the remote-tracking branch",
   upstreamBehindHint: "{count} commits behind the remote-tracking branch",
   upstreamCommittedHint: "This branch adds {insertions} lines and removes {deletions} against the remote-tracking branch",
@@ -533,7 +567,9 @@ const en: Dict = {
   committedChangesLabel: "Committed changes",
   workingChangesLabel: "Uncommitted changes",
   committedChangesHint: "The task branch adds {insertions} lines and removes {deletions} against the base branch",
+  totalChangesHint: "Committed and uncommitted together: {insertions} lines added, {deletions} removed",
   workingChangesHint: "Not committed yet: {insertions} lines added, {deletions} removed",
+  planWorkingHint: "Uncommitted changes: {count} files, {insertions} lines added and {deletions} removed",
   deliveryGateContinue: "Continue",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -673,7 +709,7 @@ const en: Dict = {
   finishAuthorizeConflict: "Hand the conflict to the agent",
   finishCommitEscalation: "Committing changes the source repository's .git directory and may need elevated permission: go to that session and authorize it by hand.",
   finishCommitFullAccess: "Committing changes the source repository's .git directory. Full access is on: the session opens at the container root and will not ask before writing there — which is the whole machine's write permission.",
-  finishCommitPrompt: "The task space “{task}” has uncommitted changes. Commit them all to their own branches in one go:\n{repositories}\n{scope}\nRead each repository's changes before committing them: write each message in the language and style that repository's own commits use, and say what changed and why.\nDo not push, do not touch other repositories or the task space, and do not merge any branch — the plugin merges each branch into its target.\nWhen they are all committed, say briefly what you committed in each.",
+  finishCommitPrompt: "【WTS Commit】{branch}\nThe task space “{task}” has uncommitted changes. Commit them all to their own branches in one go:\n{repositories}\n{scope}\nRead each repository's changes before committing them: write each message in the language and style that repository's own commits use, and say what changed and why.\nDo not push, do not touch other repositories or the task space, and do not merge any branch — the plugin merges each branch into its target.\nWhen they are all committed, say briefly what you committed in each.",
   finishCommitRepository: "- {name}: worktree {site} on branch {branch}",
   finishHandoffTitle: "A merge conflicted: deal with it, then finish the task again.",
   finishConflictDone: "The conflict is resolved: carry on and finish the task.",
@@ -710,7 +746,7 @@ const en: Dict = {
   finishContinue: "Continue finishing",
   finishContinueWaiting: "Waiting for the agent",
   finishHandoffOpen: "Open session",
-  finishHandoffPrompt: "The task space “{task}” has unfinished Git merges; resolve the conflicts in each worktree:\n{repositories}\n{scope}\nTake them one repository at a time: read both sides, work out what each was after, and write a version that keeps both intentions. Do not pick a side at random, and do not drop either side's work.\nThen commit each merge yourself: git add, and git commit with a message that says how you reconciled the two sides. Do not push, do not touch other repositories or the task space, and do not delete the branch — the plugin merges each branch into its target.\nWhen you are done, say which files you changed in each repository and why.",
+  finishHandoffPrompt: "【WTS Conflict】{branch}\nThe task space “{task}” has unfinished Git merges; resolve the conflicts in each worktree:\n{repositories}\n{scope}\nTake them one repository at a time: read both sides, work out what each was after, and write a version that keeps both intentions. Do not pick a side at random, and do not drop either side's work.\nThen commit each merge yourself: git add, and git commit with a message that says how you reconciled the two sides. Do not push, do not touch other repositories or the task space, and do not delete the branch — the plugin merges each branch into its target.\nWhen you are done, say which files you changed in each repository and why.",
   finishHandoffRepository: "- {name}: worktree {site} on branch {branch}, merging in {target} left these conflicted files: {files}",
   finishGitOutput: "Git output",
   finishContainerRemoved: "The task space was deleted.",

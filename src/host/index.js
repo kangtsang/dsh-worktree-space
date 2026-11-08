@@ -7,6 +7,7 @@ import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironmen
 import { resolveDeliveryPolicy } from './task/delivery.js'
 import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { mapWithLimit, SCAN_CONCURRENCY } from './task/concurrency.js'
+import { recordedSourceRepositories } from './task/discover.js'
 import { absolutePath, canonicalPath, isInside } from './task/paths.js'
 import { DEFAULT_BRANCH_PREFIX } from './task/naming.js'
 import { addTaskRepositories, branchesOfRepositories, classifySourceRoot, classifySourceRoots, createTask, finishTask, inspectTask, listTasks, planTask, suggestTaskRoot } from './task/operations.js'
@@ -1180,7 +1181,31 @@ export function apply(ctx, config = {}) {
       // repositories: the paths that did answer still show, and the answer says
       // which part did not.
       const found = await Promise.all(walked.map((path) => discoverGitRoots(path, { signal, maxDepth, maxDirectories: bounds.directories, ignored: bounds.ignored, onIssue: spared })))
-      const roots = [...new Set(found.flat())]
+      const walkedRoots = new Set(found.flat())
+      // A walked root that is itself a task space contributes the source repositories
+      // its record names. Nothing under such a root is a repository - a task's
+      // worktrees carry `.git` as a file - so without this a registered task space
+      // scanned as empty and its task never reached the task view, while the same
+      // directory showed in the Workspace view.
+      //
+      // What the record justifies is kept, not only which repository it names. A
+      // source repository holds the worktrees of every task made from it, so listing
+      // one whole would show a sibling task that is in no Workspace and whose source
+      // root is in none either - a task nobody registered, appearing because a
+      // neighbour was. So a repository reached through a record is reported down to
+      // the worktrees of the spaces that named it, while one reached by a walk is
+      // reported whole: registering a source root is a statement about all of its
+      // worktrees, and registering one task space about that space.
+      const recorded = await Promise.all(walked.map(async (path) => ({ space: path, repositories: await recordedSourceRepositories(path, { signal }) })))
+      const justifiedBy = new Map()
+      for (const { space, repositories } of recorded) {
+        for (const repository of repositories) {
+          const spaces = justifiedBy.get(repository) ?? new Set()
+          spaces.add(space)
+          justifiedBy.set(repository, spaces)
+        }
+      }
+      const roots = [...new Set([...walkedRoots, ...justifiedBy.keys()])]
       if (signal?.aborted) throw signal.reason
       const seen = new Set()
       // Asked a few at a time rather than one at a time, which is what this loop
@@ -1192,7 +1217,17 @@ export function apply(ctx, config = {}) {
       const listed = await mapWithLimit(roots, SCAN_CONCURRENCY, async (root) => {
         signal?.throwIfAborted()
         try {
-          return await listRepository(root)
+          const repository = await listRepository(root)
+          // A walk already justified the whole repository; only a record-sourced one
+          // is narrowed. The main worktree is kept whatever named the repository,
+          // because the branch the panel shows as a row's base is read from it.
+          const spaces = walkedRoots.has(root) ? undefined : justifiedBy.get(root)
+          if (spaces === undefined) return repository
+          return {
+            ...repository,
+            worktrees: repository.worktrees.filter((worktree) => worktree.isMain === true
+              || [...spaces].some((space) => isInside(space, worktree.path))),
+          }
         } catch {
           // A repository can disappear while a scan is in progress, or refuse to
           // answer. Either way the others are still repositories.

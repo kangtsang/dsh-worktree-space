@@ -129,6 +129,10 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
   // here because `running` is how the dialog learns a handoff is still working.
   const created: { cwd?: string }[] = []
   const prompts: { sessionId: string; text: string }[] = []
+  // Titles written before a session's first message. The dialog renames each session it
+  // opens so the row reads the marker line rather than DSH's derivation of it, and only a
+  // session it opened on this press - a reused one keeps the title it was given then.
+  const renamed: { sessionId: string; title: string }[] = []
   const snapshots: Record<string, { running: boolean }> = {}
   const sessionListeners: (() => void)[] = []
   const sessions = {
@@ -138,14 +142,19 @@ function setup({ repos = scanned(), result = finishResult(), changedFiles = 0, s
     },
     create: vi.fn(async (options: { cwd?: string }) => { created.push(options); return `session-${created.length}` }),
     using: vi.fn(async (sessionId: string, _options: unknown, operation: (reference: any) => unknown) => operation({
-      binding: { session: { prompt: async (parts: { text?: string }[]) => { prompts.push({ sessionId, text: parts[0]?.text ?? "" }) } } },
+      binding: {
+        session: {
+          rename: async (title: string) => { renamed.push({ sessionId, title }); return { title, seq: 1 } },
+          prompt: async (parts: { text?: string }[]) => { prompts.push({ sessionId, text: parts[0]?.text ?? "" }) },
+        },
+      },
     })),
   }
   // The surface the dialog was drawn in. Following a session has to leave that too, or
   // it stands in front of the conversation the click just asked to see.
   const onLeave = vi.fn()
   render(<WorktreesSettings api={api as any} workspaces={workspaces as any} uiWorkspace={uiWorkspace as any} sessions={sessions as any} onLeave={onLeave} config={config} />)
-  return { api, workspaces, sessions, created, prompts, snapshots, sessionListeners, uiWorkspace, onLeave }
+  return { api, workspaces, sessions, created, prompts, renamed, snapshots, sessionListeners, uiWorkspace, onLeave }
 }
 
 // An option's accessible name is its label followed by its hint, and one hint
@@ -395,6 +404,12 @@ describe("finishing a task", () => {
     await waitFor(() => expect(next.created).toHaveLength(1))
     expect(next.prompts[0].text).toContain(site.replace(/\\/g, "/"))
     expect(next.prompts[0].text).toContain("src/a.ts")
+    // The row the user sees is the brief's own marker line, written as an explicit title
+    // before the session's first message. Left to DSH's derivation it would be that line's
+    // first five words cut at 40 bytes - which for a marker line means the tail of the body.
+    // The branch is named in full, prefix included: `feat/antest` here, not `antest`.
+    expect(next.prompts[0].text.split("\n")[0]).toBe(`【WTS Conflict】${project}/${branch}`)
+    expect(next.renamed).toEqual([{ sessionId: "session-1", title: next.prompts[0].text.split("\n")[0] }])
     // Opened on the worktree itself, the session has everything resolving needs - the
     // conflicted files are under its working directory. Every placeholder is filled, and
     // the prompt no longer carries a boundary or a scope sentence at all.
@@ -954,7 +969,10 @@ describe("finishing a task", () => {
     await ready()
     await user.click(screen.getByRole("button", { name: t("finishTask") }))
 
-    await waitFor(() => expect(screen.getByText(format(t("planCommits"), { count: "2" }))).toBeTruthy())
+    // The headline carries the two directions rather than a bare total, and each row
+    // its own pair: "2 commits" and "↑2 ↓0" are the same fact with the direction kept.
+    await waitFor(() => expect(document.querySelector(".dws-dialog-status")?.textContent).toContain("↑ 2"))
+    expect(document.querySelector(".dws-dialog-status")?.textContent).toContain("↓ 0")
     // The space is named by its directory, and each row carries its own target.
     expect(screen.getByText(t("taskDirectoryLabel")).parentElement?.textContent).toContain(container.replace(/\\/g, "/"))
     expect([...document.querySelectorAll(".dws-plan-target")].map((node) => node.textContent)).toEqual(["main", "develop"])
@@ -977,7 +995,7 @@ describe("finishing a task", () => {
       commits: 1,
       strays: [],
       repositories: [
-        { name: "alpha", path: `${tasksRoot}\\${task}\\alpha`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 1 },
+        { name: "alpha", path: `${container}\\alpha`, branch, target: "main", checkedOut: "main", branches: ["main"], commits: 1, changedFiles: 1 },
         { name: "beta", path: `${tasksRoot}\\${task}\\beta`, branch: "feat/antest", target: "main", checkedOut: "main", branches: ["main"], changedFiles: 0, error: "fatal: unable to read object" },
       ],
     }))
@@ -988,12 +1006,12 @@ describe("finishing a task", () => {
     await waitFor(() => expect(rows()).toHaveLength(2))
     // The row that could be counted says so; the row that could not says why, and
     // nothing else — no `String(undefined)` anywhere on the dialog.
-    expect(rows()[0]).toContain(format(t("planCommits"), { count: "1" }))
-    expect(rows()[1]).not.toContain(t("planCommits"))
+    expect(rows()[0]).toContain("↑ 1")
+    expect(rows()[1]).not.toContain("↑ ")
     expect(rows()[1]).toContain("fatal: unable to read object")
     expect(document.body.textContent).not.toContain("undefined")
     // The headline keeps its own total, which the Host always reports.
-    expect(document.querySelector(".dws-dialog-status")?.textContent).toContain(format(t("planCommits"), { count: "1" }))
+    expect(document.querySelector(".dws-dialog-status")?.textContent).toContain("↑ 1")
   })
 
   it("points one repository at another branch, previews it, and merges there", async () => {
@@ -1021,10 +1039,10 @@ describe("finishing a task", () => {
     // The preview follows the choice: the commits that branch would bring, and the
     // note that it is not the branch the source repository is on.
     const plan = () => document.querySelector(".dws-finish-repos")!.textContent ?? ""
-    await waitFor(() => expect(plan()).toContain(format(t("planCommits"), { count: "4" })))
+    await waitFor(() => expect(plan()).toContain("↑ 4"))
     expect(screen.getAllByText(t("planTemporaryWorktree"))).toHaveLength(1)
     // The repository left alone keeps its own default, counted on its own branch.
-    expect(plan()).toContain(format(t("planCommits"), { count: "0" }))
+    expect(plan()).toContain("↑ 0")
 
     await user.click(screen.getByRole("button", { name: t("finishConfirmAction") }))
     await waitFor(() => expect(next.api.doneTask).toHaveBeenCalledTimes(1))
@@ -1032,6 +1050,80 @@ describe("finishing a task", () => {
     // The plan stays on screen as the record of what was done, so its choice is
     // read-only rather than pointing at a task space that no longer exists.
     await waitFor(() => expect(screen.getByRole("button", { name: `${t("planTargetLabel")} · kratos-vue-admin` })).toHaveProperty("disabled", true))
+  })
+
+  it("draws the same ahead/behind and line pairs the task view draws", async () => {
+    // The two pages sit one click apart and answer the same question, so they read the
+    // same four numbers. `behind` is what the target gained while the task was worked on:
+    // it used to be missing here, which left the dialog unable to say the task had fallen
+    // behind the branch it was about to merge into.
+    const user = userEvent.setup()
+    const next = setup({
+      plan: (built: any) => ({
+        ...built,
+        changedFiles: 3,
+        commits: 2,
+        behind: 4,
+        committedChanges: { insertions: 41, deletions: 67 },
+        workingChanges: { insertions: 12, deletions: 5 },
+        repositories: [{
+          name: "alpha", path: `${container}\\alpha`, branch, target: "main", checkedOut: "main",
+          branches: ["main"], commits: 2, behind: 4, changedFiles: 3,
+          committedChanges: { insertions: 41, deletions: 67 }, workingChanges: { insertions: 12, deletions: 5 },
+        }],
+      }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+
+    const status = () => document.querySelector(".dws-dialog-status")?.textContent ?? ""
+    await waitFor(() => expect(status()).toContain("↑ 2"))
+    // The pair is labelled, and the hint names the target branch rather than the base
+    // branch: this dialog compares a worktree with the branch it would merge into.
+    expect(status()).toContain(t("planAheadBehindLabel"))
+    expect(status()).toContain("↓ 4")
+    expect(status()).toContain("+41")
+    expect(status()).toContain("−67")
+    const ahead = document.querySelector(".dws-dialog-status .dws-ahead-behind") as HTMLElement | null
+    expect(ahead?.getAttribute("title")).toBe(`${format(t("planAheadHint"), { count: "2" })} · ${format(t("planBehindHint"), { count: "4" })}`)
+    // The uncommitted pair reads like the committed one, and its file count lives in the
+    // hint rather than in the line.
+    expect(status()).toContain(t("workingChangesLabel"))
+    expect(status()).toContain("+12")
+    expect(status()).toContain("−5")
+
+    const row = () => document.querySelector(".dws-finish-repos li")?.textContent ?? ""
+    expect(row()).toContain("↑ 2")
+    expect(row()).toContain("↓ 4")
+    expect(row()).toContain("+41")
+    expect(row()).toContain("−67")
+    // Uncommitted work is the label plus its own pair, not a bare file count; the file
+    // count moves into that pair's hint so nothing is lost.
+    expect(row()).toContain(t("workingChangesLabel"))
+    expect(row()).toContain("+12")
+    expect(row()).toContain("−5")
+    const working = [...document.querySelectorAll(".dws-finish-repos .dws-changes-label")]
+      .find((el) => (el.textContent || "").trim() === t("workingChangesLabel")) as HTMLElement | undefined
+    expect(working?.getAttribute("title")).toBe(format(t("planWorkingHint"), { count: "3", insertions: "12", deletions: "5" }))
+  })
+
+  it("says there is nothing uncommitted rather than leaving a label with no numbers", async () => {
+    // A clean task space has no pair to draw, and a bare 「未提交变更」 followed by nothing
+    // reads as a count that failed to arrive. The same sentence the task view uses for
+    // this state is the one to say here.
+    const user = userEvent.setup()
+    setup({
+      plan: (built: any) => ({ ...built, changedFiles: 0, workingChanges: undefined }),
+    })
+    await ready()
+    await user.click(screen.getByRole("button", { name: t("finishTask") }))
+    const status = () => document.querySelector(".dws-dialog-status")?.textContent ?? ""
+    await waitFor(() => expect(status()).toContain(t("clean")))
+    // No label standing on its own: 「无未提交变更」 contains the label's own words, so the
+    // check is for the label element rather than for the text.
+    const labels = [...document.querySelectorAll(".dws-dialog-status .dws-changes-label")]
+      .map((el) => (el.textContent || "").trim())
+    expect(labels).not.toContain(t("workingChangesLabel"))
   })
 
   it("lists the user's own leftovers before the choice, and only summarises build noise", async () => {
@@ -1276,14 +1368,14 @@ describe("finishing a task", () => {
     // The counts answer a question about the merge, so they sit on the branch line
     // above the checkout - not beside the source repository, which names a directory.
     const first = rows[0].textContent ?? ""
-    expect(first.indexOf(t("planSourceRepository"))).toBeGreaterThan(first.indexOf(format(t("planCommits"), { count: "1" })))
+    expect(first.indexOf(t("planSourceRepository"))).toBeGreaterThan(first.indexOf("↑ 1"))
     const sourceRow = rows[0].querySelector(".dws-plan-source-row")!
     expect(sourceRow.querySelector(".dws-plan-source")).not.toBeNull()
     // Nothing but the path is down here.
-    expect(sourceRow.textContent).not.toContain(format(t("planCommits"), { count: "1" }))
+    expect(sourceRow.textContent).not.toContain("↑ 1")
     expect(sourceRow.textContent).not.toContain(t("clean"))
     // And the row as a whole still carries both, so the move lost nothing.
-    expect(first).toContain(format(t("planCommits"), { count: "1" }))
+    expect(first).toContain("↑ 1")
     expect(first).toContain(t("clean"))
   })
 

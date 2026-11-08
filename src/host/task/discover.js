@@ -11,6 +11,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { isInside, samePathLocation } from './paths.js'
 import { coded } from './codes.js'
+import { readTaskMetadata } from './shared.js'
 import { MAX_SCAN_DIRECTORIES } from './scan-bounds.js'
 
 /**
@@ -38,6 +39,56 @@ export async function isSourceRepository(directory) {
   } catch {
     return false
   }
+}
+
+/**
+ * The source repositories a task space records, when the directory walked is one.
+ *
+ * A task container is deliberately not a source root: its worktrees carry `.git` as a
+ * file, and that is what keeps {@link isSourceRepository} from mistaking a container
+ * for a place work starts. The cost of that rule is what this function answers. A task
+ * space is a directory a user may register as a Workspace on its own, and then nothing
+ * under the walked root looks like a repository - so the scan answered an empty list
+ * and the task view showed no task for a task space that was on disk, registered, and
+ * perfectly readable. It appeared in the Workspace view and nowhere else, which reads
+ * as two pages disagreeing about the same directory.
+ *
+ * The record the plugin wrote when it made the space names every source repository it
+ * cut a worktree from, by absolute path. Listing those puts the task back in front of
+ * the panel through the same `worktree list` that finds it when the source root is
+ * registered instead: a source repository is what reports the task's worktrees, so
+ * handing the recorded source repository to the scan is the whole fix.
+ *
+ * Only this directory is asked, never one found mid-walk. Detecting a container deeper
+ * in the tree would mean reading a file in every directory the walk visits, which on a
+ * root holding thousands of them is most of the walk's cost - and what it would add is
+ * a container that is neither registered nor under a registered source root, which is
+ * a directory this plugin never told anyone to register.
+ *
+ * A recorded path that is gone, or that is no longer a source repository, is left out
+ * rather than reported as a scan problem: a task whose source repository has been
+ * removed has no worktrees to list, so there is nothing to show and a warning on every
+ * refresh would only repeat that.
+ * @param directory - the walked root, which may or may not be a task space.
+ * @param options - how to abort, when the caller has a signal.
+ * @param options.signal - abort signal, checked between candidates.
+ * @returns the recorded source repositories that still are source repositories.
+ */
+export async function recordedSourceRepositories(directory, { signal } = {}) {
+  const metadata = await readTaskMetadata(directory)
+  const recorded = Array.isArray(metadata?.repositories) ? metadata.repositories : []
+  const found = []
+  for (const entry of recorded) {
+    signal?.throwIfAborted()
+    const recordedPath = entry !== null && typeof entry === 'object' && typeof entry.sourcePath === 'string'
+      ? entry.sourcePath.trim()
+      : ''
+    if (recordedPath === '') continue
+    // Asked rather than assumed: the record states what was true when the space was
+    // made, and this is what makes it safe to hand the path to a `git worktree list`.
+    if (await isSourceRepository(recordedPath)) found.push(resolve(recordedPath))
+  }
+  return found
 }
 
 /**

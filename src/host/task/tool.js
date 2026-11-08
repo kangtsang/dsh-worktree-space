@@ -526,6 +526,100 @@ function inheritedMode(ctx, exec) {
 }
 
 /**
+ * The `<project>/<branch>` name a brief's first line carries.
+ *
+ * The first line of a brief is also the session's title: DSH derives an untouched title
+ * from the first human message, so whatever stands there is what the sidebar shows. This
+ * is the string {@link dispatchTitle} puts on that line and {@link renameDispatchedSession}
+ * writes as the title, so it decides both.
+ *
+ * The branch is named in full rather than as the task alone. `task/` is a configured
+ * prefix, so the branch is not derivable from `<project>/<task>` without knowing the
+ * setting - and a title that names the branch can be acted on (checked out, searched for,
+ * matched against `git log`) where one that names only the directory cannot. That costs
+ * the prefix's bytes, which is the reason they were left out when the budget was the
+ * 40-byte fallback; the explicit rename has 80, and the two longest names this plugin has
+ * seen (`dsh-worktree-space/task/fix-session-title-rendering`) come to 69.
+ *
+ * Nothing here truncates. A name longer than the budget makes a title the service cuts;
+ * the first line stays whole, which is where a reader can see what the cut title lost.
+ * @param project - the project layer the task is filed under.
+ * @param branch - the task's branch, prefix included.
+ * @returns the label, or the branch alone when the project is unknown.
+ */
+function taskLabel(project, branch) {
+  const named = typeof project === 'string' ? project.trim() : ''
+  const ref = typeof branch === 'string' ? branch.trim() : ''
+  if (named === '') return ref
+  return ref === '' ? named : `${named}/${ref}`
+}
+
+/**
+ * The first line of a dispatch brief, which is also the title written to the session.
+ *
+ * One function rather than the same template at two call sites: the line the model reads
+ * and the row the user sees have to be the same string, or the marker stops meaning
+ * anything. `Dispatch` is capitalised while `Commit` and `Conflict` name the hand-off
+ * prompts in the client dictionary; all three are machine markers, so they stay in
+ * English whatever the interface language is, and the same rule can find them in either.
+ *
+ * No leading `#`: the marker opens with `【`, which reads as a label on its own, and a
+ * `#` in a user message is literal text rather than a heading - the transcript renders
+ * that message as one plain run, so the character bought nothing and cost a byte of a
+ * budget the names are spending.
+ * @param project - the project layer the task is filed under.
+ * @param branch - the task's branch, prefix included.
+ * @returns the marker line.
+ */
+function dispatchTitle(project, branch) {
+  return `【WTS Dispatch】${taskLabel(project, branch)}`
+}
+
+/**
+ * Write a dispatched session's title, and say why it could not be written.
+ *
+ * `sessionTitle.rename` is the interface's own rename: it appends a `user`-sourced
+ * `session/title` event, which is the source the service treats as final. That is the
+ * whole point of doing this here - an automatic title is `fallback` or `provider`, and
+ * either may be superseded by the next message or replaced by the user's own rename,
+ * while this one stays.
+ *
+ * The service takes the live session object, not an id, so the agent is looked up first.
+ *
+ * A deployment that serves no title service, or no live-agent registry, is a composition
+ * choice rather than a failure of this call - a minimal profile serves neither and still
+ * dispatches perfectly well. Those answer silently, and the row falls back to the title
+ * DSH derives from the first message. Only a rename that was attempted and refused is
+ * worth a sentence, because that is the one case where something was expected to happen
+ * and did not.
+ * @param ctx - the host plugin context.
+ * @param sessionId - the session the controller just created.
+ * @param title - the title to write; empty means nothing to do.
+ * @returns an empty string when applied or when this deployment cannot apply it, else a
+ *   sentence for the caller.
+ */
+function renameDispatchedSession(ctx, sessionId, title) {
+  const wanted = typeof title === 'string' ? title.trim() : ''
+  if (wanted === '') return ''
+  const service = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined)
+  const titles = service('sessionTitle')
+  if (titles === undefined || titles === null || typeof titles.rename !== 'function') return ''
+  const agents = service('agents')
+  const agent = agents !== undefined && typeof agents.get === 'function'
+    ? (() => { try { return agents.get(sessionId) } catch { return undefined } })()
+    : undefined
+  const session = agent?.session
+  if (session === undefined || session === null) return ''
+  try {
+    titles.rename(session, wanted)
+    return ''
+  } catch (error) {
+    return `the session's title could not be set (${String(error?.message ?? error)}), so its row shows the title `
+      + 'derived from its first message'
+  }
+}
+
+/**
  * The standing part of every task brief, written once instead of retyped per task.
  *
  * A dispatched session cannot be reached by `send_message` - it belongs to the task
@@ -539,15 +633,15 @@ function inheritedMode(ctx, exec) {
  * without an id cannot be acted on. What this side does NOT know (which repositories
  * matter, what "done" means, what to clean up) is deliberately absent rather than
  * guessed: a preamble that invented the acceptance criteria would be worse than none.
- * @param facts - the container root, task, branch, the caller's session id, and the
- *   delivery target the task's record settled (`docker` adds the completion line).
+ * @param facts - the container root, project, task, branch, the caller's session id, and
+ *   the delivery target the task's record settled (`docker` adds the completion line).
  * @returns the standing section, as text, or '' when there is nothing to state.
  */
 function taskBriefPreamble(facts) {
-  const { tasksRoot, task, branch, callerSessionId, deployTarget } = facts
+  const { tasksRoot, project, task, branch, callerSessionId, deployTarget } = facts
   if (typeof task !== 'string' || task === '') return ''
   const lines = [
-    '# Standing instructions (added by Worktree Space)',
+    dispatchTitle(project, branch),
     '',
     `- You are working in a task space for **${task}**, at \`${tasksRoot}\`. Its repositories are`,
     `  separate checkouts on the branch \`${branch}\`; git commands run inside each repository`,
@@ -970,10 +1064,10 @@ async function presetNotFoundReason(ctx, preset, error) {
  * the dispatch is what applies rather than the one captured when the plugin loaded.
  * @param ctx - the host plugin context.
  * @param exec - the tool run context.
- * @param request - the task space, the work, the permission the call named, the model the
- *   call named, the configured model as a getter, the resolved model from
- *   {@link prepareDispatchModel}, and whether to watch the session for abnormal turn ends
- *   (`watch`, on unless the call says false).
+ * @param request - the task space, the project and task its first line names, the work, the
+ *   permission the call named, the model the call named, the configured model as a getter,
+ *   the resolved model from {@link prepareDispatchModel}, and whether to watch the session
+ *   for abnormal turn ends (`watch`, on unless the call says false).
  * @param watcher - the plugin's session watcher, when the entry made one.
  * @returns the session id (empty when none was opened), what the caller should be told,
  *   and which model the session was put on (`{ route, source, warning }`).
@@ -1038,6 +1132,27 @@ async function dispatchToSession(ctx, exec, request, watcher) {
   if (mode !== undefined && typeof sessions?.get === 'function') {
     setSessionPermission(sessions.get(sessionId), mode)
   }
+  // The title, written from the same line the brief opens with. Two reasons this is done
+  // explicitly rather than left to the interface's automatic title:
+  //
+  //   1. **The automatic title is too small and too lossy.** DSH derives it from the first
+  //      human message by taking its first five words and cutting them to 40 bytes
+  //      (`session-title`'s `fallbackMaxBytes`). `【WTS Dispatch】mall-project/task/coupon`
+  //      is two words - the marker and the name - so the derivation reaches into the body
+  //      for the remaining three and the row reads `...coupon -`. An explicit title has the
+  //      service's own `maxTitleBytes` (80) to spend and stops at the marker's own line.
+  //   2. **It pins the marker.** An automatic title is a `fallback` or `provider` source,
+  //      which the next human message may replace, and which a user's own rename replaces
+  //      outright. `rename` writes a `user`-sourced title, and that is the source
+  //      `session-title` treats as final: later messages schedule nothing.
+  //
+  // A failure here is not a failed dispatch - the session is open and the work is about to
+  // be handed over. The reason is appended so a caller can say the row will read as the
+  // automatic title instead.
+  if (typeof request.task === 'string' && request.task !== '') {
+    const titled = renameDispatchedSession(ctx, sessionId, dispatchTitle(request.project, request.branch))
+    if (titled !== '') reason = reason === '' ? titled : `${reason}; ${titled}`
+  }
   // The model this session starts on, written here because writing needs the live agent the
   // controller just returned. The decision was made by `prepareDispatchModel` before any of
   // this existed; see the note on this function for why the two are not one step.
@@ -1077,6 +1192,7 @@ async function dispatchToSession(ctx, exec, request, watcher) {
     // in the light of, not a footnote to it.
     const preamble = taskBriefPreamble({
       tasksRoot: request.tasksRoot,
+      project: request.project,
       task: request.task,
       branch: request.branch,
       callerSessionId: exec?.agent?.session?.id,
@@ -1868,6 +1984,7 @@ export function registerTaskTool(ctx, options = {}) {
             : undefined
           const opened = await dispatchToSession(ctx, exec, {
             taskPath: result.path,
+            project: result.project,
             task: result.task,
             tasksRoot: result.tasksRoot,
             branch: result.branch,
@@ -2166,6 +2283,7 @@ export function registerTaskTool(ctx, options = {}) {
         value.tasksRoot = tasksRoot
         const opened = await dispatchToSession(ctx, exec, {
           taskPath,
+          project,
           task,
           tasksRoot,
           // The branch the task is already on, read off its own record - a dispatch
