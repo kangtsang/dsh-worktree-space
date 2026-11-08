@@ -4,7 +4,7 @@
 安装 → 配置组合 → 页面或工具可见 → 卸载回滚的验收**，单元测试不能替代。配套的权限与失败边界声明见
 [`PERMISSIONS.md`](PERMISSIONS.md)，机器可读副本见 [`store-evidence.json`](store-evidence.json)。
 
-声明基线：`dsh-worktree-space@1.4.0`，被测树是本仓库默认分支上的固定提交 `86fd425`；最终发版提交与它只差这两份证据文档自己（见第 5 节循环性一条）。下面的清单现状、验收方法、
+声明基线：`dsh-worktree-space@1.4.1`，被测树是本仓库默认分支上的固定提交 `64db4b1`；最终发版提交与它只差这两份证据文档自己（见第 5 节循环性一条）。下面的清单现状、验收方法、
 验收结果与边界情形都以它为准，不引用其它版本。
 
 ---
@@ -116,7 +116,7 @@ dsh --profile evidence --dump-config
 
 | 字段 | 值 |
 | --- | --- |
-| `version` | `1.4.0` |
+| `version` | `1.4.1` |
 | `engines.node` | `>=22.19.0` |
 | `engines.dsh` | `>=0.2.1-rc.1 <0.3.0-0` |
 | `peerDependencies["@deepseek-ai/dsh-client-connection"]` | `>=0.2.1-rc.1 <0.3.0-0` |
@@ -157,13 +157,13 @@ dsh --profile evidence --dump-config
 `0.2.1-rc.3` → 34803、`0.2.1-rc.2` → 34804，避开宿主默认的 3080。**1.3.2 起不再声明支持 0.1.7 系列**；
 **1.4.0 把窗口整体移到最新五个**——DSH 发了 `0.2.1-rc.4`、`0.2.1-rc.5` 与 `0.2.2-rc.1`，窗口随之
 从 `0.2.1-rc.1`…`0.2.1-rc.3` 前移（更早版本的实测结果见 git 历史里的本文档）。
-被测产物是 dsh-worktree-space-1.4.0.tgz，由本仓库 `npm pack` 产出，含 26 个文件，
-sha256 `4C7ECCC536E32B80C6C2BD69335B66783014C7119D9502B7920307E8B772FFFC`（1440600 字节）。
-运行时间 2026-11-08 00:50:57 +08:00，判定 `PASS`（5 通过 0 失败），总耗时 42 秒，退出码 0。矩阵报告写在
+被测产物是 dsh-worktree-space-1.4.1.tgz，由本仓库 `npm pack` 产出，含 26 个文件，
+sha256 `C6AB4002ECC070107B19483F0E6CA19738F4AED9BE0C22F9F051A3034F81270E`（1099035 字节）。
+运行时间 2026-11-08 22:52:28 +08:00，判定 `PASS`（5 通过 0 失败），总耗时 57 秒，退出码 0。矩阵报告写在
 `D:\dsh-acceptance\dsh-worktree-space\matrix\logs\matrix-report.md`；**本轮加了 `-Json`**，同名
-`.json` 因此也是本轮的，报告里带着 `Commit: 86fd425`——**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
+`.json` 因此也是本轮的，报告里带着 `Commit: 64db4b1`——**一份不写明自己测的是哪个构建的兼容性报告，等于没有**。
 被测产物与那个提交逐字节一致，两处各自核过：`pnpm test` 的 `check:tracked-bundle` 重新构建后与提交里的
-`client/client.js`（`E2164D3A…7FF2`，386099 字节）与 `lib/index.js`（`DE6DA5D1…220E`，429099 字节）
+`client/client.js`（`BCB7588A…3126`，392359 字节）与 `lib/index.js`（`490BFB49…9B38`，434433 字节）
 逐字节相同；解包被测 tarball 再比，两份仍是这两个哈希。
 所以报告里的 commit 与被测的包是同一棵树，不存在「报告早于功能改动」那种情况。
 
@@ -181,7 +181,7 @@ sha256 `4C7ECCC536E32B80C6C2BD69335B66783014C7119D9502B7920307E8B772FFFC`（1440
 | `0.2.1-rc.2` | `v24.18.0` | 通过 | 通过（1232 行 / 3 处命中） | 通过 | 通过 | 通过（1229 行 / 0 处命中） |
 
 五个版本的 `dsh plugin add` 都以 0 退出且**没有** `incompatible` 警告；装上 `package.json` 的
-`version` 均为 `1.4.0`，`engines.dsh` 均为 `>=0.2.1-rc.1 <0.3.0-0`。
+`version` 均为 `1.4.1`，`engines.dsh` 均为 `>=0.2.1-rc.1 <0.3.0-0`。
 
 回滚是**逐字节**回到安装前，不是"看起来干净"：每个版本的 `06-dump-after-remove.txt` 与
 `01-create.txt` 行数完全相同（1243/1243、1231/1231、1231/1231、1231/1231、1229/1229，本轮逐对核过），
@@ -205,19 +205,19 @@ sha256 `4C7ECCC536E32B80C6C2BD69335B66783014C7119D9502B7920307E8B772FFFC`（1440
 一次吻合是猜测，两次吻合是巧合，三次才是规律。仓库重构、改文案、换排版都会让产物变，
 但那 76 字节的差一直没变——这才是把它写成规则的理由。
 
-本轮矩阵**自己就记下了这个差**：五个 `summary.txt` 都是 `bundle_bytes: 386175`，
-而仓库那份 `client/client.js` 是 386099 字节 / `E2164D3A…7FF2`，386175 − 386099 = 76，
-不需要再事后补采。本轮客户端那份长度也变了（1.3.10 的 386100 → 386099）：这一版把兼容下界从
-`0.2.0-rc.1` 收窄到 `0.2.1-rc.1`，构建时又把 `1.4.0` 写进 bundle，两件事叠在一起。
-宿主那份随 `DEFAULT_FETCH_TIMEOUT_SECONDS` 抽成常量而变，
-`lib/index.js` 为 429099 字节 / `DE6DA5D1…220E`。tarball 内的两份与仓库工作区逐字节同哈希（解包后当场比对；
-Linux 上重建的同一份也是这两个哈希）。
+本轮矩阵**自己就记下了这个差**：五个 `summary.txt` 都是 `bundle_bytes: 392435`，
+而仓库那份 `client/client.js` 是 392359 字节 / `BCB7588A…3126`，392435 − 392359 = 76，
+不需要再事后补采。本轮客户端那份长度也变了（1.4.0 的 386099 → 392359）：这一版新增了会话标题标记、
+结束面板的领先/落后与行数、以及只注册任务空间时的任务发现，三块都落在客户端。
+宿主那份也变了，`lib/index.js` 为 434433 字节 / `490BFB49…9B38`——`task.plan` 多算了 `behind` 与两对行数，
+扫描端点读任务记录的源仓库，两处都在宿主侧。tarball 内的两份与仓库工作区逐字节同哈希（解包后当场比对；
+Linux 上重建的同一份也是这两个哈希，见下一节）。
 
 **两路数据互证，但来源不同，要分清：**
 
 | 来源 | 数据 | 性质 |
 | --- | --- | --- |
-| 矩阵运行 | 五个 `summary.txt` 各记 `bundle_status: 200`、`bundle_bytes: 386175` | 来自矩阵，但**只有字节数、没有哈希** |
+| 矩阵运行 | 五个 `summary.txt` 各记 `bundle_status: 200`、`bundle_bytes: 392435` | 来自矩阵，但**只有字节数、没有哈希** |
 | 打包核对 | tarball 内 `client/client.js`、`lib/index.js` 与仓库产物的 sha256 比对（含翻字节阴性对照） | **不是**矩阵运行的数据 |
 
 上一轮（1.2.0）字节级的前缀 / 后缀 / 前缀哈希是矩阵跑完之后**另起同一批宿主、同一份 tarball**
@@ -247,11 +247,14 @@ Linux 上重建的同一份也是这两个哈希）。
 滞后推后一轮，所以此处收敛：本节记录的 sha256 指向**最后一次实跑的包**，它内含的文档是本文档的
 上一版；两份 bundle 哈希才是描述发布内容的东西。
 
-**1.4.0 的两份产物**：`client/client.js` 为 `E2164D3A…7FF2`（386099 字节），`lib/index.js` 为
-`DE6DA5D1…220E`（429099 字节）。客户端那份相对 1.3.10 只变了版本串——构建时把 `1.4.0` 写进
-bundle，`3BED4F99…B5957` 因此变成这一份。宿主那份变了：`DEFAULT_FETCH_TIMEOUT_SECONDS` 从
-schema 里的字面量 `8` 抽成常量（为了让它能被 `test/documented-defaults.test.mjs` 读到并与文档比对），
-这是本版唯一一处宿主侧改动。
+**1.4.1 的两份产物**：`client/client.js` 为 `BCB7588A…3126`（392359 字节），`lib/index.js` 为
+`490BFB49…9B38`（434433 字节）。两份都变了，且都不是只变版本串：客户端多了会话标题标记、结束面板的
+领先/落后与两对行数、以及「无未提交变更」那一句；宿主多了 `task.plan` 的 `behind` 与两对行数，
+以及扫描端点读任务记录的源仓库。本轮还修掉一处会影响产物复现的问题：`src/client/styles.css` 在
+Windows 工作树里带着 CRLF（`.gitattributes` 要求 `eol=lf`，索引里一直是 LF），`build.mjs` 把 CSS
+内联进 `client/client.js`，于是 Windows 构建产出带 `\r` 的 bundle、Linux 产出不带，两侧无法逐字节一致。
+把工作树重新检出为 LF 之后，两侧产物收敛到上面这两个哈希——这正是第 3 步 Linux 门存在的理由，
+也是它本轮先红后绿的原因。
 
 **矩阵只跑了一次。** 内容（兼容下界、窗口、README、CHANGELOG、证据）全部定稿并提交为 `86fd425`
 之后才打包、才跑矩阵；报告里的 `commit`、`pluginVersion` 与 tarball 内的 `package.json` 三者一致，
@@ -288,12 +291,12 @@ content-type、实际上什么都没记，而它旁边就是 `bundle_status: 200
 | 判据（第 2 节） | 实测 | 说明 |
 | --- | --- | --- |
 | 2.1 安装以 0 退出、无 `incompatible` | 五个版本均满足 | pnpm 12.6.0，`Packages: +1` |
-| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 五个版本均为 `1.4.0` | |
+| 2.1 `node_modules/dsh-worktree-space/` 存在、`version` 正确 | 五个版本均为 `1.4.1` | |
 | 2.2 `--dump-config` 出现 `worktree-space` 条目 | 五次均 `name: dsh-worktree-space` 命中 1 次 | 安装后比安装前多 3 行 |
 | 2.3 进程正常启动 | 五次均 `boot_alive: True`，stderr 文件均 0 字节，`boot_stopped: True` | |
 | 2.3 页面可达 | 五次均 HTTP 200（40623 / 38492 / 38492 / 38492 / 38033 字节，按 0.2.2-rc.1 到 0.2.1-rc.2），页面中出现插件 5 次 | |
-| 2.3 客户端 bundle 地址可取回 | 五次均 HTTP 200、`text/javascript; charset=utf-8`，内容含 `id: "dsh-worktree-space"` | 服务端比仓库的 `client\client.js`(386099)多 **76**；矩阵自记 `bundle_bytes: 386175`，见上节 |
-| 2.3 bundle 的 rev 逐版本不同 | `1c9aae65bbd0` / `05153a4b9d0f` / `26254a55001e` / `2e81f423fb74` / `106322311a9a` | 内容寻址，五份不同的宿主缓存各自一份 |
+| 2.3 客户端 bundle 地址可取回 | 五次均 HTTP 200、`text/javascript; charset=utf-8`，内容含 `id: "dsh-worktree-space"` | 服务端比仓库的 `client\client.js`(392359)多 **76**；矩阵自记 `bundle_bytes: 392435`，见上节 |
+| 2.3 bundle 的 rev 逐版本不同 | `7c43451ee9cd` / `14f2aff3944b` / `c80ad3b9101a` / `5c8f8aefaaa3` / `687dc23cf0dd` | 内容寻址，五份不同的宿主缓存各自一份 |
 | 2.3 RPC 路由已注册 | `task.preference` → **200** `{"ok":true,"value":{"defaultBranchPrefix":"task/","archiveDocumentsStrategy":"container","archiveDocumentsDirectory":"","handoffFullAccess":"off","auditLog":"on"}}` | 编造的 endpoint → **404** |
 | 2.4 `node_modules/dsh-worktree-space/` 消失 | 五次均 `True` | |
 | 2.4 `cordis.patch.yml` 挂载行清掉 | 五次均 0 处提及 | |
@@ -306,8 +309,8 @@ cookie；不带这个 cookie 时，`POST /api/...` 一律回 **405**、`GET /api
 `RPC method does not match endpoint.`。
 
 **bundle 地址是页面相对的**：`plugins/??dsh-worktree-space/client.js&rev=<rev>`，`rev` 每个版本各不相同
-（`1c9aae65bbd0` / `05153a4b9d0f` / `26254a55001e` / `2e81f423fb74` / `106322311a9a`，按 0.2.2-rc.1 到 0.2.1-rc.2），
-字节数五个版本一致（均 `bundle_bytes: 386175`）。
+（`7c43451ee9cd` / `14f2aff3944b` / `c80ad3b9101a` / `5c8f8aefaaa3` / `687dc23cf0dd`，按 0.2.2-rc.1 到 0.2.1-rc.2），
+字节数五个版本一致（均 `bundle_bytes: 392435`）。
 
 > 那行里的 `??` 是脚本写日志时的编码痕迹，`bundle_status: 200` 与 `bundle_registers: 1` 说明请求实际
 > 成功——两轮矩阵表现一致。它不足以当作 URL 原文引用，但足以说明「取到了包」。

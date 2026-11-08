@@ -7,6 +7,41 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.4.1 — 2026-11-08
+
+任务是插件自动开的会话时，侧栏标题直接说明它属于哪个任务空间；结束任务的对话框改用与任务空间视图同一套数字，并且多个仓库时打开更快。只把任务空间注册成工作区，任务也能被发现了。
+
+### 新增
+
+- **会话标题由插件自己写。** 派单、交由 agent 提交、交由 agent 解决冲突这三种自动开的会话，标题统一以
+  `【WTS Dispatch】`、`【WTS Commit】`、`【WTS Conflict】` 开头，后面接 `<项目>/<完整分支名>`，
+  例：`【WTS Dispatch】mall-project/task/coupon`。以前标题由宿主从首条消息的前五个词截取，派单会话于是
+  显示成 `# Standing instructions (added by` 这类看不出属于哪个任务的名字。标题以插件写入为准，之后
+  的对话不会把它改掉。
+- **结束任务对话框改用与任务空间视图同一套数字。** 每个仓库显示**领先/落后目标分支**的提交数
+  （`↑` / `↓`）、**已提交变更**与**未提交变更**各自的增删行数，与任务空间视图里的口径一致。换目标分支后
+  这些数字立刻按新目标重算 —— 「落后」尤其有意义：它说的是任务进行期间目标分支又前进了多少。
+- **对话框的汇总拆成两行。** 第一行是任务空间目录，第二行是变更数据。以前目录与数字挤在一行，路径一长
+  就把数字挤到不确定的位置。
+- **只注册任务空间也能发现任务。** 任务的 worktree 由源仓库报出，所以源仓库不在任何工作区里时，任务本来
+  查不到 —— 它只出现在工作区列表，任务空间视图里没有。现在插件读任务记录里记下的源仓库，用它把任务找出来。
+  只列出属于这个任务空间的 worktree：同一源仓库下没在工作区里的其它任务不会跟着露出来。把源仓库本身
+  注册成工作区时，它下面所有 worktree（含其它任务）照常全部列出。
+
+### 变更
+
+- **任务空间视图与工作区视图的合计合并成一对行数。** 以前头部只统计已提交的增删行，仓库行里却同时有
+  已提交与未提交两对，于是任务带着一堆没提交的改动时，头部只报了其中一半。现在合计把两者相加，悬停提示
+  写明「已提交与未提交合计」。结束任务对话框仍分开显示两对。
+- **未提交改动为空时，汇总写「无未提交变更」**，而不是留一个没有数字的标签。
+
+### 修复
+
+- **多个仓库时结束任务对话框打开慢。** 打开对话框要问每个仓库几条 git 命令，而这些命令原本串行执行。
+  在 Windows 上 `git.exe` 的启动几乎全是进程创建开销，所以这段等待随仓库数线性增长。现在互相独立的调用
+  并行执行，并且去掉了一次多余的 `git rev-parse` —— 源仓库当前检出的分支本来就在 `git worktree list` 的
+  输出里。单个仓库实测从 1219 ms 降到 712 ms。
+
 ## 1.4.0 — 2026-11-07
 
 任务空间与源码仓库都显示领先、落后的提交数与增删行数。源码仓库与自己的远端跟踪分支相比，任务空间里的仓库与源仓库当前检出的分支相比；前者不等拉取完成，先显示本地引用，远端在后台刷新。
@@ -377,6 +412,51 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.4.1 — 2026-11-08
+
+A session the plugin opens for you now says in its sidebar title which task space it belongs to; the
+finish dialog draws the same figures the task view does, and opens faster when a task spans several
+repositories. A task space registered on its own is enough for its task to be found.
+
+### Added
+
+- **The plugin writes the session title.** The three kinds of session it opens on its own — dispatch,
+  hand over the commits, hand over the conflicts — start with `【WTS Dispatch】`, `【WTS Commit】` or
+  `【WTS Conflict】`, followed by `<project>/<full branch>`, for example
+  `【WTS Dispatch】mall-project/task/coupon`. The host used to derive a title from the first five words of
+  the first message, which left a dispatched session reading `# Standing instructions (added by` — a name
+  that named no task. The title the plugin writes is final: later messages do not overwrite it.
+- **The finish dialog draws the same figures the task view draws.** Per repository: commits
+  **ahead of and behind the target branch** (`↑` / `↓`), and the lines **committed** and **uncommitted**
+  each carry. Changing the target recomputes all of them at once — `behind` is the interesting one, since
+  it says how far the target moved while the task was being worked on.
+- **The dialog's summary is two lines.** The task space directory on the first, the change figures on the
+  second. They shared one line before, so a long path pushed the numbers to wherever the line happened to
+  wrap.
+- **A task space registered on its own is enough.** A task's worktrees are reported by its source
+  repositories, so a task whose source repositories were in no Workspace could not be found — it showed in
+  the Workspace list and nowhere in the task view. The recorded source repositories are read instead, and
+  the task is listed. Only the worktrees of that task space are reported: another task under the same
+  source repository, itself in no Workspace, does not appear with it. Registering the source repository
+  itself still lists every worktree it holds, other tasks included.
+
+### Changed
+
+- **The task view's and the Workspace view's totals are one pair of line counts.** The header counted
+  committed lines only while the repository rows carried both halves, so a task holding uncommitted work
+  reported half of what its own rows were showing. The total now adds both, and the hint says so. The
+  finish dialog still shows the two pairs separately.
+- **A summary with nothing uncommitted says "no uncommitted changes"** rather than leaving a label with no
+  numbers after it.
+
+### Fixed
+
+- **The finish dialog was slow to open on a task spanning several repositories.** Opening it asks each
+  repository a handful of git questions, and those ran one after another. On Windows a `git.exe` launch is
+  almost entirely process creation, so the wait grew with the repository count. Calls that do not depend
+  on each other now run together, and one `git rev-parse` is gone: the branch the source repository sits
+  on is already in the `git worktree list` output. Measured on one repository, 1219 ms down to 712 ms.
 
 ## 1.4.0 — 2026-11-07
 

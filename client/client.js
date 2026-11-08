@@ -3,1095 +3,1095 @@ window.__ModuleLoader__.load({
   factory: function (require) {
     var module = { exports: {} }
     var exports = module.exports
-"use strict";var xl=Object.create;var ko=Object.defineProperty;var Cl=Object.getOwnPropertyDescriptor;var Sl=Object.getOwnPropertyNames;var Rl=Object.getPrototypeOf,Nl=Object.prototype.hasOwnProperty;var El=(e,t)=>{for(var n in t)ko(e,n,{get:t[n],enumerable:!0})},sa=(e,t,n,o)=>{if(t&&typeof t=="object"||typeof t=="function")for(let s of Sl(t))!Nl.call(e,s)&&s!==n&&ko(e,s,{get:()=>t[s],enumerable:!(o=Cl(t,s))||o.enumerable});return e};var Ee=(e,t,n)=>(n=e!=null?xl(Rl(e)):{},sa(t||!e||!e.__esModule?ko(n,"default",{value:e,enumerable:!0}):n,e)),Tl=e=>sa(ko({},"__esModule",{value:!0}),e);var Vd={};El(Vd,{default:()=>Ud});module.exports=Tl(Vd);var pt=require("react");var aa=`@layer dsh-worktree-space {\r
-  /* DSH owns typography and colour. Keep these aliases local to our surfaces. The page\r
-     is listed here as well as the dialog it is usually drawn in: a dialog's content is\r
-     its parent, but the page also scrolls as a root of its own in the panel.\r
-\r
-     The configuration card is listed for a reason worth keeping in mind: it is drawn\r
-     into the Plugins page's own slot, which is none of the surfaces below, so\r
-     without it every rule here that reads one of these aliases computes to nothing.\r
-     \`border: 1px solid var(--wt-line)\` does not fall back to an initial value when\r
-     \`--wt-line\` is undefined - the declaration is dropped whole - so the card's\r
-     buttons came out with no border at all rather than with a faint one. */\r
-  /* The management page in its panel form needs this list too: it is a \`dws-panel\`, not\r
-     a \`dws-manage-page\`, and without the aliases here every \`var(--wt-*)\` inside it\r
-     computes to nothing - which is how the update capsule came out with no border and no\r
-     background in the panel while looking right in the dialog. */\r
-  /* The branch pickers' panel is in this list for the third time this note has been\r
-     needed: its panel is portalled to \`document.body\`, so it is a SIBLING of the dialog\r
-     that opened it, not a child. A portal moves the element in the DOM, not in the\r
-     cascade, so the panel inherited none of these aliases - \`background: var(--wt-surface)\`\r
-     was dropped whole and the list came out see-through, with the cards behind it reading\r
-     through the options. Any surface that leaves the dialog by portal belongs here. */\r
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {\r
-    --wt-text: var(--dsw-alias-label-primary);\r
-    --wt-secondary: var(--dsw-alias-label-secondary);\r
-    --wt-muted: var(--dsw-alias-label-tertiary);\r
-    --wt-line: var(--dsw-alias-border-l2);\r
-    --wt-surface: var(--dsw-alias-bg-layer-1);\r
-    --wt-soft: var(--dsw-alias-bg-module-platform);\r
-    --wt-hover: var(--dsw-alias-interactive-bg-hover);\r
-    /* The plugin's own blue - the icon's stroke, written out rather than aliased. It is\r
-       what a chosen repository, its tick and the field's bulk actions wear, so those three\r
-       read as one family. The alias theme's \`state-business-primary\` is a close blue but\r
-       not the mark's, and \`brand-primary\` is not a colour at all: it is the label ink\r
-       (near-black in the light theme), which is how a selection came out looking like a\r
-       heavier border. */\r
-    --wt-accent: #4d6bfe;\r
-    /* Line counts read green-for-added and red-for-removed, the two colours a diff\r
-       uses. Green is the theme's own success token - the same one the clean status\r
-       dot wears - so a "+12" and a clean repository read as the same kind of fact. */\r
-    --wt-success: var(--dsw-alias-state-success-primary);\r
-    --wt-danger: var(--dsw-alias-state-error-primary);\r
-    /* Warnings wear one amber, the product's own rather than the alias theme's: brighter\r
-       and more saturated than the alias amber, so an amber dot, label or notice holds\r
-       its weight beside the green state dot and never reads as a second red. Every\r
-       warning in the plugin names this one token. */\r
-    --wt-warn: #fe9a00;\r
-    box-sizing: border-box;\r
-    color: var(--wt-text);\r
-    font-family: inherit;\r
-    font-size: 14px;\r
-    font-weight: 400;\r
-    line-height: 22px;\r
-  }\r
-  .dws-settings *, .dws-dialog-content *, .dws-manage-page *, .dws-manage-page *::before, .dws-manage-page *::after, .dws-new-session-action * { box-sizing: border-box; }\r
-  /* The management page as a main panel: the shell gives the column, so this owns the\r
-     two bands the page is made of. The first holds the way back and the heading; the\r
-     second holds the view column and the reading column. Splitting them is what puts the\r
-     view tabs on the toolbar's own line: in one band they would start under the back row\r
-     instead, and the panel would read differently from the dialog for no reason but its\r
-     back button. */\r
-  .dws-panel { --dws-nav-width: 167px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }\r
-  .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }\r
-  /* The plugin's navigation column, shared by both hosts of the page: the panel that\r
-     takes the shell's main column and the dialog the footer's shortcut opens. Every\r
-     number below is a variable, because the two frames differ only in width, in how far\r
-     the column is inset, and in the line that separates it from what it selects \u2014 the\r
-     rows themselves are the shell's own panel rows, to the pixel, in both. */\r
-  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 167px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }\r
-  .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }\r
-  .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }\r
-  .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }\r
-  .dws-nav-item[aria-current="true"] { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); color: var(--dsw-alias-label-primary, var(--wt-text)); }\r
-  .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }\r
-  .dws-nav svg { flex: none; }\r
-  .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }\r
-  /* The gear row sits at the foot of the column, the way the shell pins its own\r
-     settings control to the foot of its sidebar: the views belong at the top, and\r
-     the way out to the plugin's configuration belongs apart from them. */\r
-  .dws-nav-settings { margin-top: auto; }\r
-  /* The panel's first band, and the whole reason the page is two bands: the back row and\r
-     the heading share it, and it grows to the taller of the two, so whatever the\r
-     description wraps to, the band below begins after it. The row's inset is 24px rather\r
-     than the heading's 28px, because a 36px row and a 28px heading line only share a\r
-     centre when the row starts the 4px higher. */\r
-  .dws-panel-lead { display: flex; flex: none; flex-direction: row; align-items: flex-start; min-width: 0; }\r
-  .dws-panel-lead-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: 24px 14px 0; border-right: 1px solid var(--wt-line); }\r
-  /* The panel's second band: the view column and the reading column side by side, each\r
-     bounded in height, so the tabs and the toolbar start on one line and only the rows\r
-     inside the list scroll. */\r
-  .dws-panel-body { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }\r
-  /* No top inset in this host: the column starts on the band's first line, which is where\r
-     the toolbar is. The 2px matches the settings' own inset, which is what the toolbar\r
-     actually starts after \u2014 so the two columns' first rows share one edge, to the pixel. */\r
-  .dws-panel .dws-nav { --dws-nav-pad: 2px 14px 24px; }\r
-  /* The scroll container holds the height and passes it down; it does not scroll itself,\r
-     because the list inside is the only thing that should. Left at \`overflow: auto\` with\r
-     an unbounded child, the content grew to its natural height and this element scrolled\r
-     the heading and the toolbar away with the rows. */\r
-  .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }\r
-  /* Flush against the navigation, not centred in the leftover width: the two columns share\r
-     one left inset, so their text lines up from the panel's edge inward. The top inset\r
-     belongs to the heading's band above, not here, or the toolbar would drop below the\r
-     tabs that switch what it filters. */\r
-  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 0 32px 48px 24px; }\r
-  .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }\r
-  /* In the heading's band beside the back row: the same measure as the reading column\r
-     below it, and the band's own top inset lives here. */\r
-  .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }\r
-  .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }\r
-  .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }\r
-  /* The title and its update capsule on one line. Both hosts use this row, so the\r
-     capsule sits beside the title in the panel and in the dialog at the same place,\r
-     and the description beneath is untouched by it. \`align-items: center\` keeps a\r
-     20px title and a 20px pill on the same baseline; the wrap is a guard for a narrow\r
-     dialog, where the two would otherwise push the description off the row. */\r
-  .dws-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }\r
-  /* Says a newer version is published, and goes to the changelog. Amber rather than the\r
-     brand colour: it is a notice, not an action this page performs, and the shell's own\r
-     warn token is what every other "there is something to look at" mark in the product\r
-     uses. Rendered only when there is something to say - the component returns null\r
-     otherwise - so the heading row never reserves space for it.\r
-     The three tokens are declared HERE rather than inherited, because this capsule has\r
-     three hosts and one of them is not a plugin surface: the panel and the dialog are\r
-     inside a \`--wt-*\` scope, but the Plugins page is the shell's own, and a capsule\r
-     placed there inherited nothing - it rendered with no border and no background, which\r
-     reads as text rather than as a control. Declaring them on the element makes the\r
-     appearance independent of where the shell mounts it. */\r
-  .dws-update-pill {\r
-    --wt-text: var(--dsw-alias-label-primary);\r
-    --wt-secondary: var(--dsw-alias-label-secondary);\r
-    --wt-line: var(--dsw-alias-border-l2);\r
-    --wt-surface: var(--dsw-alias-bg-layer-1);\r
-    display: inline-flex; flex: none; align-items: center; gap: 6px; max-width: 100%; padding: 2px 12px; border: 1px solid var(--wt-line); border-radius: 999px; background: var(--wt-surface); color: var(--wt-text); font-size: 14px; line-height: 22px; text-decoration: none; white-space: nowrap;\r
-  }\r
-  .dws-update-pill:hover { border-color: var(--dsw-alias-state-warn-primary); }\r
-  .dws-update-pill-label { color: var(--wt-secondary); min-width: 3em; }\r
-  /* \`HoverHint\` wraps the pill in a span so its bubble can anchor to it; the wrapper has\r
-     to stay out of the heading row's layout, or the pill would sit inside a block box\r
-     and lose its place on the title's baseline. */\r
-  .dws-update-pill-hint { display: inline-flex; align-items: center; flex: none; }\r
-  .dws-update-pill-version { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dsw-alias-state-warn-primary); }\r
-  /* The copied state. The label is what changes, so the width would jump when it swaps\r
-     between "\u65B0\u7248\u672C" and "\u5DF2\u590D\u5236" - a fixed minimum keeps the capsule from twitching\r
-     under a pointer that has just clicked it. */\r
-  .dws-update-pill[data-copied="true"] { border-color: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-warn-primary)); }\r
-  .dws-update-pill[data-copied="true"] .dws-update-pill-label { color: var(--dsw-alias-state-success-primary, var(--wt-secondary)); }\r
-  /* The flow line sits under the description as its own line inside the same\r
-     paragraph: a block span, not a nested paragraph, because the host already\r
-     wraps this in a <p>. */\r
-  .dws-usage-flow { display: block; }\r
-  /* The section is a column that fills the frame it is given: everything above the rows\r
-     is pinned in one block, and the list below it is the only thing that scrolls, so the\r
-     search box and the filters stay where the eye left them however long the list grows. */\r
-  .dws-settings { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 2px 0 16px; }\r
-  .dws-settings-pinned { flex: none; }\r
-  .dws-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--wt-line); }\r
-  .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }\r
-  .dws-settings-header { margin-bottom: 20px; }\r
-  .dws-settings-header h2 { font-size: 16px; font-weight: 500; line-height: 24px; }\r
-  .dws-settings-header p { margin-top: 5px; color: var(--wt-secondary); font-size: 13px; line-height: 20px; }\r
-  .dws-button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 34px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }\r
-  .dws-button svg { flex: none; }\r
-  .dws-button:hover:not(:disabled) { background: var(--wt-hover); }\r
-  .dws-button:disabled { opacity: .4; cursor: not-allowed; }\r
-  .dws-button-ghost { border-color: transparent; }\r
-  .dws-button-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }\r
-  .dws-button-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }\r
-  .dws-button-danger { color: var(--wt-danger); }\r
-  .dws-button-danger-solid { border-color: transparent; background: var(--wt-danger); color: var(--dsw-static-neutral-00); }\r
-  .dws-button-danger-solid:hover:not(:disabled) { background: var(--dsw-alias-state-error-secondary); }\r
-  /* Finishing a task is a commitment, not a loss: the same button, one step down\r
-     from danger, until the dialog can name something that will be thrown away. */\r
-  .dws-button-warn-solid { border-color: transparent; background: var(--wt-warn); color: var(--dsw-static-neutral-00); }\r
-  .dws-button-warn-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-warn) 84%, black); }\r
-  /* A solid fill says more than the notice above the button already does. Outlined, it\r
-     says the same thing in the same key \u2014 a border in the tone, the tone at 10% inside \u2014\r
-     which is what .dws-notice does, sized to a control. */\r
-  .dws-button-warn-outline { border-color: color-mix(in srgb, var(--wt-warn) 45%, transparent); background: color-mix(in srgb, var(--wt-warn) 10%, transparent); }\r
-  .dws-button-warn-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-warn) 20%, transparent); }\r
-  .dws-button-danger-outline { border-color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 10%, transparent); }\r
-  .dws-button-danger-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-danger) 20%, transparent); }\r
-  .dws-icon-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--wt-secondary); }\r
-  .dws-delete-action:hover:not(:disabled) { color: var(--wt-danger); background: var(--dsw-alias-interactive-bg-hover-danger); }\r
-  .dws-button:focus-visible, .dws-chevron-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }\r
-  .dws-input, .dws-select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--wt-line); border-radius: 9px; padding: 7px 10px; outline: none; background: var(--wt-surface); color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; }\r
-  .dws-input::placeholder { color: var(--wt-muted); }\r
-  .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }\r
-  .dws-input:disabled, .dws-select:disabled { opacity: .5; }\r
-  /* A field whose value cannot be used says so in its own colour, not only in the sentence\r
-     beside it: the sentence explains, the border points at which control it is about. */\r
-  .dws-input[aria-invalid="true"], .dws-select[aria-invalid="true"] { border-color: var(--wt-danger); }\r
-  .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }\r
-  /* One path and one button, so the field takes the room the row has rather than a\r
-     fixed width: the thing being typed is a path, and paths are all lengths. It\r
-     shares the row with the search field, so it yields first. */\r
-  .dws-add-source-row { display: flex; flex: 1 1 240px; align-items: center; gap: 8px; min-width: 0; }\r
-  .dws-add-source-row .dws-input { flex: 1 1 auto; min-width: 0; }\r
-  .dws-add-source-button { flex: none; }\r
-  .dws-filter-fold { margin-left: 20px; }\r
-  /* The search field takes half the row and the refresh button follows it: a button\r
-     that says what it does, not an icon parked at the far edge. */\r
-  /* Three eighths of the toolbar. It shares the row with the refresh button and, in\r
-     the repository view, the add-repository button, and both need more of it than a\r
-     search of a list this size does. */\r
-.dws-search { display: flex; flex: 0 1 37.5%; align-items: center; gap: 8px; min-width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }\r
-  .dws-search:focus-within { border-color: var(--dsw-alias-brand-primary); }\r
-  .dws-search > svg { flex: none; }\r
-  .dws-search .dws-input { min-height: 34px; padding: 6px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }\r
-  .dws-search .dws-icon-button { width: 24px; height: 24px; min-height: 24px; margin-right: -4px; }\r
-  .dws-depth { display: flex; flex: none; align-items: center; gap: 7px; }\r
-  .dws-depth-label { color: var(--wt-secondary); font-size: 12px; line-height: 20px; }\r
-  /* The box owns the width so the chevron sits inside it, matching the scope\r
-     selector beside it rather than floating in a gap. */\r
-  .dws-depth-box { position: relative; flex: none; width: 92px; }\r
-  .dws-depth-box .dws-select { appearance: none; width: 100%; padding-right: 28px; background: var(--wt-soft); border-color: transparent; cursor: pointer; }\r
-  .dws-depth-box > svg { position: absolute; right: 10px; top: 11px; pointer-events: none; color: var(--wt-secondary); }\r
-  .dws-list-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }\r
-  .dws-filters { display: inline-flex; align-items: center; gap: 3px; }\r
-  /* Separates the fold button from the views, at the group's own 3px spacing. */\r
-  .dws-filter-divider { color: var(--wt-line); user-select: none; }\r
-  /* The one that separates two runs gets air on both sides of it. */\r
-  .dws-filter-separator { margin: 0 6px; }\r
-  .dws-filters button { border: 0; border-radius: 7px; padding: 4px 9px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }\r
-  .dws-filters button:hover { background: var(--wt-hover); }\r
-  .dws-filters button[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); font-weight: 500; }\r
-  /* The entry switches sit at the end of the toolbar, where the panel is managed. */\r
-  .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; margin-left: auto; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }\r
-  /* Sits between the controls and the rows, so it reads as a caption on the list rather\r
-     than another control: same muted ink as the summary, one step up in size.\r
-     Scoped on purpose. The reset at .dws-settings p is (0,1,1) and a bare class is only\r
-     (0,1,0), so an unscoped rule here silently loses and the caption sits flush at 0.\r
-     The 8px on top collapses with the controls row's own 8px margin-bottom, so the\r
-     caption clears the divider by one gap. Below it is 4px, not 8px: the loading\r
-     message brings 8px of its own padding, and 8 + 8 stacks to a hole. */\r
-  .dws-settings .dws-view-description { margin: 8px 0 4px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  /* The feedback link after the plugin description. It carries no size of its own: the\r
-     link wears whatever the sentence it follows is set in, which differs between the\r
-     manage dialog and the settings page. It underlines at rest rather than on hover -\r
-     it is the one link on this screen, and a reader who has decided to report a\r
-     problem should not also have to work out which words are pressable. */\r
-  .dws-feedback-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }\r
-  .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; }\r
-  .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }\r
-  /* The list's vertical rhythm. Rows are separated by their own padding, kept\r
-     just wide enough that two rows still read as two rows: a branch line and the\r
-     path under it belong together, so their gap is the smaller one. */\r
-  .dws-repo-header { display: flex; align-items: center; gap: var(--dws-row-gap); min-width: 0; padding: 3px 0; }\r
-  /* Only the arrow folds the row. It used to be the whole row, which put the name,\r
-     the branch, the count and the path inside a button - and text inside a button is\r
-     not selectable in the browser's own stylesheet, so a path you could read was a\r
-     path you could not copy. Making the arrow the control leaves the text outside a\r
-     button, where selecting it is ordinary rather than worked around, and clicking a\r
-     name to select it no longer folds the row underneath. */\r
-  .dws-chevron-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--dws-chevron-size); border: 0; padding: 0; background: transparent; color: var(--wt-muted); cursor: pointer; }\r
-  /* A row holding nothing keeps a disabled control rather than losing it: the name\r
-     it would have had is what tells a screen reader that this row cannot be folded\r
-     open, and the test that clicks it to prove it stays closed needs something to\r
-     click. Only the browser's own dimming is taken back - the row beside it is not\r
-     greyed out just because it has nothing in it. */\r
-  .dws-chevron-toggle:disabled { opacity: 1; cursor: default; }\r
-  .dws-repo-icon { flex: none; color: var(--wt-secondary); }\r
-  .dws-branch-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }\r
-  .dws-chevron { color: var(--wt-muted); transition: transform .14s ease; }\r
-  .dws-chevron-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }\r
-  .dws-chevron-placeholder { display: block; flex: none; width: var(--dws-chevron-size); }\r
-  .dws-repo-heading { display: block; flex: 1; min-width: 0; }\r
-  .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }\r
-  .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }\r
-  .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 260px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }\r
-  .dws-branch-label > svg { flex: none; }\r
-  .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }\r
-  .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  .dws-create-repo { min-height: 30px; padding: 4px 9px; font-size: 12px; }\r
-  /* The rows a repository or a task holds, set inside it rather than hung off it.\r
-     These were drawn as a tree \u2014 a rail down the left with a tick into every row, then a\r
-     rail inside the inset block with a tab up to the parent \u2014 and every line of it is\r
-     gone, as is the tint that once set the group off the surface: those rows are the same\r
-     white as the row above them now. What is left is the offset. It is pushed in past the\r
-     parent's chevron, icon and gap, so a child's icon starts on the column the parent's\r
-     name starts on and one folder visibly sits under another. The indent is the whole of\r
-     the hierarchy \u2014 nothing is drawn and nothing is shaded to say so. */\r
-  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 5px; padding: 1px 12px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap)); }\r
-  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 3px 0; }\r
-  .dws-worktree + .dws-worktree { border-top: 1px solid var(--wt-line); }\r
-  /* A child's folder is smaller than its parent's, so it sits inside the indent as a\r
-     member of that row rather than competing with the header it belongs to. */\r
-  .dws-tree-icon { flex: none; align-self: center; color: var(--wt-muted); }\r
-  .dws-worktree-info { flex: 1; min-width: 0; }\r
-  .dws-worktree-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; min-width: 0; }\r
-  .dws-worktree-title strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 20px; }\r
-  .dws-worktree-path { overflow-wrap: anywhere; margin-top: 2px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }\r
-  /* The line counts, in the two colours a change is read in: what arrives is green,\r
-     what goes is red. Fixed-width digits so two rows with different numbers still\r
-     line up down the column. */\r
-  .dws-worktree-changes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 2px; }\r
-  .dws-changes-label { color: var(--wt-muted); font-size: 11px; line-height: 18px; }\r
-  .dws-lines, .dws-ahead-behind { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; font-size: 11px; line-height: 18px; }\r
-  /* The task row carries both pairs side by side, so each needs air from the other\r
-     rather than reading as one run of symbols. */\r
-  .dws-task-title .dws-ahead-behind, .dws-task-title .dws-lines { gap: 8px; padding: 0 2px; }\r
-  .dws-task-title .dws-ahead-behind { margin-left: 2px; }\r
-  .dws-line-add, .dws-ahead { color: var(--wt-success); }\r
-  /* Behind is amber, not red: the base branch having commits this one lacks is\r
-     ordinary - it means someone else moved - and red would read as an error the\r
-     task has to fix. Red is kept for the lines a change removes. */\r
-  .dws-line-del { color: var(--wt-danger); }\r
-  .dws-behind { color: var(--wt-warn); }\r
-  /* The name in front of a branch glyph, so the icon is not the only thing saying\r
-     which branch is which. */\r
-  .dws-branch-name { color: var(--wt-muted); font-size: 11px; white-space: nowrap; }\r
-  /* A worktree row's own branch was a plain <strong> before it gained a label; it\r
-     keeps that weight, and the label beside it stays muted so the ref is still the\r
-     thing the eye lands on. */\r
-  .dws-worktree-branch .dws-branch-value { color: var(--wt-text); font-weight: 500; font-size: 13px; }\r
-  .dws-line-none { color: var(--wt-muted); font-size: 11px; }\r
-  .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }\r
-  /* 7.5px on an 18px line: the dot is a state cue read before the label beside it, so it\r
-     is sized to be seen rather than hinted at. \`border-radius: 50%\` on a square that small\r
-     already reads as a circle \u2014 a rounded rect would read as a tick box. */\r
-  .dws-status-dot { width: 7.5px; height: 7.5px; flex: none; border-radius: 50%; background: currentColor; }\r
-  .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }\r
-  /* Only a stale worktree record, which asks for a cleanup, keeps the warning\r
-     colour; a status the page could not read is worth an amber note, not red. */\r
-  .dws-status-unavailable { color: var(--wt-warn); }\r
-  /* Numbers measured against refs a previous fetch left behind: amber, because they\r
-     are not wrong, only older than they look. */\r
-  .dws-status-stale { color: var(--wt-warn); }\r
-  .dws-status-stale .dws-status-dot { color: var(--wt-warn); }\r
-  /* Fetching switched off: neutral, because nothing failed - the reader chose this.\r
-     Amber here would report their own setting back to them as a fault. */\r
-  .dws-status-idle { color: var(--wt-muted); }\r
-  .dws-status-idle .dws-status-dot { color: var(--wt-muted); }\r
-  .dws-status-prunable { color: var(--wt-danger); }\r
-  .dws-status-dirty .dws-status-dot, .dws-status-zero .dws-status-dot { color: var(--wt-warn); }\r
-  /* Committed work waiting to be merged back wears the same amber as uncommitted\r
-     work: both are work that has not landed yet, and they sit side by side. */\r
-  .dws-status-pending .dws-status-dot { color: var(--wt-warn); }\r
-  /* A Workspace that holds no repository has no creation button beside it, so the\r
-     sentence saying so is pushed to the row's right edge: the edge those buttons\r
-     end on. No dot, and the amber the zero-count dot already wears. */\r
-  .dws-space-status { flex: none; margin-left: auto; color: var(--wt-warn); }\r
-  .dws-worktree-actions { display: flex; flex: none; align-items: center; gap: 2px; }\r
-  .dws-settings .dws-no-linked { padding: 0 0 2px; color: var(--wt-muted); font-size: 12px; line-height: 20px; }\r
-  .dws-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 18px; text-align: center; color: var(--wt-muted); }\r
-  .dws-empty h3 { color: var(--wt-text); font-size: 14px; font-weight: 500; }\r
-  .dws-empty p { max-width: 340px; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }\r
-  .dws-error { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin: 12px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wt-danger) 20%, transparent); border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--wt-danger); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }\r
-  .dws-error > svg { flex: none; margin-top: 2px; }\r
-  .dws-error > span { flex: 1; min-width: 0; }\r
-  .dws-error .dws-button { margin: -4px -5px -4px 0; }\r
-  /* 4px on top, not 8: the caption above already spends 4px of its own margin here, and\r
-     two 8s stacked to a hole. The 8px below stays \u2014 nothing sits under this row. */\r
-  .dws-loading-message { display: flex; align-items: center; gap: 7px; padding: 4px 0 8px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  .dws-loading-message > svg { flex: none; }\r
-  .dws-skeleton-list { padding: 4px 0; }\r
-  .dws-skeleton-row { display: flex; align-items: center; gap: 12px; padding: 16px 0; }\r
-  .dws-skeleton-row > span { width: 18px; height: 18px; border-radius: 5px; background: var(--wt-soft); }\r
-  .dws-skeleton-row > div { display: grid; gap: 8px; flex: 1; }\r
-  .dws-skeleton-row > div span { width: 45%; height: 10px; border-radius: 4px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }\r
-  .dws-skeleton-row > div span + span { width: 70%; height: 8px; }\r
-\r
-  .dws-dialog-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }\r
-  /* Centred with auto margins instead of a translate, and that is not a style choice: the\r
-     branch pickers' panels are rendered INSIDE this element (a modal dialog's focus scope\r
-     takes focus back from anything outside its content, so a panel portalled to the body\r
-     could hold a list but never a search box) while keeping \`position: fixed\` so they are\r
-     painted over the body's clipping edge. A transform here would become the containing\r
-     block of those panels: they would be measured in this box's coordinates and cut off by\r
-     its \`overflow: hidden\`. Do not put a transform back on this rule. */\r
-  .dws-dialog-content { position: fixed; z-index: 1001; inset: 0; margin: auto; height: max-content; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }\r
-  /* The create form carries more per row than a confirmation does, and fits a\r
-     1080p viewport without scrolling at these numbers. It is the widest dialog\r
-     here: 690px was one and a half times a confirmation, then 759px, and the\r
-     repository cards now carry a name, a branch and a path each on one line - so\r
-     it is a fifth wider again, 911px, the number written out rather than a factor,\r
-     so the field rows keep the line they were laid out for. */\r
-  .dws-create-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }\r
-  /* Archiving reports as much per repository as the create form does \u2014 branches,\r
-     merge targets, commit counts, source paths, leftovers \u2014 so it reads at the same\r
-     width: a row's path and its counts line up the same way in both dialogs, and one\r
-     dialog no longer opens narrower than the one it is opened from. */\r
-  .dws-finish-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }\r
-  /* The archive dialog stacks a status line, notices, options and a report. They\r
-     ran into each other without a rhythm, so the body lays them out with one \u2014\r
-     the same everywhere, since giving sections extra space above only made the\r
-     top half airier than the bottom. */\r
-  .dws-finish-dialog .dws-dialog-body { display: flex; flex-direction: column; gap: 10px; }\r
-  .dws-finish-dialog .dws-dialog-body > * { margin: 0; }\r
-  /* The sidebar's footer entry, a row of the footer exactly like Settings: icon,\r
-     label, full width, hover highlight.\r
-     \r
-     DSH lays this slot's container out as a row, which put this entry and the\r
-     neighbouring plugin's on one line. The container is stacked instead \u2014 scoped\r
-     with :has() to a footer that actually holds this entry, so DSH's own layout is\r
-     untouched when the plugin is absent. It applies to every entry in that\r
-     container, which is the point: they read as footer rows, not as chips. */\r
-  [class*="footerActions"]:has(.dws-footer-action) { flex-direction: column; align-items: stretch; gap: 2px; }\r
-  /* The configuration card the Plugins page draws for this bundle: a label that\r
-     takes the room and a pill control at the end of the row, measured off the\r
-     settings rows the neighbouring plugin draws in the same section. */\r
-  .dws-plugin-config { padding: 4px 0; }\r
-  .dws-config-toast { position: fixed; left: 50%; bottom: 28px; z-index: 60; transform: translateX(-50%); border-radius: 10px; padding: 8px 14px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: var(--dsw-alias-label-primary); font-size: 13px; }\r
-  .dws-plugin-config-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; }\r
-  .dws-plugin-config-label { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; color: var(--dsw-alias-label-primary); font-size: 14px; }\r
-  .dws-plugin-config-field { position: relative; display: inline-flex; flex: none; align-items: center; }\r
-  .dws-plugin-config-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; border: none; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out); }\r
-  .dws-plugin-config-select:hover { background: var(--dsw-alias-interactive-bg-hover); }\r
-  .dws-plugin-config-select > svg { flex: none; }\r
-  /* What a setting is for, in the same grey the plugin blurb below uses. */\r
-  .dws-plugin-config-hint { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }\r
-  /* The list opens at the control's trailing edge, as the Plugins page's own menus do. */\r
-  .dws-plugin-config-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 100%; padding: 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }\r
-  .dws-plugin-config-item { display: flex; width: 100%; align-items: center; gap: 12px; border: 0; border-radius: 8px; padding: 7px 10px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; white-space: nowrap; cursor: pointer; }\r
-  .dws-plugin-config-item:hover { background: var(--dsw-alias-interactive-bg-hover); }\r
-  .dws-plugin-config-item-label { flex: 1; }\r
-  /* The row that says a list is still being read, inside the menu it will fill. */\r
-  .dws-plugin-config-loading { display: flex; align-items: center; gap: 8px; padding: 7px 10px; color: var(--wt-muted); font-size: 13px; line-height: 20px; }\r
-  .dws-plugin-config-loading > svg { flex: none; }\r
-  .dws-plugin-config-retry { margin-left: auto; border: 0; border-radius: 6px; padding: 2px 8px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }\r
-  .dws-plugin-config-retry:hover { background: var(--dsw-alias-interactive-bg-hover); }\r
-  /* A disabled menu row is one whose answer has not arrived: dimmed, not clickable, but\r
-     still read as an item rather than vanishing - a list that changes length while it\r
-     loads is harder to aim at than one whose rows are greyed. */\r
-  .dws-plugin-config-item:disabled { opacity: .45; cursor: default; }\r
-  .dws-plugin-config-item:disabled:hover { background: 0 0; }\r
-  .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }\r
-  /* The one row whose value is typed rather than picked. */\r
-  .dws-plugin-config-field:has(.dws-plugin-config-text) { flex: 1; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }\r
-  /* Both typed rows wear one length - half of what the path row used to stretch to (472px\r
-     measured off a screenshot of the card) - because the prefix and the archive directory\r
-     are the two values a reader types: one field width for both, rather than one stretching\r
-     across the line and one not. The picked rows keep their own size. */\r
-  .dws-plugin-config-text { display: grid; grid-template-columns: auto 236px; justify-content: end; align-items: center; gap: 10px; }\r
-  /* The typed rows keep \`auto 236px\` - value first, editor second. This row is\r
-     the other way round (actions first, count last), so it declares its own two\r
-     columns at the same widths: a grid places children in source order, so\r
-     swapping the children without swapping the columns puts the buttons in the\r
-     narrow column meant for the value. */\r
-  .dws-plugin-config-row:has(.dws-plugin-config-actions) .dws-plugin-config-text { grid-template-columns: 236px auto; }\r
-  /* The buttons of one row travel together.\r
-     The value sits in the first column and the controls in the second, so a row\r
-     with more than two controls has somewhere to put them that is not the next\r
-     grid cell: as children of the grid itself they wrapped, and a row of three\r
-     dropped its third button onto a line of its own below the first two. That is\r
-     what put \u6062\u590D\u9ED8\u8BA4 somewhere other than next to \u4FEE\u6539. */\r
-  .dws-plugin-config-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }\r
-  /* Locked wears the same pill as every other row's value, so the card reads as one list. */\r
-  .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }\r
-  /* Editing: the wrapper draws the box, not the input.\r
-     The Host page styles inputs of its own and those rules are not in this plugin's layer,\r
-     so an input cannot be trusted to be 36px tall here - it arrived visibly taller. The box\r
-     the reader sees is therefore this element, and the input inside it is stripped to the\r
-     text on top of it. A bare \`input\` rule can still add height to that child, hence the\r
-     weight on the three properties that decide it. */\r
-  .dws-plugin-config-edit { display: flex; align-items: center; box-sizing: border-box; height: 36px; min-height: 36px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 9px; padding: 0 10px; background: var(--wt-surface); }\r
-  .dws-plugin-config-edit .dws-input { flex: 1; width: auto; min-width: 0; height: 100% !important; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0; background: transparent; color: var(--wt-text); }\r
-  .dws-plugin-config-save { flex: none; height: 36px; }\r
-  /* The card's buttons carry a border, and the primary one carries it too.\r
-     The primary everywhere else is a fill with no edge, which is right on a page\r
-     whose other buttons are ghosted and wrong here: on this card the neighbours\r
-     are outlined, and a filled button with no edge between them and the fill is\r
-     the one that looks unfinished. The edge is a shade of the fill itself, so it\r
-     reads as the same button rather than as a new one. */\r
-  .dws-plugin-config .dws-button { border-color: var(--wt-line); }\r
-  .dws-plugin-config .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }\r
-\r
-  /* A dialog's buttons are the settings page's buttons - same 13px on the same 34px,\r
-     no per-dialog sizing. Squeezing them to 12px on a 26px box was tried and it\r
-     made them read as footnotes: below the 14px directory names they act on and\r
-     level with the 12px note above them, so the control was the smallest thing in\r
-     its own dialog. A control that small is hard to hit and easy to miss, and the\r
-     one thing a dialog's buttons must not be is quiet.\r
-\r
-     \`.dws-confirm-dialog\` is in the list because the question about removing a name\r
-     is a second dialog drawn as a portal sibling rather than a child, so it inherits\r
-     none of the first one's rules and matched none of them. */\r
-  .dws-ignore-dialog .dws-button-primary, .dws-confirm-dialog .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }\r
-\r
-  /* A confirmation dialog has no heading - its one sentence is the body - so the\r
-     sentence needs the size a heading would have given it. One step above the\r
-     buttons, which is the order a sentence and its own buttons read in. */\r
-  .dws-confirm-body { margin: 0; color: var(--wt-secondary); font-size: 14px; line-height: 22px; }\r
-  /* ...and the frame around it has to be the width of one sentence. This is a\r
-     class of its own rather than a width on \`.dws-confirm-dialog\`, because that\r
-     name says "this is a confirmation" and the finish dialog is one too - it just\r
-     is not a one-sentence one. Reading "confirm" as "narrow" put a 420px frame on\r
-     a dialog carrying a heading, a form and a footer, which needs 690. A width\r
-     that belongs to one shape of dialog has to be named after that shape. */\r
-  .dws-confirm-narrow { width: min(420px, calc(100vw - 32px)); }\r
-  /* The tag list drops its own cap and lets the dialog body scroll instead. The body\r
-     already scrolls and already takes the dialog's height, so a second scrollbar\r
-     inside it only made the list shorter than the frame built to hold it. */\r
-  .dws-ignore-dialog .dws-ignore-tags { max-height: none; }\r
-  /* The tag name wears the label's size too, for the same reason. */\r
-  .dws-ignore-dialog .dws-ignore-tag { font-size: 14px; min-height: 30px; border-radius: 15px; }\r
-  .dws-ignore-dialog .dws-ignore-tag .dws-icon-button { width: 22px; height: 22px; border-radius: 11px; }\r
-\r
-  /* The directory-name list. Tags rather than rows because the list is a set of\r
-     short names with nothing else to say about them, and the only action on one is\r
-     taking it off. Every tag carries a cross, so the list wants to be wide enough\r
-     to hold a row of them without wrapping into a column: 676px is 520 by one and\r
-     three-tenths, written out rather than as a factor so the intent survives being\r
-     read next to the number. Width alone, because the padding comes from the\r
-     heading/body/footer sections every dialog here is built from. */\r
-  /* 800 by 560, written as \`min()\` against the viewport rather than as fixed\r
-     pixels: on a screen narrower or shorter than that, the dialog takes what is\r
-     left instead of overflowing, and the \`max-height\` the base rule already\r
-     carries still governs. The height is what the number of tags needs - a list\r
-     of twenty-odd names stops being something the eye scans when it is the\r
-     scrollbar that decides what is on screen - so the body keeps its own scroll\r
-     and the dialog frame stays put. */\r
-  .dws-ignore-dialog { width: min(800px, calc(100vw - 32px)); max-width: 800px; height: min(560px, calc(100dvh - 40px)); }\r
-  /* The search row and the tags are one flow inside .dws-dialog-body, and the\r
-     space between them is the body doing its job rather than a rule of their own. */\r
-  .dws-ignore-dialog .dws-ignore-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; max-height: 220px; overflow-y: auto; }\r
-  .dws-ignore-tag { display: inline-flex; align-items: center; gap: 4px; box-sizing: border-box; min-height: 28px; padding: 3px 4px 3px 10px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 14px; background: var(--wt-surface); color: var(--wt-text); font-size: 13px; line-height: 20px; }\r
-  .dws-ignore-name { align-self: center; }\r
-  /* A name the Host ships wears the module tint, a name the user added does not.\r
-     The difference is colour only - same list, same tag, same one click to take a\r
-     user-added one away - because the thing a reader should learn from seeing it\r
-     is not "this is built-in" but "this one will ask before it goes". Colour\r
-     carries that as a hint; the question is what actually enforces it, and a hint\r
-     that could be missed is allowed to be. */\r
-  .dws-ignore-tag-shipped { border-color: transparent; background: var(--dsw-alias-bg-module-platform); }\r
-  .dws-ignore-tag .dws-icon-button { flex: none; width: 20px; height: 20px; border-radius: 10px; }\r
-  /* Taking a built-in name off is asked about in a dialog of its own rather than\r
-     inline in the tag. The tag row is a wrapping grid of chips; an expanded row\r
-     with a sentence and two buttons in it breaks the run of tags, and at this width\r
-     the sentence wraps to three lines inside a 28px-tall row it has grown. A second\r
-     modal over the first is the normal thing - each is its own portal, and Radix\r
-     marks the one underneath inert, so the page behind cannot be reached either\r
-     way. */\r
-  /* Geometry copied from the row the neighbouring plugin draws in the same slot,\r
-     measured off its own stylesheet rather than guessed: same height, radius,\r
-     padding, type size, and the same 4px bleed with 2px insets. */\r
-  .dws-footer-action { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: calc(100% + 4px); margin: 0 -2px; height: 42px; min-width: 0; border: 0; border-radius: 12px; padding: 0 10px 0 8px; background: 0 0; color: var(--wt-text); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; overflow: hidden; }\r
-  .dws-footer-action:hover { background: var(--wt-hover); }\r
-  .dws-footer-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-footer-action-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; color: var(--wt-secondary); }\r
-  /* The plugin's own mark: the panel row in the sidebar's list and the footer shortcut\r
-     both wear the shell's primary label colour \u2014 near-black in the light theme, white\r
-     in the dark one \u2014 so the mark is drawn in the same ink as the label beside it\r
-     instead of a hue of its own. Every folder that leads a content row stays muted;\r
-     only this mark asks for the stronger ink. */\r
-  .dws-brand-glyph { color: var(--dsw-alias-label-primary); }\r
-  .dws-footer-action-label { flex: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
-  /* The 56px rail shows the icon alone, as the neighbouring row does. */\r
-  .dws-footer-action[data-wide="false"] { flex: none; justify-content: center; gap: 0; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; }\r
-  /* The management page in a dialog, for the footer's shortcut: the same page the main\r
-     panel shows, in a window wide enough for two columns. It is a column of three\r
-     bands \u2014 the dialog's heading, the page, and the dialog's own footer \u2014 so the\r
-     heading and the footer stay put while the page inside scrolls.\r
-     Height is a share of the window, and 80% of it: at 95% the dialog covered everything\r
-     but the taskbar for a page that is a list of Workspaces, six of which fit in half\r
-     that height. The share is written as a percentage so the page keeps its proportions\r
-     on a taller screen; a list that outgrows it scrolls inside the dialog. */\r
-  .dws-manage-dialog { width: min(980px, calc(100vw - 32px)); height: 80dvh; max-height: 80dvh; }\r
-  .dws-manage-heading { flex: none; padding: 22px 56px 0 24px; }\r
-  /* The navigation belongs to the column this page scrolls in the panel, not to the top\r
-     edge of a window: inside the dialog it is the left rail of the body below the\r
-     heading, so the two are not one line of chrome too many. Its rows keep the panel's\r
-     own alignment \u2014 the label against the column's inner edge \u2014 because that is the edge\r
-     a label reads from, and a dialog does not move it. */\r
-  .dws-manage-page { display: flex; flex: 1; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }\r
-  .dws-manage-page .dws-nav { --dws-nav-width: 157px; --dws-nav-pad: 16px 12px; border-right: 0; }\r
-  /* The column the lists scroll in: flush against the navigation on its left, the same\r
-     measure the panel's own content keeps, so both surfaces put their text on one line.\r
-     It is the frame, not the scroller: the section inside it owns the pinned toolbar and\r
-     the one list that scrolls, which is what keeps the two hosts' toolbars in the same\r
-     place, so this column never scrolls a second time on its own. */\r
-  .dws-manage-page-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 16px 24px 18px; }\r
-  .dws-manage-page .dws-settings { padding: 0; }\r
-  /* The panel keeps the heading it draws for the shell's column; the dialog's own heading\r
-     already said all of it. */\r
-  .dws-manage-page .dws-settings-header { display: none; }\r
-  .dws-dialog-close { position: absolute; top: 14px; right: 14px;display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; color: var(--wt-muted); background: transparent; cursor: pointer; }\r
-  .dws-dialog-close:hover:not(:disabled) { color: var(--wt-text); background: var(--wt-hover); }\r
-  .dws-dialog-close:disabled { opacity: .4; cursor: not-allowed; }\r
-  .dws-dialog-heading { padding: 22px 24px 0; }\r
-  .dws-dialog-title { margin: 0; padding-right: 24px; font-size: 16px; font-weight: 500; line-height: 24px; }\r
-  .dws-form-note { margin: 6px 0 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }\r
-  .dws-repo-context { display: flex; flex-direction: column; gap: 3px; margin: 16px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--wt-soft); }\r
-  .dws-repo-context strong { font-size: 13px; font-weight: 500; }\r
-  .dws-repo-context code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }\r
-  .dws-create-form { display: flex; flex-direction: column; min-height: 0; }\r
-  /* Only the body scrolls, so the heading stays put and the footer stays\r
-     reachable however long the form grows \u2014 the repository list is not clipped\r
-     to its own little viewport. */\r
-  .dws-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 24px 18px; }\r
-  .dws-field { display: block; min-width: 0; margin: 0 0 15px; padding: 0; border: 0; }\r
-  /* The fieldsets the dialog stacks, with the picker ahead of them: the gaps are the\r
-     field margins collapsed out, so nothing is spaced twice. */\r
-  .dws-form-fields { display: flex; flex-direction: column; gap: 17px; }\r
-  .dws-form-fields .dws-field { margin: 0; }\r
-  /* The picker leads the body with the fields after it, and the body is not a flex\r
-     column: the two are spaced here rather than with a wrapper of their own. */\r
-  .dws-dialog-body > .dws-repositories-fieldset { margin: 0 0 17px; }\r
-  /* A fieldset's legend is not a block by default, so it is taken out of the fieldset's\r
-     inline flow to lead the field the way every other label does. */\r
-  .dws-fieldset-legend { float: left; width: 100%; margin: 0 0 8px; font-size: 13px; }\r
-  /* The three fields that describe the task sit on one surface: one inset block with a\r
-     rule between its rows, rather than three fields that happen to follow each other. */\r
-  .dws-details { display: grid; gap: 12px; clear: both; padding: 14px; border: 1px solid var(--wt-line); border-radius: 11px; background: var(--wt-soft); }\r
-  .dws-field-row { display: grid; gap: 5px; }\r
-  .dws-field-row + .dws-field-row { padding-top: 12px; border-top: 1px solid var(--wt-line); }\r
-  /* The delivery policy is eight dropdowns, two to a row: each one is a short choice, and\r
-     eight stacked rows would bury the three fields above them. The rows inside the grid are\r
-     plain cells, so the rule between fields above does not run between the columns. */\r
-  .dws-delivery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }\r
-  .dws-delivery-cell { display: grid; gap: 4px; min-width: 0; }\r
-  .dws-delivery-head { display: flex; align-items: center; gap: 4px; min-width: 0; }\r
-  .dws-delivery-label { color: var(--wt-secondary); font-size: 12px; }\r
-  .dws-details .dws-input { background: var(--wt-surface); }\r
-  .dws-field-label { display: block; margin: 0; padding: 0; color: var(--wt-text); font-size: 13px; font-weight: 400; line-height: 20px; }\r
-  /* A field's explanation shares the name's line, right-aligned against it: the control\r
-     below starts the block, and nothing follows it but the next field. An explanation too\r
-     long for that slot does not live here at all - it goes behind the \`?\` beside the name,\r
-     so the same field is never laid out two ways depending on how long its sentence\r
-     happens to be. */\r
-  .dws-field-label:has(> .dws-field-note) { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }\r
-  .dws-field-label > span:first-child { white-space: nowrap; }\r
-  .dws-field-label > .dws-field-note { text-align: right; }\r
-  /* The \`?\` rides at the end of the name, before the explanation: it is part of the\r
-     words, not a separate control, so it must not be pushed to the far edge by the\r
-     label's own \`space-between\`. */\r
-  .dws-field-label > .dws-field-name { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }\r
-  /* An option's explanation sits beside its name rather than under the control. */\r
-  .dws-field-heading, .dws-field-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; padding: 0; }\r
-  /* A hint glyph beside a label. \`align-self\`, not the legend's own \`baseline\`: a\r
-     flex container whose only child is an SVG has that SVG's bottom edge for a\r
-     baseline, so baseline alignment pins the icon's bottom to the text's and it\r
-     rides above the line. Centring it on the line puts it where a mark of that\r
-     size belongs, and it is sized to the label rather than to a control so it\r
-     reads as part of the words and not as a button that forgot its action. */\r
-.dws-field-hint { display: inline-flex; flex: none; align-self: center; align-items: center; margin: 0; padding: 0; color: var(--wt-muted); cursor: help; }\r
-  .dws-field-hint:hover { color: var(--wt-secondary); }\r
-  .dws-field-note { margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }\r
-  .dws-field-note-warning { color: var(--wt-danger); }\r
-  .dws-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }\r
-  .dws-radio-option { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--wt-line); border-radius: 9px; cursor: pointer; background: var(--wt-surface); }\r
-  .dws-radio-option:hover { background: var(--wt-hover); }\r
-  .dws-radio-option[data-selected="true"] { border-color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }\r
-  .dws-radio-option:has(input:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-radio-option:has(input:disabled) { cursor: not-allowed; opacity: .5; }\r
-  .dws-radio-input { appearance: none; display: grid; place-content: center; flex: none; width: 14px; height: 14px; margin: 3px 0 0; border: 1px solid var(--wt-muted); border-radius: 50%; background: transparent; }\r
-  .dws-radio-input::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--wt-text); transform: scale(0); }\r
-  .dws-radio-input:checked { border-color: var(--wt-text); }\r
-  .dws-radio-input:checked::before { transform: scale(1); }\r
-  .dws-radio-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }\r
-  .dws-radio-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }\r
-  .dws-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--wt-line); }\r
-  /* The label column takes what the label needs, so a label is never split\r
-     mid-word; the value keeps the rest of the row and wraps there instead. */\r
-  .dws-preview-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: baseline; }\r
-  .dws-preview-label { color: var(--wt-muted); font-size: 12px; line-height: 20px; }\r
-  .dws-preview-value { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 19px; }\r
-  .dws-dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 14px 24px 18px; border-top: 1px solid var(--wt-line); }\r
-  /* An error sits between the scrolling body and the footer's rule, so it is on\r
-     screen at the same time as the button that answers it and scrolls neither out\r
-     of view nor under the heading. It is capped and scrolls itself, because a long\r
-     message - a rollback that could not finish names several paths - must not\r
-     push the buttons off the bottom of a short dialog. */\r
-  /* \`flex: none\`, not \`flex: 0 1 auto\`. This banner sits in the dialog's flex column and\r
-     must never be squeezed: a shrinkable item in a height-bounded column gets compressed\r
-     below its own content, and with \`overflow-y: auto\` that compression shows up as a\r
-     scrollbar on a message that fits perfectly well on its own. It is bounded instead by\r
-     the max-height below, which only bites on a genuinely long message (a rollback that\r
-     could not finish names several paths). */\r
-  .dws-error-above-footer { flex: none; max-height: 22vh; overflow-y: auto; margin: 0; padding: 14px 24px 14px; }\r
-  .dws-dialog-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; color: var(--wt-muted); font-size: 13px; }\r
-  .dws-dialog-loading > div { display: flex; align-items: center; gap: 8px; }\r
-  .dws-dialog-loading > span[aria-hidden] { display: block; flex-basis: 100%; height: 30px; margin-top: 6px; border-radius: 8px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }\r
-  /* The remove-target card is gone: which branch each repository merges into is\r
-     named per repository now, and a single headline target would have had to pick\r
-     one of them. Its path moved onto the status line above. */\r
-  .dws-preserved { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--wt-secondary); font-size: 12px; }\r
-  .dws-hero-action { display: inline-flex; flex: none; align-items: center; }\r
-  .dws-hero-action:empty { display: none; }\r
-  .dws-new-session-action { display: inline-flex; flex: none; align-items: center; margin: 0; padding: 0; }\r
-  .dws-new-session-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--wt-secondary); }\r
-  .dws-new-session-button > svg { width: 16px; height: 16px; }\r
-  /* The hint on that entry. The shell's composer clips and stacks over anything\r
-     positioned inside it, so the bubble is portalled to the document body (see\r
-     \`HoverHint\`) and reads the same tokens and shape as the shell's own tooltips: fixed,\r
-     shrink-to-fit, and out of the pointer's way so it never eats the click under it. */\r
-  .dws-hint { display: inline-flex; align-items: center; position: fixed; z-index: 1100; width: max-content; max-width: 50vw; padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg, #2c2c2e); color: var(--dsw-static-neutral-bluish-00, #ffffff); font-size: 13px; line-height: 20px; white-space: pre-line; overflow-wrap: break-word; pointer-events: none; transform: translate(-50%, -100%); animation: dws-hint-in 150ms ease-in-out; }\r
-  .dws-hint-below { transform: translate(-50%, 0); }\r
-  @keyframes dws-hint-in { from { opacity: 0; } }\r
-  @media (prefers-reduced-motion: reduce) { .dws-hint { animation: none; } }\r
-  .dws-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }\r
-  /* Everything the source root holds, two to a row, with no inner scrollbar:\r
-     the dialog's body scrolls instead when the whole form outgrows the screen. */\r
-  .dws-repo-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }\r
-  /* Two to a row, so half the width each: a card's text therefore runs to where its\r
-     own button starts and is cut with an ellipsis only there - the column narrows to\r
-     the button, it does not end at a fixed width. The full value stays on the label's\r
-     title, so hover has the rest. The branch gets the whole column instead of the\r
-     180px cap it wears in the repository list, where it shares its line with more; a\r
-     name too long for the column wraps to its own line before it is cut. */\r
-  .dws-repo-choices .dws-check-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
-  .dws-repo-choices .dws-branch-label { max-width: 100%; }\r
-  /* The picker is the cards and, under them, the run that reports and acts on the\r
-     selection. The count leads that run and the actions close it, so the field reads\r
-     "here is what there is / here is what you chose" without a line of chrome between. */\r
-  .dws-repo-picker { display: grid; gap: 4px; }\r
-  /* The count and the actions are a footnote to the cards above them, so they sit\r
-     close to the last row and the field keeps its whole air below. */\r
-  .dws-repo-picker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 26px; padding: 2px 2px 0; }\r
-  .dws-repo-picker-foot .dws-field-note { flex: 1; min-width: 0; }\r
-  .dws-repo-actions { display: flex; flex: 1; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-left: auto; }\r
-  .dws-check-count { color: var(--wt-secondary); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }\r
-  .dws-picker-tools { display: inline-flex; align-items: center; gap: 8px; }\r
-  .dws-picker-divider { width: 1px; height: 12px; background: var(--wt-line); }\r
-  /* The band that closes the repository list and names the field under it: the list's\r
-     count and bulk actions on the right, the next field's name and its \`?\` on the left.\r
-     One line and one baseline, because that field answers the question the list just\r
-     asked - where does every repository start. */\r
-  .dws-base-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; }\r
-  /* A bulk action on a list is text, not a button: it sits inside the field it acts on\r
-     and must not compete with the card's own click target or the dialog's footer. */\r
-  .dws-link-button { border: 0; border-radius: 6px; padding: 2px 4px; background: transparent; color: var(--wt-accent); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }\r
-  .dws-link-button:hover { background: var(--wt-hover); }\r
-  .dws-link-button:disabled { color: var(--wt-muted); cursor: not-allowed; }\r
-  .dws-link-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  /* A repository card: the checkbox, its copy and the branch button side by side, the\r
-     card owning the hover and the ring so the whole row reads as one thing.\r
-\r
-     \`cursor: pointer\` is NOT on the card. It used to be, because the card was a\r
-     \`<label>\` and a click anywhere on it toggled the tick - but the card now holds a\r
-     button of its own, and a label forwards a click on any control inside it to its\r
-     input, so pressing that button also ticked the repository. The pointer therefore\r
-     sits on the two things that still toggle: the box and its text. The large click\r
-     target was not given up, it moved - the text is a label for the box. */\r
-  .dws-check-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); }\r
-  .dws-check-option:hover { background: var(--wt-hover); }\r
-  .dws-check-option > .dws-check-copy { flex: 1 1 auto; cursor: pointer; }\r
-  /* A chosen repository says so three times over \u2014 a filled box, an accent border and a\r
-     tinted surface \u2014 because the box alone is 16px in the corner of a card whose copy\r
-     is what the eye lands on.\r
-     The accent is the product's blue, not \`--dsw-alias-brand-primary\`: that token is the\r
-     ink (near-black in the light theme, near-white in the dark one), so it drew a chosen\r
-     card in the same tone as unread text and read as a heavier border rather than as a\r
-     selection. */\r
-  .dws-check-option:has(.dws-checkbox:checked) { border-color: var(--wt-accent); background: var(--wt-soft); }\r
-  .dws-check-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-check-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }\r
-  /* The delivery tick: one decision rather than a list of them, so it is a plain row\r
-     instead of the repository picker's bordered card. It deliberately does NOT share\r
-     \`dws-check-option\` - that class is what the selection count and the bulk actions\r
-     select on, and a tick wearing it would be counted as a repository. */\r
-  .dws-deploy-option { display: inline-flex; align-items: flex-start; gap: 9px; min-width: 0; cursor: pointer; }\r
-  .dws-deploy-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 6px; }\r
-  .dws-deploy-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }\r
-  .dws-deploy-option .dws-check-copy { flex-direction: row; align-items: center; gap: 6px; }\r
-  /* The tick and its explanation on one line: the tick on the left, the note pushed to the\r
-     right edge, which is exactly how a named field's note sits beside its name. There is no\r
-     name above the tick - the tick's label IS the name - so the line is the label line. */\r
-  .dws-deploy-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }\r
-  .dws-deploy-line > .dws-field-note { text-align: right; }\r
-  /* The checkbox is a filled, rounded tile with a tick drawn in it: two borders of one\r
-     rotated box, which is one less thing to load than a mask and keeps its weight at any\r
-     size. */\r
-  .dws-checkbox { appearance: none; display: grid; place-content: center; flex: none; width: 16px; height: 16px; margin: 2px 0 0; border: 1px solid var(--wt-muted); border-radius: 5px; background: transparent; cursor: pointer; transition: background .12s ease, border-color .12s ease; }\r
-  .dws-checkbox::before { content: ""; width: 8px; height: 4px; margin-top: -2px; border-left: 2px solid var(--dsw-alias-label-primary-foreground); border-bottom: 2px solid var(--dsw-alias-label-primary-foreground); transform: rotate(-45deg) scale(0); transition: transform .12s ease; }\r
-  .dws-checkbox:checked { border-color: var(--wt-accent); background: var(--wt-accent); }\r
-  .dws-checkbox:checked::before { transform: rotate(-45deg) scale(1); }\r
-  /* Nothing chosen is a state the field reports in words, so the tick's tile stays empty\r
-     and the border keeps the muted colour rather than pretending to be a third state. */\r
-  .dws-checkbox:indeterminate { border-color: var(--wt-accent); background: var(--wt-accent); }\r
-  .dws-checkbox:indeterminate::before { width: 8px; height: 2px; margin-top: 0; border: 0; border-radius: 1px; background: var(--dsw-alias-label-primary-foreground); transform: scale(1); }\r
-  .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }\r
-  .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  /* A merge left standing is the next step rather than a casualty, so it reads in the\r
-     warning colour and names the files in the shape a path is easiest to copy from. */\r
-  .dws-finish-handoff { display: block; margin-top: 4px; color: var(--wt-warn); }\r
-  .dws-finish-files { display: block; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }\r
-  /* The handoff is the step that is left rather than a casualty, so it is a boxed\r
-     block with the sessions that carry on from it - not another line of red text. The\r
-     sessions are listed as data: repository, what it was asked to do, where its git\r
-     commands may write, and whether it is still working. */\r
-  .dws-finish-handoff-panel { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--wt-line); border-radius: 10px; }\r
-  .dws-finish-handoff-panel p { margin: 0; }\r
-  .dws-finish-handoff-title { color: var(--wt-text); font-weight: 600; }\r
-  /* The commits are in, so the panel's headline is the good news rather than a question:\r
-     the light is the page's own green for a clean worktree, and the sentence keeps the\r
-     colour of the state it reports. Nothing here is asking to be acted on but the footer's\r
-     button, which is the only thing that reads the state again. */\r
-  .dws-finish-handoff-title.is-done { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-state-success-primary); }\r
-  /* The title and the one word this panel waits for: authorizing the commit. They share a\r
-     line while it fits, and the button drops under the title rather than squeezing it. */\r
-  .dws-finish-handoff-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }\r
-  .dws-finish-handoff-head button { flex: none; }\r
-  /* The panel's small print - the conflict hint, the approval a commit may need, the word\r
-     while a session is being opened - reads at the beta notice's own size rather than at\r
-     the dialog's body size: it is the same kind of line, sitting a few lines above that\r
-     notice in the same panel. */\r
-  .dws-finish-handoff-hint { color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  /* The row that says how much access the sessions this panel opens are given, and that can\r
-     change it. Not small print: it is a permission, so it reads at the panel's own size with\r
-     the state in the text colour, and the way to change it is a link beside the state rather\r
-     than a control of the dialog's own - the same shape as opening a session. */\r
-  .dws-finish-handoff-access { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }\r
-  .dws-finish-handoff-access strong { color: var(--wt-text); }\r
-  .dws-finish-handoff-access-switch { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }\r
-  .dws-finish-handoff-access-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  /* What the switch does and does not reach, at the small print's own size: a handoff that\r
-     is already open is not affected by it, and that is the part worth saying. */\r
-  .dws-finish-handoff-access-note { color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  /* A refusal is not small print: the Host did not write the setting, or the session could\r
-     not be widened, and both are things the reader has to act on. */\r
-  .dws-finish-handoff-access-note.is-error { color: var(--wt-warn); }\r
-  .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }\r
-  .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }\r
-  .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }\r
-  /* The session's write boundary rides in the sentence above the list, in that sentence's\r
-     own colour and size: it is what a commit in there depends on - the narrowest directory\r
-     reaching both the worktree and the repository's own gitdir - not a footnote to it. */\r
-  /* Opening the session is the one thing this dialog can do about the agent's work, so\r
-     it reads as a link rather than as a button of the dialog's own. */\r
-  .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }\r
-  .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  /* The line under the list belongs to one session, not to one repository: it says what\r
-     the agent is on. It reads as a single amber sentence - the same amber as every other\r
-     pending state here - and goes quiet once it stops. */\r
-  .dws-finish-handoff-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--wt-warn); }\r
-  .dws-finish-handoff-state.is-idle { color: var(--wt-muted); }\r
-  /* The other half of that small print, in the same size: what opening a session does to\r
-     the dialog it was opened from. */\r
-  .dws-finish-handoff-note { display: flex; align-items: flex-start; gap: 6px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  /* The glyph is the text's own grey rather than the notice's amber: it marks a\r
-     consequence to read, and nothing here is asking to be acted on. Baseline alignment\r
-     would sit its box on the text's baseline and leave the glyph riding high, so it is\r
-     dropped from the line's top edge by the same optical amount the notice above uses\r
-     for its larger glyph. */\r
-  .dws-finish-handoff-note > svg { flex: none; margin-top: 2px; color: inherit; }\r
-  .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }\r
-  /* The per-repository start-point button: text, like the bulk actions beside the\r
-     cards, because it opens a list rather than acting on the task. It is the only\r
-     thing in the card that is not a tick target, and saying so with a pointer is\r
-     what keeps the card's two jobs apart on screen. */\r
-  .dws-branch-button { flex: none; border: 1px solid var(--wt-line); border-radius: 6px; padding: 1px 6px; margin-top: 1px; background: var(--wt-surface); color: var(--wt-secondary); font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: pointer; }\r
-  .dws-branch-button:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); background: var(--wt-hover); }\r
-  .dws-branch-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  /* Portalled to the body and placed from the button: the create dialog's body is a\r
-     scroller, and a panel inside it would be clipped at the card that opened it. */\r
-  /* The dialog sets \`pointer-events: none\` on the body while it is open, and this\r
-     panel is portalled there rather than into the dialog, so it names its own. */\r
-  .dws-branch-picker { pointer-events: auto; position: fixed; z-index: 1100; display: flex; flex-direction: column; gap: 6px; max-height: 320px; padding: 8px; border: 1px solid var(--wt-line); border-radius: 10px; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); font: inherit; font-size: 12px; }\r
-  /* The shared start point reads as a field rather than as a button: it stands in\r
-     the same column as the dialog's inputs, and its value is the field's value.\r
-     It is still a button in the markup because it opens a list. */\r
-  .dws-base-ref-button { display: flex; align-items: center; width: 100%; text-align: left; cursor: pointer; }\r
-  .dws-base-ref-button:disabled { cursor: not-allowed; opacity: .5; }\r
-  .dws-base-ref-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-base-ref-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
-  .dws-branch-search { width: 100%; min-height: 0; font-size: 12px; }\r
-  /* The list scrolls inside the panel, so a repository with a hundred branches does\r
-     not push the panel off the screen - and the search above it stays put. */\r
-  .dws-branch-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }\r
-  .dws-branch-options { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }\r
-  .dws-branch-option { width: 100%; border: 0; border-radius: 6px; padding: 3px 6px; background: transparent; color: var(--wt-text); font: inherit; font-size: 12px; line-height: 20px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }\r
-  .dws-branch-option:hover { background: var(--wt-hover); }\r
-  .dws-branch-option:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }\r
-  /* The one that is in force, and it says so with the same brand ink the chosen\r
-     card wears - the picker is one field of that card, not a menu of its own. */\r
-  .dws-branch-option-chosen { color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }\r
-  /* "Reading" and "could not read" are states of one field, so they sit where the\r
-     list would with the panel's own note styling rather than in the dialog's error. */\r
-  .dws-branch-state { margin: 0; }\r
-  /* The card's first line is the repository view's title row: the name, then the\r
-     branch HEAD is on with the same icon, wrapping instead of overflowing. */\r
-  .dws-check-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }\r
-  .dws-check-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }\r
-  .dws-check-path { overflow-wrap: anywhere; white-space: pre-line; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }\r
-  /* The same tick as the repository cards, drawn inline under the prefix field: this\r
-     one asks a question about a later task space, so it is a footnote to the field\r
-     rather than a card of its own. */\r
-  .dws-default-prefix { display: flex; align-items: flex-start; gap: 8px; margin-top: 5px; cursor: pointer; }\r
-  .dws-default-prefix .dws-field-note { padding-top: 1px; }\r
-  .dws-base-ref { margin-top: 9px; }\r
-  /* The task view reuses the repository card's shape: a task is the same kind of\r
-     row, one level up from the repositories it spans. */\r
-  .dws-task { min-width: 0; border-bottom: 1px solid var(--wt-line); }\r
-  .dws-task-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 0; }\r
-  .dws-task-icon { flex: none; color: var(--wt-secondary); }\r
-  .dws-task-heading { display: block; flex: 1; min-width: 0; }\r
-  .dws-task-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }\r
-  .dws-task-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }\r
-  .dws-task-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  .dws-finish-task { flex: none; }\r
-  /* An entry added to DSH's own row menu, which owns the surrounding chrome. */\r
-  .dws-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }\r
-  .dws-menu-item:hover { background: var(--wt-hover); }\r
-  .dws-menu-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-menu-item-icon { display: inline-flex; flex: none; align-items: center; color: var(--wt-secondary); }\r
-  /* A product's own svg arrives at its vendor's size (IDEA's is 64x64), so the row\r
-     gives it a box instead of letting it set one - and no colour of ours, because the\r
-     icon carries its own. */\r
-  .dws-menu-item-icon-brand svg { width: 14px; height: 14px; display: block; }\r
-  /* A row that opens a submenu: the chevron sits at the far end, and the label keeps\r
-     its own width so a long application name does not push it off. */\r
-  .dws-menu-item-chevron { display: inline-flex; flex: none; align-items: center; margin-left: auto; color: var(--wt-muted); }\r
-  /* The submenu, positioned by the adapter beside the row that owns it. It floats over\r
-     the shell rather than nesting inside its menu, so it is not found by the scan that\r
-     fills that menu - and it escapes the menu's own overflow.\r
-     Only the geometry lives here. The surface - background, border, radius, shadow - is\r
-     copied from the owning menu at open time, because the shell owns that look and a\r
-     token named here would be a second guess at it. What is below is the fallback for a\r
-     flyout with no owning menu to read from, and it draws no border of its own: the\r
-     shell's menu is separated by its shadow, and an outline here would be a line the\r
-     menu beside it does not have. */\r
-  .dws-submenu { position: fixed; z-index: 80; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; min-width: 180px; max-width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 360px); overflow: auto; padding: 4px; border: none; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }\r
-  /* A failure notice about one press on a menu that has already closed, so it is fixed\r
-     to the corner - there is no element left for it to sit under.\r
-     Opaque rather than \`--wt-soft\`: that token is \`bg-module-platform\`, which carries\r
-     alpha, and an error that lets the page show through reads as a disabled hint. The\r
-     surface token is what the shell's own cards use for the same reason. The left border\r
-     is the state colour rather than a filled background, so the text keeps full contrast\r
-     in both themes. */\r
-  /* A failure notice about one press on a menu that has already closed, so it is fixed\r
-     to the corner - there is no element left for it to sit under.\r
-\r
-     The \`--wt-*\` aliases are declared HERE rather than inherited. They are defined on the\r
-     plugin's own surfaces (\`.dws-settings\`, \`.dws-dialog-content\`, \u2026), and this card is\r
-     none of those: it is a sibling of the shell, fixed to the viewport, so every\r
-     \`var(--wt-surface)\` in it resolved to nothing and the declaration was dropped whole -\r
-     which is why the first version came out with no background, no border and no state\r
-     colour at all.\r
-\r
-     Opaque rather than \`--wt-soft\`: that token is \`bg-module-platform\`, which carries\r
-     alpha, and an error letting the page show through reads as a disabled hint. The state\r
-     colour is the left border only, so the text keeps full contrast in both themes. */\r
-  .dws-error-card {\r
-    --wt-text: var(--dsw-alias-label-primary);\r
-    --wt-secondary: var(--dsw-alias-label-secondary);\r
-    --wt-line: var(--dsw-alias-border-l2);\r
-    --wt-surface: var(--dsw-alias-bg-layer-1);\r
-    --wt-hover: var(--dsw-alias-interactive-bg-hover);\r
-    --wt-danger: var(--dsw-alias-state-error-primary);\r
-    position: fixed; right: 18px; bottom: 18px; z-index: 70; box-sizing: border-box;\r
-    display: flex; align-items: flex-start; gap: 10px;\r
-    /* Height comes from the content, never from the viewport: a card that stretched would\r
-       be a panel, and this one is a message about a single press. */\r
-    width: min(400px, calc(100vw - 36px)); max-height: min(50vh, 320px); height: auto;\r
-    padding: 12px 12px 12px 13px;\r
-    border: 1px solid var(--wt-line); border-left: 3px solid var(--wt-danger);\r
-    border-radius: 9px; background: var(--wt-surface);\r
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);\r
-    color: var(--wt-text); font-family: inherit; font-size: 14px; font-weight: 400;\r
-  }\r
-  .dws-error-card-mark { display: inline-flex; flex: none; align-items: center; margin-top: 1px; color: var(--wt-danger); }\r
-  .dws-error-card-mark svg { display: block; }\r
-  .dws-error-card-body { display: grid; gap: 3px; min-width: 0; flex: 1 1 auto; }\r
-  .dws-error-card-title { margin: 0; color: var(--wt-text); font-size: 13px; font-weight: 600; line-height: 19px; }\r
-  .dws-error-card-detail { margin: 0; max-height: 6em; overflow: hidden; color: var(--wt-secondary); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }\r
-  .dws-error-card-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wt-secondary); cursor: pointer; }\r
-  .dws-error-card-close:hover { background: var(--wt-hover); color: var(--wt-text); }\r
-  .dws-error-card-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }\r
-  .dws-finish-report { display: grid; gap: 7px; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }\r
-  .dws-finish-report p { margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 19px; }\r
-  .dws-finish-repos { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }\r
-  .dws-finish-repos li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }\r
-  .dws-finish-repos strong { font-size: 12px; font-weight: 500; }\r
-  .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }\r
-  /* The counts wear the same colours they wear in the task view, so one pair of numbers\r
-     reads the same way on both pages. \`.dws-finish-repos span\` above is a descendant\r
-     selector and would otherwise win over the single-class colour rules below it - which\r
-     is exactly what happened: the pairs rendered, in one flat grey. */\r
-  .dws-finish-repos .dws-line-add, .dws-finish-repos .dws-ahead { color: var(--wt-success); }\r
-  .dws-finish-repos .dws-line-del { color: var(--wt-danger); }\r
-  .dws-finish-repos .dws-behind { color: var(--wt-warn); }\r
-  .dws-finish-repos .dws-changes-label { color: var(--wt-muted); font-size: 12px; }\r
-  .dws-finish-report .dws-finish-error { color: var(--wt-danger); }\r
-  /* A conflicted merge the host already aborted: told in the user's language, in the\r
-     danger colour because it is an unfinished task the user has to go and resolve,\r
-     with git's own output kept one click away rather than dumped mid-sentence. */\r
-  .dws-finish-report .dws-finish-conflict { flex-basis: 100%; color: var(--wt-danger); }\r
-  .dws-finish-log { flex-basis: 100%; min-width: 0; color: var(--wt-muted); font-size: 11px; line-height: 17px; }\r
-  .dws-finish-log summary { cursor: pointer; }\r
-  .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }\r
-  /* What there is to archive, stated above everything the dialog asks. */\r
-  /* Two lines by construction: the directory, then the counts. \`role="status"\` sits on\r
-    this block rather than on one line, so a reader announcing the change still hears\r
-    the whole answer in one breath. */\r
- .dws-dialog-status { display: grid; gap: 4px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }\r
- .dws-dialog-status-path, .dws-dialog-status-counts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0; min-width: 0; }\r
- .dws-dialog-status code { min-width: 0; overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }\r
- /* The pairs keep the task view's own spacing, so a label and its numbers stay one\r
-    phrase rather than reading as two items in the row's 6 px rhythm. */\r
- .dws-dialog-status .dws-ahead-behind, .dws-dialog-status .dws-lines { gap: 8px; }\r
- .dws-dialog-status .dws-changes-label { margin-left: 2px; }\r
-  .dws-plan { margin-top: 12px; }\r
-  /* The branch a repository merges into, chosen in place: sized like the text it\r
-     replaces rather than like a form field. */\r
-  .dws-plan-target { width: auto; max-width: 100%; min-height: 26px; padding: 2px 6px; font-size: 12px; line-height: 18px; }\r
-  /* The branch picker is a button wearing the select's geometry: the row keeps the line\r
-     it had, and the list it opens carries the search box a native select cannot offer. */\r
-  .dws-plan-picker { display: inline-flex; align-items: center; gap: 4px; padding-right: 5px; text-align: left; cursor: pointer; }\r
-  .dws-plan-picker:disabled { cursor: not-allowed; }\r
-  .dws-plan-picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
-  .dws-plan-picker-caret { flex: none; color: var(--wt-muted); }\r
-  /* Said before the merge rather than reported after it. */\r
-  .dws-plan-detour { color: var(--wt-muted); }\r
-  /* The checkout the merge runs in, and what the merge brings, on one flex line of its\r
-     own: the path first, the counts beside it, so a row spends one line on both. The\r
-     line takes the whole width because a path can be long; when it is, the counts wrap\r
-     under it and are still read after it. Set like the stray directories below, which\r
-     are directories in the same sense and should not read as a different kind of thing. */\r
-  .dws-plan-source-row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; margin-top: 2px; }\r
-  /* A path wider than the line breaks onto the next line instead of being cut: the\r
-     whole path is what this row is for, and an ellipsis hides the only part that says\r
-     which checkout the merge runs in. It breaks at any character, because a path has\r
-     no words to break at; the counts after it wrap underneath when it has taken the\r
-     line, and are still read after it. */\r
-  .dws-plan-source { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }\r
-  /* The label is two characters and its own words: it keeps its line while the path\r
-     beside it breaks, rather than splitting into "\u6E90\u4ED3" / "\u5E93\uFF1A". */\r
-  .dws-plan-source > span { flex: none; white-space: nowrap; }\r
-  .dws-plan-source code { min-width: 0; overflow-wrap: anywhere; white-space: normal; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }\r
-  /* What cleaning the container would remove, shown before it is chosen. */\r
-  .dws-plan-strays { display: grid; gap: 6px; margin-top: 14px; }\r
-  .dws-plan-strays-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }\r
-  .dws-plan-strays-none { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  /* Two to a row, like the repository choices: these are mostly short names. */\r
-  .dws-plan-strays ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 0; padding: 0; list-style: none; }\r
-  .dws-plan-strays li { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--wt-text); font-size: 12px; line-height: 18px; }\r
-  /* Half a row is not much for a name, so it ellipsises; the title has the rest. */\r
-  .dws-plan-strays code { overflow: hidden; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }\r
-  .dws-plan-doc { flex: none; color: var(--wt-danger); }\r
-  .dws-plan-noise, .dws-plan-breadcrumb { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }\r
-  .dws-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--wt-warn) 45%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--wt-warn) 10%, transparent); color: var(--wt-text); font-size: 12px; line-height: 18px; }\r
-  .dws-notice > svg { flex: none; margin-top: 1px; color: var(--wt-warn); }\r
-  .dws-notice-danger { border-color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 10%, transparent); }\r
-  .dws-notice-danger > svg { color: var(--wt-danger); }\r
-  .dws-spin { animation: dws-spin 1s linear infinite; }\r
-  @keyframes dws-spin { to { transform: rotate(360deg); } }\r
-  @keyframes dws-pulse { 50% { opacity: .45; } }\r
-  @media (max-width: 640px) {\r
-    .dws-toolbar { flex-wrap: wrap; }\r
-    /* One per row once there is no room for half a field beside the button. */\r
-    .dws-search { flex-basis: 100%; }\r
-    .dws-summary { font-size: 11px; }\r
-    .dws-repo-title { gap: 4px 7px; }\r
-    .dws-branch-label { max-width: 135px; overflow-wrap: anywhere; }\r
-    .dws-worktree-list { padding: 1px 10px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon)); border-radius: 8px; }\r
-    .dws-worktree { flex-wrap: wrap; gap: 6px; }\r
-    .dws-worktree-actions { margin-left: auto; }\r
-    /* The dialog keeps its navigation, but there is no room for the panel's 208px rail\r
-       beside the lists at this width, so the rail narrows and the content takes the rest. */\r
-    .dws-manage-page .dws-nav { --dws-nav-width: 100px; --dws-nav-pad: 12px 8px; }\r
-    .dws-manage-page-content { padding: 12px 14px 16px; }\r
-    .dws-manage-heading { padding: 18px 52px 0 18px; }\r
-    /* One repository per row once half a row is too narrow for a name and a path. */\r
-    .dws-repo-choices { grid-template-columns: minmax(0, 1fr); }\r
-    .dws-dialog-content { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 14px; }\r
-    .dws-dialog-heading { padding: 20px 18px 0; }\r
-    .dws-dialog-body { padding: 16px 18px 20px; }\r
-    .dws-dialog-footer { padding: 12px 18px 16px; }\r
-    .dws-error-above-footer { padding: 12px 18px 12px; }\r
-    .dws-preview { grid-template-columns: minmax(0, 1fr); gap: 8px; }\r
-    .dws-preview-row { grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }\r
-  }\r
-  @media (prefers-reduced-motion: reduce) {\r
-    .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { animation: none !important; transition: none !important; }\r
-  }\r
-}\r
-\r
-/* The deployment card a task row carries: a header band with the identity and\r
-   badges, the acceptance URL prominent on its own line under it, and the actions\r
-   on the last line. Compact by design - it sits between the task header and its\r
-   worktree list, and hides itself entirely when the task neither deployed\r
-   anything nor carries a deployment state. */\r
-.dws-deploy { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 0 0 8px 40px; padding: 5px 12px; border: 1px solid var(--dws-line, #e5e7eb); border-radius: 10px; }\r
-.dws-deploy-row { display: flex; align-items: center; gap: 12px; min-width: 0; }\r
-.dws-deploy-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }\r
-.dws-deploy-title { font-weight: 600; font-size: 12px; color: var(--dws-muted, #6b7280); }\r
-.dws-deploy-env { font-size: 12px; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }\r
-.dws-deploy-label { font-weight: 600; font-size: 12px; color: var(--dws-muted, #6b7280); flex: 0 0 auto; }\r
-.dws-deploy-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }\r
-.dws-deploy-url { flex: 0 1 auto; min-width: 0; max-width: 50%; font-size: 14px; font-weight: 600; color: var(--dws-accent, #4f46e5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r
-.dws-deploy-muted, .dws-deploy-containers { font-size: 12px; color: var(--dws-muted, #6b7280); }\r
-.dws-deploy-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: 0 0 auto; }\r
-.dws-deploy-destroy-armed { color: #b42318; border-color: #b42318; }\r
-.dws-deploy-error { font-size: 12px; color: #b42318; }\r
-/* The one line here that is not a failure: an action ran and this is what it could\r
-   not finish, so it wears the plugin's warning amber rather than the error red.\r
-   The fallback is for a card drawn outside the token scope, where the variable is\r
-   undefined and the colour would otherwise drop out entirely. */\r
-.dws-deploy-warning { font-size: 12px; color: var(--wt-warn, #b45309); }\r
+"use strict";var xl=Object.create;var ko=Object.defineProperty;var Cl=Object.getOwnPropertyDescriptor;var Sl=Object.getOwnPropertyNames;var Rl=Object.getPrototypeOf,Nl=Object.prototype.hasOwnProperty;var El=(e,t)=>{for(var n in t)ko(e,n,{get:t[n],enumerable:!0})},sa=(e,t,n,o)=>{if(t&&typeof t=="object"||typeof t=="function")for(let s of Sl(t))!Nl.call(e,s)&&s!==n&&ko(e,s,{get:()=>t[s],enumerable:!(o=Cl(t,s))||o.enumerable});return e};var Ee=(e,t,n)=>(n=e!=null?xl(Rl(e)):{},sa(t||!e||!e.__esModule?ko(n,"default",{value:e,enumerable:!0}):n,e)),Tl=e=>sa(ko({},"__esModule",{value:!0}),e);var Vd={};El(Vd,{default:()=>Ud});module.exports=Tl(Vd);var pt=require("react");var aa=`@layer dsh-worktree-space {
+  /* DSH owns typography and colour. Keep these aliases local to our surfaces. The page
+     is listed here as well as the dialog it is usually drawn in: a dialog's content is
+     its parent, but the page also scrolls as a root of its own in the panel.
+
+     The configuration card is listed for a reason worth keeping in mind: it is drawn
+     into the Plugins page's own slot, which is none of the surfaces below, so
+     without it every rule here that reads one of these aliases computes to nothing.
+     \`border: 1px solid var(--wt-line)\` does not fall back to an initial value when
+     \`--wt-line\` is undefined - the declaration is dropped whole - so the card's
+     buttons came out with no border at all rather than with a faint one. */
+  /* The management page in its panel form needs this list too: it is a \`dws-panel\`, not
+     a \`dws-manage-page\`, and without the aliases here every \`var(--wt-*)\` inside it
+     computes to nothing - which is how the update capsule came out with no border and no
+     background in the panel while looking right in the dialog. */
+  /* The branch pickers' panel is in this list for the third time this note has been
+     needed: its panel is portalled to \`document.body\`, so it is a SIBLING of the dialog
+     that opened it, not a child. A portal moves the element in the DOM, not in the
+     cascade, so the panel inherited none of these aliases - \`background: var(--wt-surface)\`
+     was dropped whole and the list came out see-through, with the cards behind it reading
+     through the options. Any surface that leaves the dialog by portal belongs here. */
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-muted: var(--dsw-alias-label-tertiary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    --wt-soft: var(--dsw-alias-bg-module-platform);
+    --wt-hover: var(--dsw-alias-interactive-bg-hover);
+    /* The plugin's own blue - the icon's stroke, written out rather than aliased. It is
+       what a chosen repository, its tick and the field's bulk actions wear, so those three
+       read as one family. The alias theme's \`state-business-primary\` is a close blue but
+       not the mark's, and \`brand-primary\` is not a colour at all: it is the label ink
+       (near-black in the light theme), which is how a selection came out looking like a
+       heavier border. */
+    --wt-accent: #4d6bfe;
+    /* Line counts read green-for-added and red-for-removed, the two colours a diff
+       uses. Green is the theme's own success token - the same one the clean status
+       dot wears - so a "+12" and a clean repository read as the same kind of fact. */
+    --wt-success: var(--dsw-alias-state-success-primary);
+    --wt-danger: var(--dsw-alias-state-error-primary);
+    /* Warnings wear one amber, the product's own rather than the alias theme's: brighter
+       and more saturated than the alias amber, so an amber dot, label or notice holds
+       its weight beside the green state dot and never reads as a second red. Every
+       warning in the plugin names this one token. */
+    --wt-warn: #fe9a00;
+    box-sizing: border-box;
+    color: var(--wt-text);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 22px;
+  }
+  .dws-settings *, .dws-dialog-content *, .dws-manage-page *, .dws-manage-page *::before, .dws-manage-page *::after, .dws-new-session-action * { box-sizing: border-box; }
+  /* The management page as a main panel: the shell gives the column, so this owns the
+     two bands the page is made of. The first holds the way back and the heading; the
+     second holds the view column and the reading column. Splitting them is what puts the
+     view tabs on the toolbar's own line: in one band they would start under the back row
+     instead, and the panel would read differently from the dialog for no reason but its
+     back button. */
+  .dws-panel { --dws-nav-width: 167px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
+  .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
+  /* The plugin's navigation column, shared by both hosts of the page: the panel that
+     takes the shell's main column and the dialog the footer's shortcut opens. Every
+     number below is a variable, because the two frames differ only in width, in how far
+     the column is inset, and in the line that separates it from what it selects \u2014 the
+     rows themselves are the shell's own panel rows, to the pixel, in both. */
+  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 167px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
+  .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }
+  .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
+  .dws-nav-item[aria-current="true"] { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); color: var(--dsw-alias-label-primary, var(--wt-text)); }
+  .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
+  .dws-nav svg { flex: none; }
+  .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
+  /* The gear row sits at the foot of the column, the way the shell pins its own
+     settings control to the foot of its sidebar: the views belong at the top, and
+     the way out to the plugin's configuration belongs apart from them. */
+  .dws-nav-settings { margin-top: auto; }
+  /* The panel's first band, and the whole reason the page is two bands: the back row and
+     the heading share it, and it grows to the taller of the two, so whatever the
+     description wraps to, the band below begins after it. The row's inset is 24px rather
+     than the heading's 28px, because a 36px row and a 28px heading line only share a
+     centre when the row starts the 4px higher. */
+  .dws-panel-lead { display: flex; flex: none; flex-direction: row; align-items: flex-start; min-width: 0; }
+  .dws-panel-lead-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: 24px 14px 0; border-right: 1px solid var(--wt-line); }
+  /* The panel's second band: the view column and the reading column side by side, each
+     bounded in height, so the tabs and the toolbar start on one line and only the rows
+     inside the list scroll. */
+  .dws-panel-body { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
+  /* No top inset in this host: the column starts on the band's first line, which is where
+     the toolbar is. The 2px matches the settings' own inset, which is what the toolbar
+     actually starts after \u2014 so the two columns' first rows share one edge, to the pixel. */
+  .dws-panel .dws-nav { --dws-nav-pad: 2px 14px 24px; }
+  /* The scroll container holds the height and passes it down; it does not scroll itself,
+     because the list inside is the only thing that should. Left at \`overflow: auto\` with
+     an unbounded child, the content grew to its natural height and this element scrolled
+     the heading and the toolbar away with the rows. */
+  .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+  /* Flush against the navigation, not centred in the leftover width: the two columns share
+     one left inset, so their text lines up from the panel's edge inward. The top inset
+     belongs to the heading's band above, not here, or the toolbar would drop below the
+     tabs that switch what it filters. */
+  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 0 32px 48px 24px; }
+  .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
+  /* In the heading's band beside the back row: the same measure as the reading column
+     below it, and the band's own top inset lives here. */
+  .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
+  .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
+  .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+  /* The title and its update capsule on one line. Both hosts use this row, so the
+     capsule sits beside the title in the panel and in the dialog at the same place,
+     and the description beneath is untouched by it. \`align-items: center\` keeps a
+     20px title and a 20px pill on the same baseline; the wrap is a guard for a narrow
+     dialog, where the two would otherwise push the description off the row. */
+  .dws-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  /* Says a newer version is published, and goes to the changelog. Amber rather than the
+     brand colour: it is a notice, not an action this page performs, and the shell's own
+     warn token is what every other "there is something to look at" mark in the product
+     uses. Rendered only when there is something to say - the component returns null
+     otherwise - so the heading row never reserves space for it.
+     The three tokens are declared HERE rather than inherited, because this capsule has
+     three hosts and one of them is not a plugin surface: the panel and the dialog are
+     inside a \`--wt-*\` scope, but the Plugins page is the shell's own, and a capsule
+     placed there inherited nothing - it rendered with no border and no background, which
+     reads as text rather than as a control. Declaring them on the element makes the
+     appearance independent of where the shell mounts it. */
+  .dws-update-pill {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    display: inline-flex; flex: none; align-items: center; gap: 6px; max-width: 100%; padding: 2px 12px; border: 1px solid var(--wt-line); border-radius: 999px; background: var(--wt-surface); color: var(--wt-text); font-size: 14px; line-height: 22px; text-decoration: none; white-space: nowrap;
+  }
+  .dws-update-pill:hover { border-color: var(--dsw-alias-state-warn-primary); }
+  .dws-update-pill-label { color: var(--wt-secondary); min-width: 3em; }
+  /* \`HoverHint\` wraps the pill in a span so its bubble can anchor to it; the wrapper has
+     to stay out of the heading row's layout, or the pill would sit inside a block box
+     and lose its place on the title's baseline. */
+  .dws-update-pill-hint { display: inline-flex; align-items: center; flex: none; }
+  .dws-update-pill-version { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--dsw-alias-state-warn-primary); }
+  /* The copied state. The label is what changes, so the width would jump when it swaps
+     between "\u65B0\u7248\u672C" and "\u5DF2\u590D\u5236" - a fixed minimum keeps the capsule from twitching
+     under a pointer that has just clicked it. */
+  .dws-update-pill[data-copied="true"] { border-color: var(--dsw-alias-state-success-primary, var(--dsw-alias-state-warn-primary)); }
+  .dws-update-pill[data-copied="true"] .dws-update-pill-label { color: var(--dsw-alias-state-success-primary, var(--wt-secondary)); }
+  /* The flow line sits under the description as its own line inside the same
+     paragraph: a block span, not a nested paragraph, because the host already
+     wraps this in a <p>. */
+  .dws-usage-flow { display: block; }
+  /* The section is a column that fills the frame it is given: everything above the rows
+     is pinned in one block, and the list below it is the only thing that scrolls, so the
+     search box and the filters stay where the eye left them however long the list grows. */
+  .dws-settings { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 2px 0 16px; }
+  .dws-settings-pinned { flex: none; }
+  .dws-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--wt-line); }
+  .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }
+  .dws-settings-header { margin-bottom: 20px; }
+  .dws-settings-header h2 { font-size: 16px; font-weight: 500; line-height: 24px; }
+  .dws-settings-header p { margin-top: 5px; color: var(--wt-secondary); font-size: 13px; line-height: 20px; }
+  .dws-button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 34px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+  .dws-button svg { flex: none; }
+  .dws-button:hover:not(:disabled) { background: var(--wt-hover); }
+  .dws-button:disabled { opacity: .4; cursor: not-allowed; }
+  .dws-button-ghost { border-color: transparent; }
+  .dws-button-primary { border-color: transparent; background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
+  .dws-button-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
+  .dws-button-danger { color: var(--wt-danger); }
+  .dws-button-danger-solid { border-color: transparent; background: var(--wt-danger); color: var(--dsw-static-neutral-00); }
+  .dws-button-danger-solid:hover:not(:disabled) { background: var(--dsw-alias-state-error-secondary); }
+  /* Finishing a task is a commitment, not a loss: the same button, one step down
+     from danger, until the dialog can name something that will be thrown away. */
+  .dws-button-warn-solid { border-color: transparent; background: var(--wt-warn); color: var(--dsw-static-neutral-00); }
+  .dws-button-warn-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-warn) 84%, black); }
+  /* A solid fill says more than the notice above the button already does. Outlined, it
+     says the same thing in the same key \u2014 a border in the tone, the tone at 10% inside \u2014
+     which is what .dws-notice does, sized to a control. */
+  .dws-button-warn-outline { border-color: color-mix(in srgb, var(--wt-warn) 45%, transparent); background: color-mix(in srgb, var(--wt-warn) 10%, transparent); }
+  .dws-button-warn-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-warn) 20%, transparent); }
+  .dws-button-danger-outline { border-color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 10%, transparent); }
+  .dws-button-danger-outline:hover:not(:disabled) { background: color-mix(in srgb, var(--wt-danger) 20%, transparent); }
+  .dws-icon-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-color: transparent; color: var(--wt-secondary); }
+  .dws-delete-action:hover:not(:disabled) { color: var(--wt-danger); background: var(--dsw-alias-interactive-bg-hover-danger); }
+  .dws-button:focus-visible, .dws-chevron-toggle:focus-visible, .dws-filters button:focus-visible, .dws-dialog-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 3px; }
+  .dws-input, .dws-select { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--wt-line); border-radius: 9px; padding: 7px 10px; outline: none; background: var(--wt-surface); color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; }
+  .dws-input::placeholder { color: var(--wt-muted); }
+  .dws-input:focus-visible, .dws-select:focus-visible { border-color: var(--dsw-alias-brand-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-brand-primary) 12%, transparent); }
+  .dws-input:disabled, .dws-select:disabled { opacity: .5; }
+  /* A field whose value cannot be used says so in its own colour, not only in the sentence
+     beside it: the sentence explains, the border points at which control it is about. */
+  .dws-input[aria-invalid="true"], .dws-select[aria-invalid="true"] { border-color: var(--wt-danger); }
+  .dws-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  /* One path and one button, so the field takes the room the row has rather than a
+     fixed width: the thing being typed is a path, and paths are all lengths. It
+     shares the row with the search field, so it yields first. */
+  .dws-add-source-row { display: flex; flex: 1 1 240px; align-items: center; gap: 8px; min-width: 0; }
+  .dws-add-source-row .dws-input { flex: 1 1 auto; min-width: 0; }
+  .dws-add-source-button { flex: none; }
+  .dws-filter-fold { margin-left: 20px; }
+  /* The search field takes half the row and the refresh button follows it: a button
+     that says what it does, not an icon parked at the far edge. */
+  /* Three eighths of the toolbar. It shares the row with the refresh button and, in
+     the repository view, the add-repository button, and both need more of it than a
+     search of a list this size does. */
+.dws-search { display: flex; flex: 0 1 37.5%; align-items: center; gap: 8px; min-width: 180px; min-height: 36px; padding: 0 10px; border: 1px solid var(--wt-line); border-radius: 9px; color: var(--wt-muted); background: var(--wt-surface); }
+  .dws-search:focus-within { border-color: var(--dsw-alias-brand-primary); }
+  .dws-search > svg { flex: none; }
+  .dws-search .dws-input { min-height: 34px; padding: 6px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .dws-search .dws-icon-button { width: 24px; height: 24px; min-height: 24px; margin-right: -4px; }
+  .dws-depth { display: flex; flex: none; align-items: center; gap: 7px; }
+  .dws-depth-label { color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  /* The box owns the width so the chevron sits inside it, matching the scope
+     selector beside it rather than floating in a gap. */
+  .dws-depth-box { position: relative; flex: none; width: 92px; }
+  .dws-depth-box .dws-select { appearance: none; width: 100%; padding-right: 28px; background: var(--wt-soft); border-color: transparent; cursor: pointer; }
+  .dws-depth-box > svg { position: absolute; right: 10px; top: 11px; pointer-events: none; color: var(--wt-secondary); }
+  .dws-list-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .dws-filters { display: inline-flex; align-items: center; gap: 3px; }
+  /* Separates the fold button from the views, at the group's own 3px spacing. */
+  .dws-filter-divider { color: var(--wt-line); user-select: none; }
+  /* The one that separates two runs gets air on both sides of it. */
+  .dws-filter-separator { margin: 0 6px; }
+  .dws-filters button { border: 0; border-radius: 7px; padding: 4px 9px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
+  .dws-filters button:hover { background: var(--wt-hover); }
+  .dws-filters button[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); font-weight: 500; }
+  /* The entry switches sit at the end of the toolbar, where the panel is managed. */
+  .dws-summary { display: inline-flex; flex: none; justify-content: flex-end; min-width: 210px; margin-left: auto; align-items: center; gap: 6px; color: var(--wt-muted); font-size: 12px; font-variant-numeric: tabular-nums; line-height: 20px; }
+  /* Sits between the controls and the rows, so it reads as a caption on the list rather
+     than another control: same muted ink as the summary, one step up in size.
+     Scoped on purpose. The reset at .dws-settings p is (0,1,1) and a bare class is only
+     (0,1,0), so an unscoped rule here silently loses and the caption sits flush at 0.
+     The 8px on top collapses with the controls row's own 8px margin-bottom, so the
+     caption clears the divider by one gap. Below it is 4px, not 8px: the loading
+     message brings 8px of its own padding, and 8 + 8 stacks to a hole. */
+  .dws-settings .dws-view-description { margin: 8px 0 4px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The feedback link after the plugin description. It carries no size of its own: the
+     link wears whatever the sentence it follows is set in, which differs between the
+     manage dialog and the settings page. It underlines at rest rather than on hover -
+     it is the one link on this screen, and a reader who has decided to report a
+     problem should not also have to work out which words are pressable. */
+  .dws-feedback-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; }
+  .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
+  /* The list's vertical rhythm. Rows are separated by their own padding, kept
+     just wide enough that two rows still read as two rows: a branch line and the
+     path under it belong together, so their gap is the smaller one. */
+  .dws-repo-header { display: flex; align-items: center; gap: var(--dws-row-gap); min-width: 0; padding: 3px 0; }
+  /* Only the arrow folds the row. It used to be the whole row, which put the name,
+     the branch, the count and the path inside a button - and text inside a button is
+     not selectable in the browser's own stylesheet, so a path you could read was a
+     path you could not copy. Making the arrow the control leaves the text outside a
+     button, where selecting it is ordinary rather than worked around, and clicking a
+     name to select it no longer folds the row underneath. */
+  .dws-chevron-toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--dws-chevron-size); border: 0; padding: 0; background: transparent; color: var(--wt-muted); cursor: pointer; }
+  /* A row holding nothing keeps a disabled control rather than losing it: the name
+     it would have had is what tells a screen reader that this row cannot be folded
+     open, and the test that clicks it to prove it stays closed needs something to
+     click. Only the browser's own dimming is taken back - the row beside it is not
+     greyed out just because it has nothing in it. */
+  .dws-chevron-toggle:disabled { opacity: 1; cursor: default; }
+  .dws-repo-icon { flex: none; color: var(--wt-secondary); }
+  .dws-branch-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .dws-chevron { color: var(--wt-muted); transition: transform .14s ease; }
+  .dws-chevron-toggle[aria-expanded="true"] .dws-chevron { transform: rotate(90deg); }
+  .dws-chevron-placeholder { display: block; flex: none; width: var(--dws-chevron-size); }
+  .dws-repo-heading { display: block; flex: 1; min-width: 0; }
+  .dws-repo-title { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; min-width: 0; }
+  .dws-repo-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
+  .dws-branch-label { display: inline-flex; align-items: center; gap: 4px; max-width: 260px; color: var(--wt-muted); font-size: 11px; line-height: 18px; }
+  .dws-branch-label > svg { flex: none; }
+  .dws-count { display: inline-flex; justify-content: center; align-items: center; min-width: 19px; height: 18px; padding: 0 5px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .dws-repo-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-create-repo { min-height: 30px; padding: 4px 9px; font-size: 12px; }
+  /* The rows a repository or a task holds, set inside it rather than hung off it.
+     These were drawn as a tree \u2014 a rail down the left with a tick into every row, then a
+     rail inside the inset block with a tab up to the parent \u2014 and every line of it is
+     gone, as is the tint that once set the group off the surface: those rows are the same
+     white as the row above them now. What is left is the offset. It is pushed in past the
+     parent's chevron, icon and gap, so a child's icon starts on the column the parent's
+     name starts on and one folder visibly sits under another. The indent is the whole of
+     the hierarchy \u2014 nothing is drawn and nothing is shaded to say so. */
+  .dws-worktree-list { position: relative; min-width: 0; margin: 0 0 5px; padding: 1px 12px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon) + var(--dws-row-gap)); }
+  .dws-worktree { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 3px 0; }
+  .dws-worktree + .dws-worktree { border-top: 1px solid var(--wt-line); }
+  /* A child's folder is smaller than its parent's, so it sits inside the indent as a
+     member of that row rather than competing with the header it belongs to. */
+  .dws-tree-icon { flex: none; align-self: center; color: var(--wt-muted); }
+  .dws-worktree-info { flex: 1; min-width: 0; }
+  .dws-worktree-title { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; min-width: 0; }
+  .dws-worktree-title strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 20px; }
+  .dws-worktree-path { overflow-wrap: anywhere; margin-top: 2px; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  /* The line counts, in the two colours a change is read in: what arrives is green,
+     what goes is red. Fixed-width digits so two rows with different numbers still
+     line up down the column. */
+  .dws-worktree-changes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 2px; }
+  .dws-changes-label { color: var(--wt-muted); font-size: 11px; line-height: 18px; }
+  .dws-lines, .dws-ahead-behind { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; font-size: 11px; line-height: 18px; }
+  /* The task row carries both pairs side by side, so each needs air from the other
+     rather than reading as one run of symbols. */
+  .dws-task-title .dws-ahead-behind, .dws-task-title .dws-lines { gap: 8px; padding: 0 2px; }
+  .dws-task-title .dws-ahead-behind { margin-left: 2px; }
+  .dws-line-add, .dws-ahead { color: var(--wt-success); }
+  /* Behind is amber, not red: the base branch having commits this one lacks is
+     ordinary - it means someone else moved - and red would read as an error the
+     task has to fix. Red is kept for the lines a change removes. */
+  .dws-line-del { color: var(--wt-danger); }
+  .dws-behind { color: var(--wt-warn); }
+  /* The name in front of a branch glyph, so the icon is not the only thing saying
+     which branch is which. */
+  .dws-branch-name { color: var(--wt-muted); font-size: 11px; white-space: nowrap; }
+  /* A worktree row's own branch was a plain <strong> before it gained a label; it
+     keeps that weight, and the label beside it stays muted so the ref is still the
+     thing the eye lands on. */
+  .dws-worktree-branch .dws-branch-value { color: var(--wt-text); font-weight: 500; font-size: 13px; }
+  .dws-line-none { color: var(--wt-muted); font-size: 11px; }
+  .dws-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; color: var(--wt-secondary); font-size: 11px; line-height: 18px; overflow-wrap: anywhere; }
+  /* 7.5px on an 18px line: the dot is a state cue read before the label beside it, so it
+     is sized to be seen rather than hinted at. \`border-radius: 50%\` on a square that small
+     already reads as a circle \u2014 a rounded rect would read as a tick box. */
+  .dws-status-dot { width: 7.5px; height: 7.5px; flex: none; border-radius: 50%; background: currentColor; }
+  .dws-status-clean .dws-status-dot { color: var(--dsw-alias-state-success-primary); }
+  /* Only a stale worktree record, which asks for a cleanup, keeps the warning
+     colour; a status the page could not read is worth an amber note, not red. */
+  .dws-status-unavailable { color: var(--wt-warn); }
+  /* Numbers measured against refs a previous fetch left behind: amber, because they
+     are not wrong, only older than they look. */
+  .dws-status-stale { color: var(--wt-warn); }
+  .dws-status-stale .dws-status-dot { color: var(--wt-warn); }
+  /* Fetching switched off: neutral, because nothing failed - the reader chose this.
+     Amber here would report their own setting back to them as a fault. */
+  .dws-status-idle { color: var(--wt-muted); }
+  .dws-status-idle .dws-status-dot { color: var(--wt-muted); }
+  .dws-status-prunable { color: var(--wt-danger); }
+  .dws-status-dirty .dws-status-dot, .dws-status-zero .dws-status-dot { color: var(--wt-warn); }
+  /* Committed work waiting to be merged back wears the same amber as uncommitted
+     work: both are work that has not landed yet, and they sit side by side. */
+  .dws-status-pending .dws-status-dot { color: var(--wt-warn); }
+  /* A Workspace that holds no repository has no creation button beside it, so the
+     sentence saying so is pushed to the row's right edge: the edge those buttons
+     end on. No dot, and the amber the zero-count dot already wears. */
+  .dws-space-status { flex: none; margin-left: auto; color: var(--wt-warn); }
+  .dws-worktree-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+  .dws-settings .dws-no-linked { padding: 0 0 2px; color: var(--wt-muted); font-size: 12px; line-height: 20px; }
+  .dws-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 18px; text-align: center; color: var(--wt-muted); }
+  .dws-empty h3 { color: var(--wt-text); font-size: 14px; font-weight: 500; }
+  .dws-empty p { max-width: 340px; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-error { display: flex; align-items: flex-start; gap: 8px; min-width: 0; margin: 12px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wt-danger) 20%, transparent); border-radius: 9px; background: var(--dsw-alias-interactive-bg-hover-danger); color: var(--wt-danger); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+  .dws-error > svg { flex: none; margin-top: 2px; }
+  .dws-error > span { flex: 1; min-width: 0; }
+  .dws-error .dws-button { margin: -4px -5px -4px 0; }
+  /* 4px on top, not 8: the caption above already spends 4px of its own margin here, and
+     two 8s stacked to a hole. The 8px below stays \u2014 nothing sits under this row. */
+  .dws-loading-message { display: flex; align-items: center; gap: 7px; padding: 4px 0 8px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-loading-message > svg { flex: none; }
+  .dws-skeleton-list { padding: 4px 0; }
+  .dws-skeleton-row { display: flex; align-items: center; gap: 12px; padding: 16px 0; }
+  .dws-skeleton-row > span { width: 18px; height: 18px; border-radius: 5px; background: var(--wt-soft); }
+  .dws-skeleton-row > div { display: grid; gap: 8px; flex: 1; }
+  .dws-skeleton-row > div span { width: 45%; height: 10px; border-radius: 4px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
+  .dws-skeleton-row > div span + span { width: 70%; height: 8px; }
+
+  .dws-dialog-overlay { position: fixed; inset: 0; z-index: 1000; background: var(--dsw-alias-bg-mask-1); backdrop-filter: var(--dsw-mask-blur); }
+  /* Centred with auto margins instead of a translate, and that is not a style choice: the
+     branch pickers' panels are rendered INSIDE this element (a modal dialog's focus scope
+     takes focus back from anything outside its content, so a panel portalled to the body
+     could hold a list but never a search box) while keeping \`position: fixed\` so they are
+     painted over the body's clipping edge. A transform here would become the containing
+     block of those panels: they would be measured in this box's coordinates and cut off by
+     its \`overflow: hidden\`. Do not put a transform back on this rule. */
+  .dws-dialog-content { position: fixed; z-index: 1001; inset: 0; margin: auto; height: max-content; display: flex; flex-direction: column; width: min(460px, calc(100vw - 32px)); max-height: min(740px, calc(100dvh - 40px)); border: 1px solid var(--wt-line); border-radius: 18px; outline: none; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); overflow: hidden; }
+  /* The create form carries more per row than a confirmation does, and fits a
+     1080p viewport without scrolling at these numbers. It is the widest dialog
+     here: 690px was one and a half times a confirmation, then 759px, and the
+     repository cards now carry a name, a branch and a path each on one line - so
+     it is a fifth wider again, 911px, the number written out rather than a factor,
+     so the field rows keep the line they were laid out for. */
+  .dws-create-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+  /* Archiving reports as much per repository as the create form does \u2014 branches,
+     merge targets, commit counts, source paths, leftovers \u2014 so it reads at the same
+     width: a row's path and its counts line up the same way in both dialogs, and one
+     dialog no longer opens narrower than the one it is opened from. */
+  .dws-finish-dialog { width: min(911px, calc(100vw - 32px)); max-height: min(840px, calc(100dvh - 32px)); }
+  /* The archive dialog stacks a status line, notices, options and a report. They
+     ran into each other without a rhythm, so the body lays them out with one \u2014
+     the same everywhere, since giving sections extra space above only made the
+     top half airier than the bottom. */
+  .dws-finish-dialog .dws-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+  .dws-finish-dialog .dws-dialog-body > * { margin: 0; }
+  /* The sidebar's footer entry, a row of the footer exactly like Settings: icon,
+     label, full width, hover highlight.
+     
+     DSH lays this slot's container out as a row, which put this entry and the
+     neighbouring plugin's on one line. The container is stacked instead \u2014 scoped
+     with :has() to a footer that actually holds this entry, so DSH's own layout is
+     untouched when the plugin is absent. It applies to every entry in that
+     container, which is the point: they read as footer rows, not as chips. */
+  [class*="footerActions"]:has(.dws-footer-action) { flex-direction: column; align-items: stretch; gap: 2px; }
+  /* The configuration card the Plugins page draws for this bundle: a label that
+     takes the room and a pill control at the end of the row, measured off the
+     settings rows the neighbouring plugin draws in the same section. */
+  .dws-plugin-config { padding: 4px 0; }
+  .dws-config-toast { position: fixed; left: 50%; bottom: 28px; z-index: 60; transform: translateX(-50%); border-radius: 10px; padding: 8px 14px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: var(--dsw-alias-label-primary); font-size: 13px; }
+  .dws-plugin-config-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+  .dws-plugin-config-label { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; color: var(--dsw-alias-label-primary); font-size: 14px; }
+  .dws-plugin-config-field { position: relative; display: inline-flex; flex: none; align-items: center; }
+  .dws-plugin-config-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; border: none; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out); }
+  .dws-plugin-config-select:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dws-plugin-config-select > svg { flex: none; }
+  /* What a setting is for, in the same grey the plugin blurb below uses. */
+  .dws-plugin-config-hint { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+  /* The list opens at the control's trailing edge, as the Plugins page's own menus do. */
+  .dws-plugin-config-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 100%; padding: 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+  .dws-plugin-config-item { display: flex; width: 100%; align-items: center; gap: 12px; border: 0; border-radius: 8px; padding: 7px 10px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 20px; text-align: left; white-space: nowrap; cursor: pointer; }
+  .dws-plugin-config-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dws-plugin-config-item-label { flex: 1; }
+  /* The row that says a list is still being read, inside the menu it will fill. */
+  .dws-plugin-config-loading { display: flex; align-items: center; gap: 8px; padding: 7px 10px; color: var(--wt-muted); font-size: 13px; line-height: 20px; }
+  .dws-plugin-config-loading > svg { flex: none; }
+  .dws-plugin-config-retry { margin-left: auto; border: 0; border-radius: 6px; padding: 2px 8px; background: 0 0; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  .dws-plugin-config-retry:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  /* A disabled menu row is one whose answer has not arrived: dimmed, not clickable, but
+     still read as an item rather than vanishing - a list that changes length while it
+     loads is harder to aim at than one whose rows are greyed. */
+  .dws-plugin-config-item:disabled { opacity: .45; cursor: default; }
+  .dws-plugin-config-item:disabled:hover { background: 0 0; }
+  .dws-plugin-config-item > svg { flex: none; color: var(--dsw-alias-label-primary); }
+  /* The one row whose value is typed rather than picked. */
+  .dws-plugin-config-field:has(.dws-plugin-config-text) { flex: 1; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
+  /* Both typed rows wear one length - half of what the path row used to stretch to (472px
+     measured off a screenshot of the card) - because the prefix and the archive directory
+     are the two values a reader types: one field width for both, rather than one stretching
+     across the line and one not. The picked rows keep their own size. */
+  .dws-plugin-config-text { display: grid; grid-template-columns: auto 236px; justify-content: end; align-items: center; gap: 10px; }
+  /* The typed rows keep \`auto 236px\` - value first, editor second. This row is
+     the other way round (actions first, count last), so it declares its own two
+     columns at the same widths: a grid places children in source order, so
+     swapping the children without swapping the columns puts the buttons in the
+     narrow column meant for the value. */
+  .dws-plugin-config-row:has(.dws-plugin-config-actions) .dws-plugin-config-text { grid-template-columns: 236px auto; }
+  /* The buttons of one row travel together.
+     The value sits in the first column and the controls in the second, so a row
+     with more than two controls has somewhere to put them that is not the next
+     grid cell: as children of the grid itself they wrapped, and a row of three
+     dropped its third button onto a line of its own below the first two. That is
+     what put \u6062\u590D\u9ED8\u8BA4 somewhere other than next to \u4FEE\u6539. */
+  .dws-plugin-config-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+  /* Locked wears the same pill as every other row's value, so the card reads as one list. */
+  .dws-plugin-config-locked { display: flex; align-items: center; justify-content: flex-end; height: 36px; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  /* Editing: the wrapper draws the box, not the input.
+     The Host page styles inputs of its own and those rules are not in this plugin's layer,
+     so an input cannot be trusted to be 36px tall here - it arrived visibly taller. The box
+     the reader sees is therefore this element, and the input inside it is stripped to the
+     text on top of it. A bare \`input\` rule can still add height to that child, hence the
+     weight on the three properties that decide it. */
+  .dws-plugin-config-edit { display: flex; align-items: center; box-sizing: border-box; height: 36px; min-height: 36px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 9px; padding: 0 10px; background: var(--wt-surface); }
+  .dws-plugin-config-edit .dws-input { flex: 1; width: auto; min-width: 0; height: 100% !important; min-height: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0; background: transparent; color: var(--wt-text); }
+  .dws-plugin-config-save { flex: none; height: 36px; }
+  /* The card's buttons carry a border, and the primary one carries it too.
+     The primary everywhere else is a fill with no edge, which is right on a page
+     whose other buttons are ghosted and wrong here: on this card the neighbours
+     are outlined, and a filled button with no edge between them and the fill is
+     the one that looks unfinished. The edge is a shade of the fill itself, so it
+     reads as the same button rather than as a new one. */
+  .dws-plugin-config .dws-button { border-color: var(--wt-line); }
+  .dws-plugin-config .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }
+
+  /* A dialog's buttons are the settings page's buttons - same 13px on the same 34px,
+     no per-dialog sizing. Squeezing them to 12px on a 26px box was tried and it
+     made them read as footnotes: below the 14px directory names they act on and
+     level with the 12px note above them, so the control was the smallest thing in
+     its own dialog. A control that small is hard to hit and easy to miss, and the
+     one thing a dialog's buttons must not be is quiet.
+
+     \`.dws-confirm-dialog\` is in the list because the question about removing a name
+     is a second dialog drawn as a portal sibling rather than a child, so it inherits
+     none of the first one's rules and matched none of them. */
+  .dws-ignore-dialog .dws-button-primary, .dws-confirm-dialog .dws-button-primary { border-color: color-mix(in srgb, var(--dsw-alias-button-primary-fill) 72%, black); }
+
+  /* A confirmation dialog has no heading - its one sentence is the body - so the
+     sentence needs the size a heading would have given it. One step above the
+     buttons, which is the order a sentence and its own buttons read in. */
+  .dws-confirm-body { margin: 0; color: var(--wt-secondary); font-size: 14px; line-height: 22px; }
+  /* ...and the frame around it has to be the width of one sentence. This is a
+     class of its own rather than a width on \`.dws-confirm-dialog\`, because that
+     name says "this is a confirmation" and the finish dialog is one too - it just
+     is not a one-sentence one. Reading "confirm" as "narrow" put a 420px frame on
+     a dialog carrying a heading, a form and a footer, which needs 690. A width
+     that belongs to one shape of dialog has to be named after that shape. */
+  .dws-confirm-narrow { width: min(420px, calc(100vw - 32px)); }
+  /* The tag list drops its own cap and lets the dialog body scroll instead. The body
+     already scrolls and already takes the dialog's height, so a second scrollbar
+     inside it only made the list shorter than the frame built to hold it. */
+  .dws-ignore-dialog .dws-ignore-tags { max-height: none; }
+  /* The tag name wears the label's size too, for the same reason. */
+  .dws-ignore-dialog .dws-ignore-tag { font-size: 14px; min-height: 30px; border-radius: 15px; }
+  .dws-ignore-dialog .dws-ignore-tag .dws-icon-button { width: 22px; height: 22px; border-radius: 11px; }
+
+  /* The directory-name list. Tags rather than rows because the list is a set of
+     short names with nothing else to say about them, and the only action on one is
+     taking it off. Every tag carries a cross, so the list wants to be wide enough
+     to hold a row of them without wrapping into a column: 676px is 520 by one and
+     three-tenths, written out rather than as a factor so the intent survives being
+     read next to the number. Width alone, because the padding comes from the
+     heading/body/footer sections every dialog here is built from. */
+  /* 800 by 560, written as \`min()\` against the viewport rather than as fixed
+     pixels: on a screen narrower or shorter than that, the dialog takes what is
+     left instead of overflowing, and the \`max-height\` the base rule already
+     carries still governs. The height is what the number of tags needs - a list
+     of twenty-odd names stops being something the eye scans when it is the
+     scrollbar that decides what is on screen - so the body keeps its own scroll
+     and the dialog frame stays put. */
+  .dws-ignore-dialog { width: min(800px, calc(100vw - 32px)); max-width: 800px; height: min(560px, calc(100dvh - 40px)); }
+  /* The search row and the tags are one flow inside .dws-dialog-body, and the
+     space between them is the body doing its job rather than a rule of their own. */
+  .dws-ignore-dialog .dws-ignore-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; max-height: 220px; overflow-y: auto; }
+  .dws-ignore-tag { display: inline-flex; align-items: center; gap: 4px; box-sizing: border-box; min-height: 28px; padding: 3px 4px 3px 10px; border: 1px solid var(--dsw-alias-label-primary); border-radius: 14px; background: var(--wt-surface); color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-ignore-name { align-self: center; }
+  /* A name the Host ships wears the module tint, a name the user added does not.
+     The difference is colour only - same list, same tag, same one click to take a
+     user-added one away - because the thing a reader should learn from seeing it
+     is not "this is built-in" but "this one will ask before it goes". Colour
+     carries that as a hint; the question is what actually enforces it, and a hint
+     that could be missed is allowed to be. */
+  .dws-ignore-tag-shipped { border-color: transparent; background: var(--dsw-alias-bg-module-platform); }
+  .dws-ignore-tag .dws-icon-button { flex: none; width: 20px; height: 20px; border-radius: 10px; }
+  /* Taking a built-in name off is asked about in a dialog of its own rather than
+     inline in the tag. The tag row is a wrapping grid of chips; an expanded row
+     with a sentence and two buttons in it breaks the run of tags, and at this width
+     the sentence wraps to three lines inside a 28px-tall row it has grown. A second
+     modal over the first is the normal thing - each is its own portal, and Radix
+     marks the one underneath inert, so the page behind cannot be reached either
+     way. */
+  /* Geometry copied from the row the neighbouring plugin draws in the same slot,
+     measured off its own stylesheet rather than guessed: same height, radius,
+     padding, type size, and the same 4px bleed with 2px insets. */
+  .dws-footer-action { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: calc(100% + 4px); margin: 0 -2px; height: 42px; min-width: 0; border: 0; border-radius: 12px; padding: 0 10px 0 8px; background: 0 0; color: var(--wt-text); font: inherit; font-size: 14px; line-height: 22px; text-align: left; cursor: pointer; overflow: hidden; }
+  .dws-footer-action:hover { background: var(--wt-hover); }
+  .dws-footer-action:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-footer-action-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 18px; color: var(--wt-secondary); }
+  /* The plugin's own mark: the panel row in the sidebar's list and the footer shortcut
+     both wear the shell's primary label colour \u2014 near-black in the light theme, white
+     in the dark one \u2014 so the mark is drawn in the same ink as the label beside it
+     instead of a hue of its own. Every folder that leads a content row stays muted;
+     only this mark asks for the stronger ink. */
+  .dws-brand-glyph { color: var(--dsw-alias-label-primary); }
+  .dws-footer-action-label { flex: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The 56px rail shows the icon alone, as the neighbouring row does. */
+  .dws-footer-action[data-wide="false"] { flex: none; justify-content: center; gap: 0; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; }
+  /* The management page in a dialog, for the footer's shortcut: the same page the main
+     panel shows, in a window wide enough for two columns. It is a column of three
+     bands \u2014 the dialog's heading, the page, and the dialog's own footer \u2014 so the
+     heading and the footer stay put while the page inside scrolls.
+     Height is a share of the window, and 80% of it: at 95% the dialog covered everything
+     but the taskbar for a page that is a list of Workspaces, six of which fit in half
+     that height. The share is written as a percentage so the page keeps its proportions
+     on a taller screen; a list that outgrows it scrolls inside the dialog. */
+  .dws-manage-dialog { width: min(980px, calc(100vw - 32px)); height: 80dvh; max-height: 80dvh; }
+  .dws-manage-heading { flex: none; padding: 22px 56px 0 24px; }
+  /* The navigation belongs to the column this page scrolls in the panel, not to the top
+     edge of a window: inside the dialog it is the left rail of the body below the
+     heading, so the two are not one line of chrome too many. Its rows keep the panel's
+     own alignment \u2014 the label against the column's inner edge \u2014 because that is the edge
+     a label reads from, and a dialog does not move it. */
+  .dws-manage-page { display: flex; flex: 1; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
+  .dws-manage-page .dws-nav { --dws-nav-width: 157px; --dws-nav-pad: 16px 12px; border-right: 0; }
+  /* The column the lists scroll in: flush against the navigation on its left, the same
+     measure the panel's own content keeps, so both surfaces put their text on one line.
+     It is the frame, not the scroller: the section inside it owns the pinned toolbar and
+     the one list that scrolls, which is what keeps the two hosts' toolbars in the same
+     place, so this column never scrolls a second time on its own. */
+  .dws-manage-page-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 16px 24px 18px; }
+  .dws-manage-page .dws-settings { padding: 0; }
+  /* The panel keeps the heading it draws for the shell's column; the dialog's own heading
+     already said all of it. */
+  .dws-manage-page .dws-settings-header { display: none; }
+  .dws-dialog-close { position: absolute; top: 14px; right: 14px;display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; color: var(--wt-muted); background: transparent; cursor: pointer; }
+  .dws-dialog-close:hover:not(:disabled) { color: var(--wt-text); background: var(--wt-hover); }
+  .dws-dialog-close:disabled { opacity: .4; cursor: not-allowed; }
+  .dws-dialog-heading { padding: 22px 24px 0; }
+  .dws-dialog-title { margin: 0; padding-right: 24px; font-size: 16px; font-weight: 500; line-height: 24px; }
+  .dws-form-note { margin: 6px 0 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-repo-context { display: flex; flex-direction: column; gap: 3px; margin: 16px 0 0; padding: 10px 12px; border-radius: 9px; background: var(--wt-soft); }
+  .dws-repo-context strong { font-size: 13px; font-weight: 500; }
+  .dws-repo-context code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  .dws-create-form { display: flex; flex-direction: column; min-height: 0; }
+  /* Only the body scrolls, so the heading stays put and the footer stays
+     reachable however long the form grows \u2014 the repository list is not clipped
+     to its own little viewport. */
+  .dws-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 24px 18px; }
+  .dws-field { display: block; min-width: 0; margin: 0 0 15px; padding: 0; border: 0; }
+  /* The fieldsets the dialog stacks, with the picker ahead of them: the gaps are the
+     field margins collapsed out, so nothing is spaced twice. */
+  .dws-form-fields { display: flex; flex-direction: column; gap: 17px; }
+  .dws-form-fields .dws-field { margin: 0; }
+  /* The picker leads the body with the fields after it, and the body is not a flex
+     column: the two are spaced here rather than with a wrapper of their own. */
+  .dws-dialog-body > .dws-repositories-fieldset { margin: 0 0 17px; }
+  /* A fieldset's legend is not a block by default, so it is taken out of the fieldset's
+     inline flow to lead the field the way every other label does. */
+  .dws-fieldset-legend { float: left; width: 100%; margin: 0 0 8px; font-size: 13px; }
+  /* The three fields that describe the task sit on one surface: one inset block with a
+     rule between its rows, rather than three fields that happen to follow each other. */
+  .dws-details { display: grid; gap: 12px; clear: both; padding: 14px; border: 1px solid var(--wt-line); border-radius: 11px; background: var(--wt-soft); }
+  .dws-field-row { display: grid; gap: 5px; }
+  .dws-field-row + .dws-field-row { padding-top: 12px; border-top: 1px solid var(--wt-line); }
+  /* The delivery policy is eight dropdowns, two to a row: each one is a short choice, and
+     eight stacked rows would bury the three fields above them. The rows inside the grid are
+     plain cells, so the rule between fields above does not run between the columns. */
+  .dws-delivery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+  .dws-delivery-cell { display: grid; gap: 4px; min-width: 0; }
+  .dws-delivery-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .dws-delivery-label { color: var(--wt-secondary); font-size: 12px; }
+  .dws-details .dws-input { background: var(--wt-surface); }
+  .dws-field-label { display: block; margin: 0; padding: 0; color: var(--wt-text); font-size: 13px; font-weight: 400; line-height: 20px; }
+  /* A field's explanation shares the name's line, right-aligned against it: the control
+     below starts the block, and nothing follows it but the next field. An explanation too
+     long for that slot does not live here at all - it goes behind the \`?\` beside the name,
+     so the same field is never laid out two ways depending on how long its sentence
+     happens to be. */
+  .dws-field-label:has(> .dws-field-note) { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+  .dws-field-label > span:first-child { white-space: nowrap; }
+  .dws-field-label > .dws-field-note { text-align: right; }
+  /* The \`?\` rides at the end of the name, before the explanation: it is part of the
+     words, not a separate control, so it must not be pushed to the far edge by the
+     label's own \`space-between\`. */
+  .dws-field-label > .dws-field-name { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  /* An option's explanation sits beside its name rather than under the control. */
+  .dws-field-heading, .dws-field-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; padding: 0; }
+  /* A hint glyph beside a label. \`align-self\`, not the legend's own \`baseline\`: a
+     flex container whose only child is an SVG has that SVG's bottom edge for a
+     baseline, so baseline alignment pins the icon's bottom to the text's and it
+     rides above the line. Centring it on the line puts it where a mark of that
+     size belongs, and it is sized to the label rather than to a control so it
+     reads as part of the words and not as a button that forgot its action. */
+.dws-field-hint { display: inline-flex; flex: none; align-self: center; align-items: center; margin: 0; padding: 0; color: var(--wt-muted); cursor: help; }
+  .dws-field-hint:hover { color: var(--wt-secondary); }
+  .dws-field-note { margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 20px; }
+  .dws-field-note-warning { color: var(--wt-danger); }
+  .dws-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dws-radio-option { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--wt-line); border-radius: 9px; cursor: pointer; background: var(--wt-surface); }
+  .dws-radio-option:hover { background: var(--wt-hover); }
+  .dws-radio-option[data-selected="true"] { border-color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
+  .dws-radio-option:has(input:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-radio-option:has(input:disabled) { cursor: not-allowed; opacity: .5; }
+  .dws-radio-input { appearance: none; display: grid; place-content: center; flex: none; width: 14px; height: 14px; margin: 3px 0 0; border: 1px solid var(--wt-muted); border-radius: 50%; background: transparent; }
+  .dws-radio-input::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--wt-text); transform: scale(0); }
+  .dws-radio-input:checked { border-color: var(--wt-text); }
+  .dws-radio-input:checked::before { transform: scale(1); }
+  .dws-radio-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .dws-radio-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--wt-line); }
+  /* The label column takes what the label needs, so a label is never split
+     mid-word; the value keeps the rest of the row and wraps there instead. */
+  .dws-preview-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: baseline; }
+  .dws-preview-label { color: var(--wt-muted); font-size: 12px; line-height: 20px; }
+  .dws-preview-value { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 19px; }
+  .dws-dialog-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 14px 24px 18px; border-top: 1px solid var(--wt-line); }
+  /* An error sits between the scrolling body and the footer's rule, so it is on
+     screen at the same time as the button that answers it and scrolls neither out
+     of view nor under the heading. It is capped and scrolls itself, because a long
+     message - a rollback that could not finish names several paths - must not
+     push the buttons off the bottom of a short dialog. */
+  /* \`flex: none\`, not \`flex: 0 1 auto\`. This banner sits in the dialog's flex column and
+     must never be squeezed: a shrinkable item in a height-bounded column gets compressed
+     below its own content, and with \`overflow-y: auto\` that compression shows up as a
+     scrollbar on a message that fits perfectly well on its own. It is bounded instead by
+     the max-height below, which only bites on a genuinely long message (a rollback that
+     could not finish names several paths). */
+  .dws-error-above-footer { flex: none; max-height: 22vh; overflow-y: auto; margin: 0; padding: 14px 24px 14px; }
+  .dws-dialog-loading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; color: var(--wt-muted); font-size: 13px; }
+  .dws-dialog-loading > div { display: flex; align-items: center; gap: 8px; }
+  .dws-dialog-loading > span[aria-hidden] { display: block; flex-basis: 100%; height: 30px; margin-top: 6px; border-radius: 8px; background: var(--wt-soft); animation: dws-pulse 1.8s ease-in-out infinite; }
+  /* The remove-target card is gone: which branch each repository merges into is
+     named per repository now, and a single headline target would have had to pick
+     one of them. Its path moved onto the status line above. */
+  .dws-preserved { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: var(--wt-secondary); font-size: 12px; }
+  .dws-hero-action { display: inline-flex; flex: none; align-items: center; }
+  .dws-hero-action:empty { display: none; }
+  .dws-new-session-action { display: inline-flex; flex: none; align-items: center; margin: 0; padding: 0; }
+  .dws-new-session-button { width: 32px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 8px; color: var(--wt-secondary); }
+  .dws-new-session-button > svg { width: 16px; height: 16px; }
+  /* The hint on that entry. The shell's composer clips and stacks over anything
+     positioned inside it, so the bubble is portalled to the document body (see
+     \`HoverHint\`) and reads the same tokens and shape as the shell's own tooltips: fixed,
+     shrink-to-fit, and out of the pointer's way so it never eats the click under it. */
+  .dws-hint { display: inline-flex; align-items: center; position: fixed; z-index: 1100; width: max-content; max-width: 50vw; padding: 3px 7px; border-radius: 8px; background: var(--dsw-alias-tooltip-bg, #2c2c2e); color: var(--dsw-static-neutral-bluish-00, #ffffff); font-size: 13px; line-height: 20px; white-space: pre-line; overflow-wrap: break-word; pointer-events: none; transform: translate(-50%, -100%); animation: dws-hint-in 150ms ease-in-out; }
+  .dws-hint-below { transform: translate(-50%, 0); }
+  @keyframes dws-hint-in { from { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .dws-hint { animation: none; } }
+  .dws-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* Everything the source root holds, two to a row, with no inner scrollbar:
+     the dialog's body scrolls instead when the whole form outgrows the screen. */
+  .dws-repo-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  /* Two to a row, so half the width each: a card's text therefore runs to where its
+     own button starts and is cut with an ellipsis only there - the column narrows to
+     the button, it does not end at a fixed width. The full value stays on the label's
+     title, so hover has the rest. The branch gets the whole column instead of the
+     180px cap it wears in the repository list, where it shares its line with more; a
+     name too long for the column wraps to its own line before it is cut. */
+  .dws-repo-choices .dws-check-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-repo-choices .dws-branch-label { max-width: 100%; }
+  /* The picker is the cards and, under them, the run that reports and acts on the
+     selection. The count leads that run and the actions close it, so the field reads
+     "here is what there is / here is what you chose" without a line of chrome between. */
+  .dws-repo-picker { display: grid; gap: 4px; }
+  /* The count and the actions are a footnote to the cards above them, so they sit
+     close to the last row and the field keeps its whole air below. */
+  .dws-repo-picker-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 26px; padding: 2px 2px 0; }
+  .dws-repo-picker-foot .dws-field-note { flex: 1; min-width: 0; }
+  .dws-repo-actions { display: flex; flex: 1; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; margin-left: auto; }
+  .dws-check-count { color: var(--wt-secondary); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .dws-picker-tools { display: inline-flex; align-items: center; gap: 8px; }
+  .dws-picker-divider { width: 1px; height: 12px; background: var(--wt-line); }
+  /* The band that closes the repository list and names the field under it: the list's
+     count and bulk actions on the right, the next field's name and its \`?\` on the left.
+     One line and one baseline, because that field answers the question the list just
+     asked - where does every repository start. */
+  .dws-base-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin: 0 0 8px; }
+  /* A bulk action on a list is text, not a button: it sits inside the field it acts on
+     and must not compete with the card's own click target or the dialog's footer. */
+  .dws-link-button { border: 0; border-radius: 6px; padding: 2px 4px; background: transparent; color: var(--wt-accent); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
+  .dws-link-button:hover { background: var(--wt-hover); }
+  .dws-link-button:disabled { color: var(--wt-muted); cursor: not-allowed; }
+  .dws-link-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* A repository card: the checkbox, its copy and the branch button side by side, the
+     card owning the hover and the ring so the whole row reads as one thing.
+
+     \`cursor: pointer\` is NOT on the card. It used to be, because the card was a
+     \`<label>\` and a click anywhere on it toggled the tick - but the card now holds a
+     button of its own, and a label forwards a click on any control inside it to its
+     input, so pressing that button also ticked the repository. The pointer therefore
+     sits on the two things that still toggle: the box and its text. The large click
+     target was not given up, it moved - the text is a label for the box. */
+  .dws-check-option { display: flex; align-items: flex-start; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); }
+  .dws-check-option:hover { background: var(--wt-hover); }
+  .dws-check-option > .dws-check-copy { flex: 1 1 auto; cursor: pointer; }
+  /* A chosen repository says so three times over \u2014 a filled box, an accent border and a
+     tinted surface \u2014 because the box alone is 16px in the corner of a card whose copy
+     is what the eye lands on.
+     The accent is the product's blue, not \`--dsw-alias-brand-primary\`: that token is the
+     ink (near-black in the light theme, near-white in the dark one), so it drew a chosen
+     card in the same tone as unread text and read as a heavier border rather than as a
+     selection. */
+  .dws-check-option:has(.dws-checkbox:checked) { border-color: var(--wt-accent); background: var(--wt-soft); }
+  .dws-check-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-check-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }
+  /* The delivery tick: one decision rather than a list of them, so it is a plain row
+     instead of the repository picker's bordered card. It deliberately does NOT share
+     \`dws-check-option\` - that class is what the selection count and the bulk actions
+     select on, and a tick wearing it would be counted as a repository. */
+  .dws-deploy-option { display: inline-flex; align-items: flex-start; gap: 9px; min-width: 0; cursor: pointer; }
+  .dws-deploy-option:has(.dws-checkbox:focus-visible) { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 6px; }
+  .dws-deploy-option:has(.dws-checkbox:disabled) { cursor: not-allowed; opacity: .5; }
+  .dws-deploy-option .dws-check-copy { flex-direction: row; align-items: center; gap: 6px; }
+  /* The tick and its explanation on one line: the tick on the left, the note pushed to the
+     right edge, which is exactly how a named field's note sits beside its name. There is no
+     name above the tick - the tick's label IS the name - so the line is the label line. */
+  .dws-deploy-line { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+  .dws-deploy-line > .dws-field-note { text-align: right; }
+  /* The checkbox is a filled, rounded tile with a tick drawn in it: two borders of one
+     rotated box, which is one less thing to load than a mask and keeps its weight at any
+     size. */
+  .dws-checkbox { appearance: none; display: grid; place-content: center; flex: none; width: 16px; height: 16px; margin: 2px 0 0; border: 1px solid var(--wt-muted); border-radius: 5px; background: transparent; cursor: pointer; transition: background .12s ease, border-color .12s ease; }
+  .dws-checkbox::before { content: ""; width: 8px; height: 4px; margin-top: -2px; border-left: 2px solid var(--dsw-alias-label-primary-foreground); border-bottom: 2px solid var(--dsw-alias-label-primary-foreground); transform: rotate(-45deg) scale(0); transition: transform .12s ease; }
+  .dws-checkbox:checked { border-color: var(--wt-accent); background: var(--wt-accent); }
+  .dws-checkbox:checked::before { transform: rotate(-45deg) scale(1); }
+  /* Nothing chosen is a state the field reports in words, so the tick's tile stays empty
+     and the border keeps the muted colour rather than pretending to be a third state. */
+  .dws-checkbox:indeterminate { border-color: var(--wt-accent); background: var(--wt-accent); }
+  .dws-checkbox:indeterminate::before { width: 8px; height: 2px; margin-top: 0; border: 0; border-radius: 1px; background: var(--dsw-alias-label-primary-foreground); transform: scale(1); }
+  .dws-checkbox:disabled { opacity: .5; cursor: not-allowed; }
+  .dws-checkbox:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* A merge left standing is the next step rather than a casualty, so it reads in the
+     warning colour and names the files in the shape a path is easiest to copy from. */
+  .dws-finish-handoff { display: block; margin-top: 4px; color: var(--wt-warn); }
+  .dws-finish-files { display: block; margin-top: 2px; color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* The handoff is the step that is left rather than a casualty, so it is a boxed
+     block with the sessions that carry on from it - not another line of red text. The
+     sessions are listed as data: repository, what it was asked to do, where its git
+     commands may write, and whether it is still working. */
+  .dws-finish-handoff-panel { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--wt-line); border-radius: 10px; }
+  .dws-finish-handoff-panel p { margin: 0; }
+  .dws-finish-handoff-title { color: var(--wt-text); font-weight: 600; }
+  /* The commits are in, so the panel's headline is the good news rather than a question:
+     the light is the page's own green for a clean worktree, and the sentence keeps the
+     colour of the state it reports. Nothing here is asking to be acted on but the footer's
+     button, which is the only thing that reads the state again. */
+  .dws-finish-handoff-title.is-done { display: flex; align-items: center; gap: 7px; color: var(--dsw-alias-state-success-primary); }
+  /* The title and the one word this panel waits for: authorizing the commit. They share a
+     line while it fits, and the button drops under the title rather than squeezing it. */
+  .dws-finish-handoff-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+  .dws-finish-handoff-head button { flex: none; }
+  /* The panel's small print - the conflict hint, the approval a commit may need, the word
+     while a session is being opened - reads at the beta notice's own size rather than at
+     the dialog's body size: it is the same kind of line, sitting a few lines above that
+     notice in the same panel. */
+  .dws-finish-handoff-hint { color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The row that says how much access the sessions this panel opens are given, and that can
+     change it. Not small print: it is a permission, so it reads at the panel's own size with
+     the state in the text colour, and the way to change it is a link beside the state rather
+     than a control of the dialog's own - the same shape as opening a session. */
+  .dws-finish-handoff-access { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .dws-finish-handoff-access strong { color: var(--wt-text); }
+  .dws-finish-handoff-access-switch { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
+  .dws-finish-handoff-access-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* What the switch does and does not reach, at the small print's own size: a handoff that
+     is already open is not affected by it, and that is the part worth saying. */
+  .dws-finish-handoff-access-note { color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* A refusal is not small print: the Host did not write the setting, or the session could
+     not be widened, and both are things the reader has to act on. */
+  .dws-finish-handoff-access-note.is-error { color: var(--wt-warn); }
+  .dws-finish-handoff-sessions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+  .dws-finish-handoff-sessions li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+  .dws-finish-handoff-sessions code { overflow-wrap: anywhere; color: var(--wt-muted); font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+  /* The session's write boundary rides in the sentence above the list, in that sentence's
+     own colour and size: it is what a commit in there depends on - the narrowest directory
+     reaching both the worktree and the repository's own gitdir - not a footnote to it. */
+  /* Opening the session is the one thing this dialog can do about the agent's work, so
+     it reads as a link rather than as a button of the dialog's own. */
+  .dws-finish-handoff-open { border: 0; padding: 0; background: none; color: var(--dsw-alias-brand-primary); font: inherit; cursor: pointer; text-decoration: underline; }
+  .dws-finish-handoff-open:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* The line under the list belongs to one session, not to one repository: it says what
+     the agent is on. It reads as a single amber sentence - the same amber as every other
+     pending state here - and goes quiet once it stops. */
+  .dws-finish-handoff-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: var(--wt-warn); }
+  .dws-finish-handoff-state.is-idle { color: var(--wt-muted); }
+  /* The other half of that small print, in the same size: what opening a session does to
+     the dialog it was opened from. */
+  .dws-finish-handoff-note { display: flex; align-items: flex-start; gap: 6px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* The glyph is the text's own grey rather than the notice's amber: it marks a
+     consequence to read, and nothing here is asking to be acted on. Baseline alignment
+     would sit its box on the text's baseline and leave the glyph riding high, so it is
+     dropped from the line's top edge by the same optical amount the notice above uses
+     for its larger glyph. */
+  .dws-finish-handoff-note > svg { flex: none; margin-top: 2px; color: inherit; }
+  .dws-check-copy { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  /* The per-repository start-point button: text, like the bulk actions beside the
+     cards, because it opens a list rather than acting on the task. It is the only
+     thing in the card that is not a tick target, and saying so with a pointer is
+     what keeps the card's two jobs apart on screen. */
+  .dws-branch-button { flex: none; border: 1px solid var(--wt-line); border-radius: 6px; padding: 1px 6px; margin-top: 1px; background: var(--wt-surface); color: var(--wt-secondary); font: inherit; font-size: 11px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+  .dws-branch-button:hover { border-color: var(--dsw-alias-brand-primary); color: var(--dsw-alias-brand-primary); background: var(--wt-hover); }
+  .dws-branch-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  /* Portalled to the body and placed from the button: the create dialog's body is a
+     scroller, and a panel inside it would be clipped at the card that opened it. */
+  /* The dialog sets \`pointer-events: none\` on the body while it is open, and this
+     panel is portalled there rather than into the dialog, so it names its own. */
+  .dws-branch-picker { pointer-events: auto; position: fixed; z-index: 1100; display: flex; flex-direction: column; gap: 6px; max-height: 320px; padding: 8px; border: 1px solid var(--wt-line); border-radius: 10px; background: var(--wt-surface); box-shadow: var(--dsw-shadow-lv3); font: inherit; font-size: 12px; }
+  /* The shared start point reads as a field rather than as a button: it stands in
+     the same column as the dialog's inputs, and its value is the field's value.
+     It is still a button in the markup because it opens a list. */
+  .dws-base-ref-button { display: flex; align-items: center; width: 100%; text-align: left; cursor: pointer; }
+  .dws-base-ref-button:disabled { cursor: not-allowed; opacity: .5; }
+  .dws-base-ref-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-base-ref-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-branch-search { width: 100%; min-height: 0; font-size: 12px; }
+  /* The list scrolls inside the panel, so a repository with a hundred branches does
+     not push the panel off the screen - and the search above it stays put. */
+  .dws-branch-list { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+  .dws-branch-options { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+  .dws-branch-option { width: 100%; border: 0; border-radius: 6px; padding: 3px 6px; background: transparent; color: var(--wt-text); font: inherit; font-size: 12px; line-height: 20px; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+  .dws-branch-option:hover { background: var(--wt-hover); }
+  .dws-branch-option:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+  /* The one that is in force, and it says so with the same brand ink the chosen
+     card wears - the picker is one field of that card, not a menu of its own. */
+  .dws-branch-option-chosen { color: var(--dsw-alias-brand-primary); background: var(--wt-soft); }
+  /* "Reading" and "could not read" are states of one field, so they sit where the
+     list would with the panel's own note styling rather than in the dialog's error. */
+  .dws-branch-state { margin: 0; }
+  /* The card's first line is the repository view's title row: the name, then the
+     branch HEAD is on with the same icon, wrapping instead of overflowing. */
+  .dws-check-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+  .dws-check-label { color: var(--wt-text); font-size: 13px; line-height: 20px; }
+  .dws-check-path { overflow-wrap: anywhere; white-space: pre-line; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 18px; }
+  /* The same tick as the repository cards, drawn inline under the prefix field: this
+     one asks a question about a later task space, so it is a footnote to the field
+     rather than a card of its own. */
+  .dws-default-prefix { display: flex; align-items: flex-start; gap: 8px; margin-top: 5px; cursor: pointer; }
+  .dws-default-prefix .dws-field-note { padding-top: 1px; }
+  .dws-base-ref { margin-top: 9px; }
+  /* The task view reuses the repository card's shape: a task is the same kind of
+     row, one level up from the repositories it spans. */
+  .dws-task { min-width: 0; border-bottom: 1px solid var(--wt-line); }
+  .dws-task-header { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 0; }
+  .dws-task-icon { flex: none; color: var(--wt-secondary); }
+  .dws-task-heading { display: block; flex: 1; min-width: 0; }
+  .dws-task-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dws-task-title h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 500; line-height: 22px; }
+  .dws-task-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; margin-top: 2px; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-finish-task { flex: none; }
+  /* An entry added to DSH's own row menu, which owns the surrounding chrome. */
+  .dws-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 6px; padding: 6px 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; text-align: left; cursor: pointer; }
+  .dws-menu-item:hover { background: var(--wt-hover); }
+  .dws-menu-item:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-menu-item-icon { display: inline-flex; flex: none; align-items: center; color: var(--wt-secondary); }
+  /* A product's own svg arrives at its vendor's size (IDEA's is 64x64), so the row
+     gives it a box instead of letting it set one - and no colour of ours, because the
+     icon carries its own. */
+  .dws-menu-item-icon-brand svg { width: 14px; height: 14px; display: block; }
+  /* A row that opens a submenu: the chevron sits at the far end, and the label keeps
+     its own width so a long application name does not push it off. */
+  .dws-menu-item-chevron { display: inline-flex; flex: none; align-items: center; margin-left: auto; color: var(--wt-muted); }
+  /* The submenu, positioned by the adapter beside the row that owns it. It floats over
+     the shell rather than nesting inside its menu, so it is not found by the scan that
+     fills that menu - and it escapes the menu's own overflow.
+     Only the geometry lives here. The surface - background, border, radius, shadow - is
+     copied from the owning menu at open time, because the shell owns that look and a
+     token named here would be a second guess at it. What is below is the fallback for a
+     flyout with no owning menu to read from, and it draws no border of its own: the
+     shell's menu is separated by its shadow, and an outline here would be a line the
+     menu beside it does not have. */
+  .dws-submenu { position: fixed; z-index: 80; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; min-width: 180px; max-width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 360px); overflow: auto; padding: 4px; border: none; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+  /* A failure notice about one press on a menu that has already closed, so it is fixed
+     to the corner - there is no element left for it to sit under.
+     Opaque rather than \`--wt-soft\`: that token is \`bg-module-platform\`, which carries
+     alpha, and an error that lets the page show through reads as a disabled hint. The
+     surface token is what the shell's own cards use for the same reason. The left border
+     is the state colour rather than a filled background, so the text keeps full contrast
+     in both themes. */
+  /* A failure notice about one press on a menu that has already closed, so it is fixed
+     to the corner - there is no element left for it to sit under.
+
+     The \`--wt-*\` aliases are declared HERE rather than inherited. They are defined on the
+     plugin's own surfaces (\`.dws-settings\`, \`.dws-dialog-content\`, \u2026), and this card is
+     none of those: it is a sibling of the shell, fixed to the viewport, so every
+     \`var(--wt-surface)\` in it resolved to nothing and the declaration was dropped whole -
+     which is why the first version came out with no background, no border and no state
+     colour at all.
+
+     Opaque rather than \`--wt-soft\`: that token is \`bg-module-platform\`, which carries
+     alpha, and an error letting the page show through reads as a disabled hint. The state
+     colour is the left border only, so the text keeps full contrast in both themes. */
+  .dws-error-card {
+    --wt-text: var(--dsw-alias-label-primary);
+    --wt-secondary: var(--dsw-alias-label-secondary);
+    --wt-line: var(--dsw-alias-border-l2);
+    --wt-surface: var(--dsw-alias-bg-layer-1);
+    --wt-hover: var(--dsw-alias-interactive-bg-hover);
+    --wt-danger: var(--dsw-alias-state-error-primary);
+    position: fixed; right: 18px; bottom: 18px; z-index: 70; box-sizing: border-box;
+    display: flex; align-items: flex-start; gap: 10px;
+    /* Height comes from the content, never from the viewport: a card that stretched would
+       be a panel, and this one is a message about a single press. */
+    width: min(400px, calc(100vw - 36px)); max-height: min(50vh, 320px); height: auto;
+    padding: 12px 12px 12px 13px;
+    border: 1px solid var(--wt-line); border-left: 3px solid var(--wt-danger);
+    border-radius: 9px; background: var(--wt-surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    color: var(--wt-text); font-family: inherit; font-size: 14px; font-weight: 400;
+  }
+  .dws-error-card-mark { display: inline-flex; flex: none; align-items: center; margin-top: 1px; color: var(--wt-danger); }
+  .dws-error-card-mark svg { display: block; }
+  .dws-error-card-body { display: grid; gap: 3px; min-width: 0; flex: 1 1 auto; }
+  .dws-error-card-title { margin: 0; color: var(--wt-text); font-size: 13px; font-weight: 600; line-height: 19px; }
+  .dws-error-card-detail { margin: 0; max-height: 6em; overflow: hidden; color: var(--wt-secondary); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+  .dws-error-card-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wt-secondary); cursor: pointer; }
+  .dws-error-card-close:hover { background: var(--wt-hover); color: var(--wt-text); }
+  .dws-error-card-close:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+  .dws-finish-report { display: grid; gap: 7px; margin-top: 14px; padding: 11px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }
+  .dws-finish-report p { margin: 0; overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 19px; }
+  .dws-finish-repos { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .dws-finish-repos li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+  .dws-finish-repos strong { font-size: 12px; font-weight: 500; }
+  .dws-finish-repos span { overflow-wrap: anywhere; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  /* The counts wear the same colours they wear in the task view, so one pair of numbers
+     reads the same way on both pages. \`.dws-finish-repos span\` above is a descendant
+     selector and would otherwise win over the single-class colour rules below it - which
+     is exactly what happened: the pairs rendered, in one flat grey. */
+  .dws-finish-repos .dws-line-add, .dws-finish-repos .dws-ahead { color: var(--wt-success); }
+  .dws-finish-repos .dws-line-del { color: var(--wt-danger); }
+  .dws-finish-repos .dws-behind { color: var(--wt-warn); }
+  .dws-finish-repos .dws-changes-label { color: var(--wt-muted); font-size: 12px; }
+  .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
+  /* A conflicted merge the host already aborted: told in the user's language, in the
+     danger colour because it is an unfinished task the user has to go and resolve,
+     with git's own output kept one click away rather than dumped mid-sentence. */
+  .dws-finish-report .dws-finish-conflict { flex-basis: 100%; color: var(--wt-danger); }
+  .dws-finish-log { flex-basis: 100%; min-width: 0; color: var(--wt-muted); font-size: 11px; line-height: 17px; }
+  .dws-finish-log summary { cursor: pointer; }
+  .dws-finish-log pre { max-height: 150px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; }
+  /* What there is to archive, stated above everything the dialog asks. */
+  /* Two lines by construction: the directory, then the counts. \`role="status"\` sits on
+    this block rather than on one line, so a reader announcing the change still hears
+    the whole answer in one breath. */
+ .dws-dialog-status { display: grid; gap: 4px; margin: 0 0 12px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+ .dws-dialog-status-path, .dws-dialog-status-counts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0; min-width: 0; }
+ .dws-dialog-status code { min-width: 0; overflow-wrap: anywhere; color: var(--wt-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+ /* The pairs keep the task view's own spacing, so a label and its numbers stay one
+    phrase rather than reading as two items in the row's 6 px rhythm. */
+ .dws-dialog-status .dws-ahead-behind, .dws-dialog-status .dws-lines { gap: 8px; }
+ .dws-dialog-status .dws-changes-label { margin-left: 2px; }
+  .dws-plan { margin-top: 12px; }
+  /* The branch a repository merges into, chosen in place: sized like the text it
+     replaces rather than like a form field. */
+  .dws-plan-target { width: auto; max-width: 100%; min-height: 26px; padding: 2px 6px; font-size: 12px; line-height: 18px; }
+  /* The branch picker is a button wearing the select's geometry: the row keeps the line
+     it had, and the list it opens carries the search box a native select cannot offer. */
+  .dws-plan-picker { display: inline-flex; align-items: center; gap: 4px; padding-right: 5px; text-align: left; cursor: pointer; }
+  .dws-plan-picker:disabled { cursor: not-allowed; }
+  .dws-plan-picker-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-plan-picker-caret { flex: none; color: var(--wt-muted); }
+  /* Said before the merge rather than reported after it. */
+  .dws-plan-detour { color: var(--wt-muted); }
+  /* The checkout the merge runs in, and what the merge brings, on one flex line of its
+     own: the path first, the counts beside it, so a row spends one line on both. The
+     line takes the whole width because a path can be long; when it is, the counts wrap
+     under it and are still read after it. Set like the stray directories below, which
+     are directories in the same sense and should not read as a different kind of thing. */
+  .dws-plan-source-row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; margin-top: 2px; }
+  /* A path wider than the line breaks onto the next line instead of being cut: the
+     whole path is what this row is for, and an ellipsis hides the only part that says
+     which checkout the merge runs in. It breaks at any character, because a path has
+     no words to break at; the counts after it wrap underneath when it has taken the
+     line, and are still read after it. */
+  .dws-plan-source { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
+  /* The label is two characters and its own words: it keeps its line while the path
+     beside it breaks, rather than splitting into "\u6E90\u4ED3" / "\u5E93\uFF1A". */
+  .dws-plan-source > span { flex: none; white-space: nowrap; }
+  .dws-plan-source code { min-width: 0; overflow-wrap: anywhere; white-space: normal; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+  /* What cleaning the container would remove, shown before it is chosen. */
+  .dws-plan-strays { display: grid; gap: 6px; margin-top: 14px; }
+  .dws-plan-strays-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+  .dws-plan-strays-none { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  /* Two to a row, like the repository choices: these are mostly short names. */
+  .dws-plan-strays ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 0; padding: 0; list-style: none; }
+  .dws-plan-strays li { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--wt-text); font-size: 12px; line-height: 18px; }
+  /* Half a row is not much for a name, so it ellipsises; the title has the rest. */
+  .dws-plan-strays code { overflow: hidden; padding: 1px 5px; border: 1px solid var(--wt-line); border-radius: 5px; background: var(--wt-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .dws-plan-doc { flex: none; color: var(--wt-danger); }
+  .dws-plan-noise, .dws-plan-breadcrumb { margin: 0; color: var(--wt-muted); font-size: 12px; line-height: 18px; }
+  .dws-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--wt-warn) 45%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--wt-warn) 10%, transparent); color: var(--wt-text); font-size: 12px; line-height: 18px; }
+  .dws-notice > svg { flex: none; margin-top: 1px; color: var(--wt-warn); }
+  .dws-notice-danger { border-color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 10%, transparent); }
+  .dws-notice-danger > svg { color: var(--wt-danger); }
+  .dws-spin { animation: dws-spin 1s linear infinite; }
+  @keyframes dws-spin { to { transform: rotate(360deg); } }
+  @keyframes dws-pulse { 50% { opacity: .45; } }
+  @media (max-width: 640px) {
+    .dws-toolbar { flex-wrap: wrap; }
+    /* One per row once there is no room for half a field beside the button. */
+    .dws-search { flex-basis: 100%; }
+    .dws-summary { font-size: 11px; }
+    .dws-repo-title { gap: 4px 7px; }
+    .dws-branch-label { max-width: 135px; overflow-wrap: anywhere; }
+    .dws-worktree-list { padding: 1px 10px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon)); border-radius: 8px; }
+    .dws-worktree { flex-wrap: wrap; gap: 6px; }
+    .dws-worktree-actions { margin-left: auto; }
+    /* The dialog keeps its navigation, but there is no room for the panel's 208px rail
+       beside the lists at this width, so the rail narrows and the content takes the rest. */
+    .dws-manage-page .dws-nav { --dws-nav-width: 100px; --dws-nav-pad: 12px 8px; }
+    .dws-manage-page-content { padding: 12px 14px 16px; }
+    .dws-manage-heading { padding: 18px 52px 0 18px; }
+    /* One repository per row once half a row is too narrow for a name and a path. */
+    .dws-repo-choices { grid-template-columns: minmax(0, 1fr); }
+    .dws-dialog-content { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 14px; }
+    .dws-dialog-heading { padding: 20px 18px 0; }
+    .dws-dialog-body { padding: 16px 18px 20px; }
+    .dws-dialog-footer { padding: 12px 18px 16px; }
+    .dws-error-above-footer { padding: 12px 18px 12px; }
+    .dws-preview { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .dws-preview-row { grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dws-settings *, .dws-dialog-content *, .dws-new-session-action * { animation: none !important; transition: none !important; }
+  }
+}
+
+/* The deployment card a task row carries: a header band with the identity and
+   badges, the acceptance URL prominent on its own line under it, and the actions
+   on the last line. Compact by design - it sits between the task header and its
+   worktree list, and hides itself entirely when the task neither deployed
+   anything nor carries a deployment state. */
+.dws-deploy { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 0 0 8px 40px; padding: 5px 12px; border: 1px solid var(--dws-line, #e5e7eb); border-radius: 10px; }
+.dws-deploy-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dws-deploy-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dws-deploy-title { font-weight: 600; font-size: 12px; color: var(--dws-muted, #6b7280); }
+.dws-deploy-env { font-size: 12px; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.dws-deploy-label { font-weight: 600; font-size: 12px; color: var(--dws-muted, #6b7280); flex: 0 0 auto; }
+.dws-deploy-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dws-deploy-url { flex: 0 1 auto; min-width: 0; max-width: 50%; font-size: 14px; font-weight: 600; color: var(--dws-accent, #4f46e5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-deploy-muted, .dws-deploy-containers { font-size: 12px; color: var(--dws-muted, #6b7280); }
+.dws-deploy-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex: 0 0 auto; }
+.dws-deploy-destroy-armed { color: #b42318; border-color: #b42318; }
+.dws-deploy-error { font-size: 12px; color: #b42318; }
+/* The one line here that is not a failure: an action ran and this is what it could
+   not finish, so it wears the plugin's warning amber rather than the error red.
+   The fallback is for a card drawn outside the token scope, where the variable is
+   undefined and the colour would otherwise drop out entirely. */
+.dws-deploy-warning { font-size: 12px; color: var(--wt-warn, #b45309); }
 `;var ye=require("react");var oo=require("react"),Ll={xmlns:"http://www.w3.org/2000/svg",width:24,height:24,viewBox:"0 0 24 24",fill:"none"},vo=(0,oo.forwardRef)(({color:e="currentColor",size:t=24,strokeWidth:n,absoluteStrokeWidth:o=!1,className:s="",altIcon:i,showAlt:p=!1,icon:a,primaryColor:u,secondaryColor:r,disableSecondaryOpacity:c=!1,...C},m)=>{let v=n!==void 0?o?Number(n)*24/Number(t):n:void 0,R=v!==void 0?{strokeWidth:v,stroke:"currentColor"}:{},g={ref:m,...Ll,width:t,height:t,color:u||e,className:s,...R,...C},N=[...p&&i?i:a].sort(([,E],[,P])=>{let S=E.opacity!==void 0;return P.opacity!==void 0?1:S?-1:0}).map(([E,P])=>{let S=P.opacity!==void 0,T=S&&!c?P.opacity:void 0,L=r?{...P.stroke!==void 0?{stroke:S?r:u||e}:{fill:S?r:u||e}}:{};return(0,oo.createElement)(E,{...P,...R,...L,opacity:T,key:P.key})});return(0,oo.createElement)("svg",g,N)});vo.displayName="HugeiconsIcon";var ra=[["circle",{cx:"12",cy:"12",r:"10",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M12 8V12",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M12.125 15.75H12M12.25 15.75C12.25 15.8881 12.1381 16 12 16C11.8619 16 11.75 15.8881 11.75 15.75C11.75 15.6119 11.8619 15.5 12 15.5C12.1381 15.5 12.25 15.6119 12.25 15.75Z",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}]];var ia=[["path",{d:"M18 9.00005C18 9.00005 13.5811 15 12 15C10.4188 15 6 9 6 9",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var la=[["path",{d:"M15 6C15 6 9.00001 10.4189 9 12C8.99999 13.5812 15 18 15 18",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var ca=[["path",{d:"M9.00005 6C9.00005 6 15 10.4189 15 12C15 13.5812 9 18 9 18",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var da=[["path",{d:"M18 6L6.00081 17.9992M17.9992 18L6 6.00085",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var pa=[["path",{d:"M5 13.2592L7.58583 15.9568C8.2525 16.6523 8.58583 17 9.00004 17C9.41425 17 9.74759 16.6523 10.4143 15.9568L19 7",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var ha=[["circle",{cx:"12",cy:"12",r:"10",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M9.5 9.5C9.5 8.11929 10.6193 7 12 7C13.3807 7 14.5 8.11929 14.5 9.5C14.5 10.3569 14.0689 11.1131 13.4117 11.5636C12.7283 12.0319 12 12.6716 12 13.5",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M12.125 16.75H12M12.25 16.75C12.25 16.8881 12.1381 17 12 17C11.8619 17 11.75 16.8881 11.75 16.75C11.75 16.6119 11.8619 16.5 12 16.5C12.1381 16.5 12.25 16.6119 12.25 16.75Z",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}]];var ua=[["path",{d:"M2 13C2.06427 12.3499 2.20951 11.9124 2.53777 11.5858C3.12654 11 4.07416 11 5.9694 11H18.0306C19.9258 11 20.8735 11 21.4622 11.5858C21.7905 11.9124 21.9357 12.3499 22 13",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M8 7H16.75C18.8567 7 19.91 7 20.6667 7.50559C20.9943 7.72447 21.2755 8.00572 21.4944 8.33329C22 9.08996 22 10.1433 22 12.25C22 15.7612 22 17.5167 21.1573 18.7779C20.7926 19.3238 20.3238 19.7926 19.7779 20.1573C18.5167 21 16.7612 21 13.25 21H12C7.28595 21 4.92893 21 3.46447 19.5355C2 18.0711 2 15.714 2 11V7.94427C2 6.1278 2 5.21956 2.38032 4.53806C2.65142 4.05227 3.05227 3.65142 3.53806 3.38032C4.21956 3 5.1278 3 6.94427 3C8.10802 3 8.6899 3 9.19926 3.19101C10.3622 3.62712 10.8418 4.68358 11.3666 5.73313L12 7",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"1"}]];var fa=[["path",{d:"M8 6.50116H16.75C18.8567 6.50116 19.91 6.50116 20.6667 7.0069C20.9943 7.22584 21.2755 7.50717 21.4944 7.83484C22 8.59173 22 9.64538 22 11.7527C22 12.0122 22 12.2621 21.9997 12.5029M12 6.50116L11.3666 5.23392C10.8418 4.18406 10.3622 3.1273 9.19926 2.69106C8.6899 2.5 8.10802 2.5 6.94427 2.5C5.1278 2.5 4.21956 2.5 3.53806 2.88043C3.05227 3.15161 2.65142 3.55257 2.38032 4.03851C2 4.72021 2 5.62871 2 7.44571V10.5023C2 15.2177 2 17.5754 3.46447 19.0403C4.70529 20.2815 6.58687 20.4711 10 20.5",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["circle",{cx:"14",cy:"12.5",r:"2",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["circle",{cx:"20",cy:"18.5",r:"2",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}],["path",{d:"M18 18.5C15.7909 18.5 14 16.7091 14 14.5",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"3"}],["path",{d:"M14 14.5V21.5",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"4"}]];var ma=[["path",{d:"M8 7H16.75C18.8567 7 19.91 7 20.6667 7.50559C20.9943 7.72447 21.2755 8.00572 21.4944 8.33329C22 9.08996 22 10.1433 22 12.25C22 15.7612 22 17.5167 21.1573 18.7779C20.7926 19.3238 20.3238 19.7926 19.7779 20.1573C18.5167 21 16.7612 21 13.25 21H12C7.28595 21 4.92893 21 3.46447 19.5355C2 18.0711 2 15.714 2 11V7.94427C2 6.1278 2 5.21956 2.38032 4.53806C2.65142 4.05227 3.05227 3.65142 3.53806 3.38032C4.21956 3 5.1278 3 6.94427 3C8.10802 3 8.6899 3 9.19926 3.19101C10.3622 3.62712 10.8418 4.68358 11.3666 5.73313L12 7",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["circle",{cx:"12",cy:"14",r:"2",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M14 14H18M10 14H6",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}]];var ga=[["path",{d:"M7 19H13C15.8284 19 17.2426 19 18.1213 18.1213C19 17.2426 19 15.8284 19 13V10M19 10C19.7002 10 21.0085 11.9943 21.5 12.5M19 10C18.2998 10 16.9915 11.9943 16.5 12.5",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M5 7L5 17",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["circle",{cx:"5",cy:"5",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"2"}],["circle",{cx:"19",cy:"5",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"3"}],["circle",{cx:"5",cy:"19",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"4"}]];var wa=[["path",{d:"M6 8L6 16",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M18 16V12C18 9.17156 18 7.75735 17.1213 6.87867C16.2426 5.99999 14.8284 5.99999 12 5.99999L11 5.99999M11 5.99999C11 5.29976 12.9943 3.99152 13.5 3.49999M11 5.99999C11 6.70022 12.9943 8.00846 13.5 8.49999",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["circle",{cx:"6",cy:"18",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"2"}],["circle",{cx:"6",cy:"6",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"3"}],["circle",{cx:"18",cy:"18",r:"2",stroke:"currentColor",strokeWidth:"1.5",key:"4"}]];var ba=[["circle",{cx:"12",cy:"12",r:"10",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M12 16V12",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M12.125 8.25H12M12.25 8.25C12.25 8.11193 12.1381 8 12 8C11.8619 8 11.75 8.11193 11.75 8.25C11.75 8.38807 11.8619 8.5 12 8.5C12.1381 8.5 12.25 8.38807 12.25 8.25Z",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}]];var ya=[["path",{d:"M12 3V6",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M12 18V21",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M21 12L18 12",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"2"}],["path",{d:"M6 12L3 12",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"3"}],["path",{d:"M18.3635 5.63672L16.2422 7.75804",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"4"}],["path",{d:"M7.75804 16.2422L5.63672 18.3635",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"5"}],["path",{d:"M18.3635 18.3635L16.2422 16.2422",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"6"}],["path",{d:"M7.75804 7.75804L5.63672 5.63672",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"7"}]];var ka=[["path",{d:"M12 4V20M20 12H4",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}]];var va=[["path",{d:"M3.04712 13C3.01082 12.6717 2.99219 12.338 2.99219 12C2.99219 7.02944 7.02162 3 11.9922 3C14.8195 3 17.3422 4.30367 18.9922 6.34267M20.9373 11C20.9736 11.3283 20.9922 11.662 20.9922 12C20.9922 16.9706 16.9628 21 11.9922 21C9.16492 21 6.64214 19.6963 4.99219 17.6573",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M15.9922 7H16.9922C18.4064 7 19.1135 7 19.5528 6.56066C19.9922 6.12132 19.9922 5.41421 19.9922 4V3",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}],["path",{d:"M7.99219 17H6.99219C5.57797 17 4.87087 17 4.43153 17.4393C3.99219 17.8787 3.99219 18.5858 3.99219 20V21",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"2"}]];var xa=[["path",{d:"M17 17L21 21",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"0"}],["path",{d:"M19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11C3 15.4183 6.58172 19 11 19C15.4183 19 19 15.4183 19 11Z",stroke:"currentColor",strokeLinecap:"round",strokeLinejoin:"round",strokeWidth:"1.5",key:"1"}]];var Ca=[["path",{d:"M15.5 12C15.5 13.933 13.933 15.5 12 15.5C10.067 15.5 8.5 13.933 8.5 12C8.5 10.067 10.067 8.5 12 8.5C13.933 8.5 15.5 10.067 15.5 12Z",stroke:"currentColor",strokeWidth:"1.5",key:"0"}],["path",{d:"M21.011 14.0965C21.5329 13.9558 21.7939 13.8854 21.8969 13.7508C22 13.6163 22 13.3998 22 12.9669V11.0332C22 10.6003 22 10.3838 21.8969 10.2493C21.7938 10.1147 21.5329 10.0443 21.011 9.90358C19.0606 9.37759 17.8399 7.33851 18.3433 5.40087C18.4817 4.86799 18.5509 4.60156 18.4848 4.44529C18.4187 4.28902 18.2291 4.18134 17.8497 3.96596L16.125 2.98673C15.7528 2.77539 15.5667 2.66972 15.3997 2.69222C15.2326 2.71472 15.0442 2.90273 14.6672 3.27873C13.208 4.73448 10.7936 4.73442 9.33434 3.27864C8.95743 2.90263 8.76898 2.71463 8.60193 2.69212C8.43489 2.66962 8.24877 2.77529 7.87653 2.98663L6.15184 3.96587C5.77253 4.18123 5.58287 4.28891 5.51678 4.44515C5.45068 4.6014 5.51987 4.86787 5.65825 5.4008C6.16137 7.3385 4.93972 9.37763 2.98902 9.9036C2.46712 10.0443 2.20617 10.1147 2.10308 10.2492C2 10.3838 2 10.6003 2 11.0332V12.9669C2 13.3998 2 13.6163 2.10308 13.7508C2.20615 13.8854 2.46711 13.9558 2.98902 14.0965C4.9394 14.6225 6.16008 16.6616 5.65672 18.5992C5.51829 19.1321 5.44907 19.3985 5.51516 19.5548C5.58126 19.7111 5.77092 19.8188 6.15025 20.0341L7.87495 21.0134C8.24721 21.2247 8.43334 21.3304 8.6004 21.3079C8.76746 21.2854 8.95588 21.0973 9.33271 20.7213C10.7927 19.2644 13.2088 19.2643 14.6689 20.7212C15.0457 21.0973 15.2341 21.2853 15.4012 21.3078C15.5682 21.3303 15.7544 21.2246 16.1266 21.0133L17.8513 20.034C18.2307 19.8187 18.4204 19.711 18.4864 19.5547C18.5525 19.3984 18.4833 19.132 18.3448 18.5991C17.8412 16.6616 19.0609 14.6226 21.011 14.0965Z",stroke:"currentColor",strokeLinecap:"round",strokeWidth:"1.5",key:"1"}]];var pn=require("react/jsx-runtime");function je(e){return({strokeWidth:n=1.5,...o})=>(0,pn.jsx)(vo,{icon:e,strokeWidth:n,...o})}var xo=je(fa),Co=je(ma),so=je(ua),rn=je(wa),Sa=je(ga),Ra=je(ba),ao=je(ha),Fe=je(ra),hn=je(pa),_e=je(ya),Tt=je(da),Na=je(la),So=je(ca),ro=je(ia),un=je(ka),Mn=je(va),Ro=je(xa),Ea=je(Ca);function Fn({size:e=24,className:t,"aria-hidden":n}){return(0,pn.jsxs)("svg",{xmlns:"http://www.w3.org/2000/svg",width:e,height:e,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:t,"aria-hidden":n,children:[(0,pn.jsx)("path",{d:"M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5"}),(0,pn.jsx)("circle",{cx:"13",cy:"12",r:"2"}),(0,pn.jsx)("path",{d:"M18 19c-2.8 0-5-2.2-5-5v8"}),(0,pn.jsx)("circle",{cx:"20",cy:"19",r:"2"})]})}var ss=require("react"),io="dsh-worktree-space",Ta={searchPlaceholder:"\u641C\u7D22\u4EFB\u52A1\u7A7A\u95F4/\u5DE5\u4F5C\u533A/\u4ED3\u5E93/\u5206\u652F\u6216\u8DEF\u5F84",viewSwitch:"\u89C6\u56FE",viewRepositories:"Git \u4ED3\u5E93\u89C6\u56FE",viewWorkspaces:"\u5DE5\u4F5C\u533A\u89C6\u56FE",workspaceSpans:"\u5305\u542B {count} \u4E2A\u4ED3\u5E93",workspaceCannot:"\u6CA1\u6709 Git \u4ED3\u5E93\uFF0C\u65E0\u6CD5\u521B\u5EFA\u4EFB\u52A1\u7A7A\u95F4",workspaceUnreadable:"\u65E0\u6CD5\u68C0\u67E5",workspaceCreate:"\u65B0\u5EFA Worktree Space",workspaceRevealIn:"\u7528 {ide} \u6253\u5F00",workspaceOpenIn:"\u5728\u5E94\u7528\u4E2D\u6253\u5F00",workspaceOpenInApp:"\u7528 {app} \u6253\u5F00",workspaceRevealUnavailable:"\u5BBF\u4E3B\u6CA1\u6709\u63A5\u53D7\u8FD9\u6B21\u6253\u5F00\u8BF7\u6C42\uFF1B\u8FD9\u53F0\u673A\u5668\u53EF\u80FD\u6CA1\u6709\u684C\u9762\uFF0C\u6216\u8BE5\u5E94\u7528\u5DF2\u7ECF\u5378\u8F7D\u3002",workspaceRevealFailed:"\u65E0\u6CD5\u6253\u5F00\u8BE5\u76EE\u5F55",workspaceChecking:"\u6B63\u5728\u68C0\u67E5\u2026",workspaceEmpty:"\u8FD8\u6CA1\u6709\u5DE5\u4F5C\u533A\u3002",viewTasks:"\u4EFB\u52A1\u7A7A\u95F4\u89C6\u56FE",taskCount:"\u4E2A\u4EFB\u52A1",workspaceCount:"\u4E2A\u5DE5\u4F5C\u533A",finishTask:"\u7ED3\u675F\u4EFB\u52A1",noTasks:"\u8FD8\u6CA1\u6709\u4EFB\u52A1\u7A7A\u95F4\u3002",noTasksHint:"\u7528\u4ED3\u5E93\u53F3\u4FA7\u7684\u300C\u65B0\u5EFA\u300D\u521B\u5EFA\u7B2C\u4E00\u4E2A\u4EFB\u52A1\u7A7A\u95F4\uFF1A\u6BCF\u4E2A\u9009\u4E2D\u7684\u4ED3\u5E93\u5404\u4E00\u4EFD worktree\uFF0C\u5171\u7528\u540C\u4E00\u4E2A\u5206\u652F\u3002",filterAll:"\u5168\u90E8",filterWithWorktrees:"\u6709\u4ED3\u5E93",filterAttention:"\u5F85\u5904\u7406",filters:"\u7B5B\u9009",clearFilters:"\u6E05\u9664\u641C\u7D22\u8BCD",noMatches:"\u6CA1\u6709\u5339\u914D\u7684\u4EFB\u52A1\u3001\u5DE5\u4F5C\u533A\u6216\u4ED3\u5E93",toggleRepository:"\u5C55\u5F00\u6216\u6536\u8D77\u4ED3\u5E93",toggleTask:"\u5C55\u5F00\u6216\u6536\u8D77\u4EFB\u52A1\u7A7A\u95F4",toggleWorkspace:"\u5C55\u5F00\u6216\u6536\u8D77\u5DE5\u4F5C\u533A",expandAll:"\u5168\u90E8\u5C55\u5F00",collapseAll:"\u5168\u90E8\u6536\u8D77",worktreesTitle:"Worktree Space \u7BA1\u7406",pluginSettings:"\u63D2\u4EF6\u8BBE\u7F6E",backToConversation:"\u8FD4\u56DE\u4F1A\u8BDD",repositories:"\u4E2A\u4ED3\u5E93",worktreeCount:"\u4E2A worktree",worktreeCountHint:"{count} \u4E2A worktree",summaryTasksHint:"\u5171 {tasks} \u4E2A\u4EFB\u52A1\u7A7A\u95F4\u3001{worktrees} \u4E2A worktree\u3002",currentBranchLabel:"\u5F53\u524D\u5206\u652F",branchLabel:"\u5206\u652F",taskBranchLabel:"\u4EFB\u52A1\u5206\u652F",baseBranchLabel:"\u57FA\u7EBF\u5206\u652F",remoteBranchLabel:"\u8FDC\u7AEF\u5206\u652F",noRemoteBranch:"\u672A\u8DDF\u8E2A\u8FDC\u7AEF",aheadLabel:"\u9886\u5148",behindLabel:"\u843D\u540E",aheadHint:"\u4EFB\u52A1\u5206\u652F\u9886\u5148\u57FA\u7EBF\u5206\u652F {count} \u4E2A\u63D0\u4EA4",behindHint:"\u57FA\u7EBF\u5206\u652F\u9886\u5148\u4EFB\u52A1\u5206\u652F {count} \u4E2A\u63D0\u4EA4",planAheadHint:"\u4EFB\u52A1\u5206\u652F\u6BD4\u76EE\u6807\u5206\u652F\u591A {count} \u4E2A\u63D0\u4EA4",planBehindHint:"\u76EE\u6807\u5206\u652F\u6BD4\u4EFB\u52A1\u5206\u652F\u591A {count} \u4E2A\u63D0\u4EA4",planAheadBehindLabel:"\u9886\u5148/\u843D\u540E",upstreamAheadHint:"\u5F53\u524D\u5206\u652F\u9886\u5148\u8FDC\u7AEF\u8DDF\u8E2A\u5206\u652F {count} \u4E2A\u63D0\u4EA4",upstreamBehindHint:"\u8FDC\u7AEF\u8DDF\u8E2A\u5206\u652F\u9886\u5148\u5F53\u524D\u5206\u652F {count} \u4E2A\u63D0\u4EA4",upstreamCommittedHint:"\u5F53\u524D\u5206\u652F\u76F8\u5BF9\u8FDC\u7AEF\u8DDF\u8E2A\u5206\u652F\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",upstreamWorkingHint:"\u5DE5\u4F5C\u533A\u91CC\u5C1A\u672A\u63D0\u4EA4\u7684\u90E8\u5206\uFF1A\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",committedChangesLabel:"\u5DF2\u63D0\u4EA4\u53D8\u66F4",workingChangesLabel:"\u672A\u63D0\u4EA4\u53D8\u66F4",committedChangesHint:"\u4EFB\u52A1\u5206\u652F\u76F8\u5BF9\u57FA\u7EBF\u5206\u652F\u7D2F\u8BA1\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",totalChangesHint:"\u5DF2\u63D0\u4EA4\u4E0E\u672A\u63D0\u4EA4\u5408\u8BA1\uFF1A\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",workingChangesHint:"\u5DE5\u4F5C\u533A\u91CC\u5C1A\u672A\u63D0\u4EA4\u7684\u90E8\u5206\uFF1A\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",planWorkingHint:"\u672A\u63D0\u4EA4\u53D8\u66F4\uFF1A{count} \u4E2A\u6587\u4EF6\uFF0C\u65B0\u589E {insertions} \u884C\u3001\u5220\u9664 {deletions} \u884C",deliveryGateContinue:"\u7EE7\u7EED",createDescription:"\u4E3A\u4E00\u4E2A\u4EFB\u52A1\u521B\u5EFA\u72EC\u7ACB\u7684\u4EFB\u52A1\u7A7A\u95F4\u76EE\u5F55\uFF1A\u6BCF\u4E2A\u9009\u4E2D\u4ED3\u5E93\u5404\u5F00\u4E00\u4E2A worktree\uFF0C\u5171\u7528\u540C\u4E00\u4E2A\u4EFB\u52A1\u5206\u652F\uFF1B\u4EFB\u52A1\u7A7A\u95F4\u76EE\u5F55\u5EFA\u5728 Worktree Space \u5BB9\u5668\u6839\u76EE\u5F55\u4E0B\u3002",containerLocation:"Worktree Space \u5BB9\u5668\u6839\u76EE\u5F55",containerLocationHint:"\u5B58\u653E\u4EFB\u52A1\u7A7A\u95F4\u7684\u6839\u76EE\u5F55",containerHint:"\u4EFB\u52A1\u7A7A\u95F4\u8981\u72EC\u7ACB\u4E8E\u6E90\u7801\u76EE\u5F55\uFF1A\u53EF\u653E\u5728\u6E90\u7801\u6839\u76EE\u5F55\u4E4B\u5916\uFF08\u5E73\u7EA7\u6216\u66F4\u5916\u5C42\uFF09\uFF0C\u4E0D\u80FD\u662F\u5B83\u672C\u8EAB\u3001\u4E0D\u80FD\u5728\u5B83\u4E4B\u5185\u3001\u4E5F\u4E0D\u80FD\u5305\u542B\u5B83\u3002\u8FD9\u6837\u6536\u5C3E\u65F6\u7684\u6E05\u7406\u4E0D\u4F1A\u78B0\u5230\u6E90\u7801\u3002",repositoriesCountLabel:"\u5DF2\u9009\u62E9 {count} / {total} \u4E2A\u4ED3\u5E93",repositoriesLabel:"\u9009\u62E9\u4ED3\u5E93",repositoriesHint:"\u81F3\u5C11\u9009\u62E9\u4E00\u4E2A\u4ED3\u5E93\u3002",selectAll:"\u5168\u9009",selectNone:"\u5168\u4E0D\u9009",detailsLabel:"\u4EFB\u52A1\u4FE1\u606F",deliveryDeployCheckbox:"\u90E8\u7F72\u5230 Docker",deliveryDeployCheckboxHint:"\u52FE\u9009\u540E\u4EFB\u52A1\u7A7A\u95F4\u5217\u8868\u652F\u6301\u4E00\u952E\u90E8\u7F72\u3001\u9500\u6BC1 Docker \u5BB9\u5668\uFF0C\u6216\u6267\u884C\u5192\u70DF\u6D4B\u8BD5",deliveryDeployNote:`Docker \u90E8\u7F72\u811A\u672C\u4E0D\u5728\u9762\u677F\u8BBE\u7F6E\uFF1A\u4EFB\u52A1\u7A7A\u95F4\u7684\u90E8\u7F72\u5165\u53E3\u811A\u672C\uFF08\u9ED8\u8BA4 .worktree-space/deploy/deploy.sh\uFF09\u5B9E\u73B0\u4E09\u4E2A\u5B50\u547D\u4EE4 up/smoke/destroy[\u53EF\u9009]\u3002
 up\uFF1Adocker\u5BB9\u5668\uFF08\u7EC4\uFF09\u90E8\u7F72\u542F\u52A8\u811A\u672C\u547D\u4EE4\uFF1Bsmoke\uFF1A\u5192\u70DF\u6D4B\u8BD5\u811A\u672C\u547D\u4EE4\uFF1Bdestroy[\u53EF\u9009]\uFF1Adocker\u5BB9\u5668\uFF08\u7EC4\uFF09\u9500\u6BC1\u811A\u672C\u547D\u4EE4\u3002
 \u52FE\u9009\u540E\uFF0C\u521B\u5EFA\u4EFB\u52A1\u7A7A\u95F4\u65F6\u4F1A\u628A\u5DE5\u4F5C\u533A\u7684 .worktree-space/deploy/ \u6574\u4E2A\u590D\u5236\u5230\u4EFB\u52A1\u7A7A\u95F4\u91CC\u7684\u540C\u4E00\u4F4D\u7F6E\u3002`,deployScript:"\u90E8\u7F72\u811A\u672C",deployScriptHint:"\u7559\u7A7A\u5219\u7528 \u5DE5\u4F5C\u533A/.worktree-space/deploy/deploy.sh",deployScriptNote:"\u5DE5\u4F5C\u533A/.worktree-space/deploy/ \u76EE\u5F55\u4E0B\u7684\u6587\u4EF6\u8DEF\u5F84\uFF0C\u53EF\u4EE5\u653E\u5728\u5B83\u7684\u4EFB\u610F\u5B50\u76EE\u5F55\u91CC\uFF08\u4F8B\uFF1A.worktree-space/deploy/notify.sh\uFF09\uFF1B\u8BE5\u76EE\u5F55\u4E4B\u5916\u7684\u8DEF\u5F84\u4F1A\u88AB\u62D2\u7EDD\uFF08E4014\uFF09\u3002\u8FD9\u4E2A\u8DEF\u5F84\u76F8\u5BF9\u5DE5\u4F5C\u533A\uFF1A\u521B\u5EFA\u4EFB\u52A1\u7A7A\u95F4\u65F6\u5DE5\u4F5C\u533A\u7684 .worktree-space/deploy/ \u4F1A\u6574\u4E2A\u590D\u5236\u5230\u4EFB\u52A1\u7A7A\u95F4\u91CC\u7684\u540C\u4E00\u4F4D\u7F6E\uFF0C\u6240\u4EE5\u540C\u4E00\u4E2A\u8DEF\u5F84\u5728\u4E24\u8FB9\u90FD\u6210\u7ACB\uFF0C\u8FD9\u4E2A\u5165\u53E3\u811A\u672C\u968F\u540E\u5C31\u5728\u90A3\u91CC\u8FD0\u884C\u3002",deployScriptPlaceholder:".worktree-space/deploy/deploy.sh",baseHead:"\u5404\u4ED3\u5E93\u5F53\u524D HEAD",baseNamed:"\u6307\u5B9A\u5206\u652F\u6216\u63D0\u4EA4",baseRefPlaceholder:"\u5982 main",baseRefHint:"\u8BE5 ref \u5FC5\u987B\u5728\u6BCF\u4E2A\u9009\u4E2D\u7684\u4ED3\u5E93\u4E2D\u90FD\u5B58\u5728\u3002",invalidBaseRef:"ref \u4E0D\u5408\u6CD5\uFF1A\u4E0D\u80FD\u542B\u7A7A\u683C\u6216 ~ ^ : ? * [ ] \\\uFF0C\u4E0D\u80FD\u542B .. \u6216 @{\uFF0C\u4E5F\u4E0D\u80FD\u4EE5 - / \u5F00\u5934\u6216\u4EE5 / .lock \u7ED3\u5C3E\u3002",changeBaseRef:"\u6307\u5B9A\u5206\u652F",baseRefPickerLabel:"\u4E3A {repository} \u9009\u62E9\u5206\u652F\u8D77\u70B9",baseRefPickerSearch:"\u641C\u7D22\u5206\u652F",baseRefUniformLabel:"\u6240\u6709\u9009\u4E2D\u4ED3\u5E93\u5171\u6709\u7684\u5206\u652F",baseRefUniformHint:"\u4E0A\u65B9\u5355\u72EC\u6307\u5B9A\u8FC7\u5206\u652F\u7684\u4ED3\u5E93\u6CBF\u7528\u5404\u81EA\u7684\u9009\u62E9\uFF1B\u5176\u4F59\u4ED3\u5E93\u90FD\u4ECE\u8FD9\u4E2A\u8D77\u70B9\u5F00\u59CB\u3002",baseRefNotCheckout:"\u53EA\u51B3\u5B9A\u65B0 worktree \u4ECE\u54EA\u91CC\u5F00\u59CB\uFF0C\u4E0D\u5207\u6362\u6E90\u4ED3\u5E93\u5F53\u524D\u68C0\u51FA\u7684\u5206\u652F\u3002",baseRefRules:`\u6240\u6709\u9009\u4E2D\u4ED3\u5E93\u7684\u9ED8\u8BA4\u8D77\u70B9\u3002
@@ -1206,7 +1206,7 @@ For more information, see https://radix-ui.com/primitives/docs/components/${t.do
 `)[0]??"";try{await o.using(x,{source:"controllerOperation"},async ee=>{let Le=ee.binding.session.rename;!F&&Ne!==""&&typeof Le=="function"&&await Le.call(ee.binding.session,Ne).catch(()=>{}),await ee.binding.session.prompt([{type:"text",text:oe}],"queue")});for(let ee of l.entries)be.push({name:ee.name,site:ee.site,boundary:l.boundary,wide:l.wide,fullAccess:le,kind:A,sessionId:x})}catch(ee){for(let Le of l.entries)pe.current.delete(`${A}:${Le.name}`),Oe.push(`${Le.name}: ${Ae(r,ee)}`)}}G(l=>[...l.filter(x=>!be.some(F=>F.name===x.name)),...be]),Oe.length>0&&$(Oe.join("; ")),Z(!1)},vn=async()=>{qt.length===0||k||te||Ue||await dn(qt.map(h=>({name:h.name,site:h.path,mainRepo:h.mainRepo,branch:h.branch})),"commit",Qn)},to=async()=>{Ct.length===0||k||te||Ue||await dn(Ct.map(h=>({name:h.name,site:h.mergeSite===void 0||h.mergeSite===""?h.path:h.mergeSite,mainRepo:h.mainRepo,branch:h.branch,target:h.target,files:h.conflictedFiles??[]})),"conflict",eo)},_t=async()=>{if(!Re.current&&!(m===null||k||Ue)&&!(L!==null&&!L.failed)){Re.current=!0;try{await Ze()}finally{Re.current=!1}}};return(0,f.jsx)(wt,{open:!0,onOpenChange:h=>{h||yn()},children:(0,f.jsxs)(bt,{busy:k,className:"dws-confirm-dialog dws-finish-dialog",children:[(0,f.jsxs)("div",{className:"dws-dialog-heading",children:[(0,f.jsx)(en,{className:"dws-dialog-title",children:w(r("finishTitle"),{task:m?.task??""})}),(0,f.jsx)(yt,{className:"dws-form-note",children:r("finishDescription")})]}),(0,f.jsxs)("div",{className:"dws-dialog-body",children:[m!==null&&L===null?(0,f.jsxs)("div",{className:"dws-dialog-status",role:"status",children:[(0,f.jsxs)("p",{className:"dws-dialog-status-path",children:[(0,f.jsx)("span",{children:r("taskDirectoryLabel")}),(0,f.jsx)("code",{title:U(e),children:U(e)})]}),(0,f.jsxs)("p",{className:"dws-dialog-status-counts",children:[(0,f.jsx)("span",{className:"dws-changes-label",children:r("planAheadBehindLabel")}),(0,f.jsxs)("span",{className:"dws-ahead-behind",title:`${w(r("planAheadHint"),{count:String(m.commits)})} \xB7 ${w(r("planBehindHint"),{count:String(m.behind??0)})}`,children:[(0,f.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",m.commits]}),(0,f.jsxs)("span",{className:"dws-behind",children:["\u2193 ",m.behind??0]})]}),(0,f.jsx)("span",{"aria-hidden":"true",children:"\xB7"}),m.committedChanges===void 0?null:(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-changes-label",children:r("committedChangesLabel")}),(0,f.jsxs)("span",{className:"dws-lines",title:w(r("committedChangesHint"),{insertions:String(m.committedChanges.insertions),deletions:String(m.committedChanges.deletions)}),children:[(0,f.jsxs)("span",{className:"dws-line-add",children:["+",m.committedChanges.insertions]}),(0,f.jsxs)("span",{className:"dws-line-del",children:["\u2212",m.committedChanges.deletions]})]}),(0,f.jsx)("span",{"aria-hidden":"true",children:"\xB7"})]}),m.changedFiles===0?(0,f.jsx)("span",{children:r("clean")}):(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-changes-label",title:m.workingChanges===void 0?w(r("dirty"),{count:String(m.changedFiles)}):w(r("planWorkingHint"),{count:String(m.changedFiles),insertions:String(m.workingChanges.insertions),deletions:String(m.workingChanges.deletions)}),children:r("workingChangesLabel")}),m.workingChanges===void 0?null:(0,f.jsxs)("span",{className:"dws-lines",title:w(r("planWorkingHint"),{count:String(m.changedFiles),insertions:String(m.workingChanges.insertions),deletions:String(m.workingChanges.deletions)}),children:[(0,f.jsxs)("span",{className:"dws-line-add",children:["+",m.workingChanges.insertions]}),(0,f.jsxs)("span",{className:"dws-line-del",children:["\u2212",m.workingChanges.deletions]})]})]})]})]}):null,m!==null&&m.repositories.length>0?(0,f.jsx)("ul",{className:"dws-finish-repos dws-plan",children:m.repositories.map(h=>(0,f.jsxs)("li",{children:[(0,f.jsx)("strong",{children:h.name}),(0,f.jsx)("span",{children:h.branch??"\u2014"}),ft(h).length===0?(0,f.jsx)("span",{children:h.target===void 0?"":`\u2192 ${h.target}`}):(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{"aria-hidden":"true",children:"\u2192"}),(0,f.jsx)(oi,{label:`${r("planTargetLabel")} \xB7 ${h.name}`,options:ft(h),disabled:Yt||L!==null,value:H[h.name]??h.target??"",onChoose:A=>Xe(h.name,A)})]}),h.commits===void 0&&h.behind===void 0?null:(0,f.jsxs)("span",{className:"dws-ahead-behind",title:`${w(r("planAheadHint"),{count:String(h.commits??0)})} \xB7 ${w(r("planBehindHint"),{count:String(h.behind??0)})}`,children:[(0,f.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",h.commits??0]}),(0,f.jsxs)("span",{className:"dws-behind",children:["\u2193 ",h.behind??0]})]}),h.committedChanges===void 0?null:(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-changes-label",title:w(r("committedChangesHint"),{insertions:String(h.committedChanges.insertions),deletions:String(h.committedChanges.deletions)}),children:r("committedChangesLabel")}),(0,f.jsxs)("span",{className:"dws-lines",title:w(r("committedChangesHint"),{insertions:String(h.committedChanges.insertions),deletions:String(h.committedChanges.deletions)}),children:[(0,f.jsxs)("span",{className:"dws-line-add",children:["+",h.committedChanges.insertions]}),(0,f.jsxs)("span",{className:"dws-line-del",children:["\u2212",h.committedChanges.deletions]})]})]}),h.changedFiles>0?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-changes-label",title:h.workingChanges===void 0?w(r("dirty"),{count:String(h.changedFiles)}):w(r("planWorkingHint"),{count:String(h.changedFiles),insertions:String(h.workingChanges.insertions),deletions:String(h.workingChanges.deletions)}),children:r("workingChangesLabel")}),h.workingChanges===void 0?null:(0,f.jsxs)("span",{className:"dws-lines",title:w(r("planWorkingHint"),{count:String(h.changedFiles),insertions:String(h.workingChanges.insertions),deletions:String(h.workingChanges.deletions)}),children:[(0,f.jsxs)("span",{className:"dws-line-add",children:["+",h.workingChanges.insertions]}),(0,f.jsxs)("span",{className:"dws-line-del",children:["\u2212",h.workingChanges.deletions]})]})]}):(0,f.jsx)("span",{children:r("clean")}),h.target!==void 0&&h.target!==h.checkedOut?(0,f.jsx)("span",{className:"dws-plan-detour",children:r("planTemporaryWorktree")}):null,h.error?(0,f.jsx)("span",{className:"dws-finish-error",children:h.error}):null,(0,f.jsx)("span",{className:"dws-plan-source-row",children:h.mainRepo===void 0||h.mainRepo===""?null:(0,f.jsxs)("span",{className:"dws-plan-source",children:[(0,f.jsx)("span",{children:r("planSourceRepository")}),(0,f.jsx)("code",{title:U(h.mainRepo),children:U(h.mainRepo)})]})})]},h.path))}):null,m!==null&&L===null?(0,f.jsxs)("div",{className:"dws-plan-strays",children:[(0,f.jsxs)("p",{className:"dws-plan-strays-head",children:[(0,f.jsx)("span",{children:r("planStrays")}),Ve.length>0?(0,f.jsx)("span",{children:w(r("planCount"),{count:String(Ve.length)})}):null]}),Ve.length===0?(0,f.jsx)("p",{className:"dws-plan-strays-none",children:r("planStraysNone")}):(0,f.jsx)("ul",{children:Ve.map(h=>(0,f.jsxs)("li",{children:[(0,f.jsx)("code",{title:h.name,children:Rt(h)}),h.documents>0?(0,f.jsx)("span",{className:"dws-plan-doc",children:w(r("planDocuments"),{count:String(h.documents)})}):null]},h.name))}),Ot.length>0?(0,f.jsx)("p",{className:"dws-plan-noise",children:w(r("planNoise"),{count:String(Ot.length),names:Ot.map(Rt).join(r("listJoin"))})}):null,(0,f.jsx)("p",{className:"dws-plan-breadcrumb",children:r("planBreadcrumb")})]}):null,R?(0,f.jsxs)("div",{className:"dws-error",role:"alert",children:[(0,f.jsx)(Fe,{size:16}),(0,f.jsx)("span",{children:R})]}):null,L?(0,f.jsxs)("div",{className:"dws-finish-report",role:"status",children:[(0,f.jsx)("p",{children:L.failed?L.repositories.every(h=>!h.merged&&!h.removed)?r("finishNone"):r("finishPartial"):L.repositories.some(h=>h.merged)?r("finishDone"):L.repositories.length>0&&L.repositories.every(h=>h.branchDeleted)?r("finishDoneDiscarded"):r("finishDoneKept")}),(0,f.jsx)("ul",{className:"dws-finish-repos",children:L.repositories.map(h=>(0,f.jsxs)("li",{children:[(0,f.jsx)("strong",{children:h.name}),(0,f.jsx)("span",{children:[h.merged?w(r("finishMerged"),{target:h.target??""}):null,h.removed?r("finishRemoved"):null,h.branchDeleted?r("finishBranchDeleted"):null].filter(Boolean).join(" \xB7 ")||(h.mergeInProgress?r("finishConflictKept"):h.conflict?r("finishConflicted"):r("finishUntouched"))}),h.mergeInProgress?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-finish-conflict dws-finish-handoff",role:"status",children:w(r("finishConflictHandoff"),{site:U(h.mergeSite===void 0||h.mergeSite===""?h.path:h.mergeSite)})}),(h.conflictedFiles??[]).length>0?(0,f.jsx)("span",{className:"dws-finish-files",children:w(r("finishConflictFiles"),{files:(h.conflictedFiles??[]).join(", ")})}):null,(0,f.jsxs)("details",{className:"dws-finish-log",children:[(0,f.jsx)("summary",{children:r("finishGitOutput")}),(0,f.jsx)("pre",{children:h.error})]})]}):h.conflict?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)("span",{className:"dws-finish-conflict",children:r("finishConflict")}),(0,f.jsxs)("details",{className:"dws-finish-log",children:[(0,f.jsx)("summary",{children:r("finishGitOutput")}),(0,f.jsx)("pre",{children:h.error})]})]}):h.error?(0,f.jsx)("span",{className:"dws-finish-error",children:h.error}):null]},h.path))}),(0,f.jsx)("p",{children:L.containerRemoved?r("finishContainerRemoved"):w(r("finishContainerKept"),{path:U(L.path)})}),L.archivedStrays.length?(0,f.jsx)("p",{children:w(r("finishArchived"),{path:U(E),names:L.archivedStrays.join(", ")})}):null,L.strays.length?(0,f.jsx)("p",{children:w(r("finishStrays"),{names:L.strays.join(", ")})}):null,L.warnings.map((h,A)=>(0,f.jsx)("p",{className:"dws-finish-error",children:To(r,h)},`${h.code??"warning"}-${A}`)),c!==void 0?(0,f.jsx)("p",{className:z===""?void 0:"dws-finish-error",children:z!==""?w(r("archiveWorkspaceKept"),{error:z}):L.containerRemoved?r("archiveWorkspaceRemoved"):r("archiveWorkspaceKeptIntact")}):null]}):null,D.length>0||te||qt.length>0||Ct.length>0?(0,f.jsxs)("div",{className:"dws-finish-handoff-panel",children:[(0,f.jsxs)("div",{className:"dws-finish-handoff-head",children:[ve||sn?(0,f.jsxs)("p",{className:"dws-finish-handoff-title is-done",role:"status",children:[(0,f.jsx)("span",{className:"dws-status-dot","aria-hidden":"true"}),(0,f.jsx)("span",{children:r(ve?"finishCommitDone":"finishConflictDone")})]}):(0,f.jsx)("p",{className:"dws-finish-handoff-title",children:r(Ke==="conflict"?"finishHandoffTitle":"finishCommitTitle")}),Ke==="commit"&&qt.length>0?(0,f.jsx)(K,{disabled:te||k||Ue,onClick:()=>{vn()},children:r("finishAuthorizeCommit")}):null,Ke==="conflict"&&Ct.length>0?(0,f.jsx)(K,{disabled:te||k||Ue,onClick:()=>{to()},children:r("finishAuthorizeConflict")}):null]}),Ke==="conflict"&&!sn?(0,f.jsx)("p",{children:r("finishHandoffExplain")}):null,Ke==="conflict"?(0,f.jsx)("p",{className:"dws-finish-handoff-hint",children:r("finishHandoffHint")}):null,(0,f.jsxs)("p",{className:"dws-finish-handoff-access",children:[(0,f.jsx)("span",{children:r("handoffAccessLabel")}),(0,f.jsx)("strong",{children:r(ge?"handoffFullAccessOn":"handoffFullAccessOff")}),i===void 0?null:(0,f.jsx)("button",{type:"button",className:"dws-finish-handoff-access-switch",onClick:an,children:r(ge?"handoffAccessSwitchToAsk":"handoffAccessSwitchToFull")})]}),(0,f.jsx)("p",{className:"dws-finish-handoff-access-note",children:r(i===void 0?"handoffAccessNoForm":"handoffAccessScope")}),ie!==""?(0,f.jsx)("p",{className:"dws-finish-handoff-access-note is-error",role:"status",children:ie}):null,Ke==="commit"?(0,f.jsx)("p",{className:"dws-finish-handoff-hint",children:r(ge?"finishCommitFullAccess":"finishCommitEscalation")}):null,Mt.length>0?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsxs)("p",{className:"dws-finish-handoff-authorized",children:[w(r("finishHandoffAuthorized"),{count:String(St.length),job:r(St.every(h=>h.kind==="conflict")?"finishHandoffJobConflict":"finishHandoffJobCommit")}),St.map((h,A)=>(0,f.jsxs)("span",{children:[A>0?r("listJoin"):null,(0,f.jsx)("span",{className:"dws-finish-handoff-boundary",title:h.fullAccess===!0?r("finishHandoffScopeFullAccess"):h.wide?r("finishHandoffScopeWide"):r("finishHandoffScopeTight"),children:w(r("finishHandoffBoundary"),{path:U(h.boundary)})})]},h.sessionId))]}),(0,f.jsx)("ul",{className:"dws-finish-handoff-sessions",children:Mt.map(h=>(0,f.jsxs)("li",{children:[(0,f.jsx)("strong",{children:h.name}),(0,f.jsx)("code",{title:U(h.site),children:U(h.site)})]},`${h.kind}:${h.name}`))}),St.map(h=>{let A=xt(h.sessionId);return(0,f.jsxs)("p",{className:A?"dws-finish-handoff-state":"dws-finish-handoff-state is-idle",children:[(0,f.jsx)("span",{children:r(A?h.kind==="conflict"?"finishHandoffRunningConflict":"finishHandoffRunningCommit":"finishHandoffIdle")}),(0,f.jsx)("button",{type:"button",className:"dws-finish-handoff-open",onClick:()=>Jn(h.sessionId),children:r("finishHandoffOpen")})]},h.sessionId)}),St.length>0?(0,f.jsxs)("p",{className:"dws-finish-handoff-note",children:[(0,f.jsx)(Fe,{size:13,"aria-hidden":"true"}),(0,f.jsx)("span",{children:r("finishHandoffScene")})]}):null]}):null,te?(0,f.jsxs)("p",{className:"dws-finish-handoff-hint",role:"status",children:[(0,f.jsx)(_e,{size:14,className:"dws-spin","aria-hidden":"true"})," ",r("finishHandoffAuthorizing")]}):null,q!==""?(0,f.jsx)("p",{className:"dws-finish-error",children:w(r("finishHandoffFailed"),{error:q})}):null]}):null,L===null&&m===null&&R===""?(0,f.jsxs)("div",{className:"dws-dialog-loading",role:"status",children:[(0,f.jsxs)("div",{children:[(0,f.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"})," ",r("loadingRepository")]}),(0,f.jsx)("span",{"aria-hidden":"true"})]}):null,L===null&&m!==null?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsxs)("p",{className:"dws-notice",role:"status",children:[(0,f.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,f.jsx)("span",{children:r("archiveConsequence")})]}),Kt.length>0?(0,f.jsxs)("p",{className:"dws-notice",role:"status",children:[(0,f.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,f.jsx)("span",{children:w(r("finishGateWarning"),{missing:Do(r,Kt)})})]}):null,(0,f.jsxs)("label",{className:"dws-check-option",children:[(0,f.jsx)("input",{type:"checkbox",className:"dws-checkbox",disabled:Yt,checked:b.merge,onChange:h=>N(A=>({...A,merge:h.target.checked,deleteBranch:h.target.checked||A.force?A.deleteBranch:!1}))}),(0,f.jsxs)("span",{className:"dws-check-copy",children:[(0,f.jsx)("span",{className:"dws-check-label",children:r("finishMerge")}),(0,f.jsx)("span",{className:"dws-check-path",children:r("finishMergeHint")})]})]}),(0,f.jsxs)("label",{className:"dws-check-option",children:[(0,f.jsx)("input",{type:"checkbox",className:"dws-checkbox",disabled:Yt||!b.merge&&!b.force,checked:b.deleteBranch&&(b.merge||b.force),onChange:h=>N(A=>({...A,deleteBranch:h.target.checked}))}),(0,f.jsxs)("span",{className:"dws-check-copy",children:[(0,f.jsx)("span",{className:"dws-check-label",children:r("finishDeleteBranch")}),(0,f.jsx)("span",{className:"dws-check-path",children:r("finishDeleteBranchHint")})]})]}),(0,f.jsxs)("label",{className:"dws-check-option",children:[(0,f.jsx)("input",{type:"checkbox",className:"dws-checkbox",disabled:Yt,checked:b.force,onChange:h=>N(A=>({...A,force:h.target.checked,deleteBranch:A.merge||h.target.checked?A.deleteBranch:!1}))}),(0,f.jsxs)("span",{className:"dws-check-copy",children:[(0,f.jsx)("span",{className:"dws-check-label",children:r("finishForce")}),(0,f.jsx)("span",{className:"dws-check-path",children:r("finishForceHint")})]})]}),Ve.length>0?(0,f.jsxs)(f.Fragment,{children:[(0,f.jsxs)("label",{className:"dws-check-option",children:[(0,f.jsx)("input",{type:"checkbox",className:"dws-checkbox",disabled:Yt,checked:b.archiveDocuments,onChange:h=>N(A=>({...A,archiveDocuments:h.target.checked}))}),(0,f.jsxs)("span",{className:"dws-check-copy",children:[(0,f.jsx)("span",{className:"dws-check-label",children:r("archiveDocuments")}),(0,f.jsx)("span",{className:"dws-check-path",children:w(r("archiveDocumentsHint"),{path:U(E)})})]})]}),b.archiveDocuments?null:(0,f.jsxs)("p",{className:"dws-notice dws-notice-danger",role:"alert",children:[(0,f.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,f.jsx)("span",{children:w(r("archiveDocumentsWarning"),{names:Ve.map(Rt).join(r("listJoin")),count:String(bn.reduce((h,A)=>h+A.documents,0))})})]})]}):null,m.changedFiles>0&&!b.force?(0,f.jsxs)("p",{className:"dws-notice",role:"status",children:[(0,f.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,f.jsx)("span",{children:w(r("finishDirtyNotice"),{count:String(m.changedFiles)})})]}):null,b.force?(0,f.jsxs)("p",{className:"dws-notice dws-notice-danger",role:"alert",children:[(0,f.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,f.jsx)("span",{children:b.deleteBranch?r("finishForceWarningBranch"):r("finishForceWarning")})]}):null]}):null]}),Ue?(0,f.jsxs)("div",{className:"dws-error dws-error-above-footer",role:"alert",children:[(0,f.jsx)(Fe,{size:16,"aria-hidden":"true"}),(0,f.jsx)("span",{children:w(r(Vt.length===1?"hostE5012":"hostE5012Many"),{count:String(Vt.length)})})]}):null,S?(0,f.jsxs)("div",{className:"dws-error dws-error-above-footer",role:"alert",children:[(0,f.jsx)(Fe,{size:16,"aria-hidden":"true"}),(0,f.jsx)("span",{children:S})]}):null,(0,f.jsx)("div",{className:"dws-dialog-footer",children:L?(0,f.jsxs)(f.Fragment,{children:[L.failed?(0,f.jsxs)(K,{className:"dws-button-warn-solid",disabled:k||et,onClick:()=>{_t()},children:[k||et?(0,f.jsx)(_e,{size:14,className:"dws-spin"}):(0,f.jsx)(hn,{size:14}),r(k?"finishing":et?"finishContinueWaiting":"finishContinue")]}):null,(0,f.jsx)(K,{onClick:yn,children:r("close")})]}):(0,f.jsxs)(f.Fragment,{children:[(0,f.jsx)(K,{className:"dws-button-ghost",disabled:k,onClick:yn,children:r("cancel")}),(0,f.jsxs)(K,{className:Nt?"dws-button-danger-outline":"dws-button-warn-outline",disabled:Yt||Wn,onClick:()=>{_t()},children:[k?(0,f.jsx)(_e,{size:14,className:"dws-spin"}):(0,f.jsx)(hn,{size:14}),r(k?"finishing":"finishConfirmAction")]})]})})]})})}var fe=require("react");var nt=require("react"),si=require("react-dom"),Dn=require("react/jsx-runtime"),zs=8,$s=8;function Gt({label:e,className:t="",disabled:n=!1,delayMs:o=120,children:s}){let i=(0,nt.useRef)(null),p=(0,nt.useRef)(null),a=(0,nt.useRef)(void 0),[u,r]=(0,nt.useState)(!1),[c,C]=(0,nt.useState)(null),m=(0,nt.useCallback)(()=>{window.clearTimeout(a.current),a.current=void 0,r(!1),C(null)},[]),v=(0,nt.useCallback)(()=>{n||(window.clearTimeout(a.current),a.current=window.setTimeout(()=>r(!0),o))},[o,n]);return(0,nt.useEffect)(()=>()=>window.clearTimeout(a.current),[]),(0,nt.useEffect)(()=>{n&&m()},[n,m]),(0,nt.useLayoutEffect)(()=>{if(!u)return;let R=()=>{let b=i.current,N=b?.getBoundingClientRect();if(b===null||N===void 0)return;if(!b.isConnected){m();return}let E=(p.current?.offsetWidth??0)/2,P=p.current?.offsetHeight??0,S=N.top-P-zs<$s;C({left:Math.min(Math.max(N.left+N.width/2,E+$s),window.innerWidth-E-$s),top:S?N.bottom+zs:N.top-zs,below:S})},g=b=>{let N=i.current;if(N===null||N.contains(b.target))return;let E=N.getBoundingClientRect(),{clientX:P,clientY:S}=b;(!(Number.isFinite(P)&&Number.isFinite(S))||P<E.left||P>E.right||S<E.top||S>E.bottom)&&m()};return R(),window.addEventListener("resize",R),window.addEventListener("scroll",m,!0),window.addEventListener("blur",m),document.addEventListener("pointerdown",m,!0),document.addEventListener("pointermove",g,!0),()=>{window.removeEventListener("resize",R),window.removeEventListener("scroll",m,!0),window.removeEventListener("blur",m),document.removeEventListener("pointerdown",m,!0),document.removeEventListener("pointermove",g,!0)}},[u,m]),(0,Dn.jsxs)(Dn.Fragment,{children:[(0,Dn.jsx)("span",{ref:i,className:t,onMouseEnter:v,onMouseLeave:m,onFocus:v,onBlur:m,onKeyDown:R=>{R.key==="Escape"&&m()},children:s}),u?(0,si.createPortal)((0,Dn.jsx)("span",{ref:p,role:"tooltip",className:c?.below===!0?"dws-hint dws-hint-below":"dws-hint",style:c===null?{left:0,top:0,visibility:"hidden"}:{left:`${c.left}px`,top:`${c.top}px`},children:e}),document.body):null]})}var At=require("react"),ri=require("react-dom");var qe=require("react/jsx-runtime"),ai=280,Vo=6;function ii({id:e,value:t,branches:n,loading:o,error:s,disabled:i,describedBy:p,onChoose:a,onRetry:u}){let r=J(),[c,C]=(0,At.useState)(!1),[m,v]=(0,At.useState)(""),[R,g]=(0,At.useState)(null),b=(0,At.useRef)(null),N=(0,At.useRef)(null),E=(0,At.useRef)(null),P=()=>{C(!1),v("")};(0,At.useLayoutEffect)(()=>{if(!c){g(null);return}let I=b.current?.getBoundingClientRect();if(I===void 0)return;let z=Math.min(Math.max(I.width,ai),420),_=Math.min(320,44+n.length*28),k=I.bottom+Vo,H=window.innerHeight-k>=_+Vo?k:Math.max(8,I.top-Vo-_);g({left:Math.max(8,Math.min(I.left,window.innerWidth-z-8)),top:H})},[c,n.length]),(0,At.useEffect)(()=>{if(!c)return;E.current?.focus();let I=k=>{let O=k.target;N.current?.contains(O)||b.current?.contains(O)||P()},z=k=>{k.key==="Escape"&&P()},_=()=>{let k=b.current?.getBoundingClientRect();k!==void 0&&g(O=>O===null?O:{...O,top:Math.max(8,Math.min(k.bottom+Vo,window.innerHeight-8))})};return window.addEventListener("scroll",_,!0),document.addEventListener("pointerdown",I,!0),document.addEventListener("keydown",z,!0),()=>{window.removeEventListener("scroll",_,!0),document.removeEventListener("pointerdown",I,!0),document.removeEventListener("keydown",z,!0)}},[c]);let S=m.trim().toLowerCase(),T=S===""?n:n.filter(I=>I.toLowerCase().includes(S)),L=o?r("baseRefLoading"):s!==""?w(r("baseRefFailed"),{error:s}):n.length===0?r("baseRefNoCommon"):T.length===0?w(r("baseRefFilterEmpty"),{query:m.trim()}):"";return(0,qe.jsxs)(qe.Fragment,{children:[(0,qe.jsx)("button",{ref:b,id:e,type:"button",className:"dws-input dws-base-ref dws-base-ref-button",disabled:i,"aria-haspopup":"listbox","aria-expanded":c,"aria-describedby":p,onClick:()=>c?P():C(!0),children:(0,qe.jsx)("span",{className:"dws-base-ref-value",children:t===""?r("baseRefEachOwnHead"):t})}),L===""?null:(0,qe.jsxs)("p",{className:"dws-form-note dws-branch-state",children:[L,s===""||o?null:(0,qe.jsxs)(qe.Fragment,{children:[" ",(0,qe.jsx)("button",{type:"button",className:"dws-link-button",onClick:u,children:r("baseRefRetry")})]})]}),c?(0,ri.createPortal)((0,qe.jsxs)("div",{ref:N,className:"dws-branch-picker",role:"group","aria-label":r("baseRefUniformLabel"),style:R===null?{left:0,top:0,visibility:"hidden"}:{left:`${R.left}px`,top:`${R.top}px`,width:`${ai}px`},children:[(0,qe.jsx)("input",{ref:E,className:"dws-input dws-branch-search",type:"text",value:m,onChange:I=>v(I.target.value),placeholder:r("baseRefPickerSearch"),"aria-label":r("baseRefPickerSearch"),autoComplete:"off",spellCheck:!1}),T.length===0?null:(0,qe.jsx)("ul",{className:"dws-branch-options",children:T.map(I=>(0,qe.jsx)("li",{children:(0,qe.jsx)("button",{type:"button",className:I===t?"dws-branch-option dws-branch-option-chosen":"dws-branch-option",onClick:()=>{a(I),P()},children:I})},I))}),(0,qe.jsx)("button",{type:"button",className:t===""?"dws-branch-option dws-branch-option-chosen":"dws-branch-option",onClick:()=>{a(""),P()},children:r("baseRefEachOwnHead")})]}),Kn(b.current)):null]})}var Wt=require("react"),li=require("react-dom");var ze=require("react/jsx-runtime"),Uc=260,Vc=220,js=6;function ci({repository:e,entry:t,loading:n,error:o,chosen:s,current:i,onChoose:p,onRetry:a}){let u=J(),[r,c]=(0,Wt.useState)(!1),[C,m]=(0,Wt.useState)(""),[v,R]=(0,Wt.useState)(null),g=(0,Wt.useRef)(null),b=(0,Wt.useRef)(null),N=(0,Wt.useRef)(null),E=()=>{c(!1),R(null),m("")};(0,Wt.useLayoutEffect)(()=>{if(!r)return;let z=()=>{let _=g.current?.getBoundingClientRect();if(_===void 0)return;let k=b.current?.offsetHeight??0,O=g.current?.closest(".dws-check-option")?.getBoundingClientRect(),H=Math.min(Math.max(O?.width??Uc,Vc),window.innerWidth-16),W=_.bottom+k+js>window.innerHeight;R({left:Math.min(Math.max(O?.left??_.left,8),window.innerWidth-H-8),top:W?Math.max(8,_.top-k-js):_.bottom+js,width:H,below:W})};return z(),window.addEventListener("resize",z),()=>window.removeEventListener("resize",z)},[r]),(0,Wt.useEffect)(()=>{if(!r)return;N.current?.focus();let z=k=>{let O=k.target;b.current?.contains(O??null)||g.current?.contains(O??null)||E()},_=k=>{k.key==="Escape"&&E()};return window.addEventListener("scroll",E,!0),document.addEventListener("pointerdown",z,!0),document.addEventListener("keydown",_,!0),()=>{window.removeEventListener("scroll",E,!0),document.removeEventListener("pointerdown",z,!0),document.removeEventListener("keydown",_,!0)}},[r]);let P=t?.branches??[],S=C.trim().toLowerCase(),T=S===""?P:P.filter(z=>z.toLowerCase().includes(S)),L=t?.truncated??0,I=(0,ze.jsxs)("div",{ref:b,className:"dws-branch-picker",role:"group","aria-label":w(u("baseRefPickerLabel"),{repository:e}),style:v===null?{left:0,top:0,visibility:"hidden"}:{left:`${v.left}px`,top:`${v.top}px`,width:`${v.width}px`},children:[(0,ze.jsx)("input",{ref:N,className:"dws-input dws-branch-search",type:"text",value:C,onChange:z=>m(z.target.value),placeholder:u("baseRefPickerSearch"),"aria-label":u("baseRefPickerSearch"),autoComplete:"off",spellCheck:!1}),n?(0,ze.jsx)("p",{className:"dws-field-note dws-branch-state",children:u("baseRefLoading")}):o!==""?(0,ze.jsxs)("p",{className:"dws-field-note dws-branch-state dws-field-note-warning",children:[w(u("baseRefFailed"),{error:o})," ",(0,ze.jsx)("button",{type:"button",className:"dws-link-button",onClick:a,children:u("baseRefRetry")})]}):P.length===0?(0,ze.jsx)("p",{className:"dws-field-note dws-branch-state",children:u("baseRefEmpty")}):T.length===0?(0,ze.jsx)("p",{className:"dws-field-note dws-branch-state",children:w(u("baseRefFilterEmpty"),{query:C.trim()})}):null,T.length===0?null:(0,ze.jsx)("div",{className:"dws-branch-list",children:(0,ze.jsx)("ul",{className:"dws-branch-options",children:T.map(z=>(0,ze.jsx)("li",{children:(0,ze.jsx)("button",{type:"button",className:z===s?"dws-branch-option dws-branch-option-chosen":"dws-branch-option",onClick:()=>{p(z),E()},children:z})},z))})}),L===0?null:(0,ze.jsx)("p",{className:"dws-field-note dws-branch-state",children:w(u("baseRefTruncated"),{count:String(L)})}),(0,ze.jsx)("button",{type:"button",className:s===void 0?"dws-branch-option dws-branch-option-chosen":"dws-branch-option",onClick:()=>{p(void 0),E()},children:u("baseRefReset")})]});return(0,ze.jsxs)(ze.Fragment,{children:[(0,ze.jsx)("button",{ref:g,type:"button",className:"dws-branch-button",onClick:()=>c(z=>!z),"aria-expanded":r,title:`${s===void 0?i===void 0?u("baseRefReset"):w(u("baseRefCurrent"),{branch:i}):w(u("baseRefChosen"),{branch:s})} \xB7 ${u("baseRefNotCheckout")}`,children:u("changeBaseRef")}),r?(0,li.createPortal)(I,Kn(g.current)):null]})}var y=require("react/jsx-runtime"),di={deployTarget:"none"};function Kc(e){return{deploy:{target:e.deployTarget==="docker"?"docker":"none"}}}var pi="task/",qc=/[\s~^:?*\[\]\\\u0000-\u001f\u007f]/;function Yc(e){return e===""?"":qc.test(e)||e.includes("..")||e.includes("@{")||e.includes("//")||e.startsWith("/")||e.startsWith("-")?"invalidBranchPrefix":""}function hi({target:e,api:t,workspaces:n,uiWorkspace:o,config:s,onCreated:i,onClose:p}){let a=J(),u=(0,fe.useId)(),[r,c]=(0,fe.useState)(null),[C,m]=(0,fe.useState)(!0),[v,R]=(0,fe.useState)(0),[g,b]=(0,fe.useState)(""),[N,E]=(0,fe.useState)(""),[P,S]=(0,fe.useState)(""),[T,L]=(0,fe.useState)([]),[I,z]=(0,fe.useState)(""),[_,k]=(0,fe.useState)(void 0),[O,H]=(0,fe.useState)(!1),[W,D]=(0,fe.useState)(""),[G,te]=(0,fe.useState)(0),[Z,q]=(0,fe.useState)({}),[$,ge]=(0,fe.useState)(di),[ke,ie]=(0,fe.useState)(""),[Q,st]=(0,fe.useState)(!1),[Ye,Re]=(0,fe.useState)(!1),[pe,ue]=(0,fe.useState)(""),[$e,vt]=(0,fe.useState)(!1),ht=(0,fe.useRef)(!1),[Xe,Vt]=(0,fe.useState)(null);(0,fe.useEffect)(()=>{b(""),z(""),q({}),Vt(null),st(!1),Re(!1),ge(di),ie("")},[e.path]);let[Ue,Kt]=(0,fe.useState)(""),bn=(0,fe.useRef)("");(0,fe.useEffect)(()=>{if(s===void 0)return;let M=()=>{let V=s.getSnapshot().value?.defaultBranchPrefix,X=typeof V=="string"?V:"";bn.current=X,Kt(X)};return M(),s.subscribe(M)},[s]),(0,fe.useEffect)(()=>{let M=!0;return c(null),m(!0),ue(""),t.suggestRoot(e.path).then(V=>{M&&(c(V),S(U(V.suggested)),E(bn.current||V.branchPrefix||pi),L(V.repositories.map(X=>X.path)))}).catch(V=>{M&&ue(Ae(a,V))}).finally(()=>{M&&m(!1)}),()=>{M=!1}},[t,e.path,v]),(0,fe.useEffect)(()=>{if(r===null)return;let M=r.repositories.map(X=>X.path);if(M.length===0)return;let V=!0;return H(!0),D(""),t.branches(M).then(X=>{V&&k(X??{})}).catch(X=>{V&&D(Ae(a,X))}).finally(()=>{V&&H(!1)}),()=>{V=!1}},[t,r,G]);let Ve=r?.repositories??[],Ot=r?.branchPrefix??pi,ut=N.trim(),xt=ut===""?Ue||Ot:ut,et=Yc(xt),at=et===""?w(a("branchPrefixHint"),{prefix:xt||Ot}):ut===""&&Ue!==""?w(a("invalidConfiguredBranchPrefix"),{prefix:xt}):a(et),It=s!==void 0,qt=It&&ut!==""&&et===""&&ut!==Ue,Ct=P.trim(),Ke=r===null?"":U(r.suggested),Wn=It&&Ct!==""&&Ke!==""&&Ct!==Ke,ve=Ha(g),sn=/^[a-z0-9_][a-z0-9._-]*$/.test(ve)&&!ve.includes("..")&&!ve.endsWith(".")&&!ve.endsWith(".lock"),Me=sn&&et===""?`${xt}${ve}`:"",Mt=it(e.path),St=ve!==""&&P.trim()!==""&&Mt!==""?Cn(Cn(P.trim(),Mt),ve):"",Rt=g.length>0&&!sn,ft=Rt?ve===""?"invalidNameEmpty":ve.startsWith(".")?"invalidNameLeadingDot":ve.includes("..")?"invalidNameConsecutiveDots":ve.endsWith(".lock")?"invalidNameLockSuffix":ve.endsWith(".")?"invalidNameTrailingDot":"invalidNameGeneric":"",yn=Rt?"dws-field-note dws-field-note-warning":"dws-field-note",Jn=et!==""?"dws-field-note dws-field-note-warning":"dws-field-note",Nt=r!==null&&Ve.length>0,Ze=$e||C||!Nt||!!Xe,Yt=(()=>{let M=Ve.filter(X=>T.includes(X.path));if(M.length===0)return[];let V;for(let X of M){let we=_?.[X.path];if(we===void 0)return[];let Ie=new Set(we.branches);if(V=V===void 0?[...Ie]:V.filter(l=>Ie.has(l)),V.length===0)return[]}return(V??[]).sort((X,we)=>X.localeCompare(we))})(),cn=I!==""&&Yt.includes(I)?I:"",Et=cn,kn=()=>{let M={};for(let V of Ve){if(!T.includes(V.path))continue;let X=Z[V.name];X!==void 0&&(M[V.name]=X)}return Object.keys(M).length===0?void 0:M},Xt=kn(),Qn=$.deployTarget!=="none",eo=sn&&T.length>0&&P.trim()!==""&&et==="",Ft=()=>{ht.current=!0,vt(!0),ue("")},Hn=()=>{ht.current=!1,vt(!1)},an=()=>{ht.current||p()},dn=async(M,V)=>{let X=[];if(V?.workspaceId)try{await n.delete(V.workspaceId)}catch(we){X.push(Ae(a,we))}try{await t.doneTask({task:M.task,project:M.project,tasksRoot:P.trim(),merge:!1,deleteBranch:!0,force:!0,cause:"creating its Workspace in the dialog failed, so the create was rolled back rather than left half-made."})}catch(we){X.push(Ae(a,we))}return X.length===0?{ok:!0}:{ok:!1,error:X.join("; ")}},vn=async(M,V)=>{let X=await n.create({path:M});try{await n.rename(X.workspaceId,`${e.title}/${V}`),await o.openWorkspace(X.workspaceId),i(M),p()}catch(we){throw await n.delete(X.workspaceId),we}},to=async()=>{if(!(!Xe||ht.current)){Ft();try{await vn(Xe.path,Xe.task),Vt(null)}catch(M){ue(`${a("registerFailed")} ${Ae(a,M)}`)}finally{Hn()}}},_t=async(M,V)=>{try{return await s?.set(M,V)===!0}catch{return!1}},h=async()=>{if(ht.current||Xe||C||!Nt)return;if(!sn){ue(a(g.trim()!==""&&ft!==""?ft:"fillTaskName"));return}if(et!==""){ue(at);return}if(T.length===0){ue(a("repositoriesHint"));return}Ft();let M,V,X="create";try{let we=await t.createTask({sourceRoot:e.path,task:ve,tasksRoot:P.trim(),repos:T,baseRef:Et===""?void 0:Et,...Xt===void 0?{}:{baseRefs:kn()},branchPrefix:xt,deployTarget:Kc($).deploy.target,...ke.trim()===""?{}:{deployScript:ke.trim()}});if(M={path:we.path,task:we.task,project:we.project},Q&&qt){let Ie=await _t("defaultBranchPrefix",ut);st(!1),Ie||ue(a("branchPrefixNotSaved"))}if(Ye&&Wn){let l=await _t("tasksRootDirectory",Ct)?await _t("tasksRootStrategy","custom"):!1;Re(!1),l||ue(a("tasksRootNotSaved"))}X="register",V=await n.create({path:we.path}),X="rename",await n.rename(V.workspaceId,`${e.title}/${we.task}`),X="open",await o.openWorkspace(V.workspaceId),i(we.path),p()}catch(we){let Ie=Ae(a,we);if(X==="open"){M&&i(M.path),ue(`${a("openFailed")}${Ie}`);return}if(we?.code==="task-space-unregistered"&&!M){Vt({path:St,task:ve,project:Mt,tasksRoot:P.trim(),branch:Me}),ue(w(a("resumeUnregistered"),{path:St}));return}if(M){let l=await dn(M,V);l.ok?ue(w(a("createRolledBack"),{error:Ie})):ue(w(a("rollbackIncomplete"),{error:Ie,undo:l.error,path:M.path,branch:Me||M.task}));return}ue(`${a("operationError")}${Ie}`)}finally{Hn()}},A=(M,V)=>{L(X=>V?[...new Set([...X,M])]:X.filter(we=>we!==M))},re=M=>{L(M?Ve.map(V=>V.path):[])},be=(0,y.jsxs)("fieldset",{className:"dws-field dws-repositories-fieldset",disabled:Ze,"aria-describedby":T.length===0?`${u}-repositories-note`:void 0,children:[(0,y.jsx)("legend",{className:"dws-field-legend",children:(0,y.jsx)("span",{id:`${u}-repositories`,className:"dws-field-label",children:a("repositoriesLabel")})}),(0,y.jsxs)("div",{className:"dws-repo-picker",children:[(0,y.jsx)("div",{className:"dws-repo-choices",children:Ve.map((M,V)=>{let X=Z[M.name],we=X??M.branch;return(0,y.jsxs)("div",{className:"dws-check-option",children:[(0,y.jsx)("input",{id:`${u}-repo-${V}`,className:"dws-checkbox",type:"checkbox",checked:T.includes(M.path),onChange:Ie=>A(M.path,Ie.target.checked)}),(0,y.jsxs)("label",{className:"dws-check-copy",htmlFor:`${u}-repo-${V}`,children:[(0,y.jsxs)("span",{className:"dws-check-name",children:[(0,y.jsx)("span",{className:"dws-check-label",children:M.name}),we===void 0?null:(0,y.jsxs)("span",{className:"dws-branch-label",title:`${a(X===void 0?"currentBranchLabel":"baseRefChosen")}: ${we}`,children:[(0,y.jsx)(rn,{size:12}),(0,y.jsx)("span",{className:"dws-branch-value",children:we})]}),X===void 0?null:(0,y.jsx)("span",{className:"dws-visually-hidden",children:w(a("baseRefValue"),{branch:X})})]}),(0,y.jsx)("span",{className:"dws-check-path",title:U(M.path),children:U(M.path)})]}),(0,y.jsx)(ci,{repository:M.name,entry:_?.[M.path],loading:O||_===void 0&&W==="",error:W,chosen:X,current:M.branch,onChoose:Ie=>q(l=>{let x={...l};return Ie===void 0?delete x[M.name]:x[M.name]=Ie,x}),onRetry:()=>te(Ie=>Ie+1)})]},M.path)})}),T.length===0?(0,y.jsx)("div",{className:"dws-repo-picker-foot",children:(0,y.jsx)("p",{id:`${u}-repositories-note`,className:"dws-field-note",children:a("repositoriesHint")})}):null]})]}),Oe=(0,y.jsxs)("fieldset",{className:"dws-field dws-details-fieldset",disabled:Ze,children:[(0,y.jsx)("legend",{className:"dws-field-label dws-fieldset-legend",children:a("detailsLabel")}),(0,y.jsxs)("div",{className:"dws-details",children:[(0,y.jsxs)("div",{className:"dws-field-row",children:[(0,y.jsxs)("label",{className:"dws-field-label",htmlFor:`${u}-name`,children:[(0,y.jsx)("span",{id:`${u}-name-label`,children:a("taskName")}),(0,y.jsx)("span",{className:yn,children:a(Rt?ft:"taskNameHint")})]}),(0,y.jsx)(Qe,{id:`${u}-name`,"aria-labelledby":`${u}-name-label`,value:g,disabled:Ze,onChange:M=>b(M.target.value),placeholder:a("taskNamePlaceholder"),autoFocus:!0,autoComplete:"off",spellCheck:!1,"aria-invalid":Rt||void 0,"aria-describedby":`${u}-name-note`}),(0,y.jsx)("span",{id:`${u}-name-note`,className:"dws-field-note dws-visually-hidden",children:a(Rt?ft:"taskNameHint")})]}),(0,y.jsxs)("div",{className:"dws-field-row",children:[(0,y.jsxs)("label",{className:"dws-field-label",htmlFor:`${u}-prefix`,children:[(0,y.jsx)("span",{id:`${u}-prefix-label`,children:a("branchPrefix")}),(0,y.jsx)("span",{className:Jn,children:at})]}),(0,y.jsx)(Qe,{id:`${u}-prefix`,"aria-labelledby":`${u}-prefix-label`,value:N,disabled:Ze,onChange:M=>E(M.target.value),placeholder:Ot,autoComplete:"off",spellCheck:!1,"aria-invalid":et!==""||void 0,"aria-describedby":`${u}-prefix-note`}),(0,y.jsx)("span",{id:`${u}-prefix-note`,className:"dws-field-note dws-visually-hidden",children:at}),qt?(0,y.jsxs)("label",{className:"dws-default-prefix",htmlFor:`${u}-default-prefix`,children:[(0,y.jsx)("input",{id:`${u}-default-prefix`,className:"dws-checkbox",type:"checkbox","aria-label":a("rememberPrefix"),checked:Q,disabled:Ze,onChange:M=>st(M.target.checked)}),(0,y.jsx)("span",{className:"dws-check-copy",children:(0,y.jsx)("span",{className:"dws-check-label",children:a("rememberPrefix")})})]}):null]}),(0,y.jsxs)("div",{className:"dws-field-row",children:[(0,y.jsxs)("label",{className:"dws-field-label",htmlFor:`${u}-container`,children:[(0,y.jsxs)("span",{className:"dws-field-name",children:[(0,y.jsx)("span",{id:`${u}-container-label`,children:a("containerLocation")}),(0,y.jsx)(Gt,{label:a("containerHint"),className:"dws-field-hint",children:(0,y.jsx)(ao,{size:13,"aria-hidden":"true"})})]}),(0,y.jsx)("span",{className:"dws-field-note",children:a("containerLocationHint")})]}),(0,y.jsx)(Qe,{id:`${u}-container`,"aria-labelledby":`${u}-container-label`,value:P,disabled:Ze,onChange:M=>S(M.target.value),autoComplete:"off",spellCheck:!1,"aria-describedby":`${u}-container-note`}),(0,y.jsx)("span",{id:`${u}-container-note`,className:"dws-field-note dws-visually-hidden",children:a("containerHint")}),Wn?(0,y.jsxs)(y.Fragment,{children:[(0,y.jsxs)("label",{className:"dws-default-prefix",htmlFor:`${u}-default-root`,children:[(0,y.jsx)("input",{id:`${u}-default-root`,className:"dws-checkbox",type:"checkbox","aria-label":a("rememberTasksRoot"),checked:Ye,disabled:Ze,onChange:M=>Re(M.target.checked)}),(0,y.jsx)("span",{className:"dws-check-copy",children:(0,y.jsx)("span",{className:"dws-check-label",children:a("rememberTasksRoot")})})]}),(0,y.jsx)("p",{className:"dws-field-note",children:a("tasksRootStrategyHint")})]}):null]}),(0,y.jsxs)("div",{className:"dws-field-row",children:[(0,y.jsxs)("div",{className:"dws-deploy-line",children:[(0,y.jsxs)("label",{className:"dws-deploy-option",htmlFor:`${u}-deploy-docker`,children:[(0,y.jsx)("input",{id:`${u}-deploy-docker`,className:"dws-checkbox",type:"checkbox",checked:$.deployTarget==="docker",disabled:Ze,onChange:M=>ge({deployTarget:M.target.checked?"docker":"none"})}),(0,y.jsxs)("span",{className:"dws-check-copy",children:[(0,y.jsx)("span",{className:"dws-check-label",children:a("deliveryDeployCheckbox")}),(0,y.jsx)(Gt,{label:a("deliveryDeployNote"),className:"dws-field-hint",children:(0,y.jsx)(ao,{size:13,"aria-hidden":"true"})})]})]}),(0,y.jsx)("span",{className:"dws-field-note",children:a("deliveryDeployCheckboxHint")})]}),$.deployTarget==="none"?null:(0,y.jsx)(y.Fragment,{children:(0,y.jsxs)("div",{className:"dws-field-row",children:[(0,y.jsxs)("label",{className:"dws-field-label",htmlFor:`${u}-deploy-script`,children:[(0,y.jsxs)("span",{className:"dws-field-name",children:[(0,y.jsx)("span",{id:`${u}-deploy-script-label`,children:a("deployScript")}),(0,y.jsx)(Gt,{label:a("deployScriptNote"),className:"dws-field-hint",children:(0,y.jsx)(ao,{size:13,"aria-hidden":"true"})})]}),(0,y.jsx)("span",{className:"dws-field-note",children:a("deployScriptHint")})]}),(0,y.jsx)(Qe,{id:`${u}-deploy-script`,"aria-labelledby":`${u}-deploy-script-label`,value:ke,disabled:Ze,onChange:M=>ie(M.target.value),placeholder:a("deployScriptPlaceholder"),autoComplete:"off",spellCheck:!1,"aria-describedby":`${u}-deploy-script-note`}),(0,y.jsx)("span",{id:`${u}-deploy-script-note`,className:"dws-field-note dws-visually-hidden",children:a("deployScriptNote")})]})})]})]})]}),On=(0,y.jsxs)("div",{className:"dws-field dws-base-fieldset",children:[(0,y.jsxs)("div",{className:"dws-base-heading",children:[(0,y.jsx)("span",{id:`${u}-base-label`,className:"dws-field-label",children:a("basedOn")}),(0,y.jsx)(Gt,{label:a("baseRefRules"),className:"dws-field-hint",children:(0,y.jsx)(ao,{size:13,"aria-hidden":"true"})}),(0,y.jsxs)("div",{className:"dws-repo-actions",children:[(0,y.jsx)("span",{className:"dws-check-count","aria-live":"polite",children:w(a("repositoriesCountLabel"),{count:String(T.length),total:String(Ve.length)})}),(0,y.jsxs)("span",{className:"dws-picker-tools",children:[(0,y.jsx)("button",{type:"button",className:"dws-link-button",disabled:Ze,onClick:()=>re(!0),children:a("selectAll")}),(0,y.jsx)("span",{className:"dws-picker-divider","aria-hidden":"true"}),(0,y.jsx)("button",{type:"button",className:"dws-link-button",disabled:Ze,onClick:()=>re(!1),children:a("selectNone")})]})]})]}),(0,y.jsxs)("div",{className:"dws-base-control",role:"group","aria-labelledby":`${u}-base-label`,children:[(0,y.jsx)(ii,{id:`${u}-uniform-base`,value:cn,branches:Yt,loading:_===void 0||O,error:W,disabled:Ze,describedBy:`${u}-base-rules`,onChoose:z,onRetry:()=>te(M=>M+1)}),(0,y.jsx)("p",{className:"dws-form-note",children:a("baseRefUniformHint")}),(0,y.jsx)("span",{id:`${u}-base-rules`,className:"dws-visually-hidden",children:a("baseRefRules")})]})]}),no=(0,y.jsxs)("dl",{className:"dws-preview","aria-live":"polite","aria-atomic":"true",children:[(0,y.jsxs)("div",{className:"dws-preview-row",children:[(0,y.jsx)("dt",{className:"dws-preview-label",children:a("branch")}),(0,y.jsx)("dd",{className:"dws-preview-value",children:Xe?.branch??(Me||"\u2014")})]}),(0,y.jsxs)("div",{className:"dws-preview-row",children:[(0,y.jsx)("dt",{className:"dws-preview-label",children:a("taskDirectoryLabel")}),(0,y.jsx)("dd",{className:"dws-preview-value",children:U(Xe?.path??St)||"\u2014"})]})]});return(0,y.jsx)(wt,{open:!0,onOpenChange:M=>{M||an()},children:(0,y.jsxs)(bt,{busy:$e,className:"dws-create-dialog",children:[(0,y.jsxs)("header",{className:"dws-dialog-heading",children:[(0,y.jsx)(en,{className:"dws-dialog-title",children:a("dialogTitle")}),(0,y.jsx)(yt,{className:"dws-form-note",children:a("createDescription")}),(0,y.jsxs)("div",{className:"dws-repo-context",children:[(0,y.jsx)("strong",{children:e.title}),(0,y.jsx)("code",{title:U(e.path),children:U(e.path)})]})]}),(0,y.jsxs)("form",{className:"dws-create-form",onSubmit:M=>{M.preventDefault(),h()},"aria-busy":$e,children:[(0,y.jsxs)("div",{className:"dws-dialog-body",children:[!C&&Nt?be:null,C?(0,y.jsxs)("div",{className:"dws-dialog-loading",role:"status",children:[(0,y.jsxs)("div",{children:[(0,y.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"})," ",a("loadingSourceRoot")]}),(0,y.jsx)("span",{"aria-hidden":"true"}),(0,y.jsx)("span",{"aria-hidden":"true"}),(0,y.jsx)("span",{"aria-hidden":"true"})]}):Nt?(0,y.jsxs)("div",{className:"dws-form-fields",children:[On,Oe,no]}):(0,y.jsxs)("div",{className:"dws-empty",children:[(0,y.jsx)("p",{children:a("notSourceRoot")}),(0,y.jsx)(K,{type:"button",className:"dws-button-ghost",onClick:()=>R(M=>M+1),children:a("retry")})]})]}),pe?(0,y.jsxs)("div",{className:"dws-error dws-error-above-footer",role:"alert",children:[(0,y.jsx)(Fe,{size:16,"aria-hidden":"true"}),(0,y.jsx)("span",{children:pe})]}):null,(0,y.jsx)("footer",{className:"dws-dialog-footer",children:Xe?(0,y.jsx)(y.Fragment,{children:(0,y.jsxs)(K,{type:"button",className:"dws-button-primary",disabled:$e,onClick:()=>{to()},children:[$e?(0,y.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"}):null,a("retryRegister")]})}):(0,y.jsxs)(y.Fragment,{children:[(0,y.jsx)(K,{type:"button",className:"dws-button-ghost",disabled:$e,onClick:an,children:a("cancel")}),(0,y.jsxs)(K,{type:"submit",className:"dws-button-primary",disabled:$e||C||!eo,children:[$e?(0,y.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"}):null,a($e?"creating":"createAndOpen")]})]})})]})]})})}var Ko=require("react/jsx-runtime");function ui({session:e,useWorkspaces:t,onOpen:n,canCreate:o}){let s=J(),i=t(p=>p.items.find(a=>a.sessionIds?.includes(e.sessionId)));return!e.blank||!i||o&&!o(i)?null:(0,Ko.jsx)(Gt,{label:s("newWorktreeSpace"),className:"dws-new-session-action",children:(0,Ko.jsx)(K,{type:"button",className:"dws-new-session-button","aria-label":s("newWorktreeSpace"),onClick:()=>n(i),children:(0,Ko.jsx)(Fn,{size:16,"aria-hidden":"true"})})})}var Ce=require("react");var tn={},Gs=new Set,fi=()=>{for(let e of Gs)e()};function nn(e){return tn[e]}function kt(e,t){if(t===void 0){if(!(e in tn))return;let{[e]:n,...o}=tn;tn=o}else{if(tn[e]===t)return;tn={...tn,[e]:t}}fi()}function mi(e){let t={};for(let[n,o]of Object.entries(tn))e[n]!==o&&(t[n]=o);Object.keys(t).length!==Object.keys(tn).length&&(tn=t,fi())}function Ln(e){return Gs.add(e),()=>{Gs.delete(e)}}var ot=require("react");var gi=["node_modules","dist","build","coverage","storybook-static","__pycache__","site-packages","target","obj","packages","library","deriveddata","pods","vendor","deps","elm-stuff","dist-newstyle","_build","blib","zig-out","binaries","intermediate","deriveddatacache","worktree-space","dsh-worktree-space"];function Ht(e,t,n){let o=new Set(n.map(p=>p.toLowerCase())),s=new Set,i=[];for(let p of[...e,...t]){let a=p.toLowerCase();o.has(a)||s.has(a)||(s.add(a),i.push(p))}return i}function wi(e,t){return e.length===t.length&&e.every((n,o)=>n===t[o])}var ne=require("react/jsx-runtime");function bi(e){let t=e.trim().replace(/^[/\\]+|[/\\]+$/g,"");return t===""||/[/\\]/.test(t)||t==="."||t===".."?"":t.length<=255?t:""}function yi(e){let t=new Set,n=[];for(let o of e){let s=o.toLowerCase();t.has(s)||(t.add(s),n.push(o))}return n}function Zc({name:e,busy:t,onConfirm:n,onCancel:o}){let s=J();return(0,ne.jsx)(wt,{open:!0,onOpenChange:i=>{i||o()},children:(0,ne.jsxs)(bt,{className:"dws-confirm-dialog dws-confirm-narrow",busy:t,showClose:!1,children:[(0,ne.jsx)("div",{className:"dws-dialog-body",children:(0,ne.jsx)(yt,{className:"dws-confirm-body",children:w(s("ignoredScanDirectoriesConfirmRemove"),{name:e})})}),(0,ne.jsxs)("footer",{className:"dws-dialog-footer",children:[(0,ne.jsx)(K,{disabled:t,onClick:o,children:s("cancel")}),(0,ne.jsx)(K,{className:"dws-button-primary",disabled:t,onClick:()=>n(e),children:s("configConfirm")})]})]})})}function ki({builtIn:e,configured:t,disabled:n=[],busy:o=!1,onSave:s,onClose:i}){let p=J(),[a,u]=(0,ot.useState)(()=>Ht(e,t,n)),[r,c]=(0,ot.useState)(""),[C,m]=(0,ot.useState)(!1),[v,R]=(0,ot.useState)(""),[g,b]=(0,ot.useState)(!1),[N,E]=(0,ot.useState)(""),P=`${e.join("")}${t.join("")}${n.join("")}`,S=(0,ot.useMemo)(()=>Ht(e,t,n),[P]);(0,ot.useEffect)(()=>{u(S),E("")},[S]);let T=(0,ot.useMemo)(()=>new Set(e.map(H=>H.toLowerCase())),[e]),L=(0,ot.useMemo)(()=>a.filter(H=>!T.has(H.toLowerCase())).length,[a,T]),I=L>=200,z=(0,ot.useMemo)(()=>new Intl.Collator(void 0,{numeric:!0,sensitivity:"base"}),[]),_=(0,ot.useMemo)(()=>{let H=r.trim().toLowerCase();return a.filter(W=>H===""||W.toLowerCase().includes(H)).sort((W,D)=>z.compare(W,D))},[a,r,z]),k=H=>{u(W=>W.filter(D=>D.toLowerCase()!==H.toLowerCase())),b(!1)},O=()=>{let H=bi(v);if(H==="")return;!a.some(D=>D.toLowerCase()===H.toLowerCase())&&L<200&&u(D=>[...D,H]),R(""),m(!1),c("")};return(0,ne.jsxs)(ne.Fragment,{children:[(0,ne.jsx)(wt,{open:!0,onOpenChange:H=>{H||i()},children:(0,ne.jsxs)(bt,{className:"dws-ignore-dialog",busy:o,children:[(0,ne.jsxs)("header",{className:"dws-dialog-heading",children:[(0,ne.jsx)(en,{className:"dws-dialog-title",children:p("ignoredScanDirectoriesTitle")}),(0,ne.jsx)(yt,{className:"dws-form-note",children:p("ignoredScanDirectoriesDialogHint")})]}),(0,ne.jsxs)("div",{className:"dws-dialog-body",children:[(0,ne.jsxs)("div",{className:"dws-toolbar",children:[(0,ne.jsxs)("label",{className:"dws-search",children:[(0,ne.jsx)(Ro,{size:16,"aria-hidden":"true"}),(0,ne.jsx)(Qe,{"aria-label":p("ignoredScanDirectoriesSearch"),placeholder:p("ignoredScanDirectoriesSearch"),value:r,onChange:H=>c(H.target.value)}),r?(0,ne.jsx)(K,{className:"dws-icon-button","aria-label":p("clearFilters"),onClick:()=>c(""),children:(0,ne.jsx)(Tt,{size:14})}):null]}),C?(0,ne.jsxs)("div",{className:"dws-add-source-row",children:[(0,ne.jsx)(Qe,{"aria-label":p("ignoredScanDirectoriesAdd"),placeholder:p("ignoredScanDirectoriesAddPlaceholder"),value:v,autoFocus:!0,autoComplete:"off",spellCheck:!1,onChange:H=>R(H.target.value),onKeyDown:H=>{H.key==="Enter"&&(H.preventDefault(),O())}}),(0,ne.jsx)(K,{className:"dws-button-primary",disabled:bi(v)==="",onClick:O,children:p("ignoredScanDirectoriesAddConfirm")}),(0,ne.jsx)(K,{className:"dws-icon-button","aria-label":p("cancel"),onClick:()=>{m(!1),R("")},children:(0,ne.jsx)(Tt,{size:14})})]}):(0,ne.jsxs)(K,{className:"dws-button dws-add-source-button",disabled:o,onClick:()=>{if(I){b(!0);return}b(!1),m(!0)},children:[(0,ne.jsx)(un,{size:14}),p("ignoredScanDirectoriesAdd")]}),g?(0,ne.jsx)("p",{className:"dws-error",role:"alert",children:w(p("ignoredScanDirectoriesFull"),{count:String(200)})}):null]}),_.length>0?(0,ne.jsx)("div",{className:"dws-ignore-tags","data-ignore-list":"names",role:"list",children:_.map(H=>(0,ne.jsxs)("span",{className:T.has(H.toLowerCase())?"dws-ignore-tag dws-ignore-tag-shipped":"dws-ignore-tag",role:"listitem",children:[(0,ne.jsx)("span",{className:"dws-ignore-name",children:H}),(0,ne.jsx)(K,{className:"dws-icon-button","aria-label":w(p("ignoredScanDirectoriesRemove"),{name:H}),disabled:o,onClick:()=>{T.has(H.toLowerCase())?E(H):k(H)},children:(0,ne.jsx)(Tt,{size:12})})]},H))}):(0,ne.jsx)("p",{className:"dws-empty",children:r.trim()===""?p("ignoredScanDirectoriesNone"):p("ignoredScanDirectoriesNoMatch")})]}),(0,ne.jsxs)("footer",{className:"dws-dialog-footer",children:[(0,ne.jsx)(K,{disabled:o,onClick:i,children:p("cancel")}),(0,ne.jsx)(K,{className:"dws-button-primary",disabled:o,onClick:()=>{let H=new Set(a.map(G=>G.toLowerCase())),W=yi(e).filter(G=>!H.has(G.toLowerCase())),D=new Set(W.map(G=>G.toLowerCase()));s(yi(a).filter(G=>!T.has(G.toLowerCase())||D.has(G.toLowerCase())),W)},children:p(o?"configSaving":"configSave")})]})]})}),N===""?null:(0,ne.jsx)(Zc,{name:N,busy:o,onCancel:()=>E(""),onConfirm:H=>{k(H),E("")}})]})}var B=require("react/jsx-runtime"),Jc=[1,2,3,4,5],Qc=[500,1e3,2e3,3e3,5e3,1e4],ed=[3,5,8,15,30,60],vi=(e,t,n)=>{let o=e(t);return o===t?n:o},td="archiveDocumentsDirectory",nd="Custom archive directory",od="archiveDocumentsDirectoryHint",sd="Used only by the custom strategy; empty files them under the container root instead.",qo="archiveDocumentsStrategy",Ri="container",ad="ignoredScanDirectories",rd="removedScanDirectories",Yo="tasksRootStrategy",qs="tasksRootDirectory",Ni="default",Ei="auditLog",Pn="taskModelProvider",An="taskModel",Vs="",xi="on",id="off",Ti="handoffFullAccess",ld="on",Ci="off",cd=e=>[{field:"panelEntry",label:e("entryPanelLabel"),fallback:"hide",choices:[{value:"show",key:"configShow"},{value:"hide",key:"configHide"}]},{field:"sidebarEntry",label:e("entrySidebarLabel"),fallback:"show",choices:[{value:"show",key:"configShow"},{value:"hide",key:"configHide"}]},{field:Ti,label:e("handoffFullAccess"),fallback:Ci,hint:e("handoffFullAccessHint"),choices:[{value:Ci,key:"handoffFullAccessOff"},{value:ld,key:"handoffFullAccessOn"}]},{field:"scanDepth",label:e("scanDepth"),fallback:"2",numeric:!0,hint:e("scanDepthHint"),choices:Jc.map(t=>({value:String(t),text:w(e("scanDepthOption"),{count:String(t)})}))},{field:"maxScanDirectories",label:e("maxScanDirectories"),fallback:"2000",numeric:!0,hint:e("maxScanDirectoriesHint"),choices:Qc.map(t=>({value:String(t),text:String(t)}))},{field:"autoFetchRemote",label:e("autoFetchRemote"),fallback:"on",boolean:!0,hint:e("autoFetchRemoteHint"),choices:[{value:"on",key:"configOn"},{value:"off",key:"configOff"}]},{field:"fetchTimeoutSeconds",label:e("fetchTimeoutSeconds"),fallback:"8",numeric:!0,hint:e("fetchTimeoutSecondsHint"),choices:ed.map(t=>({value:String(t),text:w(e("fetchTimeoutOption"),{seconds:String(t)})})),shownWhen:t=>(t.autoFetchRemote??"on")==="on"},{kind:"list",field:ad,label:e("ignoredScanDirectories"),builtIn:gi,hint:e("ignoredScanDirectoriesHint")},{kind:"text",field:"defaultBranchPrefix",label:e("defaultBranchPrefixSettingsLabel"),fallback:"task/",hint:e("defaultBranchPrefixHint")},{field:Yo,label:e("tasksRootStrategy"),fallback:Ni,hint:e("tasksRootStrategyHint"),choices:[{value:"default",key:"tasksRootStrategyDefault"},{value:"custom",key:"tasksRootStrategyCustom"}]},{kind:"text",field:qs,label:e("tasksRootDirectory"),fallback:"",hint:e("tasksRootDirectoryHint"),allowEmpty:!0},{field:qo,label:e("archiveDocumentsStrategy"),fallback:Ri,hint:e("archiveDocumentsStrategyHint"),choices:[{value:"container",key:"archiveStrategyContainer"},{value:"custom",key:"archiveStrategyCustom"}]},{kind:"text",field:"archiveDocumentsDirectory",label:vi(e,td,nd),fallback:"",hint:vi(e,od,sd),allowEmpty:!0},{field:Ei,label:e("auditLog"),fallback:xi,hint:e("auditLogHint"),choices:[{value:xi,key:"auditLogOn"},{value:id,key:"auditLogOff"}]}];function dd({field:e,label:t,fallback:n,hint:o,allowEmpty:s,form:i,notify:p}){let a=J(),u=Xo(i.getSnapshot().value)[e]??n,[r,c]=(0,Ce.useState)(()=>nn(e)??u),[C,m]=(0,Ce.useState)(!1),[v,R]=(0,Ce.useState)(!1);(0,Ce.useEffect)(()=>{let b=()=>c(nn(e)??Xo(i.getSnapshot().value)[e]??n);b();let N=Ln(b),E=i.subscribe(b);return()=>{N(),E()}},[e,n,i]);let g=()=>{let b=r.trim();b===""&&s!==!0||(R(!0),kt(e,b),p(null),i.set(e,b).then(N=>{if(R(!1),!N){kt(e,void 0),p(a("configNotSaved"));return}m(!1),p(a("configSaved"))}).catch(()=>{R(!1),kt(e,void 0),p(a("configNotSaved"))}))};return(0,B.jsxs)("div",{className:"dws-plugin-config-row dws-plugin-config-prefix",children:[(0,B.jsxs)("span",{className:"dws-plugin-config-label",children:[t,o===void 0?null:(0,B.jsx)("span",{className:"dws-plugin-config-hint",children:C?a("configPrefixEditHint"):o})]}),(0,B.jsx)("span",{className:"dws-plugin-config-field",children:(0,B.jsxs)("span",{className:"dws-plugin-config-text",children:[(0,B.jsx)(K,{className:"dws-plugin-config-save",disabled:v,onClick:C?g:()=>{m(!0),p(null)},children:a(C?"configSave":"configEdit")}),C?(0,B.jsx)("span",{className:"dws-plugin-config-edit",children:(0,B.jsx)(Qe,{value:r,disabled:v,"aria-label":t,autoComplete:"off",spellCheck:!1,onChange:b=>c(b.target.value)})}):(0,B.jsx)("span",{className:"dws-plugin-config-locked","aria-label":t,children:r})]})})]})}function pd({busy:e,onConfirm:t,onCancel:n}){let o=J();return(0,B.jsx)(wt,{open:!0,onOpenChange:s=>{s||n()},children:(0,B.jsxs)(bt,{className:"dws-confirm-dialog dws-confirm-narrow",busy:e,showClose:!1,children:[(0,B.jsx)("div",{className:"dws-dialog-body",children:(0,B.jsx)(yt,{className:"dws-confirm-body",children:o("ignoredScanDirectoriesResetConfirm")})}),(0,B.jsxs)("footer",{className:"dws-dialog-footer",children:[(0,B.jsx)(K,{disabled:e,onClick:n,children:o("cancel")}),(0,B.jsx)(K,{className:"dws-button-primary",disabled:e,onClick:t,children:o("configConfirm")})]})]})})}function hd({field:e,removedField:t,label:n,hint:o,builtIn:s,form:i,notify:p}){let a=J(),[u,r]=(0,Ce.useState)(!1),[c,C]=(0,Ce.useState)(!1),[m,v]=(0,Ce.useState)(!1),R=S=>{let T=i.getSnapshot().value[S];return Array.isArray(T)?T.map(L=>String(L??"")).filter(L=>L!==""):[]},[g,b]=(0,Ce.useState)(()=>Ht(s,R(e),R(t)));(0,Ce.useEffect)(()=>{let S=()=>b(T=>{let L=Ht(s,R(e),R(t));return wi(T,L)?T:L});return S(),i.subscribe(S)},[i,s,e,t]);let N=R(e).length>0||R(t).length>0,E=async(S,T)=>{C(!0),b(Ht(s,S,T)),p(null);try{let I=await i.set(e,S)&&await i.set(t,T);if(C(!1),!I){b(Ht(s,R(e),R(t))),p(a("configNotSaved"));return}r(!1),p(a("configSaved"))}catch{C(!1),b(Ht(s,R(e),R(t))),p(a("configNotSaved"))}},P=async()=>{v(!1),C(!0),p(null);try{let T=await i.set(e,[])&&await i.set(t,[]);if(C(!1),!T){b(Ht(s,R(e),R(t))),p(a("configNotSaved"));return}b(Ht(s,[],[])),p(a("configSaved"))}catch{C(!1),b(Ht(s,R(e),R(t))),p(a("configNotSaved"))}};return(0,B.jsxs)(B.Fragment,{children:[(0,B.jsxs)("div",{className:"dws-plugin-config-row",children:[(0,B.jsxs)("span",{className:"dws-plugin-config-label",children:[n,o===void 0?null:(0,B.jsx)("span",{className:"dws-plugin-config-hint",children:o})]}),(0,B.jsx)("span",{className:"dws-plugin-config-field",children:(0,B.jsxs)("span",{className:"dws-plugin-config-text",children:[(0,B.jsxs)("span",{className:"dws-plugin-config-actions",children:[(0,B.jsx)(K,{className:"dws-plugin-config-save",disabled:c||!N,"aria-label":a("ignoredScanDirectoriesReset"),title:a("ignoredScanDirectoriesReset"),onClick:()=>{p(null),v(!0)},children:a("ignoredScanDirectoriesReset")}),(0,B.jsx)(K,{className:"dws-plugin-config-save","aria-label":a("ignoredScanDirectoriesEdit"),title:a("ignoredScanDirectoriesEdit"),disabled:c,onClick:()=>{p(null),r(!0)},children:a("configEdit")})]}),(0,B.jsx)("span",{className:"dws-plugin-config-locked","aria-label":n,children:w(a("ignoredScanDirectoriesCount"),{count:String(g.length)})})]})})]}),u?(0,B.jsx)(ki,{builtIn:s,configured:R(e),disabled:R(t),busy:c,onSave:(S,T)=>{E(S,T)},onClose:()=>{c||r(!1)}}):null,m?(0,B.jsx)(pd,{busy:c,onConfirm:()=>{P()},onCancel:()=>{c||v(!1)}}):null]})}var Si=(e,t)=>`${e}\0${t}`;function ud({provider:e,model:t,catalog:n,loading:o,unavailable:s,onRetry:i,form:p,notify:a}){let u=J(),[r,c]=(0,Ce.useState)(!1),[C,m]=(0,Ce.useState)(!1),v=e===""||t===""?"":Si(e,t),R=[{value:Vs,provider:"",model:""}];for(let S of n?.providers??[])for(let T of S.models)R.push({value:Si(S.provider,T),provider:S.provider,model:T});let g=R.some(S=>S.value===v);v!==""&&!g&&R.push({value:v,provider:e,model:t});let b=S=>S.value===Vs?u("taskModelInherit"):`${S.provider}/${S.model}`,N=R.find(S=>S.value===v),E=S=>{c(!1),m(!0),a(null),kt(Pn,S.provider),kt(An,S.model),p.set(Pn,S.provider).then(T=>T?p.set(An,S.model):!1).then(T=>{if(m(!1),T===!1){kt(Pn,void 0),kt(An,void 0),a(u("configNotSaved"));return}a(u("configSaved"))}).catch(()=>{m(!1),kt(Pn,void 0),kt(An,void 0),a(u("configNotSaved"))})},P=u(o?"taskModelLoadingHint":s?"taskModelUnavailableHint":"taskModelHint");return(0,B.jsxs)("div",{className:"dws-plugin-config-row dws-plugin-config-model",children:[(0,B.jsxs)("span",{className:"dws-plugin-config-label",children:[u("taskModelLabel"),(0,B.jsx)("span",{className:"dws-plugin-config-hint",children:P})]}),(0,B.jsxs)("span",{className:"dws-plugin-config-field",children:[(0,B.jsxs)("button",{type:"button",className:"dws-plugin-config-select","aria-label":u("taskModelLabel"),"aria-haspopup":"menu","aria-expanded":r,"aria-busy":o,disabled:C,onClick:()=>c(!r),children:[(0,B.jsx)("span",{className:"dws-plugin-config-value",children:o?u("taskModelLoading"):s?u("taskModelUnavailable"):N!==void 0?b(N):u("taskModelNotSpecified")}),o?(0,B.jsx)(_e,{size:14,strokeWidth:1.3,className:"dws-spin","aria-hidden":"true"}):(0,B.jsx)(ro,{size:14,strokeWidth:1.3,"aria-hidden":"true"})]}),r?(0,B.jsxs)("div",{className:"dws-plugin-config-menu",role:"menu",children:[o?(0,B.jsxs)("div",{className:"dws-plugin-config-loading",role:"status",children:[(0,B.jsx)(_e,{size:14,strokeWidth:1.3,className:"dws-spin","aria-hidden":"true"}),(0,B.jsx)("span",{children:u("taskModelLoadingMenu")})]}):null,s&&!o?(0,B.jsxs)("div",{className:"dws-plugin-config-loading",role:"status",children:[(0,B.jsx)("span",{children:u("taskModelUnavailable")}),(0,B.jsx)("button",{type:"button",className:"dws-plugin-config-retry",onClick:i,children:u("taskModelRetry")})]}):null,R.map(S=>(0,B.jsxs)("button",{type:"button",role:"menuitem",className:"dws-plugin-config-item","data-selected":S.value===v?"true":"false",disabled:o&&S.value!==Vs,onClick:()=>E(S),children:[(0,B.jsx)("span",{className:"dws-plugin-config-item-label",children:b(S)}),S.value===v?(0,B.jsx)(hn,{size:16,strokeWidth:1,"aria-hidden":"true"}):null]},S.value||"none"))]}):null]})]})}function Ks(){let e={};for(let t of["panelEntry","sidebarEntry",Ti,"scanDepth","maxScanDirectories","autoFetchRemote","fetchTimeoutSeconds","defaultBranchPrefix",Yo,qs,qo,"archiveDocumentsDirectory",Ei,Pn,An]){let n=nn(t);n!==void 0&&(e[t]=n)}return e}function Xo(e){if(e===null||typeof e!="object")return{};let t=Object.entries(e);return Object.fromEntries(t.map(([n,o])=>[n,o==null?"":typeof o=="boolean"?o?"on":"off":String(o)]))}function Di({form:e,models:t,loadModels:n}){let o=J(),[s,i]=(0,Ce.useState)(t),[p,a]=(0,Ce.useState)(!1),[u,r]=(0,Ce.useState)(t===void 0&&n!==void 0),[c,C]=(0,Ce.useState)(0),m=(0,Ce.useRef)(n);m.current=n,(0,Ce.useEffect)(()=>{if(t!==void 0){i(t),r(!1),a(!1);return}let k=m.current;if(k===void 0){r(!1);return}let O=!0;return r(!0),a(!1),k().then(H=>{O&&(i(H),r(!1))}).catch(()=>{O&&(a(!0),r(!1))}),()=>{O=!1}},[t,c]);let[v,R]=(0,Ce.useState)(()=>e===void 0?{}:Xo(e.getSnapshot().value)),[g,b]=(0,Ce.useState)(()=>Ks()),[N,E]=(0,Ce.useState)(null),[P,S]=(0,Ce.useState)(null);(0,Ce.useEffect)(()=>{if(P===null)return;let k=window.setTimeout(()=>S(null),2400);return()=>window.clearTimeout(k)},[P]);let T=(0,Ce.useRef)(null);if((0,Ce.useEffect)(()=>{if(e===void 0)return;let k=()=>{let W=Xo(e.getSnapshot().value);R(W),mi(W),b(Ks())};k();let O=e.subscribe(k),H=Ln(()=>b(Ks()));return()=>{O(),H()}},[e]),(0,Ce.useEffect)(()=>{if(N===null)return;let k=O=>{O.type==="keydown"&&O.key!=="Escape"||O.type==="pointerdown"&&T.current?.contains(O.target)||E(null)};return document.addEventListener("pointerdown",k),document.addEventListener("keydown",k),()=>{document.removeEventListener("pointerdown",k),document.removeEventListener("keydown",k)}},[N]),e===void 0)return null;let L=(k,O,H,W)=>{E(null),kt(k,O.value),S(o("configSaved")),e.set(k,H?Number(O.value):W?O.value==="on":O.value).then(D=>{D||(kt(k,void 0),S(o("configNotSaved")))}).catch(()=>{kt(k,void 0),S(o("configNotSaved"))})},I=g[qo]??v[qo]??Ri,z=g[Yo]??v[Yo]??Ni,_=k=>{if(k.kind!=="text"&&k.kind!=="list"&&k.shownWhen!==void 0){let O={};for(let[H,W]of Object.entries({...v,...g}))O[H]=String(W);return k.shownWhen(O)}return k.field==="archiveDocumentsDirectory"?I==="custom":k.field===qs?z==="custom":!0};return(0,B.jsxs)("div",{className:"dws-plugin-config",ref:T,children:[P===null?null:(0,B.jsx)("div",{className:"dws-config-toast",role:"status",children:P}),cd(o).filter(_).map(k=>{if(k.kind==="text")return(0,B.jsx)(dd,{field:k.field,label:k.label,fallback:k.fallback,hint:k.hint,allowEmpty:k.allowEmpty,form:e,notify:S},k.field);if(k.kind==="list")return(0,B.jsx)(hd,{field:k.field,removedField:rd,label:k.label,hint:k.hint,builtIn:k.builtIn,form:e,notify:S},k.field);let{field:O,label:H,fallback:W,numeric:D,choices:G,hint:te}=k,Z=k.boolean===!0,q=g[O]??v[O]??W,ge=G.some(Q=>Q.value===q)?G:[...G,{value:q,text:q}],ke=Q=>Q.text??o(Q.key??Q.value),ie=ge.find(Q=>Q.value===q);return(0,B.jsxs)("div",{className:"dws-plugin-config-row",children:[(0,B.jsxs)("span",{className:"dws-plugin-config-label",children:[H,te===void 0?null:(0,B.jsx)("span",{className:"dws-plugin-config-hint",children:te})]}),(0,B.jsxs)("span",{className:"dws-plugin-config-field",children:[(0,B.jsxs)("button",{type:"button",className:"dws-plugin-config-select","aria-label":H,"aria-haspopup":"menu","aria-expanded":N===O,onClick:()=>E(N===O?null:O),children:[(0,B.jsx)("span",{className:"dws-plugin-config-value",children:ie?ke(ie):q}),(0,B.jsx)(ro,{size:14,strokeWidth:1.3,"aria-hidden":"true"})]}),N===O?(0,B.jsx)("div",{className:"dws-plugin-config-menu",role:"menu",children:ge.map(Q=>(0,B.jsxs)("button",{type:"button",role:"menuitem",className:"dws-plugin-config-item","data-selected":Q.value===q?"true":"false",onClick:()=>L(O,Q,D,Z),children:[(0,B.jsx)("span",{className:"dws-plugin-config-item-label",children:ke(Q)}),Q.value===q?(0,B.jsx)(hn,{size:16,strokeWidth:1,"aria-hidden":"true"}):null]},Q.value))}):null]})]},O)}),(0,B.jsx)(ud,{provider:g[Pn]??v[Pn]??"",model:g[An]??v[An]??"",catalog:s,loading:u,unavailable:p,onRetry:()=>C(k=>k+1),form:e,notify:S})]})}var _i=require("react");var Li="0 0 24 24";var fd=["m14.5 7-5 5","M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20","m9.5 7 5 5"],md=["M5 12h14","M12 5v14"],Ys=e=>`<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="${Li}" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${e.map(t=>`<path d="${t}" stroke="currentColor" stroke-width="2"/>`).join("")}</svg>`,Pi=Ys(fd),Ai=Ys(md),gd=["m18 16 4-4-4-4","m6 8-4 4 4 4","m14.5 4-5 16"],Xs=Ys(gd),wd=["M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z","M12 8v4","M12 16h.01"],bd=["M18 6 6 18","m6 6 12 12"],Zs=(e,t)=>`<svg xmlns="http://www.w3.org/2000/svg" width="${t}" height="${t}" viewBox="${Li}" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${e.map(n=>`<path d="${n}" stroke="currentColor" stroke-width="2"/>`).join("")}</svg>`,Wi=Zs(wd,16),Hi=Zs(bd,14),yd=["m9 18 6-6-6-6"],Oi=Zs(yd,14);var Ii='[data-row-key^="workspace:"]',go="data-dws-menu-item",wo="data-dws-submenu",Js="data-dws-submenu-owner",Mi="button";function Fi(e){let t=String(e??"");if(!t.startsWith("workspace:"))return;let n=t.slice(10).trim();return n===""?void 0:n}var kd=1500,vd=180;function Bi({api:e,workspaces:t,canCreate:n,onCreate:o,onArchive:s,onOpenIn:i,capability:p}){let a=J();return(0,_i.useEffect)(()=>{let u=null,r=0,c=!0,C=!1,m=!1,v=0,R=null,g=new WeakSet,b=W=>{let D=W.target,G=D?.closest?.(Ii)??null;G===null||D?.closest?.(Mi)==null||(u=G,r=Date.now())},N=W=>{W.key!=="Enter"&&W.key!==" "&&W.key!=="Spacebar"||b(W)},E=(W,D,G)=>[...n(W)?[{icon:Ai,label:a("workspaceCreate"),choose:()=>o({path:W.path,title:W.title})}]:[],...D?[{icon:Pi,label:a("archiveWorkspace"),choose:()=>s(W.path)}]:[],...G.length===0?[]:[{icon:Xs,label:a("workspaceOpenIn"),choose:()=>{},submenu:G.map(te=>({icon:te.icon===void 0?Xs:`<img src="${te.icon}" alt="" width="14" height="14" />`,iconFit:te.icon===void 0,label:w(a("workspaceOpenInApp"),{app:te.name}),choose:()=>i(W.path,te.id)}))}]],P=(W,D)=>{let G=[...W.querySelectorAll('[role="menuitem"]')],Z=G.find(ie=>typeof ie.className=="string"&&ie.className.includes("danger"))??G[G.length-1],q=Z?.parentElement??null,$=q?.parentElement??null,ge=G.find(ie=>ie!==Z&&!String(ie.className).includes("danger"))??Z,ke=String(ge?.className??"").split(/\s+/).filter(ie=>ie!==""&&!ie.includes("selected")).join(" ");for(let ie of D){let Q=document.createElement("button");Q.type="button",Q.setAttribute("role","menuitem"),v+=1;let st=`wts-${String(v)}`;Q.setAttribute(go,st),ie.submenu!==void 0&&Q.setAttribute("aria-haspopup","menu"),Q.className=ke===""?"dws-menu-item":`${ke} dws-menu-item`;let Ye=document.createElement("span");Ye.className=ie.iconFit===!0?"dws-menu-item-icon dws-menu-item-icon-brand":"dws-menu-item-icon",Ye.innerHTML=ie.icon;let Re=document.createElement("span");if(Re.textContent=ie.label,Q.append(Ye,Re),ie.submenu!==void 0){let pe=document.createElement("span");pe.className="dws-menu-item-chevron",pe.innerHTML=Oi,Q.append(pe)}if(ie.submenu!==void 0){let pe=ie.submenu;Q.addEventListener("pointerenter",()=>{S(Q,st,pe,ke)}),Q.addEventListener("pointerleave",()=>{L()}),Q.addEventListener("click",ue=>{ue.preventDefault(),ue.stopPropagation()})}else Q.addEventListener("click",pe=>{pe.preventDefault(),pe.stopPropagation(),T(),document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:!0})),ie.choose()});if(Z!==void 0&&q!==null&&$!==null){let pe=document.createElement("div");typeof q.className=="string"&&q.className!==""&&(pe.className=q.className),pe.appendChild(Q),$.insertBefore(pe,q)}else Z!==void 0&&q!==null?q.insertBefore(Q,Z):W.appendChild(Q)}},S=(W,D,G,te)=>{T();let Z=document.createElement("div");Z.setAttribute("role","menu"),Z.setAttribute(wo,""),Z.setAttribute(Js,D),Z.className="dws-submenu";for(let Re of G){let pe=document.createElement("button");pe.type="button",pe.setAttribute("role","menuitem"),pe.className=te===""?"dws-menu-item":`${te} dws-menu-item`;let ue=document.createElement("span");ue.className=Re.iconFit===!0?"dws-menu-item-icon dws-menu-item-icon-brand":"dws-menu-item-icon",ue.innerHTML=Re.icon;let $e=document.createElement("span");$e.textContent=Re.label,pe.append(ue,$e),pe.addEventListener("click",vt=>{vt.preventDefault(),vt.stopPropagation(),T(),document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:!0})),Re.choose()}),Z.appendChild(pe)}let q=W.closest('[role="menu"]');(q??document.body).appendChild(Z);let ge=q===null?null:_(q);if(ge!==null&&q!==null&&typeof getComputedStyle=="function"){let Re=getComputedStyle(ge.element),pe=getComputedStyle(q);Z.style.background=Re.backgroundColor,Z.style.borderRadius=Re.borderRadius,Z.style.boxShadow=Re.boxShadow,Z.style.color=pe.color,Z.style.font=pe.font;let ue=Number.parseFloat(Re.borderTopWidth);Number.isFinite(ue)&&ue>0&&Re.borderTopStyle!=="none"?Z.style.border=Re.border:Z.style.border="none"}let ke=W.getBoundingClientRect(),ie=Z.getBoundingClientRect(),st=window.innerWidth-ke.right>=ie.width+8?ke.right+4:Math.max(8,ke.left-ie.width-4),Ye=Math.min(ke.top,Math.max(8,window.innerHeight-ie.height-8));Z.style.left=`${String(st)}px`,Z.style.top=`${String(Ye)}px`,Z.addEventListener("pointerenter",()=>{I()}),Z.addEventListener("pointerleave",()=>{L()})},T=()=>{I();for(let W of document.querySelectorAll(`[${wo}]`))W.remove()},L=()=>{I(),R=setTimeout(()=>{R=null,T()},vd)},I=()=>{R!==null&&(clearTimeout(R),R=null)},z=W=>{let D=W.getAttribute(Js);if(D===null)return!1;let G=document.querySelector(`[${go}="${D}"]`);return G!==null&&G.isConnected&&G.closest('[role="menu"]')!==null},_=W=>{if(typeof getComputedStyle!="function")return null;let D=W;for(;D!==null;){let G=getComputedStyle(D);if(G.backgroundColor!==""&&G.backgroundColor!=="transparent"){let te=/rgba?\([^)]*?,\s*([\d.]+)\s*\)/.exec(G.backgroundColor);if(te===null||Number.parseFloat(te[1])>0)return{element:D}}if(G.backgroundImage!==""&&G.backgroundImage!=="none")return{element:D};D=D.parentElement}return null},k=async()=>{if(!(m||!c)){m=!0;try{for(let W of document.querySelectorAll(`[${wo}]`))z(W)||T();for(let W of document.querySelectorAll('[role="menu"]')){if(W.hasAttribute(wo)||g.has(W)||W.querySelector(`[${go}]`)!==null)continue;let D=u;if(D===null||!D.isConnected||Date.now()-r>kd)continue;let G=Fi(D.getAttribute("data-row-key"));if(G===void 0)continue;let te=t.list.getSnapshot().items.find($=>$.workspaceId===G);if(te===void 0)continue;g.add(W);let Z=!1;try{Z=(await e.inspectTask(te.path)).isTask}catch{Z=!1}let q=E(te,Z,p?.applications??[]);!c||q.length===0||!W.isConnected||P(W,q)}}finally{m=!1}}},O=()=>{if(C||!c)return;C=!0;let W=()=>{C=!1,k()};typeof requestAnimationFrame=="function"?requestAnimationFrame(W):queueMicrotask(W)};document.addEventListener("pointerdown",b,!0),document.addEventListener("keydown",N,!0);let H=new MutationObserver(O);return H.observe(document.body,{childList:!0,subtree:!0}),()=>{c=!1,document.removeEventListener("pointerdown",b,!0),document.removeEventListener("keydown",N,!0),H.disconnect();for(let W of document.querySelectorAll(`[${go}]`))W.remove()}},[e,t,n,o,s,i,p,a]),null}var qn=require("react"),zi=require("react-dom"),Yn=require("react/jsx-runtime");function $i({children:e}){let t=(0,qn.useRef)(null),[n,o]=(0,qn.useState)(null);(0,qn.useLayoutEffect)(()=>{let i=t.current?.closest('[data-slot="conversation.composer"]');if(!i)return;let p=document.createElement("span");p.className="dws-hero-action";let a=!1,u=()=>{let c=i.querySelector('[data-slot="conversation.hero.agentPreset"]'),C=c?.parentElement;if(!c||!C||!C.querySelector('button[aria-haspopup="menu"]')){a&&(p.remove(),a=!1,o(null));return}(p.parentElement!==C||p.nextSibling!==c)&&C.insertBefore(p,c),a||(a=!0,o(p))},r=new MutationObserver(u);return r.observe(i,{childList:!0,subtree:!0}),u(),()=>{r.disconnect(),p.remove()}},[]);let s=n?(0,zi.createPortal)(e,n):null;return(0,Yn.jsxs)(Yn.Fragment,{children:[(0,Yn.jsx)("span",{ref:t,hidden:!0,"data-dws-placement":""}),s]})}var Xn=require("react/jsx-runtime");function ji({wide:e,onOpen:t}){let o=J()("worktrees");return(0,Xn.jsxs)("button",{type:"button",className:"dws-footer-action","data-wide":e?"true":"false",title:o,"aria-label":o,onClick:t,children:[(0,Xn.jsx)("span",{className:"dws-footer-action-icon","aria-hidden":"true",children:(0,Xn.jsx)(Fn,{size:18,className:"dws-brand-glyph"})}),e?(0,Xn.jsx)("span",{className:"dws-footer-action-label",children:o}):null]})}var ll=require("react");var se=require("react");async function Qs(e,t,n){let o=[...e],s=new Array(o.length),i=Math.max(1,Math.trunc(t)||1),p=0,a=async()=>{for(;;){let u=p++;if(u>=o.length)return;s[u]=await n(o[u],u)}};return await Promise.all(Array.from({length:Math.min(i,o.length)},a)),s}async function Gi(e,t,n,o){let s=String(n??"").trim();if(s==="")throw xn("repository-path-required");if(o.some(p=>mt(p,s)))return{added:!1,reason:"listed"};if(!(await e.classifyRoot(s)).isRepository)throw xn("not-a-git-repository",{path:U(s)});return await t.create({path:s}),{added:!0,path:s}}function ea(e){let t=new Set,n=[];for(let o of e){let s=Te(o.repoPath);!s||t.has(s)||(t.add(s),n.push({...o,currentBranch:o.worktrees.find(i=>i.isMain)?.branch,worktrees:o.worktrees.filter(i=>!i.isMain)}))}return n}function Ui(e){return ea(e.repositories).map(t=>({...t,worktrees:t.worktrees.map(n=>{let o=e.statuses[n.path];return o===void 0?{...n,checking:!0}:{...n,...o}})}))}function xd(e){if(e.isMain)return;let t=co(Te(e.path)),n=it(t);if(!(n===""||!e.branch?.endsWith(`/${n}`)))return t}function Vi(e){let t=new Map;for(let o of e)for(let s of o.worktrees){let i=xd(s);if(i===void 0)continue;let p=Te(i),a=t.get(p);a===void 0&&(a={seen:new Set,group:{name:it(i),path:i,project:_n(i),tasksRoot:Bn(i),repositories:[],changedFiles:0,commits:0,behind:0,lockedRepositories:0,prunableRepositories:0,checkingRepositories:0,unknownRepositories:0}},t.set(p,a));let u=Te(s.path);if(a.seen.has(u))continue;a.seen.add(u);let r=s.checking===!0,c=s.statusError,C=!r&&c!==void 0&&c!=="",m=s.changedFiles??0,v=s.commits??0,R=s.behind??0;a.group.repositories.push({name:it(s.path),path:s.path,branch:s.branch,baseBranch:o.currentBranch,changedFiles:m,commits:v,behind:R,committedChanges:s.committedChanges,workingChanges:s.workingChanges,locked:s.locked,prunable:s.prunable,checking:r,unknown:C}),a.group.changedFiles+=m,a.group.commits+=v,a.group.behind+=R;let g=(b,N)=>N===void 0?b:{insertions:(b?.insertions??0)+N.insertions,deletions:(b?.deletions??0)+N.deletions};a.group.committedChanges=g(a.group.committedChanges,s.committedChanges),a.group.workingChanges=g(a.group.workingChanges,s.workingChanges),s.locked&&(a.group.lockedRepositories+=1),s.prunable&&(a.group.prunableRepositories+=1),r&&(a.group.checkingRepositories+=1),C&&(a.group.unknownRepositories+=1)}let n=[...t.values()].map(o=>o.group);for(let o of n){let s=new Set(o.repositories.map(p=>p.branch));o.branch=s.size===1?o.repositories[0]?.branch:void 0;let i=new Set(o.repositories.map(p=>p.baseBranch));o.baseBranch=i.size===1?o.repositories[0]?.baseBranch:void 0,o.repositories.sort((p,a)=>p.name.localeCompare(a.name))}return n.sort((o,s)=>o.project.localeCompare(s.project)||o.name.localeCompare(s.name))}var dt=require("react");var j=require("react/jsx-runtime"),Cd=/[\s~^:?*\[\]\\\u0000-\u001f\u007f]/;function Sd(e){return e===""?"":Cd.test(e)||e.includes("..")||e.includes("@{")||e.startsWith("-")||e.startsWith("/")||e.endsWith("/")||e.endsWith(".lock")?"invalidBaseRef":""}function Ki({taskPath:e,api:t,workspaces:n,repositories:o,onAdded:s,onClose:i}){let p=J(),a=(0,dt.useId)(),[u,r]=(0,dt.useState)(null),[c,C]=(0,dt.useState)(!0),[m,v]=(0,dt.useState)([]),[R,g]=(0,dt.useState)("head"),[b,N]=(0,dt.useState)(""),[E,P]=(0,dt.useState)(!1),[S,T]=(0,dt.useState)(""),L=(0,dt.useRef)(!1);(0,dt.useEffect)(()=>{let $=!0;return C(!0),t.inspectTask(e).then(ge=>{$&&(r(ge),N(ge.baseRef??""))}).catch(ge=>{$&&T(Ae(p,ge))}).finally(()=>{$&&C(!1)}),()=>{$=!1}},[t,e]);let I=new Set(u?.repositories??[]),z=o.filter($=>!I.has(it($.repoPath))).filter($=>!Lo(e,$.repoPath)),_=($,ge)=>v(ke=>ge?[...new Set([...ke,$])]:ke.filter(ie=>ie!==$)),k=$=>v($?z.map(ge=>ge.repoPath):[]),O=R==="named"?b.trim():"",H=R==="named"?Sd(O):"",W=m.length>0&&(R==="head"||O!=="")&&H===""&&!c,D=async()=>{if(!(L.current||!u||!W)){L.current=!0,P(!0),T("");try{await t.addRepositories({task:u.task,project:u.project,tasksRoot:u.tasksRoot,repositories:m,...O===""?{}:{baseRef:O}}),s(),i()}catch($){T(Ae(p,$))}finally{L.current=!1,P(!1)}}},G=()=>{L.current||i()},te=E||c||u===null,Z=(0,j.jsxs)("fieldset",{className:"dws-field dws-repositories-fieldset",disabled:te,"aria-describedby":m.length===0?`${a}-repositories-note`:void 0,children:[(0,j.jsxs)("legend",{className:"dws-field-legend",children:[(0,j.jsx)("span",{id:`${a}-repositories`,className:"dws-field-label",children:p("addRepositoriesLabel")}),(0,j.jsx)(Gt,{label:p("addRepositoriesSourceHint"),className:"dws-field-hint",children:(0,j.jsx)(Ra,{size:13,"aria-hidden":"true"})})]}),(0,j.jsxs)("div",{className:"dws-repo-picker",children:[(0,j.jsx)("div",{className:"dws-repo-choices",children:z.map(($,ge)=>{let ke=it($.repoPath);return(0,j.jsxs)("label",{className:"dws-check-option",htmlFor:`${a}-repo-${ge}`,children:[(0,j.jsx)("input",{id:`${a}-repo-${ge}`,className:"dws-checkbox",type:"checkbox",checked:m.includes($.repoPath),onChange:ie=>_($.repoPath,ie.target.checked)}),(0,j.jsxs)("span",{className:"dws-check-copy",children:[(0,j.jsxs)("span",{className:"dws-check-name",children:[(0,j.jsx)("span",{className:"dws-check-label",children:ke}),$.currentBranch===void 0?null:(0,j.jsxs)("span",{className:"dws-branch-label",title:`${p("currentBranchLabel")}: ${$.currentBranch}`,children:[(0,j.jsx)(rn,{size:12}),(0,j.jsx)("span",{className:"dws-branch-value",children:$.currentBranch})]})]}),(0,j.jsx)("span",{className:"dws-check-path",title:U($.repoPath),children:U($.repoPath)})]})]},$.repoPath)})}),(0,j.jsxs)("div",{className:"dws-repo-picker-foot",children:[m.length===0?(0,j.jsx)("p",{id:`${a}-repositories-note`,className:"dws-field-note",children:p("addRepositoriesHint")}):null,(0,j.jsxs)("div",{className:"dws-repo-actions",children:[(0,j.jsx)("span",{className:"dws-check-count","aria-live":"polite",children:w(p("repositoriesCountLabel"),{count:String(m.length),total:String(z.length)})}),(0,j.jsxs)("span",{className:"dws-picker-tools",children:[(0,j.jsx)("button",{type:"button",className:"dws-link-button",onClick:()=>k(!0),children:p("selectAll")}),(0,j.jsx)("span",{className:"dws-picker-divider","aria-hidden":"true"}),(0,j.jsx)("button",{type:"button",className:"dws-link-button",onClick:()=>k(!1),children:p("selectNone")})]})]})]})]})]}),q=(0,j.jsxs)("fieldset",{className:"dws-field dws-base-fieldset",disabled:te,children:[(0,j.jsx)("legend",{className:"dws-field-legend",children:(0,j.jsx)("span",{className:"dws-field-label",children:p("basedOn")})}),(0,j.jsx)("div",{className:"dws-radio-group",role:"radiogroup","aria-label":p("basedOn"),children:["head","named"].map($=>(0,j.jsxs)("label",{htmlFor:`${a}-${$}`,className:"dws-radio-option","data-selected":R===$?"true":void 0,children:[(0,j.jsx)("input",{id:`${a}-${$}`,className:"dws-radio-input",type:"radio",name:`${a}-base`,value:$,checked:R===$,onChange:()=>g($)}),(0,j.jsx)("span",{className:"dws-radio-copy",children:(0,j.jsx)("span",{className:"dws-radio-label",children:p($==="head"?"baseHead":"baseNamed")})})]},$))}),R==="named"?(0,j.jsxs)(j.Fragment,{children:[(0,j.jsx)(Qe,{className:"dws-base-ref",value:b,disabled:te,onChange:$=>N($.target.value),placeholder:p("baseRefPlaceholder"),autoComplete:"off",spellCheck:!1,"aria-label":p("baseNamed"),"aria-describedby":`${a}-base-note`,"aria-invalid":H!==""||void 0}),(0,j.jsx)("p",{id:`${a}-base-note`,className:H===""?"dws-form-note":"dws-form-note dws-field-note-warning",children:p(H===""?"baseRefHint":H)})]}):null]});return(0,j.jsx)(wt,{open:!0,onOpenChange:$=>{$||G()},children:(0,j.jsxs)(bt,{busy:E,className:"dws-create-dialog",children:[(0,j.jsxs)("header",{className:"dws-dialog-heading",children:[(0,j.jsx)(en,{className:"dws-dialog-title",children:p("addRepositoriesTitle")}),(0,j.jsx)(yt,{className:"dws-form-note",children:p("addRepositoriesDescription")}),(0,j.jsxs)("div",{className:"dws-repo-context",children:[(0,j.jsx)("strong",{children:u?.task??""}),(0,j.jsx)("code",{title:U(e),children:U(e)})]})]}),(0,j.jsxs)("form",{className:"dws-create-form",onSubmit:$=>{$.preventDefault(),D()},"aria-busy":E,children:[(0,j.jsxs)("div",{className:"dws-dialog-body",children:[S?(0,j.jsxs)("div",{className:"dws-error",role:"alert",children:[(0,j.jsx)(Fe,{size:16,"aria-hidden":"true"}),(0,j.jsx)("span",{children:S})]}):null,c?(0,j.jsxs)("div",{className:"dws-dialog-loading",role:"status",children:[(0,j.jsxs)("div",{children:[(0,j.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"})," ",p("loadingTask")]}),(0,j.jsx)("span",{"aria-hidden":"true"}),(0,j.jsx)("span",{"aria-hidden":"true"}),(0,j.jsx)("span",{"aria-hidden":"true"})]}):(0,j.jsxs)("div",{className:"dws-form-fields",children:[Z,q]})]}),(0,j.jsxs)("footer",{className:"dws-dialog-footer",children:[(0,j.jsx)(K,{type:"button",className:"dws-button-ghost",disabled:E,onClick:G,children:p("cancel")}),(0,j.jsxs)(K,{type:"submit",className:"dws-button-primary",disabled:E||!W,children:[E?(0,j.jsx)(_e,{size:16,className:"dws-spin","aria-hidden":"true"}):null,p(E?"addingRepositories":"addRepositoriesConfirm")]})]})]})]})})}var Ge=require("react");var qi="https://github.com/kangtsang/dsh-worktree-space/issues",Yi="https://www.bilibili.com/video/BV1iM466VEz2";function Xi(e){if(typeof e!="string"||e==="")return null;let t;try{t=new URL(e)}catch{return null}return t.protocol==="http:"||t.protocol==="https:"?e:null}var me=require("react/jsx-runtime");function Zi(e){if(!e)return"";let t=new Date(e);if(Number.isNaN(t.getTime()))return e;let n=o=>String(o).padStart(2,"0");return`${t.getFullYear()}-${n(t.getMonth()+1)}-${n(t.getDate())} ${n(t.getHours())}:${n(t.getMinutes())}:${n(t.getSeconds())}`}function Ji({api:e,path:t}){let n=J(),[o,s]=(0,Ge.useState)(null),[i,p]=(0,Ge.useState)(null),[a,u]=(0,Ge.useState)(""),[r,c]=(0,Ge.useState)(""),[C,m]=(0,Ge.useState)(!1),[v,R]=(0,Ge.useState)(!1),[g,b]=(0,Ge.useState)(!1),[N,E]=(0,Ge.useState)(!1),P=(0,Ge.useRef)(null),S=(0,Ge.useCallback)(async W=>{try{let D=await e.deployStatus(t,{signal:W});if(W?.aborted)return;s(D),R(!1),u("")}catch{if(W?.aborted)return;R(!0)}},[e,t]);(0,Ge.useEffect)(()=>{let W=new AbortController;return S(W.signal),()=>W.abort()},[S]);let T=(0,Ge.useRef)(null);(0,Ge.useEffect)(()=>()=>T.current?.abort(),[]),(0,Ge.useEffect)(()=>()=>{P.current!==null&&clearTimeout(P.current)},[]);async function L(W){m(!0);try{let D=await W();if(D?.status)s(D.status),u("");else{T.current?.abort();let G=new AbortController;T.current=G,await S(G.signal)}b(D?.timedOut===!0),D!==void 0&&c("warning"in D&&D.warning?To(n,D.warning):""),D&&"gate"in D&&p(D.gate??null)}catch(D){u(D instanceof Error?D.message:String(D))}finally{m(!1)}}function I(){if(!N){E(!0),P.current!==null&&clearTimeout(P.current),P.current=setTimeout(()=>E(!1),4e3);return}E(!1),L(()=>e.destroyDeployment(t))}if(v||o===null)return null;let z=o.containers.length>0;if(o.target==="none"&&!o.stateFound&&!z)return null;let _=o.target!=="none",k=o.lastSmoke,O=k?.result==="pass"?{cls:"dws-status-clean",label:n("deploySmokePass")}:k?.result==="fail"?{cls:"dws-status-unavailable",label:n("deploySmokeFail")}:{cls:"dws-status-checking",label:n("deploySmokeNone")},H=Xi(o.url);return(0,me.jsxs)("div",{className:"dws-deploy",children:[(0,me.jsxs)("div",{className:"dws-deploy-head",children:[(0,me.jsx)("span",{className:"dws-deploy-title",children:n("deployTitle")}),(0,me.jsx)("span",{className:"dws-deploy-env",title:o.envId,children:o.envId}),z?(0,me.jsx)("span",{className:"dws-deploy-containers",children:w(n("deployContainers"),{count:String(o.containers.length)})}):null,(0,me.jsx)(K,{className:"dws-button-ghost dws-deploy-refresh",disabled:C,"aria-label":n("deployRefresh"),title:n("deployRefresh"),onClick:()=>L(()=>Promise.resolve()),children:(0,me.jsx)(Mn,{size:13})})]}),(0,me.jsx)("div",{className:"dws-deploy-badges",children:(0,me.jsxs)("span",{className:`dws-status ${O.cls}`,title:Zi(k?.at)||void 0,children:[(0,me.jsx)("span",{className:"dws-status-dot"}),O.label,k?.at?` ${Zi(k.at)}`:""]})}),i!==null&&i.applies&&i.missing.length>0?(0,me.jsx)("div",{className:"dws-deploy-gate",children:(0,me.jsx)("span",{className:"dws-deploy-muted",children:w(n("deployGateWaiting"),{missing:Do(n,i.missing)})})}):null,(0,me.jsxs)("div",{className:"dws-deploy-row",children:[(0,me.jsx)("span",{className:"dws-deploy-label",children:n("deployUrlLabel")}),H?(0,me.jsx)("a",{className:"dws-deploy-url",href:H,target:"_blank",rel:"noreferrer",title:n("deployOpen"),children:H}):(0,me.jsx)("span",{className:"dws-deploy-muted",children:n("deployNoUrl")}),(0,me.jsxs)("div",{className:"dws-deploy-actions",children:[_&&z?(0,me.jsxs)(K,{className:"dws-button-ghost dws-deploy-run-smoke",disabled:C,title:n("deploySmoke"),onClick:()=>L(()=>e.deploySmoke(t)),children:[(0,me.jsx)(Mn,{size:14}),(0,me.jsx)("span",{children:n("deploySmoke")})]}):null,_&&!z?(0,me.jsxs)(K,{className:"dws-button-ghost dws-deploy-up",disabled:C,title:n("deployUp"),onClick:()=>L(()=>e.deployUp(t)),children:[(0,me.jsx)(Mn,{size:14}),(0,me.jsx)("span",{children:n("deployUp")})]}):null,z?(0,me.jsxs)(K,{className:`dws-button-ghost dws-deploy-destroy${N?" dws-deploy-destroy-armed":""}`,disabled:C,title:n("deployDestroy"),onClick:I,children:[(0,me.jsx)(Tt,{size:14}),(0,me.jsx)("span",{children:n(N?"deployDestroyAgain":"deployDestroy")})]}):null]})]}),z&&!o.stateFound?(0,me.jsx)("span",{className:"dws-deploy-error",children:n("deployStateMissing")}):null,g?(0,me.jsx)("span",{className:"dws-deploy-error",children:n("deploySmokeTimeout")}):null,a!==""?(0,me.jsx)("span",{className:"dws-deploy-error",children:a}):null,r!==""?(0,me.jsx)("span",{className:"dws-deploy-warning",role:"status",children:r}):null]})}var d=require("react/jsx-runtime"),tl=[["spaces","viewWorkspaces"],["repos","viewRepositories"],["tasks","viewTasks"]];function nl(){return tl.map(([e,t])=>({value:e,label:t}))}var Rd=[["all","filterAll"],["attention","filterAttention"]],bo=e=>e.split(/[\\/]/).filter(Boolean).pop()??e;function Nd(e,t){let n=e.toLowerCase();return/timed out|deadline|e3003/.test(n)?t("fetchFailedTimeout"):/could not read from remote|no such remote|does not appear to be a git repository|not found/.test(n)?t("fetchFailedUnreachable"):/permission denied|authentication|credentials|publickey|access denied/.test(n)?t("fetchFailedDenied"):t("fetchFailedGeneric")}function gn(e){return{insertions:(e.committedChanges?.insertions??0)+(e.workingChanges?.insertions??0),deletions:(e.committedChanges?.deletions??0)+(e.workingChanges?.deletions??0)}}function Zo({committed:e,working:t,committedHint:n,workingHint:o}){let s=J();return(0,d.jsxs)("div",{className:"dws-worktree-changes",children:[(0,d.jsx)("span",{className:"dws-changes-label",children:s("committedChangesLabel")}),(0,d.jsx)(Qi,{changes:e,hint:n??s("committedChangesHint")}),(0,d.jsx)("span",{className:"dws-changes-label",children:s("workingChangesLabel")}),(0,d.jsx)(Qi,{changes:t,hint:o??s("workingChangesHint")})]})}function Jo({baseBranch:e,baseLabel:t,ahead:n,behind:o,aheadHint:s,behindHint:i,committedChanges:p,workingChanges:a}){let u=J(),r=t??u("baseBranchLabel"),c=w(s??u("aheadHint"),{count:String(n)}),C=w(i??u("behindHint"),{count:String(o)});return(0,d.jsxs)(d.Fragment,{children:[(0,d.jsxs)("span",{className:"dws-branch-label dws-base-branch",title:`${r}: ${e??u("branchesDiffer")}`,children:[(0,d.jsxs)("span",{className:"dws-branch-name",children:[r,"\uFF1A"]}),(0,d.jsx)(Sa,{size:12}),(0,d.jsx)("span",{className:"dws-branch-value",children:e??u("branchesDiffer")})]}),n>0||o>0?(0,d.jsxs)("span",{className:"dws-ahead-behind",title:`${c} \xB7 ${C}`,children:[(0,d.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",n]}),(0,d.jsxs)("span",{className:"dws-behind",children:["\u2193 ",o]})]}):null]})}function Qi({changes:e,hint:t}){if(e===void 0)return(0,d.jsx)("span",{className:"dws-line-none",children:"\u2014"});let n=w(t,{insertions:String(e.insertions),deletions:String(e.deletions)});return(0,d.jsxs)("span",{className:"dws-lines",title:n,children:[(0,d.jsxs)("span",{className:"dws-line-add",children:["+",e.insertions]}),(0,d.jsxs)("span",{className:"dws-line-del",children:["\u2212",e.deletions]})]})}var el=6,ta=(e,t)=>t.startsWith(`${e}/`)?t.slice(e.length+1):t;function ol({api:e,workspaces:t,uiWorkspace:n,sessions:o,pickDirectory:s,heading:i=!0,onCreate:p,control:a,onLeave:u,config:r}){let c=J(),[C,m]=(0,se.useState)("spaces"),v=a?.view??C,R=a?.onView??m,[g,b]=(0,se.useState)([]),[N,E]=(0,se.useState)(!1),[P,S]=(0,se.useState)(null),T=()=>{let l=nn("scanDepth");if(typeof l=="string"&&l.trim()!==""){let x=Number(l);if(Number.isFinite(x))return x}return P},[L,I]=(0,se.useState)(""),[z,_]=(0,se.useState)(""),[k,O]=(0,se.useState)("all"),[H,W]=(0,se.useState)(()=>new Set),[D,G]=(0,se.useState)({}),[te,Z]=(0,se.useState)({}),[q,$]=(0,se.useState)(0);(0,se.useEffect)(()=>{if(v!=="spaces")return;let l=new AbortController,x=new Set,F=()=>{let Ne=t.list.getSnapshot().items.map(ee=>ee.path).filter(ee=>!x.has(ee));if(Ne.length!==0){for(let ee of Ne)x.add(ee);G(ee=>({...ee,...Object.fromEntries(Ne.map(Le=>[Le,"checking"]))})),e.classifyRoots(Ne,l.signal).then(ee=>{if(l.signal.aborted)return;let Le=new Map(ee.map(rt=>[rt.path,rt]));G(rt=>({...rt,...Object.fromEntries(Ne.map(he=>[he,Le.get(he)??"failed"]))}))}).catch(()=>{l.signal.aborted||G(ee=>({...ee,...Object.fromEntries(Ne.map(Le=>[Le,"failed"]))}))})}};F();let le=t.list.subscribe(()=>F());return()=>{l.abort(),le()}},[v,e,t,q]);let ge=l=>{let x=te[l];if(x!==void 0)return x;let F=Object.keys(te).find(le=>mt(le,l));return F===void 0?void 0:te[F]},ke=(0,se.useMemo)(()=>[...new Set(Object.values(D).flatMap(l=>l==="checking"||l==="failed"?[]:l.repositories.map(x=>x.path)))].join(`
 `),[D]),ie=(0,se.useRef)(new Set);(0,se.useEffect)(()=>{if(ke==="")return;let l=ke.split(`
 `).filter(F=>!ie.current.has(F));if(l.length===0)return;let x=!0;return(async()=>{let F=await Qs(l,el,async ee=>{try{return[ee,await e.upstream(ee)]}catch{return}});if(!x)return;let le=F.filter(ee=>ee!==void 0);for(let[ee]of le)ie.current.add(ee);le.length>0&&Z(ee=>({...ee,...Object.fromEntries(le)}));let oe=[];for(let ee of l){if(!x)return;try{oe.push([ee,await e.upstream(ee,void 0,!0)])}catch{}}if(!x||oe.length===0)return;let Ne=oe.filter(([,ee])=>ee.changed!==!1);Ne.length!==0&&Z(ee=>{let Le={...ee};for(let[rt,he]of Ne){let In=Object.keys(Le).find(de=>mt(de,rt))??rt;Le[In]=he}return Le})})(),()=>{x=!1}},[e,ke]);let[Q,st]=(0,se.useState)(null),[Ye,Re]=(0,se.useState)(null),[pe,ue]=(0,se.useState)(!1),[$e,vt]=(0,se.useState)(""),[ht,Xe]=(0,se.useState)(""),[Vt,Ue]=(0,se.useState)(""),[Kt,bn]=(0,se.useState)(!1),[Ve,Ot]=(0,se.useState)(!1),[ut,xt]=(0,se.useState)(""),[et,at]=(0,se.useState)(""),[It,qt]=(0,se.useState)(!1);(0,se.useEffect)(()=>{st(l=>l??Fa()[0]??null)},[]);let Ct=(0,se.useRef)(null),Ke=(0,se.useRef)(!1),Wn=(0,se.useCallback)(async l=>{st(l.path)},[]),ve=(0,se.useCallback)(async(l=[])=>{Ct.current?.abort();let x=new AbortController;Ct.current=x,E(!0),I("");try{let F=t.list.getSnapshot().items.map(de=>de.path),le=l.reduce((de,Y)=>de.some(Pe=>mt(Pe,Y))?de:[...de,Y],F),oe=T(),Ne=await e.scan(le,x.signal,oe??void 0);if(x.signal.aborted)return;S(Ne.bounds.depth),I(Ne.complete?"":Ne.reason);let ee=ea(Ne.lists);Ke.current=!0,b(ee.map(de=>({...de,worktrees:de.worktrees.map(Y=>({...Y,checking:!0}))})));let Le=ee.flatMap((de,Y)=>de.worktrees.map(Pe=>({repo:Y,row:Pe,target:de.currentBranch}))),rt=await Qs(Le,el,async({repo:de,row:Y,target:Pe})=>{try{return{repo:de,row:{...Y,...await e.status(Y.path,Pe,x.signal)}}}catch(Bt){return{repo:de,row:{...Y,statusError:Ae(c,Bt)}}}}),he=new Map;for(let{repo:de,row:Y}of rt){let Pe=he.get(de);Pe===void 0?he.set(de,[Y]):Pe.push(Y)}let In=ee.map((de,Y)=>({...de,worktrees:he.get(Y)??[]}));x.signal.aborted||b(In)}catch(F){x.signal.aborted||I(Ae(c,F))}finally{x.signal.aborted||E(!1)}},[e,t,c]);(0,se.useEffect)(()=>{let l=["scanDepth","maxScanDirectories","ignoredScanDirectories","removedScanDirectories"],x=new Map;return Ln(()=>{for(let F of l){let le=nn(F);if(!(le===void 0||x.get(F)===le)){x.set(F,le),ve(),$(oe=>oe+1);return}}})},[ve]),(0,se.useEffect)(()=>{let l=new AbortController,x=t.list.getSnapshot().items.map(F=>F.path);return e.cachedScan(x,l.signal).then(F=>{!F||l.signal.aborted||(S(F.current.depth),!(Ke.current||F.repositories.length===0)&&b(Ui(F)))}).catch(()=>{}),ve(),()=>{l.abort(),Ct.current?.abort()}},[e,t,ve,c]);let sn=l=>!!(l.changedFiles||l.commits||l.locked||l.prunable||l.statusError&&!l.checking),Me=z.trim().toLocaleLowerCase(),Mt=(...l)=>Me===""||l.some(x=>x?.toLocaleLowerCase().includes(Me)),St=l=>Me===""?l.worktrees:l.worktrees.filter(x=>Mt(x.path,x.branch)),Rt=l=>Me===""?l.repositories:l.repositories.filter(x=>Mt(x.path,x.name)),ft=g.filter(l=>k==="attention"&&!l.worktrees.some(sn)?!1:Mt(l.repoPath,l.currentBranch,...l.worktrees.flatMap(x=>[x.path,x.branch]))),yn=g.reduce((l,x)=>l+x.worktrees.length,0),Jn=ft.reduce((l,x)=>l+St(x).length,0),Nt=(l,x)=>l===x?String(x):`${l} / ${x}`,Ze=l=>l.checking?c("checkingStatus"):l.statusError?/worktree-unavailable|ENOENT|No such file/i.test(l.statusError)?c("unavailable"):l.statusError:l.changedFiles?w(c("dirty"),{count:String(l.changedFiles)}):l.prunable?c("prunable"):c("clean"),Yt=l=>l?(0,d.jsxs)("span",{className:"dws-status dws-status-pending",title:c("pendingHint"),children:[(0,d.jsx)("span",{className:"dws-status-dot"}),w(c("pending"),{count:String(l)})]}):null,cn=l=>W(x=>{let F=new Set(x);return F.has(l)?F.delete(l):F.add(l),F}),Et=(0,se.useMemo)(()=>Vi(g),[g]),kn=l=>l.changedFiles>0||l.commits>0||l.lockedRepositories>0||l.prunableRepositories>0||l.unknownRepositories>0,Xt=Et.filter(l=>k==="attention"&&!kn(l)?!1:!Me||[l.name,l.path,l.branch,...l.repositories.map(x=>x.path)].some(x=>x?.toLocaleLowerCase().includes(Me))),Qn=Et.reduce((l,x)=>l+x.repositories.length,0),eo=Xt.reduce((l,x)=>l+Rt(x).length,0),Ft=t.list.getSnapshot().items,Hn=(0,se.useMemo)(()=>{let l=new Map,x=new Map,F=[...Ft].sort((le,oe)=>oe.path.length-le.path.length);for(let le of g)for(let oe of F)if(mt(le.repoPath,oe.path)||Lo(oe.path,le.repoPath)){l.set(Te(le.repoPath),oe.path);let Ne=x.get(oe.path);Ne===void 0?x.set(oe.path,[le]):Ne.push(le);break}return{owner:l,under:x}},[g,Ft]),an=l=>Hn.under.get(l.path)??[],dn=[...ft.filter(l=>l.worktrees.length>0).map(l=>l.repoPath),...Xt.filter(l=>l.repositories.length>0).map(l=>l.path),...Ft.filter(l=>{let x=D[l.path];return x!==void 0&&x!=="checking"&&x!=="failed"&&an(l).length>0}).map(l=>l.path)],vn=dn.length>0&&dn.every(l=>H.has(l)),to=()=>W(vn?new Set:new Set(dn)),_t=l=>Me!==""||H.has(l),h=Ft.filter(l=>{let x=D[l.path];return k==="attention"&&(x!==void 0&&x!=="checking"&&x!=="failed")&&an(l).length===0?!1:Me===""?!0:l.title.toLowerCase().includes(Me)||l.path.toLowerCase().includes(Me)||an(l).some(le=>le.repoPath.toLowerCase().includes(Me))}),A=l=>l.checking?{state:"checking",label:c("checkingStatus")}:l.unknown?{state:"unavailable",label:c("statusUnknown")}:l.changedFiles?{state:"dirty",label:w(c("dirty"),{count:String(l.changedFiles)})}:l.prunable?{state:"prunable",label:c("prunable")}:{state:"clean",label:c("clean")},re=async(l,x)=>{if(s!==void 0)try{let F=await s();F!==null&&F!==""&&l(F)}catch(F){x(F instanceof Error?F.message:String(F))}},be=async()=>{let l=$e.trim();if(!(l===""||Kt)){bn(!0),Xe("");try{if(!(await Gi(e,t,l,g.map(F=>F.repoPath))).added){Ue(c("addRepositoryAlready"));return}Ue(""),vt(""),ue(!1),await ve([l])}catch(x){Xe(Ae(c,x))}finally{bn(!1)}}},Oe=async()=>{let l=ut.trim();if(!(l===""||It)){qt(!0),at("");try{if(!(await e.classifyRoot(l)).isDirectory)throw new Error(w(c("addWorkspaceNotDirectory"),{path:U(l)}));if((t.list.getSnapshot().items??[]).some(le=>mt(le.path,l)))throw new Error(c("addWorkspaceAlready"));await t.create({path:l}),xt(""),Ot(!1),await ve([l])}catch(x){at(Ae(c,x))}finally{qt(!1)}}},On=tl.map(([l,x])=>(0,d.jsx)("button",{type:"button","aria-pressed":v===l,onClick:()=>R(l),children:c(x)},l)),no=Rd.map(([l,x])=>{let F=c(v==="spaces"&&l==="attention"?"filterWithWorktrees":x);return(0,d.jsx)("button",{type:"button","aria-pressed":k===l,onClick:()=>O(l),children:F},l)}),M=(0,d.jsx)("button",{type:"button",className:"dws-filter-fold","aria-pressed":vn,onClick:to,children:c(vn?"collapseAll":"expandAll")}),V=(0,d.jsx)("span",{className:"dws-filter-divider","aria-hidden":"true",children:"|"}),X=(0,d.jsx)("span",{className:"dws-filter-divider dws-filter-separator","aria-hidden":"true",children:"|"}),we=c(v==="spaces"?"viewSpacesDescription":v==="repos"?"viewReposDescription":"viewTasksDescription"),Ie=v==="repos"||v==="tasks"||v==="spaces";return(0,d.jsxs)("section",{className:"dws-settings","aria-label":c("worktrees"),children:[(0,d.jsxs)("div",{className:"dws-settings-pinned",children:[i?(0,d.jsx)("header",{className:"dws-settings-header",children:(0,d.jsxs)("div",{children:[(0,d.jsx)("h2",{children:c("worktreesTitle")}),(0,d.jsx)("p",{children:c("panelDescription")})]})}):null,(0,d.jsxs)("div",{className:"dws-toolbar",children:[(0,d.jsxs)("label",{className:"dws-search",children:[(0,d.jsx)(Ro,{size:16,"aria-hidden":"true"}),(0,d.jsx)(Qe,{"aria-label":c("searchPlaceholder"),placeholder:c("searchPlaceholder"),value:z,onChange:l=>_(l.target.value)}),z?(0,d.jsx)(K,{className:"dws-icon-button","aria-label":c("clearFilters"),onClick:()=>_(""),children:(0,d.jsx)(Tt,{size:14})}):null]}),(0,d.jsxs)(K,{className:"dws-button dws-refresh","aria-label":c("refresh"),title:c("refresh"),disabled:N,onClick:()=>{ve()},children:[(0,d.jsx)(Mn,{size:14,className:N?"dws-spin":void 0}),c("refresh")]}),v==="repos"&&!pe?(0,d.jsxs)(K,{className:"dws-button dws-add-source-button",disabled:N,onClick:()=>{Xe(""),Ue(""),ue(!0)},children:[(0,d.jsx)(un,{size:14}),c("addRepositorySource")]}):null,v==="repos"&&pe?(0,d.jsxs)("div",{className:"dws-add-source-row",children:[(0,d.jsx)(Qe,{"aria-label":c("addRepositorySource"),placeholder:c("addRepositoryManualPlaceholder"),value:$e,autoFocus:!0,autoComplete:"off",spellCheck:!1,onChange:l=>vt(l.target.value),onKeyDown:l=>{l.key==="Enter"&&(l.preventDefault(),be())}}),s===void 0?null:(0,d.jsx)(K,{className:"dws-button",disabled:Kt,onClick:()=>{re(vt,Xe)},children:c("browse")}),(0,d.jsxs)(K,{className:"dws-button-primary",disabled:Kt||$e.trim()==="",onClick:()=>{be()},children:[Kt?(0,d.jsx)(_e,{size:14,className:"dws-spin","aria-hidden":"true"}):null,c(Kt?"addingRepository":"addRepositoryAdd")]}),(0,d.jsx)(K,{className:"dws-icon-button","aria-label":c("cancel"),onClick:()=>{ue(!1),vt(""),Xe(""),Ue("")},children:(0,d.jsx)(Tt,{size:14})})]}):null,v==="spaces"&&!Ve?(0,d.jsxs)(K,{className:"dws-button dws-add-source-button",disabled:N,onClick:()=>{at(""),Ot(!0)},children:[(0,d.jsx)(un,{size:14}),c("addWorkspace")]}):null,v==="spaces"&&Ve?(0,d.jsxs)("div",{className:"dws-add-source-row",children:[(0,d.jsx)(Qe,{"aria-label":c("addWorkspace"),placeholder:c("addWorkspacePlaceholder"),value:ut,autoFocus:!0,autoComplete:"off",spellCheck:!1,onChange:l=>xt(l.target.value),onKeyDown:l=>{l.key==="Enter"&&(l.preventDefault(),Oe())}}),s===void 0?null:(0,d.jsx)(K,{className:"dws-button",disabled:It,onClick:()=>{re(xt,at)},children:c("browse")}),(0,d.jsxs)(K,{className:"dws-button-primary",disabled:It||ut.trim()==="",onClick:()=>{Oe()},children:[It?(0,d.jsx)(_e,{size:14,className:"dws-spin","aria-hidden":"true"}):null,c(It?"addingWorkspace":"addWorkspaceConfirm")]}),(0,d.jsx)(K,{className:"dws-icon-button","aria-label":c("cancel"),onClick:()=>{Ot(!1),xt(""),at("")},children:(0,d.jsx)(Tt,{size:14})})]}):null]}),ht?(0,d.jsxs)("div",{className:"dws-error",role:"alert",children:[(0,d.jsx)(Fe,{size:16}),(0,d.jsx)("span",{children:ht})]}):null,Vt?(0,d.jsxs)("p",{className:"dws-notice",role:"status",children:[(0,d.jsx)(Fe,{size:15,"aria-hidden":"true"}),(0,d.jsx)("span",{children:Vt})]}):null,et?(0,d.jsxs)("div",{className:"dws-error",role:"alert",children:[(0,d.jsx)(Fe,{size:16}),(0,d.jsx)("span",{children:et})]}):null,(0,d.jsxs)("div",{className:"dws-list-controls",children:[a===void 0?(0,d.jsxs)(d.Fragment,{children:[(0,d.jsx)("div",{className:"dws-filters",role:"group","aria-label":c("viewSwitch"),children:On}),X]}):null,(0,d.jsxs)("div",{className:"dws-filters",role:"group","aria-label":c("filters"),children:[no,V,M]}),(0,d.jsx)("span",{className:"dws-summary",...v==="tasks"?{title:w(c("summaryTasksHint"),{tasks:String(Et.length),worktrees:String(Qn)})}:{},children:v==="repos"?(0,d.jsxs)(d.Fragment,{children:[Nt(ft.length,g.length)," ",c("repositories"),(0,d.jsx)("span",{"aria-hidden":"true",children:"\xB7"}),Nt(Jn,yn)," ",c("worktreeCount")]}):v==="tasks"?(0,d.jsxs)(d.Fragment,{children:[Nt(Xt.length,Et.length)," ",c("taskCount"),(0,d.jsx)("span",{"aria-hidden":"true",children:"\xB7"}),Nt(eo,Qn)," ",c("worktreeCount")]}):(0,d.jsxs)(d.Fragment,{children:[Nt(h.length,Ft.length)," ",c("workspaceCount")]})})]}),(0,d.jsx)("p",{className:"dws-view-description",children:we}),L?(0,d.jsxs)("div",{className:"dws-error",role:"alert",children:[(0,d.jsx)(Fe,{size:16}),(0,d.jsx)("span",{children:L}),(0,d.jsx)(K,{className:"dws-button-ghost",disabled:N,onClick:()=>{ve()},children:c("retry")})]}):null,N?(0,d.jsxs)("div",{className:"dws-loading-message",role:"status",children:[(0,d.jsx)(_e,{size:14,className:"dws-spin"}),(0,d.jsx)("span",{children:T()===null?c("scanningUnknown"):w(c("scanning"),{depth:String(T())})})]}):null,!N&&v==="repos"&&ft.length===0?(0,d.jsxs)("div",{className:"dws-empty",children:[(0,d.jsx)(Co,{size:24,strokeWidth:1.5}),(0,d.jsx)("h3",{children:c("noMatches")})]}):null,!N&&v==="tasks"&&Xt.length===0?(0,d.jsxs)("div",{className:"dws-empty",children:[(0,d.jsx)(so,{size:24,strokeWidth:1.5}),(0,d.jsx)("h3",{children:Et.length?c("noMatches"):c("noTasks")}),Et.length?null:(0,d.jsx)("p",{children:c("noTasksHint")})]}):null]}),Ie?(0,d.jsxs)("div",{className:"dws-list-body",children:[N&&g.length===0?(0,d.jsx)("div",{className:"dws-skeleton-list","aria-hidden":"true",children:[0,1,2].map(l=>(0,d.jsxs)("div",{className:"dws-skeleton-row",children:[(0,d.jsx)("span",{}),(0,d.jsxs)("div",{children:[(0,d.jsx)("span",{}),(0,d.jsx)("span",{})]})]},l))}):null,v==="repos"?(0,d.jsx)("div",{className:"dws-repo-list",children:ft.map(l=>{let x=St(l),F=x.length>0,le=F&&_t(l.repoPath);return(0,d.jsxs)("article",{className:"dws-repo",children:[(0,d.jsxs)("header",{className:"dws-repo-header",children:[(0,d.jsx)("button",{type:"button",className:"dws-chevron-toggle",disabled:!F,onClick:()=>cn(l.repoPath),"aria-expanded":F?le:void 0,"aria-label":`${c("toggleRepository")} ${bo(l.repoPath)}`,children:F?(0,d.jsx)(So,{size:14,className:"dws-chevron"}):(0,d.jsx)("span",{className:"dws-chevron-placeholder"})}),(0,d.jsx)(Co,{size:24,className:"dws-repo-icon"}),(0,d.jsxs)("span",{className:"dws-repo-heading",children:[(0,d.jsxs)("span",{className:"dws-repo-title",children:[(0,d.jsx)("h3",{children:bo(l.repoPath)}),(0,d.jsxs)("span",{className:"dws-branch-label",title:`${c("currentBranchLabel")}: ${l.currentBranch??c("detached")}`,children:[(0,d.jsx)(rn,{size:12}),(0,d.jsx)("span",{className:"dws-branch-value",children:l.currentBranch??c("detached")})]}),x.length>0?(0,d.jsx)("span",{className:"dws-count",title:w(c("worktreeCountHint"),{count:String(x.length)}),children:x.length}):null]}),(0,d.jsx)("span",{className:"dws-repo-path",title:U(l.repoPath),children:U(l.repoPath)})]}),p?(0,d.jsxs)(K,{className:"dws-button-ghost dws-create-repo","aria-label":c("workspaceCreate"),title:`${c("workspaceCreate")} \xB7 ${bo(l.repoPath)}`,onClick:()=>p({path:l.repoPath,title:bo(l.repoPath)}),children:[(0,d.jsx)(un,{size:15}),(0,d.jsx)("span",{children:c("workspaceCreate")})]}):null]}),le?(0,d.jsx)("div",{className:"dws-worktree-list",children:x.map(oe=>{let Ne=oe.checking?"checking":oe.statusError?"unavailable":oe.changedFiles?"dirty":oe.prunable?"prunable":"clean";return(0,d.jsxs)("div",{className:"dws-worktree",children:[(0,d.jsx)(xo,{size:18,className:"dws-tree-icon","aria-hidden":"true"}),(0,d.jsxs)("div",{className:"dws-worktree-info",children:[(0,d.jsxs)("div",{className:"dws-worktree-title",children:[(0,d.jsxs)("span",{className:"dws-branch-label dws-worktree-branch",title:`${c("currentBranchLabel")}: ${oe.branch??c("detached")}`,children:[(0,d.jsxs)("span",{className:"dws-branch-name",children:[c("branchLabel"),"\uFF1A"]}),(0,d.jsx)(rn,{size:12}),(0,d.jsx)("strong",{className:"dws-branch-value",children:oe.branch??c("detached")})]}),(0,d.jsxs)("span",{className:`dws-status dws-status-${Ne}`,title:oe.statusError,children:[(0,d.jsx)("span",{className:"dws-status-dot"}),Ze(oe)]}),(0,d.jsx)(Jo,{baseBranch:l.currentBranch,ahead:oe.commits??0,behind:oe.behind??0}),oe.locked?(0,d.jsx)("span",{className:"dws-status",children:c("locked")}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(oe.path),children:U(ta(l.repoPath,oe.path))}),(0,d.jsx)(Zo,{committed:oe.committedChanges,working:oe.workingChanges})]})]},oe.path)})}):null]},l.repoPath)})}):null,v==="tasks"?(0,d.jsx)("div",{className:"dws-repo-list",children:Xt.map(l=>{let x=Rt(l);return(0,d.jsxs)("article",{className:"dws-task",children:[(0,d.jsxs)("header",{className:"dws-task-header",children:[(0,d.jsx)("button",{type:"button",className:"dws-chevron-toggle",disabled:x.length===0,onClick:()=>cn(l.path),"aria-expanded":x.length>0?_t(l.path):void 0,"aria-label":`${c("toggleTask")} ${l.name}`,children:x.length>0?(0,d.jsx)(So,{size:14,className:"dws-chevron"}):(0,d.jsx)("span",{className:"dws-chevron-placeholder"})}),(0,d.jsx)(so,{size:24,className:"dws-task-icon"}),(0,d.jsxs)("span",{className:"dws-task-heading",children:[(0,d.jsxs)("span",{className:"dws-task-title",children:[(0,d.jsx)("h3",{children:l.name}),(0,d.jsxs)("span",{className:"dws-branch-label",title:`${c("taskBranchLabel")}: ${l.branch??c("branchesDiffer")}`,children:[(0,d.jsxs)("span",{className:"dws-branch-name",children:[c("taskBranchLabel"),"\uFF1A"]}),(0,d.jsx)(rn,{size:12}),(0,d.jsx)("span",{className:"dws-branch-value",children:l.branch??c("branchesDiffer")})]}),l.commits>0||l.behind>0?(0,d.jsxs)("span",{className:"dws-count dws-ahead-behind",title:`${w(c("aheadHint"),{count:String(l.commits)})} \xB7 ${w(c("behindHint"),{count:String(l.behind)})}`,children:[(0,d.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",l.commits]}),(0,d.jsxs)("span",{className:"dws-behind",children:["\u2193 ",l.behind]})]}):null,l.committedChanges===void 0&&l.workingChanges===void 0?null:(0,d.jsxs)("span",{className:"dws-count dws-lines",title:w(c("totalChangesHint"),{insertions:String(gn(l).insertions),deletions:String(gn(l).deletions)}),children:[(0,d.jsxs)("span",{className:"dws-line-add",children:["+",gn(l).insertions]}),(0,d.jsxs)("span",{className:"dws-line-del",children:["\u2212",gn(l).deletions]})]}),(0,d.jsx)("span",{className:"dws-count",title:w(c("worktreeCountHint"),{count:String(x.length)}),children:x.length})]}),(0,d.jsx)("span",{className:"dws-task-path",title:U(l.path),children:U(l.path)})]}),(0,d.jsxs)(K,{className:"dws-button-ghost dws-add-repository",disabled:N,onClick:()=>Re(l.path),children:[(0,d.jsx)(un,{size:15}),(0,d.jsx)("span",{children:c("addRepositoryToTask")})]}),(0,d.jsxs)(K,{className:"dws-button-ghost dws-finish-task",disabled:N,onClick:()=>Wn(l),children:[(0,d.jsx)(hn,{size:15}),(0,d.jsx)("span",{children:c("finishTask")})]})]}),(0,d.jsx)(Ji,{api:e,path:l.path}),x.length===0||_t(l.path)?(0,d.jsx)("div",{className:"dws-worktree-list",children:x.map(F=>{let le=A(F);return(0,d.jsxs)("div",{className:"dws-worktree",children:[(0,d.jsx)(xo,{size:18,className:"dws-tree-icon","aria-hidden":"true"}),(0,d.jsxs)("div",{className:"dws-worktree-info",children:[(0,d.jsxs)("div",{className:"dws-worktree-title",children:[(0,d.jsx)("strong",{children:F.name}),(0,d.jsxs)("span",{className:`dws-status dws-status-${le.state}`,children:[(0,d.jsx)("span",{className:"dws-status-dot"}),le.label]}),(0,d.jsx)(Jo,{baseBranch:F.baseBranch,ahead:F.commits,behind:F.behind}),F.locked?(0,d.jsx)("span",{className:"dws-status",children:c("locked")}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(F.path),children:U(F.path)}),(0,d.jsx)(Zo,{committed:F.committedChanges,working:F.workingChanges})]})]},F.path)})}):null]},l.path)})}):null,v==="spaces"?(0,d.jsx)("div",{className:"dws-repo-list",children:Ft.length===0?(0,d.jsx)("p",{className:"dws-no-linked",children:c("workspaceEmpty")}):h.length===0?(0,d.jsxs)("div",{className:"dws-empty",children:[(0,d.jsx)(so,{size:24,strokeWidth:1.5}),(0,d.jsx)("h3",{children:c("noMatches")})]}):h.map(l=>{let x=D[l.path],F=x!==void 0&&x!=="checking"&&x!=="failed",le=F?an(l):[],oe=le.filter(Y=>Me===""||Y.repoPath.toLowerCase().includes(Me)),Ne=F&&x.isSourceRoot,ee=F&&le.length===0,Le=x==="checking"?{className:"dws-status-checking",label:c("workspaceChecking")}:F?{className:Ne?"dws-status-clean":"dws-status-zero",label:w(c("workspaceSpans"),{count:String(oe.length)})}:{className:"dws-status-unavailable",label:c("workspaceUnreadable")},rt=oe.length>0,he=Et.find(Y=>mt(Y.path,l.path)),In=(rt||he!==void 0)&&_t(l.path),de=oe.reduce((Y,Pe)=>{let Bt=ge(Pe.repoPath);return Bt===void 0||(Y.read+=1,Y.ahead+=Bt.commits??0,Y.behind+=Bt.behind??0,Bt.committedChanges===void 0&&Bt.workingChanges===void 0)||(Y.insertions+=(Bt.committedChanges?.insertions??0)+(Bt.workingChanges?.insertions??0),Y.deletions+=(Bt.committedChanges?.deletions??0)+(Bt.workingChanges?.deletions??0),Y.lines+=1),Y},{read:0,ahead:0,behind:0,insertions:0,deletions:0,lines:0});return(0,d.jsxs)("article",{className:"dws-repo",children:[(0,d.jsxs)("header",{className:"dws-repo-header",children:[(0,d.jsx)("button",{type:"button",className:"dws-chevron-toggle",disabled:!rt&&he===void 0,onClick:()=>cn(l.path),"aria-expanded":rt||he!==void 0?In:void 0,"aria-label":`${c("toggleWorkspace")} ${l.title}`,children:rt||he!==void 0?(0,d.jsx)(So,{size:14,className:"dws-chevron"}):(0,d.jsx)("span",{className:"dws-chevron-placeholder"})}),(0,d.jsx)(so,{size:24,className:"dws-repo-icon"}),(0,d.jsxs)("span",{className:"dws-repo-heading",children:[(0,d.jsxs)("span",{className:"dws-repo-title",children:[(0,d.jsx)("h3",{children:l.title}),he===void 0?(0,d.jsxs)(d.Fragment,{children:[(0,d.jsxs)("span",{className:"dws-status "+Le.className,children:[(0,d.jsx)("span",{className:"dws-status-dot"}),Le.label]}),de.read>0&&(de.ahead>0||de.behind>0)?(0,d.jsxs)("span",{className:"dws-ahead-behind",title:`${w(c("upstreamAheadHint"),{count:String(de.ahead)})} \xB7 ${w(c("upstreamBehindHint"),{count:String(de.behind)})}`,children:[(0,d.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",de.ahead]}),(0,d.jsxs)("span",{className:"dws-behind",children:["\u2193 ",de.behind]})]}):null,de.lines>0?(0,d.jsxs)("span",{className:"dws-lines",title:w(c("totalChangesHint"),{insertions:String(de.insertions),deletions:String(de.deletions)}),children:[(0,d.jsxs)("span",{className:"dws-line-add",children:["+",de.insertions]}),(0,d.jsxs)("span",{className:"dws-line-del",children:["\u2212",de.deletions]})]}):null]}):(0,d.jsxs)(d.Fragment,{children:[(0,d.jsxs)("span",{className:"dws-branch-label",title:`${c("taskBranchLabel")}: ${he.branch??c("branchesDiffer")}`,children:[(0,d.jsxs)("span",{className:"dws-branch-name",children:[c("taskBranchLabel"),"\uFF1A"]}),(0,d.jsx)(rn,{size:12}),(0,d.jsx)("span",{className:"dws-branch-value",children:he.branch??c("branchesDiffer")})]}),he.commits>0||he.behind>0?(0,d.jsxs)("span",{className:"dws-ahead-behind",title:`${w(c("aheadHint"),{count:String(he.commits)})} \xB7 ${w(c("behindHint"),{count:String(he.behind)})}`,children:[(0,d.jsxs)("span",{className:"dws-ahead",children:["\u2191 ",he.commits]}),(0,d.jsxs)("span",{className:"dws-behind",children:["\u2193 ",he.behind]})]}):null,he.committedChanges===void 0&&he.workingChanges===void 0?null:(0,d.jsxs)("span",{className:"dws-lines",title:w(c("totalChangesHint"),{insertions:String(gn(he).insertions),deletions:String(gn(he).deletions)}),children:[(0,d.jsxs)("span",{className:"dws-line-add",children:["+",gn(he).insertions]}),(0,d.jsxs)("span",{className:"dws-line-del",children:["\u2212",gn(he).deletions]})]}),(0,d.jsx)("span",{className:"dws-count",title:w(c("worktreeCountHint"),{count:String(he.repositories.length)}),children:he.repositories.length})]})]}),(0,d.jsx)("span",{className:"dws-repo-path",title:U(l.path),children:U(l.path)})]}),ee&&he===void 0?(0,d.jsx)("span",{className:"dws-status dws-space-status",children:c("workspaceCannot")}):null,p&&Ne?(0,d.jsxs)(K,{className:"dws-button-ghost dws-create-repo","aria-label":c("workspaceCreate"),title:c("workspaceCreate"),onClick:()=>p({path:l.path,title:l.title}),children:[(0,d.jsx)(un,{size:15}),(0,d.jsx)("span",{children:c("workspaceCreate")})]}):null]}),In?(0,d.jsx)("div",{className:"dws-worktree-list",children:he===void 0?oe.map(Y=>{let Pe=ge(Y.repoPath);return(0,d.jsxs)("div",{className:"dws-worktree",children:[(0,d.jsx)(Co,{size:18,className:"dws-tree-icon","aria-hidden":"true"}),(0,d.jsxs)("div",{className:"dws-worktree-info",children:[(0,d.jsxs)("div",{className:"dws-worktree-title",children:[(0,d.jsx)("strong",{children:bo(Y.repoPath)}),(0,d.jsx)(Jo,{baseBranch:Pe?.upstream??c("noRemoteBranch"),baseLabel:c("remoteBranchLabel"),ahead:Pe?.commits??0,behind:Pe?.behind??0,aheadHint:c("upstreamAheadHint"),behindHint:c("upstreamBehindHint")}),Pe?.upstream==null||Pe.fetched===!0?null:Pe.fetchEnabled===!1?(0,d.jsxs)("span",{className:"dws-status dws-status-idle",title:c("upstreamFetchOff"),children:[(0,d.jsx)("span",{className:"dws-status-dot"}),c("upstreamNotFetched")]}):Pe.fetchError===void 0||Pe.fetchError===""?null:(0,d.jsxs)("span",{className:"dws-status dws-status-stale",title:`${Nd(Pe.fetchError,c)}
-${Pe.fetchError}`,children:[(0,d.jsx)("span",{className:"dws-status-dot"}),c("upstreamFetchFailedLabel")]}),Y.worktrees.length>0?(0,d.jsx)("span",{className:"dws-count",title:w(c("worktreeCountHint"),{count:String(Y.worktrees.length)}),children:Y.worktrees.length}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(Y.repoPath),children:U(ta(l.path,Y.repoPath))}),(0,d.jsx)(Zo,{committed:Pe?.committedChanges,working:Pe?.workingChanges,committedHint:c("upstreamCommittedHint"),workingHint:c("upstreamWorkingHint")})]})]},Y.repoPath)}):he.repositories.map(Y=>(0,d.jsxs)("div",{className:"dws-worktree",children:[(0,d.jsx)(xo,{size:18,className:"dws-tree-icon","aria-hidden":"true"}),(0,d.jsxs)("div",{className:"dws-worktree-info",children:[(0,d.jsxs)("div",{className:"dws-worktree-title",children:[(0,d.jsx)("strong",{children:Y.name}),(0,d.jsx)(Jo,{baseBranch:Y.baseBranch,ahead:Y.commits,behind:Y.behind}),Y.locked?(0,d.jsx)("span",{className:"dws-status",children:c("locked")}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(Y.path),children:U(ta(l.path,Y.path))}),(0,d.jsx)(Zo,{committed:Y.committedChanges,working:Y.workingChanges})]})]},Y.path))}):null]},l.workspaceId)})}):null]}):null,Ye?(0,d.jsx)(Ki,{taskPath:Ye,api:e,workspaces:t,repositories:g,onAdded:()=>{ve()},onClose:()=>Re(null)}):null,Q?(0,d.jsx)(Uo,{path:Q,api:e,workspaces:t,sessions:o,uiWorkspace:n,onArchived:()=>{ve()},onClose:()=>st(null),onLeave:u,config:r}):null]})}var on=require("react/jsx-runtime");function Qo(){let e=J(),t=Aa(Pa());return(0,on.jsxs)(on.Fragment,{children:[e("panelDescription"),(0,on.jsxs)("span",{className:"dws-usage-flow",children:[e("usageFlow")," ",t?(0,on.jsxs)(on.Fragment,{children:[(0,on.jsx)("a",{className:"dws-feedback-link",href:Yi,target:"_blank",rel:"noreferrer",children:e("videoLink")})," "]}):null,(0,on.jsx)("a",{className:"dws-feedback-link",href:qi,target:"_blank",rel:"noreferrer",children:e("feedbackLink")})]})]})}var wn=require("react");var es="dsh-worktree-space",na="1.4.0",Ed="https://github.com/kangtsang/dsh-worktree-space",sl=`${Ed}/blob/main/docs/CHANGELOG.md`;var ns=require("react");var Td=["https://registry.npmjs.org","https://registry.npmmirror.com"],Dd=3600*1e3,ts=null;async function Ld(e){try{let t=await fetch(`${e}/${es}/latest`);if(!t.ok)return null;let n=await t.json();return typeof n.version=="string"?n.version:null}catch{return null}}function Pd(){return(ts===null||Date.now()-ts.at>=Dd)&&(ts={at:Date.now(),promise:(async()=>{for(let e of Td){let t=await Ld(e);if(t!==null)return t}return null})()}),ts.promise}function Ad(e,t){let n=i=>i.replace(/^v/,"").split("-",1)[0].split(".").map(p=>Number.parseInt(p,10)||0),o=n(e),s=n(t);for(let i=0;i<Math.max(o.length,s.length);i+=1){let p=o[i]??0,a=s[i]??0;if(p!==a)return p>a}return!1}function al(){let[e,t]=(0,ns.useState)(null);return(0,ns.useEffect)(()=>{if(na.includes("-dev"))return;let n=!0;return Pd().then(o=>{n&&o!==null&&t(o)}),()=>{n=!1}},[]),e!==null&&Ad(e,na)?e:null}var Zn=require("react/jsx-runtime");function rl(e){return`${es}@${e}`}var Wd=1600;function os(){let e=J(),t=al(),[n,o]=(0,wn.useState)(!1),s=(0,wn.useRef)(null);(0,wn.useEffect)(()=>()=>{s.current!==null&&clearTimeout(s.current)},[]);let i=(0,wn.useCallback)(async u=>{let r=rl(u);try{await navigator.clipboard.writeText(r),o(!0),s.current!==null&&clearTimeout(s.current),s.current=setTimeout(()=>{o(!1)},Wd)}catch{}},[]);if(t===null)return null;let p=rl(t),a=n?w(e("updateCopied"),{spec:p}):w(e("updateTip"),{spec:p,version:`v${t}`});return(0,Zn.jsx)(Gt,{label:a,className:"dws-update-pill-hint",delayMs:80,children:(0,Zn.jsxs)("a",{className:"dws-update-pill","data-copied":n?"true":"false",href:sl,target:"_blank",rel:"noreferrer","aria-label":a,onContextMenu:u=>{u.preventDefault(),i(t)},children:[(0,Zn.jsx)("span",{className:"dws-update-pill-label",children:e(n?"updateCopiedShort":"updateAvailable")}),(0,Zn.jsx)("span",{className:"dws-update-pill-version",children:`\u2191 v${t}`})]})})}var ce=require("react/jsx-runtime");function il({view:e,onView:t,onOpenSettings:n}){let o=J();return(0,ce.jsxs)("nav",{className:"dws-nav","aria-label":o("worktreesTitle"),children:[nl().map(({value:s,label:i})=>(0,ce.jsx)("button",{type:"button",className:"dws-nav-item","aria-current":e===s?"true":void 0,onClick:()=>t(s),children:(0,ce.jsx)("span",{children:o(i)})},s)),n?(0,ce.jsxs)("button",{type:"button",className:"dws-nav-item dws-nav-settings",onClick:n,children:[(0,ce.jsx)(Ea,{size:16,"aria-hidden":"true"}),(0,ce.jsx)("span",{children:o("pluginSettings")})]}):null]})}function Hd({onBack:e}){let t=J();return(0,ce.jsx)("div",{className:"dws-panel-lead-nav",children:e===void 0?null:(0,ce.jsxs)(ce.Fragment,{children:[(0,ce.jsxs)("button",{type:"button",className:"dws-nav-item",onClick:e,children:[(0,ce.jsx)(Na,{size:16,"aria-hidden":"true"}),(0,ce.jsx)("span",{children:t("backToConversation")})]}),(0,ce.jsx)("span",{className:"dws-nav-rule","aria-hidden":"true"})]})})}function oa({api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,variant:p,onBack:a,onLeave:u,config:r,pickDirectory:c}){let C=J(),[m,v]=(0,ll.useState)("spaces"),R=(0,ce.jsx)(ol,{api:e,workspaces:t,uiWorkspace:n,sessions:o,pickDirectory:c,heading:!1,onCreate:s,control:{view:m,onView:v},onLeave:u??a,config:r});return p==="dialog"?(0,ce.jsxs)("section",{className:"dws-manage-page","aria-label":C("worktreesTitle"),children:[(0,ce.jsx)(il,{view:m,onView:v,onOpenSettings:i}),(0,ce.jsx)("div",{className:"dws-manage-page-content",children:R})]}):(0,ce.jsxs)("section",{className:"dws-panel","aria-label":C("worktreesTitle"),children:[(0,ce.jsxs)("div",{className:"dws-panel-lead",children:[(0,ce.jsx)(Hd,{onBack:a}),(0,ce.jsxs)("header",{className:"dws-panel-heading",children:[(0,ce.jsxs)("div",{className:"dws-title-row",children:[(0,ce.jsx)("h1",{children:C("worktreesTitle")}),(0,ce.jsx)(os,{})]}),(0,ce.jsx)("p",{children:(0,ce.jsx)(Qo,{})})]})]}),(0,ce.jsxs)("div",{className:"dws-panel-body",children:[(0,ce.jsx)(il,{view:m,onView:v,onOpenSettings:i}),(0,ce.jsx)("div",{className:"dws-panel-scroll",children:(0,ce.jsx)("div",{className:"dws-panel-content",children:R})})]})]})}function cl({onBack:e,...t}){return(0,ce.jsx)(oa,{...t,variant:"panel",onBack:e})}function dl({size:e}){return(0,ce.jsx)(Fn,{size:e,className:"dws-brand-glyph"})}var Ut=require("react/jsx-runtime");function pl({api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,onClose:p,config:a,pickDirectory:u}){let r=J();return(0,Ut.jsx)(wt,{open:!0,onOpenChange:c=>{c||p()},children:(0,Ut.jsxs)(bt,{className:"dws-manage-dialog",children:[(0,Ut.jsxs)("header",{className:"dws-manage-heading",children:[(0,Ut.jsxs)("div",{className:"dws-title-row",children:[(0,Ut.jsx)(en,{className:"dws-dialog-title",children:r("worktreesTitle")}),(0,Ut.jsx)(os,{})]}),(0,Ut.jsx)(yt,{className:"dws-form-note",children:(0,Ut.jsx)(Qo,{})})]}),(0,Ut.jsx)(oa,{api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,variant:"dialog",onLeave:p,config:a,pickDirectory:u})]})})}var Od="/api";function Id(e,t){let n=e===void 0||e==="E9001";if(e==="E3004"||n&&/not a git repository/i.test(t))return"E3004";if(e==="E3005"||n&&/is not a working tree|No such file or directory/i.test(t))return"E3005";if(e==="E2002")return"task-space-unregistered";if(e==="E2001")return"task-space-exists";if(e==="E3001")return"branch-exists"}function hl(e){async function t(o,s,i){let p=[Od,`dsh-worktree-space/${o}`,s],a=await(i?e.rpc.call(...p,i):e.rpc.call(...p));if(!a?.ok){let u=a?.error?.message;if(u===void 0)throw xn("worktree-failed");let r=Id(a?.error?.code,String(u))??a?.error?.code,c=new Error(String(u));throw c.code=r,c.details=a?.error?.details,c}return a.value}async function n(o,s,i){let p=new AbortController,a=xn("worktree-timeout"),u,r=()=>{},c=new Promise((C,m)=>{r=()=>{p.abort(),m(xn("worktree-cancelled"))},u=setTimeout(()=>{p.abort(),m(a)},15e3),i?.addEventListener("abort",r,{once:!0}),i?.aborted&&r()});try{return await Promise.race([t(o,s,p.signal),c])}finally{clearTimeout(u),i?.removeEventListener("abort",r)}}return{scan:(o,s,i)=>n("worktree.scan",i===void 0?{paths:o}:{paths:o,depth:i},s),cachedScan:(o,s)=>n("worktree.cached",{paths:o},s),status:(o,s,i)=>n("worktree.status",s?{path:o,target:s}:{path:o},i),upstream:(o,s,i=!1)=>n("worktree.upstream",i?{path:o,fetch:!0}:{path:o},s),classifyRoot:(o,s)=>n("task.classify-root",{sourceRoot:o},s),classifyRoots:(o,s)=>n("task.classify-roots",{paths:o},s),suggestRoot:(o,s,i)=>n("task.suggest-root",{sourceRoot:o,tasksRoot:s},i),branches:(o,s)=>n("task.branches",{paths:o},s),preferences:o=>n("task.preference",{},o),models:o=>n("task.models",{},o),createTask:o=>t("task.create",o),addRepositories:o=>t("task.add-repositories",o),inspectTask:(o,s)=>n("task.inspect",{path:o},s),planTask:(o,s)=>n("task.plan",o,s),doneTask:o=>t("task.done",o),widenHandoffSession:o=>t("task.handoff-access",{sessionId:o}),fileHandoffSession:(o,s)=>t("task.handoff-open",{sessionId:o,cwd:s}),deployStatus:(o,s)=>n("task.deploy-status",s?.derive===!0?{path:o,derive:!0}:{path:o},s?.signal),destroyDeployment:o=>t("task.deploy-destroy",{path:o}),deployUp:o=>t("task.deploy-up",{path:o}),deploySmoke:o=>t("task.deploy-smoke",{path:o})}}var Md="open-in-app/apps",Fd="open-in-app/icon",_d="open-in-app/open";function ul(e){try{let n=e.get("remote")?.session;return n!==void 0&&typeof n.openWorkspacePath=="function"?n:void 0}catch{return}}async function fl(e){let t=ul(e);if(t===void 0)return{available:!1,applications:[]};let n=!1;try{let o=await t.canOpenWorkspacePath();n=o.ok&&o.value===!0}catch{n=!1}return n?{available:!0,applications:await Bd()}:{available:!1,applications:[]}}async function Bd(){try{let e=await fetch(Md);if(!e.ok)return[];let t=await e.json();return(Array.isArray(t.apps)?t.apps.filter(o=>typeof o=="string"):[]).map(o=>({id:o,name:o,icon:`${Fd}/${encodeURIComponent(o)}`}))}catch{return[]}}async function ml(e,t,n){let o=ul(e);if(o!==void 0)try{if((await o.openWorkspacePath({path:t,application:n})).ok)return!0}catch{}try{return(await fetch(_d,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({app:n,path:t})})).ok}catch{return!1}}function gl(e,t){try{return e.get(t)}catch{return}}function wl(e){let t=globalThis.__DSH_DIRECTORY_PICKER__;if(t!==void 0&&typeof t.pick=="function")return!0;let n=gl(e,"remote");return n?.directoryPicker!==void 0&&typeof n.directoryPicker.pick=="function"}async function bl(e,t){let n=globalThis.__DSH_DIRECTORY_PICKER__;if(n!==void 0&&typeof n.pick=="function")return await n.pick();let s=gl(e,"remote")?.directoryPicker;if(s===void 0||typeof s.pick!="function")throw new Error("no directory picker is available on this deployment");let i=await s.pick(t);if(!i.ok)throw new Error(i.error?.message??"the directory picker failed");return i.value??null}var He=require("react/jsx-runtime"),yl="data-dsh-worktree-space-style",zd=5,kl="dsh-worktree-space",$d="dsh-worktree-space",yo,jd=20;function Gd(){if(typeof document>"u"||document.querySelector(`style[${yl}]`))return()=>{};let e=document.createElement("style");return e.setAttribute(yl,""),e.textContent=aa,document.head.appendChild(e),()=>e.remove()}var vl={name:"dsh-worktree-space",inject:["slots","connection","locale","workspaces","uiWorkspace","sessions","layout","remote","remote.session","remote.directoryPicker"],apply(e){e.effect(Gd,"dsh-worktree-space styles"),e.effect(()=>Da(e),"dsh-worktree-space locale");let t=hl(e.connection),n=e.workspaces,o=e.uiWorkspace,s=e.sessions,i={sourceRootPaths:new Set},p=new Set,a=()=>i,u=_=>(p.add(_),()=>{p.delete(_)}),r=!0,c=()=>{},C=()=>{},m=()=>{},v=0,R=wl(e)?()=>bl(e):void 0,g=_=>c(_),b=_=>C(_),N=()=>m(),E=()=>{try{e.get("pluginNavigation")?.openBundle?.($d)}catch{}},P=async()=>{if(!r)return;let _=++v,O=n.list.getSnapshot().items.map(D=>D.path);if(O.length===0){i={sourceRootPaths:new Set};for(let D of p)D();return}let H;try{H=await t.classifyRoots(O)}catch{H=[]}if(!r||_!==v)return;let W=new Set;for(let D of H)D?.isSourceRoot&&D.path&&W.add(Te(D.path));i={sourceRootPaths:W};for(let D of p)D()};e.effect(()=>{r=!0;let _=n.list.subscribe(()=>{P()});return P(),()=>{r=!1,v+=1,_(),p.clear()}},"dsh-worktree-space workspace classification");function S(){let[_,k]=(0,pt.useState)(null),{sourceRootPaths:O}=(0,pt.useSyncExternalStore)(u,a,a),H=(0,pt.useCallback)(q=>O.has(Te(q.path)),[O]),[W,D]=(0,pt.useState)(null);(0,pt.useEffect)(()=>{let q=!0;return fl(e).then($=>{q&&D($)}),()=>{q=!1}},[]);let[G,te]=(0,pt.useState)(null),Z=(0,pt.useCallback)((q,$)=>{(async()=>{if(await ml(e,q,$)){te(null);return}te({message:Zt("workspaceRevealFailed"),detail:Zt("workspaceRevealUnavailable")})})()},[Zt]);return(0,pt.useEffect)(()=>{if(G===null)return;let q=$=>{$.key==="Escape"&&te(null)};return document.addEventListener("keydown",q,!0),()=>document.removeEventListener("keydown",q,!0)},[G]),(0,pt.useEffect)(()=>(c=q=>k({kind:"create",target:q}),C=q=>k({kind:"archive",path:q}),m=()=>k({kind:"manage"}),()=>{c=()=>{},C=()=>{},m=()=>{}}),[]),(0,He.jsxs)(He.Fragment,{children:[(0,He.jsx)(Bi,{api:t,workspaces:n,canCreate:H,onCreate:g,onArchive:b,onOpenIn:Z,capability:W}),G===null?null:(0,He.jsxs)("div",{className:"dws-error-card",role:"alert",children:[(0,He.jsx)("span",{className:"dws-error-card-mark","aria-hidden":"true",dangerouslySetInnerHTML:{__html:Wi}}),(0,He.jsxs)("div",{className:"dws-error-card-body",children:[(0,He.jsx)("p",{className:"dws-error-card-title",children:G.message}),G.detail===void 0?null:(0,He.jsx)("p",{className:"dws-error-card-detail",children:G.detail})]}),(0,He.jsx)("button",{type:"button",className:"dws-error-card-close","aria-label":Zt("close"),onClick:()=>te(null),children:(0,He.jsx)("span",{"aria-hidden":"true",dangerouslySetInnerHTML:{__html:Hi}})})]}),_?.kind==="create"?(0,He.jsx)(hi,{target:_.target,api:t,workspaces:n,uiWorkspace:o,config:yo??void 0,onCreated:()=>{P()},onClose:()=>k(null)}):null,_?.kind==="archive"?(0,He.jsx)(Uo,{path:_.path,api:t,workspaces:n,sessions:s,uiWorkspace:o,config:yo??void 0,onArchived:()=>{P()},onClose:()=>k(null)}):null,_?.kind==="manage"?(0,He.jsx)(pl,{api:t,workspaces:n,uiWorkspace:o,sessions:s,config:yo??void 0,pickDirectory:R,onCreate:q=>k({kind:"create",target:q}),onOpenSettings:()=>{k(null),E()},onClose:()=>k(null)}):null]})}function T(_){let{sourceRootPaths:k}=(0,pt.useSyncExternalStore)(u,a,a);return(0,He.jsx)($i,{children:(0,He.jsx)(ui,{session:_.session,useWorkspaces:_.useWorkspaces,canCreate:O=>k.has(Te(O.path)),onOpen:O=>c(O)})})}e.slots.inject("conversation.input.dock",()=>e.slots.register({name:"conversation.input.dock",id:"dsh-worktree-space-new-session",order:-30,label:()=>Zt("createTask")},_=>(0,He.jsx)(T,{..._}))),e.slots.inject("shell.overlay",()=>e.slots.register({name:"shell.overlay",id:"dsh-worktree-space-create",order:30,label:()=>Zt("createTask")},S)),e.slots.inject("main",()=>e.slots.register({name:"main",key:kl},()=>(0,He.jsx)(cl,{api:t,workspaces:n,uiWorkspace:o,sessions:s,config:yo??void 0,pickDirectory:R,onCreate:g,onOpenSettings:E,onBack:()=>e.layout.selectPanel(null)})));let L=[],I=_=>{for(let k of L)k();L=[],_?.panelEntry==="show"&&L.push(e.slots.inject("sidebar.panellist",()=>e.slots.register({name:"sidebar.panellist",id:kl,order:jd,label:()=>Zt("worktrees")},k=>(0,He.jsx)(dl,{size:k.size})))),_?.sidebarEntry!=="hide"&&L.push(e.slots.inject("sidebar.footer.action",()=>e.slots.register({name:"sidebar.footer.action",id:"dsh-worktree-space",order:zd,label:()=>Zt("worktrees")},k=>(0,He.jsx)(ji,{wide:k.wide,onOpen:N}))))},z="worktree-space";e.inject(["configForms"],_=>{let k=_.configForms;if(k===void 0||typeof k.get!="function"){I(void 0);return}let O=k.get(z);yo=O;let H=()=>{let D=O.getSnapshot().value;I({sidebarEntry:nn("sidebarEntry")??D?.sidebarEntry,panelEntry:nn("panelEntry")??D?.panelEntry})};if(H(),e.effect(()=>O.subscribe(H),"dsh-worktree-space entry configuration"),e.effect(()=>Ln(H),"dsh-worktree-space entry preview"),typeof k.whileServed!="function")return;let W=()=>t.models();e.effect(()=>k.whileServed([z],()=>e.slots.inject("plugins.bundle.config",()=>e.slots.register({name:"plugins.bundle.config",key:io,locale:io},()=>(0,He.jsx)(Di,{form:O,loadModels:W})))),"dsh-worktree-space plugin configuration card")})}};var Ud=vl;
+${Pe.fetchError}`,children:[(0,d.jsx)("span",{className:"dws-status-dot"}),c("upstreamFetchFailedLabel")]}),Y.worktrees.length>0?(0,d.jsx)("span",{className:"dws-count",title:w(c("worktreeCountHint"),{count:String(Y.worktrees.length)}),children:Y.worktrees.length}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(Y.repoPath),children:U(ta(l.path,Y.repoPath))}),(0,d.jsx)(Zo,{committed:Pe?.committedChanges,working:Pe?.workingChanges,committedHint:c("upstreamCommittedHint"),workingHint:c("upstreamWorkingHint")})]})]},Y.repoPath)}):he.repositories.map(Y=>(0,d.jsxs)("div",{className:"dws-worktree",children:[(0,d.jsx)(xo,{size:18,className:"dws-tree-icon","aria-hidden":"true"}),(0,d.jsxs)("div",{className:"dws-worktree-info",children:[(0,d.jsxs)("div",{className:"dws-worktree-title",children:[(0,d.jsx)("strong",{children:Y.name}),(0,d.jsx)(Jo,{baseBranch:Y.baseBranch,ahead:Y.commits,behind:Y.behind}),Y.locked?(0,d.jsx)("span",{className:"dws-status",children:c("locked")}):null]}),(0,d.jsx)("div",{className:"dws-worktree-path",title:U(Y.path),children:U(ta(l.path,Y.path))}),(0,d.jsx)(Zo,{committed:Y.committedChanges,working:Y.workingChanges})]})]},Y.path))}):null]},l.workspaceId)})}):null]}):null,Ye?(0,d.jsx)(Ki,{taskPath:Ye,api:e,workspaces:t,repositories:g,onAdded:()=>{ve()},onClose:()=>Re(null)}):null,Q?(0,d.jsx)(Uo,{path:Q,api:e,workspaces:t,sessions:o,uiWorkspace:n,onArchived:()=>{ve()},onClose:()=>st(null),onLeave:u,config:r}):null]})}var on=require("react/jsx-runtime");function Qo(){let e=J(),t=Aa(Pa());return(0,on.jsxs)(on.Fragment,{children:[e("panelDescription"),(0,on.jsxs)("span",{className:"dws-usage-flow",children:[e("usageFlow")," ",t?(0,on.jsxs)(on.Fragment,{children:[(0,on.jsx)("a",{className:"dws-feedback-link",href:Yi,target:"_blank",rel:"noreferrer",children:e("videoLink")})," "]}):null,(0,on.jsx)("a",{className:"dws-feedback-link",href:qi,target:"_blank",rel:"noreferrer",children:e("feedbackLink")})]})]})}var wn=require("react");var es="dsh-worktree-space",na="1.4.1",Ed="https://github.com/kangtsang/dsh-worktree-space",sl=`${Ed}/blob/main/docs/CHANGELOG.md`;var ns=require("react");var Td=["https://registry.npmjs.org","https://registry.npmmirror.com"],Dd=3600*1e3,ts=null;async function Ld(e){try{let t=await fetch(`${e}/${es}/latest`);if(!t.ok)return null;let n=await t.json();return typeof n.version=="string"?n.version:null}catch{return null}}function Pd(){return(ts===null||Date.now()-ts.at>=Dd)&&(ts={at:Date.now(),promise:(async()=>{for(let e of Td){let t=await Ld(e);if(t!==null)return t}return null})()}),ts.promise}function Ad(e,t){let n=i=>i.replace(/^v/,"").split("-",1)[0].split(".").map(p=>Number.parseInt(p,10)||0),o=n(e),s=n(t);for(let i=0;i<Math.max(o.length,s.length);i+=1){let p=o[i]??0,a=s[i]??0;if(p!==a)return p>a}return!1}function al(){let[e,t]=(0,ns.useState)(null);return(0,ns.useEffect)(()=>{if(na.includes("-dev"))return;let n=!0;return Pd().then(o=>{n&&o!==null&&t(o)}),()=>{n=!1}},[]),e!==null&&Ad(e,na)?e:null}var Zn=require("react/jsx-runtime");function rl(e){return`${es}@${e}`}var Wd=1600;function os(){let e=J(),t=al(),[n,o]=(0,wn.useState)(!1),s=(0,wn.useRef)(null);(0,wn.useEffect)(()=>()=>{s.current!==null&&clearTimeout(s.current)},[]);let i=(0,wn.useCallback)(async u=>{let r=rl(u);try{await navigator.clipboard.writeText(r),o(!0),s.current!==null&&clearTimeout(s.current),s.current=setTimeout(()=>{o(!1)},Wd)}catch{}},[]);if(t===null)return null;let p=rl(t),a=n?w(e("updateCopied"),{spec:p}):w(e("updateTip"),{spec:p,version:`v${t}`});return(0,Zn.jsx)(Gt,{label:a,className:"dws-update-pill-hint",delayMs:80,children:(0,Zn.jsxs)("a",{className:"dws-update-pill","data-copied":n?"true":"false",href:sl,target:"_blank",rel:"noreferrer","aria-label":a,onContextMenu:u=>{u.preventDefault(),i(t)},children:[(0,Zn.jsx)("span",{className:"dws-update-pill-label",children:e(n?"updateCopiedShort":"updateAvailable")}),(0,Zn.jsx)("span",{className:"dws-update-pill-version",children:`\u2191 v${t}`})]})})}var ce=require("react/jsx-runtime");function il({view:e,onView:t,onOpenSettings:n}){let o=J();return(0,ce.jsxs)("nav",{className:"dws-nav","aria-label":o("worktreesTitle"),children:[nl().map(({value:s,label:i})=>(0,ce.jsx)("button",{type:"button",className:"dws-nav-item","aria-current":e===s?"true":void 0,onClick:()=>t(s),children:(0,ce.jsx)("span",{children:o(i)})},s)),n?(0,ce.jsxs)("button",{type:"button",className:"dws-nav-item dws-nav-settings",onClick:n,children:[(0,ce.jsx)(Ea,{size:16,"aria-hidden":"true"}),(0,ce.jsx)("span",{children:o("pluginSettings")})]}):null]})}function Hd({onBack:e}){let t=J();return(0,ce.jsx)("div",{className:"dws-panel-lead-nav",children:e===void 0?null:(0,ce.jsxs)(ce.Fragment,{children:[(0,ce.jsxs)("button",{type:"button",className:"dws-nav-item",onClick:e,children:[(0,ce.jsx)(Na,{size:16,"aria-hidden":"true"}),(0,ce.jsx)("span",{children:t("backToConversation")})]}),(0,ce.jsx)("span",{className:"dws-nav-rule","aria-hidden":"true"})]})})}function oa({api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,variant:p,onBack:a,onLeave:u,config:r,pickDirectory:c}){let C=J(),[m,v]=(0,ll.useState)("spaces"),R=(0,ce.jsx)(ol,{api:e,workspaces:t,uiWorkspace:n,sessions:o,pickDirectory:c,heading:!1,onCreate:s,control:{view:m,onView:v},onLeave:u??a,config:r});return p==="dialog"?(0,ce.jsxs)("section",{className:"dws-manage-page","aria-label":C("worktreesTitle"),children:[(0,ce.jsx)(il,{view:m,onView:v,onOpenSettings:i}),(0,ce.jsx)("div",{className:"dws-manage-page-content",children:R})]}):(0,ce.jsxs)("section",{className:"dws-panel","aria-label":C("worktreesTitle"),children:[(0,ce.jsxs)("div",{className:"dws-panel-lead",children:[(0,ce.jsx)(Hd,{onBack:a}),(0,ce.jsxs)("header",{className:"dws-panel-heading",children:[(0,ce.jsxs)("div",{className:"dws-title-row",children:[(0,ce.jsx)("h1",{children:C("worktreesTitle")}),(0,ce.jsx)(os,{})]}),(0,ce.jsx)("p",{children:(0,ce.jsx)(Qo,{})})]})]}),(0,ce.jsxs)("div",{className:"dws-panel-body",children:[(0,ce.jsx)(il,{view:m,onView:v,onOpenSettings:i}),(0,ce.jsx)("div",{className:"dws-panel-scroll",children:(0,ce.jsx)("div",{className:"dws-panel-content",children:R})})]})]})}function cl({onBack:e,...t}){return(0,ce.jsx)(oa,{...t,variant:"panel",onBack:e})}function dl({size:e}){return(0,ce.jsx)(Fn,{size:e,className:"dws-brand-glyph"})}var Ut=require("react/jsx-runtime");function pl({api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,onClose:p,config:a,pickDirectory:u}){let r=J();return(0,Ut.jsx)(wt,{open:!0,onOpenChange:c=>{c||p()},children:(0,Ut.jsxs)(bt,{className:"dws-manage-dialog",children:[(0,Ut.jsxs)("header",{className:"dws-manage-heading",children:[(0,Ut.jsxs)("div",{className:"dws-title-row",children:[(0,Ut.jsx)(en,{className:"dws-dialog-title",children:r("worktreesTitle")}),(0,Ut.jsx)(os,{})]}),(0,Ut.jsx)(yt,{className:"dws-form-note",children:(0,Ut.jsx)(Qo,{})})]}),(0,Ut.jsx)(oa,{api:e,workspaces:t,uiWorkspace:n,sessions:o,onCreate:s,onOpenSettings:i,variant:"dialog",onLeave:p,config:a,pickDirectory:u})]})})}var Od="/api";function Id(e,t){let n=e===void 0||e==="E9001";if(e==="E3004"||n&&/not a git repository/i.test(t))return"E3004";if(e==="E3005"||n&&/is not a working tree|No such file or directory/i.test(t))return"E3005";if(e==="E2002")return"task-space-unregistered";if(e==="E2001")return"task-space-exists";if(e==="E3001")return"branch-exists"}function hl(e){async function t(o,s,i){let p=[Od,`dsh-worktree-space/${o}`,s],a=await(i?e.rpc.call(...p,i):e.rpc.call(...p));if(!a?.ok){let u=a?.error?.message;if(u===void 0)throw xn("worktree-failed");let r=Id(a?.error?.code,String(u))??a?.error?.code,c=new Error(String(u));throw c.code=r,c.details=a?.error?.details,c}return a.value}async function n(o,s,i){let p=new AbortController,a=xn("worktree-timeout"),u,r=()=>{},c=new Promise((C,m)=>{r=()=>{p.abort(),m(xn("worktree-cancelled"))},u=setTimeout(()=>{p.abort(),m(a)},15e3),i?.addEventListener("abort",r,{once:!0}),i?.aborted&&r()});try{return await Promise.race([t(o,s,p.signal),c])}finally{clearTimeout(u),i?.removeEventListener("abort",r)}}return{scan:(o,s,i)=>n("worktree.scan",i===void 0?{paths:o}:{paths:o,depth:i},s),cachedScan:(o,s)=>n("worktree.cached",{paths:o},s),status:(o,s,i)=>n("worktree.status",s?{path:o,target:s}:{path:o},i),upstream:(o,s,i=!1)=>n("worktree.upstream",i?{path:o,fetch:!0}:{path:o},s),classifyRoot:(o,s)=>n("task.classify-root",{sourceRoot:o},s),classifyRoots:(o,s)=>n("task.classify-roots",{paths:o},s),suggestRoot:(o,s,i)=>n("task.suggest-root",{sourceRoot:o,tasksRoot:s},i),branches:(o,s)=>n("task.branches",{paths:o},s),preferences:o=>n("task.preference",{},o),models:o=>n("task.models",{},o),createTask:o=>t("task.create",o),addRepositories:o=>t("task.add-repositories",o),inspectTask:(o,s)=>n("task.inspect",{path:o},s),planTask:(o,s)=>n("task.plan",o,s),doneTask:o=>t("task.done",o),widenHandoffSession:o=>t("task.handoff-access",{sessionId:o}),fileHandoffSession:(o,s)=>t("task.handoff-open",{sessionId:o,cwd:s}),deployStatus:(o,s)=>n("task.deploy-status",s?.derive===!0?{path:o,derive:!0}:{path:o},s?.signal),destroyDeployment:o=>t("task.deploy-destroy",{path:o}),deployUp:o=>t("task.deploy-up",{path:o}),deploySmoke:o=>t("task.deploy-smoke",{path:o})}}var Md="open-in-app/apps",Fd="open-in-app/icon",_d="open-in-app/open";function ul(e){try{let n=e.get("remote")?.session;return n!==void 0&&typeof n.openWorkspacePath=="function"?n:void 0}catch{return}}async function fl(e){let t=ul(e);if(t===void 0)return{available:!1,applications:[]};let n=!1;try{let o=await t.canOpenWorkspacePath();n=o.ok&&o.value===!0}catch{n=!1}return n?{available:!0,applications:await Bd()}:{available:!1,applications:[]}}async function Bd(){try{let e=await fetch(Md);if(!e.ok)return[];let t=await e.json();return(Array.isArray(t.apps)?t.apps.filter(o=>typeof o=="string"):[]).map(o=>({id:o,name:o,icon:`${Fd}/${encodeURIComponent(o)}`}))}catch{return[]}}async function ml(e,t,n){let o=ul(e);if(o!==void 0)try{if((await o.openWorkspacePath({path:t,application:n})).ok)return!0}catch{}try{return(await fetch(_d,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({app:n,path:t})})).ok}catch{return!1}}function gl(e,t){try{return e.get(t)}catch{return}}function wl(e){let t=globalThis.__DSH_DIRECTORY_PICKER__;if(t!==void 0&&typeof t.pick=="function")return!0;let n=gl(e,"remote");return n?.directoryPicker!==void 0&&typeof n.directoryPicker.pick=="function"}async function bl(e,t){let n=globalThis.__DSH_DIRECTORY_PICKER__;if(n!==void 0&&typeof n.pick=="function")return await n.pick();let s=gl(e,"remote")?.directoryPicker;if(s===void 0||typeof s.pick!="function")throw new Error("no directory picker is available on this deployment");let i=await s.pick(t);if(!i.ok)throw new Error(i.error?.message??"the directory picker failed");return i.value??null}var He=require("react/jsx-runtime"),yl="data-dsh-worktree-space-style",zd=5,kl="dsh-worktree-space",$d="dsh-worktree-space",yo,jd=20;function Gd(){if(typeof document>"u"||document.querySelector(`style[${yl}]`))return()=>{};let e=document.createElement("style");return e.setAttribute(yl,""),e.textContent=aa,document.head.appendChild(e),()=>e.remove()}var vl={name:"dsh-worktree-space",inject:["slots","connection","locale","workspaces","uiWorkspace","sessions","layout","remote","remote.session","remote.directoryPicker"],apply(e){e.effect(Gd,"dsh-worktree-space styles"),e.effect(()=>Da(e),"dsh-worktree-space locale");let t=hl(e.connection),n=e.workspaces,o=e.uiWorkspace,s=e.sessions,i={sourceRootPaths:new Set},p=new Set,a=()=>i,u=_=>(p.add(_),()=>{p.delete(_)}),r=!0,c=()=>{},C=()=>{},m=()=>{},v=0,R=wl(e)?()=>bl(e):void 0,g=_=>c(_),b=_=>C(_),N=()=>m(),E=()=>{try{e.get("pluginNavigation")?.openBundle?.($d)}catch{}},P=async()=>{if(!r)return;let _=++v,O=n.list.getSnapshot().items.map(D=>D.path);if(O.length===0){i={sourceRootPaths:new Set};for(let D of p)D();return}let H;try{H=await t.classifyRoots(O)}catch{H=[]}if(!r||_!==v)return;let W=new Set;for(let D of H)D?.isSourceRoot&&D.path&&W.add(Te(D.path));i={sourceRootPaths:W};for(let D of p)D()};e.effect(()=>{r=!0;let _=n.list.subscribe(()=>{P()});return P(),()=>{r=!1,v+=1,_(),p.clear()}},"dsh-worktree-space workspace classification");function S(){let[_,k]=(0,pt.useState)(null),{sourceRootPaths:O}=(0,pt.useSyncExternalStore)(u,a,a),H=(0,pt.useCallback)(q=>O.has(Te(q.path)),[O]),[W,D]=(0,pt.useState)(null);(0,pt.useEffect)(()=>{let q=!0;return fl(e).then($=>{q&&D($)}),()=>{q=!1}},[]);let[G,te]=(0,pt.useState)(null),Z=(0,pt.useCallback)((q,$)=>{(async()=>{if(await ml(e,q,$)){te(null);return}te({message:Zt("workspaceRevealFailed"),detail:Zt("workspaceRevealUnavailable")})})()},[Zt]);return(0,pt.useEffect)(()=>{if(G===null)return;let q=$=>{$.key==="Escape"&&te(null)};return document.addEventListener("keydown",q,!0),()=>document.removeEventListener("keydown",q,!0)},[G]),(0,pt.useEffect)(()=>(c=q=>k({kind:"create",target:q}),C=q=>k({kind:"archive",path:q}),m=()=>k({kind:"manage"}),()=>{c=()=>{},C=()=>{},m=()=>{}}),[]),(0,He.jsxs)(He.Fragment,{children:[(0,He.jsx)(Bi,{api:t,workspaces:n,canCreate:H,onCreate:g,onArchive:b,onOpenIn:Z,capability:W}),G===null?null:(0,He.jsxs)("div",{className:"dws-error-card",role:"alert",children:[(0,He.jsx)("span",{className:"dws-error-card-mark","aria-hidden":"true",dangerouslySetInnerHTML:{__html:Wi}}),(0,He.jsxs)("div",{className:"dws-error-card-body",children:[(0,He.jsx)("p",{className:"dws-error-card-title",children:G.message}),G.detail===void 0?null:(0,He.jsx)("p",{className:"dws-error-card-detail",children:G.detail})]}),(0,He.jsx)("button",{type:"button",className:"dws-error-card-close","aria-label":Zt("close"),onClick:()=>te(null),children:(0,He.jsx)("span",{"aria-hidden":"true",dangerouslySetInnerHTML:{__html:Hi}})})]}),_?.kind==="create"?(0,He.jsx)(hi,{target:_.target,api:t,workspaces:n,uiWorkspace:o,config:yo??void 0,onCreated:()=>{P()},onClose:()=>k(null)}):null,_?.kind==="archive"?(0,He.jsx)(Uo,{path:_.path,api:t,workspaces:n,sessions:s,uiWorkspace:o,config:yo??void 0,onArchived:()=>{P()},onClose:()=>k(null)}):null,_?.kind==="manage"?(0,He.jsx)(pl,{api:t,workspaces:n,uiWorkspace:o,sessions:s,config:yo??void 0,pickDirectory:R,onCreate:q=>k({kind:"create",target:q}),onOpenSettings:()=>{k(null),E()},onClose:()=>k(null)}):null]})}function T(_){let{sourceRootPaths:k}=(0,pt.useSyncExternalStore)(u,a,a);return(0,He.jsx)($i,{children:(0,He.jsx)(ui,{session:_.session,useWorkspaces:_.useWorkspaces,canCreate:O=>k.has(Te(O.path)),onOpen:O=>c(O)})})}e.slots.inject("conversation.input.dock",()=>e.slots.register({name:"conversation.input.dock",id:"dsh-worktree-space-new-session",order:-30,label:()=>Zt("createTask")},_=>(0,He.jsx)(T,{..._}))),e.slots.inject("shell.overlay",()=>e.slots.register({name:"shell.overlay",id:"dsh-worktree-space-create",order:30,label:()=>Zt("createTask")},S)),e.slots.inject("main",()=>e.slots.register({name:"main",key:kl},()=>(0,He.jsx)(cl,{api:t,workspaces:n,uiWorkspace:o,sessions:s,config:yo??void 0,pickDirectory:R,onCreate:g,onOpenSettings:E,onBack:()=>e.layout.selectPanel(null)})));let L=[],I=_=>{for(let k of L)k();L=[],_?.panelEntry==="show"&&L.push(e.slots.inject("sidebar.panellist",()=>e.slots.register({name:"sidebar.panellist",id:kl,order:jd,label:()=>Zt("worktrees")},k=>(0,He.jsx)(dl,{size:k.size})))),_?.sidebarEntry!=="hide"&&L.push(e.slots.inject("sidebar.footer.action",()=>e.slots.register({name:"sidebar.footer.action",id:"dsh-worktree-space",order:zd,label:()=>Zt("worktrees")},k=>(0,He.jsx)(ji,{wide:k.wide,onOpen:N}))))},z="worktree-space";e.inject(["configForms"],_=>{let k=_.configForms;if(k===void 0||typeof k.get!="function"){I(void 0);return}let O=k.get(z);yo=O;let H=()=>{let D=O.getSnapshot().value;I({sidebarEntry:nn("sidebarEntry")??D?.sidebarEntry,panelEntry:nn("panelEntry")??D?.panelEntry})};if(H(),e.effect(()=>O.subscribe(H),"dsh-worktree-space entry configuration"),e.effect(()=>Ln(H),"dsh-worktree-space entry preview"),typeof k.whileServed!="function")return;let W=()=>t.models();e.effect(()=>k.whileServed([z],()=>e.slots.inject("plugins.bundle.config",()=>e.slots.register({name:"plugins.bundle.config",key:io,locale:io},()=>(0,He.jsx)(Di,{form:O,loadModels:W})))),"dsh-worktree-space plugin configuration card")})}};var Ud=vl;
 
     return (module.exports && module.exports.default) || module.exports
   },

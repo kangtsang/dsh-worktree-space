@@ -112,7 +112,7 @@
 | --- | --- | --- |
 | **工作区视图** | 每个 DSH 工作区，带「包含 N 个仓库」徽章；没有仓库的会写「没有 Git 仓库，无法创建任务空间」 | **新建 Worktree Space**（能建的那些行）、**添加工作区**（填一个目录把它注册成工作区） |
 | **Git 仓库视图** | 扫到的每个 Git 仓库，展开是它链接的 worktree（分支、N 个未提交变更、已锁定、可清理） | **新建 Worktree Space**（从某个仓库起）、**添加仓库**（填路径把目录注册成工作区，因此进入本视图） |
-| **任务空间视图** | 每个任务，展开是它下面的仓库；任务头上是任务分支、待合并提交数 | **添加仓库**、**结束任务**，以及任务行下面的部署卡片 |
+| **任务空间视图** | 每个任务，展开是它下面的仓库；任务头上是任务分支、领先/落后目标分支的提交数、已提交与未提交**合计**的增删行数 | **添加仓库**、**结束任务**，以及任务行下面的部署卡片 |
 
 搜索框一次匹配任务、工作区、仓库、分支和路径；三个视图都能用 **待处理** 筛出需要关注的行
 （有改动的、被锁定的、可清理的、状态读取失败的），工作区视图里这一档是「有仓库」。
@@ -386,8 +386,9 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 
 | 区域 | 内容 |
 | --- | --- |
-| 状态行 | 未提交变更数 · 待合并提交数 · 空间目录名 |
-| 仓库列表 | 每行：仓库名、任务分支、`→` **目标分支**；下一行是 **源仓库**路径，同一行右边接着 N 个提交与未提交 / 无未提交变更。目标点开是一个可搜索的分支列表，换完立刻重算预览；该目标不是源仓库当前检出时会标「会在临时 worktree 中合并」 |
+| 目录行 | `空间目录名` + 任务空间路径，单独一行 |
+| 汇总行 | `领先/落后` + `↑` / `↓` 两个提交数 · `已提交变更` + 增删行数 · `未提交变更` + 增删行数（没有未提交改动时写「无未提交变更」）。悬停「未提交变更」还会给出涉及几个文件 |
+| 仓库列表 | 每行：仓库名、任务分支、`→` **目标分支**；同一行右边接着该仓库的 `领先/落后`、`已提交变更`、`未提交变更` 三组数字。目标点开是一个可搜索的分支列表，换完立刻按新目标重算上面所有数字；该目标不是源仓库当前检出时会标「会在临时 worktree 中合并」 |
 | 任务空间内其他内容 | 会被归档或删除的条目名 + 文档数；另有几项构建/编辑器产物会一并删除；底部一句说明 `.worktree-space/` 不属于可归档内容 |
 
 ### 7.2 四个选项
@@ -960,7 +961,7 @@ the host's plugin page to change this plugin's configuration.
 | --- | --- | --- |
 | **Workspaces** | Each DSH Workspace, with an "N repositories" badge; one without any says "No git repositories, no task space can be created" | **New Worktree Space** (on the rows that can host one), **Add Workspace** (name a directory to register it as a Workspace) |
 | **Git repositories** | Every git repository the scan found, expanding into the worktrees linked to it (branch, N uncommitted changes, locked, prunable) | **New Worktree Space** (starting from one repository), **Add repository** (name a path to register that directory as a Workspace, which is why you are in this view) |
-| **Task spaces** | Each task, expanding into the repositories below it; the task header carries its branch and how many commits await merging | **Add repository**, **Finish task**, and the deploy card under the task's row |
+| **Task spaces** | Each task, expanding into the repositories below it; the task header carries its branch, the commits it is ahead of and behind its target, and the lines **committed and uncommitted together** | **Add repository**, **Finish task**, and the deploy card under the task's row |
 
 The search box matches tasks, Workspaces, repositories, branches and paths at once. All three views carry
 a **Needs attention** filter for the rows worth looking at (changed, locked, prunable, or whose status
@@ -1290,8 +1291,9 @@ lays out what is about to happen:
 
 | Area | Contents |
 | --- | --- |
-| Status line | Uncommitted changes · commits awaiting merge · the space's directory name |
-| Repository list | Per row: repository name, task branch, `→` **target branch**; the **source repository** path sits on the next line, with N commits and uncommitted / nothing uncommitted after it. The target opens a **searchable branch list**, and changing it recomputes the preview at once; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
+| Directory line | `Space directory` and the task space's path, on a line of its own |
+| Totals line | `Ahead/behind` with the `↑` / `↓` commit counts · `Committed changes` with its added and removed lines · `Uncommitted changes` with its own (or "no uncommitted changes" when there are none). Hovering the uncommitted pair also says how many files it covers |
+| Repository list | Per row: repository name, task branch, `→` **target branch**; on the same line, that repository's `ahead/behind`, `committed` and `uncommitted` figures. The target opens a **searchable branch list**, and changing it recomputes every figure above at once against the new target; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
 | Other content in the task space | Names of the entries that will be archived or deleted, plus a document count; several build/editor artefacts are deleted alongside them; the note at the foot says `.worktree-space/` is not archiveable content |
 
 ### 7.2 The four options

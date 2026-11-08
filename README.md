@@ -128,11 +128,15 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 - **管理页面**，分三个视图（入口见「管理 Worktree Space」一节）：
   - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库。每个源码仓库带一行
     `远端分支：<分支>` + 领先/落后提交数（`↑` / `↓`）+ 这些提交的增删行数，工作区头部是它下面
-    所有仓库的合计；
+    所有仓库的合计（**已提交与未提交合计在一对行数里**）；
   - **Git 仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree；
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理），
-    任务行下面就是它的部署卡片。任务行显示**任务分支**与整个任务的合计，展开后每个仓库显示自己的
-    **基线分支**与那一份数字。
+    任务行下面就是它的部署卡片。任务行显示**任务分支**与整个任务的合计（已提交与未提交合计在一对
+    行数里），展开后每个仓库显示自己的**基线分支**与那一份数字。
+  - **任务空间自己注册成工作区时也能被发现**：任务的 worktree 由源仓库报出，所以源仓库不在任何工作区里
+    时，任务本来查不到。此时插件读任务记录里记下的源仓库，用它们把任务找出来 —— 只列出属于这个任务空间的
+    worktree，同一源仓库下没在工作区里的其它任务不会跟着露出来；而源仓库本身被注册成工作区时，它下面
+    所有 worktree（含其它任务）照常全部列出。
 - **给任务补仓库**：任务进行到一半才发现少一个仓库时，在任务行上点「添加仓库」—— 候选就是 Git 仓库视图里
   那一列，任务已经有的不会重复列出；也可以直接填一个仓库目录，它会注册成工作区，因此同样进入 Git 仓库视图。
   新仓库在任务现有分支上开 worktree，起点默认各仓库当前的 HEAD，也可指定分支或提交。新仓库可以位于不同目录
@@ -290,8 +294,10 @@ DSH 实例的内存里，实例关闭时随之清空。
 ![结束任务对话框](docs/img/finish-task.png)
 
 在任务行上点 **结束任务**，或在工作区列表的 `⋯` 菜单里点 **结束任务空间**。对话框打开时先把**计划**读一遍
-（不信任打开它的那一行），逐个仓库列出：当前分支、**要合并到哪条分支**（可以换）、领先几个提交、
-有几个文件没提交，以及确实存在遗留内容时才出现的 **归档任务空间里的文档** 选项。
+（不信任打开它的那一行），分两行列出：**空间目录**（一行，`空间目录名` + 路径），然后是汇总与逐仓库的
+变更数据。逐个仓库列出：当前分支、**要合并到哪条分支**（可以换）、领先/落后该目标分支几个提交
+（`↑` / `↓`）、**已提交变更**与**未提交变更**各自的增删行数，以及确实存在遗留内容时才出现的
+**归档任务空间里的文档** 选项。换目标分支后这些数字立刻按新目标重算。
 
 四个勾选框：**合并回目标分支**（默认选中）、**删除分支**、**强制**、**归档任务空间里的文档**（默认选中）；
 「删除分支」在不合并也没勾强制时不可用。
@@ -727,12 +733,20 @@ the repository that stopped it, and merges once that session has resolved it.
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
     each one has. Every source repository carries `Remote branch: <branch>` with the commits
     ahead and behind (`↑` / `↓`) and the lines those commits add and remove; the Workspace
-    header carries the sum over its repositories;
+    header carries the sum over its repositories, with **committed and uncommitted lines
+    added up into one pair**;
   - **Git repositories** lists every Git repository found and the worktrees linked to it;
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable), with that task's deployment card under its row. A task
-    row carries the **task branch** and the whole task's totals; opened, each repository shows
-    its own **base branch** and that repository's figures.
+    row carries the **task branch** and the whole task's totals, with committed and
+    uncommitted lines in one pair; opened, each repository shows its own **base branch** and
+    that repository's figures.
+  - **A registered task space is found on its own**: a task's worktrees are reported by its
+    source repositories, so a task whose source repositories are in no Workspace used to be
+    invisible. The recorded source repositories are read instead, and the task is listed -
+    down to the worktrees of that task space only, so another task under the same source
+    repository does not appear with it. Registering the source repository itself still lists
+    every worktree it holds, other tasks included.
 - **Add a repository to a task** from its row, when the work turns out to need one the task
   did not start with. The candidates are the Git repository view's own list, minus the ones the
   task already has; a repository directory can also be typed in, and it is registered as a
@@ -928,9 +942,11 @@ the gate is raising the environment and running the smoke.
 
 Use **Finish task** on the task row, or **Finish task space** in the workspace list's `⋯` menu. The
 dialog reads the **plan** once more when it opens — it does not trust the row that opened it — and
-lists, per repository, the current branch, **which branch it would merge into** (changeable), how many
-commits it is ahead, how many files are uncommitted, and, only when there really is something left
-behind, the **Archive the task space's documents** option.
+shows two lines: the **space directory** on one, the change figures on the other. Per repository it
+lists the current branch, **which branch it would merge into** (changeable), how many commits it is
+ahead of and behind that target (`↑` / `↓`), the lines **committed** and **uncommitted** each carry,
+and, only when there really is something left behind, the **Archive the task space's documents**
+option. Changing the target recomputes every one of those figures at once.
 
 Four tick boxes: **Merge into the target branch** (ticked), **Delete branch**, **Force**, and
 **Archive the task space's documents** (ticked). Delete branch is unavailable without either a merge
