@@ -155,12 +155,13 @@
 
 | 依赖 | 用途 | 提供方 |
 | --- | --- | --- |
-| Node.js `>=22.19.0` | 运行时（`package.json` 的 `engines.node`） | 用户环境 |
-| DSH `>=0.2.1-rc.1 <0.3.0-0` | 宿主：客户端契约与服务注入（`engines.dsh` / `dsh.compatibility.dsh`，声明式） | 用户环境 |
+| Node.js `^22.19.0 \|\| >=24.0.0` | 运行时（`package.json` 的 `engines.node`） | 用户环境 |
+| DSH `>=0.2.0-rc.1 \|\| >=0.2.1-rc.1 \|\| >=0.2.2-rc.1` | 宿主：客户端契约与服务注入（`engines.dsh` / `dsh.compatibility.dsh`，声明式） | 用户环境 |
 | `@deepseek-ai/cordis` `^4.0.2` | 插件框架 | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-client-connection` `>=0.2.1-rc.1 <0.3.0-0` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`）；DSH 0.2.0 起安装与启动会强制校验这个范围 | DSH profile（`peerDependencies`） |
-| `@deepseek-ai/dsh-tools` `>=0.2.1-rc.1 <0.3.0-0` | 宿主工具定义 `defineTool`；同样被 DSH 强制校验 | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-client-connection` `>=0.2.0-rc.1 \|\| >=0.2.1-rc.1 \|\| >=0.2.2-rc.1` | 客户端连接与宿主 RPC（`/api/dsh-worktree-space`）；范围不参与兼容判定（判定看 `engines.dsh`），标为 `optional`，安装器不安装副本 | DSH profile（`peerDependencies`，`optional`） |
+| `@deepseek-ai/dsh-tools` `>=0.2.0-rc.1 \|\| >=0.2.1-rc.1 \|\| >=0.2.2-rc.1` | 宿主工具定义 `defineTool`；同样标为 `optional`，由 profile 提供、安装器不安装副本 | DSH profile（`peerDependencies`，`optional`） |
 | `@deepseek-ai/schemastery` `^3.18.2` | 配置模式校验 | DSH profile（`peerDependencies`） |
+| `@deepseek-ai/dsh-client-locale`、`dsh-client-ui-settings`、`dsh-client-ui-settings-plugins`、`dsh-client-ui-sidebar`、`dsh-client-ui-slots`、`dsh-client-ui-workspace`、`dsh-api-remotes`、`dsh-api-workspace-controller`、`dsh-api-session-controller`（均为 `>=0.2.0-rc.1 \|\| >=0.2.1-rc.1 \|\| >=0.2.2-rc.1`） | 客户端界面注入的宿主模块，逐项列在 `dsh.client.inject` 里；清单中与其它 peer 一并声明并标为 `optional`，由 profile 提供 | DSH profile（`peerDependencies`，`optional`） |
 | `react` / `react-dom` 18 | 客户端界面，打包时按 external 处理 | DSH web 运行时 |
 | `git` | 全部仓库操作 | 用户环境（须在 `PATH`，版本随系统） |
 | `@hugeicons/core-free-icons`、`@hugeicons/react`、`@radix-ui/react-dialog` | 图标与对话框组件，**仅构建期**，已内联进 `client/client.js` | 构建机（`devDependencies`） |
@@ -422,12 +423,13 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
 
 | Dependency | Purpose | Provided by |
 | --- | --- | --- |
-| Node.js `>=22.19.0` | Runtime (`engines.node` in `package.json`) | The user's environment |
-| DSH `>=0.2.1-rc.1 <0.3.0-0` | Host: client contract and service injection (`engines.dsh` / `dsh.compatibility.dsh`, declarative) | The user's environment |
+| Node.js `^22.19.0 || >=24.0.0` | Runtime (`engines.node` in `package.json`) | The user's environment |
+| DSH `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1` | Host: client contract and service injection (`engines.dsh` / `dsh.compatibility.dsh`, declarative) | The user's environment |
 | `@deepseek-ai/cordis` `^4.0.2` | Plugin framework | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-client-connection` `>=0.2.1-rc.1 <0.3.0-0` | Client connection and host RPC (`/api/dsh-worktree-space`); from DSH 0.2.0 on, install and startup enforce this range | DSH profile (`peerDependencies`) |
-| `@deepseek-ai/dsh-tools` `>=0.2.1-rc.1 <0.3.0-0` | Host tool definition, `defineTool`; enforced by DSH the same way | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-client-connection` `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1` | Client connection and host RPC (`/api/dsh-worktree-space`); the range does not take part in the compatibility decision (that is `engines.dsh`), and it is marked `optional` so installers do not install a copy | DSH profile (`peerDependencies`, `optional`) |
+| `@deepseek-ai/dsh-tools` `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1` | Host tool definition, `defineTool`; likewise `optional`, provided by the profile, never installed by an installer | DSH profile (`peerDependencies`, `optional`) |
 | `@deepseek-ai/schemastery` `^3.18.2` | Configuration schema validation | DSH profile (`peerDependencies`) |
+| `@deepseek-ai/dsh-client-locale`, `dsh-client-ui-settings`, `dsh-client-ui-settings-plugins`, `dsh-client-ui-sidebar`, `dsh-client-ui-slots`, `dsh-client-ui-workspace`, `dsh-api-remotes`, `dsh-api-workspace-controller`, `dsh-api-session-controller` (all `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`) | Host modules injected into the client UI, listed one by one in `dsh.client.inject`; declared as peers with the rest and marked `optional`, provided by the profile | DSH profile (`peerDependencies`, `optional`) |
 | `react` / `react-dom` 18 | Client UI, marked external at bundle time | The DSH web runtime |
 | `git` | Every repository operation | The user's environment (must be on `PATH`; version follows the system) |
 | `@hugeicons/core-free-icons`, `@hugeicons/react`, `@radix-ui/react-dialog` | Icon and dialog components, **build time only**, already inlined into `client/client.js` | The build machine (`devDependencies`) |

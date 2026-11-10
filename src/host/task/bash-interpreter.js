@@ -71,6 +71,11 @@ const WINDOWS_STUB_NAMES = [
 
 /** Where a Git for Windows install keeps a real bash, in preference order. */
 const GIT_BASH_PATHS = [
+  // `bin/bash.exe` first: it is a small launcher that sets up Git's own MSYS PATH
+  // before handing over, so a script started through it can reach `git` as well as
+  // the shell built-ins. That is why it is the one to spawn - but its directory is
+  // *not* the directory to put on PATH, since it holds only `bash.exe`, `sh.exe` and
+  // `git.exe`; {@link toolDirectoryFor} answers that second question separately.
   'C:/Program Files/Git/bin/bash.exe',
   'C:/Program Files/Git/usr/bin/bash.exe',
   'C:/Program Files (x86)/Git/bin/bash.exe',
@@ -113,6 +118,43 @@ function isExecutableFile(candidate) {
 }
 
 /**
+ * The directory to put on the child's PATH for a shell this side located, which is
+ * not always the directory the shell itself lives in.
+ *
+ * For everything the harness ships, and for a POSIX machine, the two are the same
+ * question: a shell under `<version>/usr/bin` has its utilities in that same
+ * `usr/bin`. Git for Windows is the exception, and it is the reason this function
+ * exists. It installs two `bash.exe`:
+ *
+ *   - `Git/bin/bash.exe` is a 43 KB launcher. Started, it assembles Git's MSYS PATH
+ *     itself, so `dirname`, `sed`, `tr` and even `git` resolve - from the outside it
+ *     looks like it needs nothing. Its own directory holds `bash.exe`, `sh.exe` and
+ *     `git.exe` and nothing else, so prepending it to PATH adds a directory with no
+ *     tools in it, and the `toolDir` is then a lie even though every command works.
+ *   - `Git/usr/bin/bash.exe` is the real shell and resolves nothing on its own. Its
+ *     directory *is* the tools directory - `dirname.exe`, `sed.exe`, `tr.exe` all
+ *     sit beside it - so it has to be prepended or the first `dirname` fails.
+ *
+ * Both orders therefore work at runtime, which is exactly why the wrong answer could
+ * hide: the launcher masked a `toolDir` that named no tools. Answering `usr/bin` for
+ * both keeps the guarantee the PATH merge exists for - the appended directory can
+ * actual answer for the utilities an entry reaches by lookup - and keeps `git`
+ * reachable, because `usr/bin` is on the MSYS PATH the launcher builds as well.
+ * @param command - the resolved shell, as this side would spawn it.
+ * @returns the directory to prepend to the child's PATH.
+ */
+function toolDirectoryFor(command) {
+  const own = dirname(command)
+  // Matched on the tail, and case-insensitively, for the reason the stub list is:
+  // a Git installed on another drive or in a per-user directory is the same layout.
+  if (String(own).replace(/\\/g, '/').toLowerCase().endsWith('/git/bin')) {
+    const sibling = join(own, '..', 'usr', 'bin')
+    if (isExecutableFile(join(sibling, 'dirname.exe'))) return sibling
+  }
+  return own
+}
+
+/**
  * The bash to run a deploy entry with on this machine, or `undefined` when there
  * is none.
  *
@@ -132,7 +174,7 @@ export function bashInterpreter() {
   }
   for (const candidate of [...harnessBashCandidates(), ...GIT_BASH_PATHS]) {
     if (isWindowsBashStub(candidate)) continue
-    if (isExecutableFile(candidate)) return { command: candidate, toolDir: dirname(candidate) }
+    if (isExecutableFile(candidate)) return { command: candidate, toolDir: toolDirectoryFor(candidate) }
   }
   return undefined
 }

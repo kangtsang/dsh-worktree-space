@@ -4,7 +4,7 @@
 // the panel's message names the file rather than the interpreter.
 import { describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { bashInterpreter, isWindowsBashStub, pathForShell } from '../src/host/task/bash-interpreter.js'
 
 describe('the WSL forwarding stubs are recognised', () => {
@@ -70,10 +70,38 @@ describe('the interpreter a deploy entry is run by', () => {
     // Without this every entry dies on `dirname: command not found`: a shell named
     // by absolute path does not get the utilities sitting beside it, and neither the
     // harness's own shell nor Git for Windows is on the PATH the Host hands a child.
+    //
+    // The assertion is about the utilities, not about which directory the binary
+    // happens to sit in. Those are the same directory everywhere except Git for
+    // Windows, whose `bin/bash.exe` is a launcher: prefixing its own directory puts a
+    // folder holding only `bash.exe`/`sh.exe`/`git.exe` on PATH, and the launcher
+    // hides that by assembling its own MSYS PATH. So what gets pinned is the only
+    // claim that has to hold - the directory can answer for the tools an entry
+    // reaches by lookup - and `dirname.exe` stands for all of them.
     const found = bashInterpreter()
     if (process.platform !== 'win32') return
-    expect(found.toolDir).toBe(dirname(found.command))
     expect(existsSync(join(found.toolDir, 'dirname.exe'))).toBe(true)
+    expect(existsSync(join(found.toolDir, 'sed.exe'))).toBe(true)
+    // And it is the directory the spawn will actually be given, not a second guess.
+    // The second entry carries a separator of its own: with a single entry and no
+    // `;` anywhere, `pathForShell` cannot tell this apart from a POSIX PATH and
+    // joins with `:` - which is right for the merge and irrelevant to the claim here.
+    expect(pathForShell(found.toolDir, 'C:\\Windows;C:\\Windows\\System32').split(';')[0])
+      .toBe(found.toolDir)
+  })
+
+  it('gives Git\'s launcher the tools directory, not its own', () => {
+    // The layout that produced the wrong answer: `Git/bin` holds the shell and
+    // `Git/usr/bin` holds the utilities. Asserted against the real install when there
+    // is one, and against the rule when there is not, so the intent is pinned on a
+    // machine without Git as well.
+    const launcher = 'C:/Program Files/Git/bin/bash.exe'
+    const tools = 'C:/Program Files/Git/usr/bin'
+    const found = bashInterpreter()
+    if (process.platform !== 'win32') return
+    if (found.command.replace(/\\/g, '/').toLowerCase() === launcher.toLowerCase()) {
+      expect(found.toolDir.replace(/\\/g, '/').toLowerCase()).toBe(tools.toLowerCase())
+    }
   })
 })
 

@@ -55,9 +55,9 @@ dsh plugin --profile web add dsh-worktree-space
 
 ## 🔧 环境要求
 
-- [Node.js](https://nodejs.org) `>=22.19.0`
+- [Node.js](https://nodejs.org) `^22.19.0 || >=24.0.0`（22 线自 22.19.0 起，24 线不设上界；不把 23 这类奇数线算进支持范围）
 - [Git](https://git-scm.com)：所有 worktree 与分支操作都由它执行，不随插件分发，需在 `PATH` 上
-- DSH `>=0.2.1-rc.1 <0.3.0-0`，即 0.2.x（下界自 `0.2.1-rc.1` 起，不含 0.3.0 线的预发布）
+- DSH `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`（按三条已发布的版本线各取一个下界，写法与生态里其它插件一致；逐版本实测范围见本节末）
 - 客户端：**网页端与桌面端均可用**；桌面端由人工验证，命令行矩阵未覆盖
 
 **五个 DSH 版本逐个实测通过**：`0.2.2-rc.1`、`0.2.1-rc.5`、`0.2.1-rc.4`、`0.2.1-rc.3`、`0.2.1-rc.2`，
@@ -65,8 +65,11 @@ dsh plugin --profile web add dsh-worktree-space
 **命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。逐条记录见
 [`docs/store-evidence.md`](docs/store-evidence.md)。
 
-DSH 会**强制校验**清单里 `peerDependencies` 声明的 DSH 版本范围：运行时的版本不满足，就在安装前或启动时
-拒绝加载，并给出 `dsh plugin allow-version` 的精确豁免命令。`engines.dsh` 之类的字段只是声明，不会阻止加载。
+兼容判定看清单里的 `engines.dsh`（本包声明 `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`）：只要声明了它，DSH 就按它单独判定，
+`peerDependencies` 不再参与 —— 运行时版本不满足会在安装前或启动时被拒绝，并给出 `dsh plugin allow-version`
+的精确豁免命令。`peerDependencies` 表达的是另一件事：声明的 13 个宿主包（含 `dsh.client.inject` 里那 10 个
+客户端模块）由 DSH profile 提供，插件运行期使用宿主那一份；它们已用 `peerDependenciesMeta` 全部标成
+`optional`，自动安装 peer 的安装器不再把副本写进 profile。
 实测范围之外的版本一律按未知处理，不拿宽泛范围冒充证据；遇到版本相关的问题请到
 [Issues](https://github.com/kangtsang/dsh-worktree-space/issues) 反馈。
 
@@ -635,10 +638,10 @@ top right.
 
 ## 🔧 Requirements
 
-- [Node.js](https://nodejs.org) `>=22.19.0`
+- [Node.js](https://nodejs.org) `^22.19.0 || >=24.0.0` (the 22 line from 22.19.0 up, the 24 line open-ended; odd lines such as 23 are outside the supported range)
 - [Git](https://git-scm.com): it runs every worktree and branch operation, is not shipped with the
   plugin, and has to be on `PATH`
-- DSH `>=0.2.1-rc.1 <0.3.0-0`, the 0.2.x line (starting at `0.2.1-rc.1`, excluding the 0.3.0 line's prereleases)
+- DSH `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1` (one lower bound per published release line, the same shape other plugins in the ecosystem declare; the tested versions are the matrix at the end of this section)
 - Clients: **both the web client and the desktop client work**; the desktop client was verified by
   hand, the command-line matrix does not cover it
 
@@ -649,10 +652,15 @@ the desktop client (Electron) was only confirmed installable by hand and is not 
 matrix. The per-release record is in
 [`docs/store-evidence.md`](docs/store-evidence.md).
 
-DSH **enforces** the DSH range declared in the manifest's `peerDependencies`: a runtime that does not
-satisfy it has the install refused before pnpm runs, or the plugin refused at startup, with the
-exact-version exemption (`dsh plugin allow-version`) offered instead. Fields such as `engines.dsh` are
-declarations and block nothing. Anything outside the tested range is treated as unknown rather than
+Compatibility is decided by the manifest's `engines.dsh` (this package declares
+`>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`): when it is declared DSH judges by it alone and `peerDependencies` is not
+consulted — a runtime outside the range has the install refused before pnpm runs, or the plugin
+refused at startup, with the exact-version exemption (`dsh plugin allow-version`) offered instead.
+`peerDependencies` says something else: the 13 declared host packages (the 10 client modules in
+`dsh.client.inject` among them) come from the DSH profile and the plugin uses the host's copy at
+runtime; they are marked `optional` in `peerDependenciesMeta`, so an installer that installs peers
+automatically no longer writes copies into the profile. Anything outside the
+tested range is treated as unknown rather than
 passed off as evidence; if you hit a version-specific problem, open an
 [issue](https://github.com/kangtsang/dsh-worktree-space/issues).
 
