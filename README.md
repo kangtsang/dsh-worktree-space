@@ -162,6 +162,11 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 ```text
 ~/workspace/                           根工作空间：项目都挂在这一层，也存放 Worktree Space 容器根目录
 ├── repo-x/                            项目 x 的主工作区（本身就是仓库）
+│   └── .worktree-space/               插件在这个源码根自己的目录：用到哪样才出现哪样
+│       ├── deploy/                    工作区自己写的部署脚本，创建任务空间时整份复制进去
+│       ├── tasks/repo-x/task-x.json   任务索引：从源码检出就能查到任务在哪、哪些会话做过
+│       ├── tasks-archive/repo-x/      收尾后归档的索引，每个项目留最近 10 份
+│       └── .gitignore                 仅当这个源码根本身是仓库时写入：忽略 tasks/ 与 tasks-archive/，不含 deploy/
 ├── project1/                          项目 1 的主工作区（下面若干仓库）
 │   ├── repo-a/
 │   └── repo-b/
@@ -210,6 +215,8 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 **Worktree Space 容器根**是插件的专用区：第一次在这底下建任务空间时，插件会写一份 `README.md` 说明这里是 Worktree 专用区、
 不要直接 `git init` 或 `clone`（已经有了就不覆盖）。反过来说，容器根本身要已经是 Git 仓库（下面有 `.git`），
 创建会被**拒绝**，且一个目录都不会建出来。
+
+**源码根下也会有一个 `.worktree-space/`**，和任务空间里那个同名但用途不同：`deploy/` 是工作区自己写的部署脚本（创建任务空间时整份复制进去）；`tasks/` 是任务索引，让从源码检出工作的会话不必知道容器根在哪儿也能查到任务落在哪；`tasks-archive/` 收尾后归档的索引，每个项目留最近 10 份。这个目录**用到才出现**：没写部署脚本、也没有从源码检出查过任务的源码根，下面不会有它。源码根本身是仓库时，插件还会写一份 `.gitignore`，只忽略 `tasks/` 与 `tasks-archive/` 两项——`deploy/` 是否纳管由工作区自己决定，插件不动。要让整个 `.worktree-space/` 都不进版本库，在仓库根自己的 `.gitignore` 里加一行 `.worktree-space/`；插件已经写过的那份不会被覆盖。
 
 归档根底下再分两层：`<项目>/<任务名>-<YYYYMMDD-HHMMSS>/`。归档结构因此与 Worktree Space 容器结构同形，一个项目的归档收在自己
 那一层里；默认档就在容器根下，整块只多出 `archived-docs` 这一个目录和操作日志那个文件（见[操作日志](#-操作日志)）。删掉 worktree 不会删除对应的 Git
@@ -787,6 +794,11 @@ the repository that stopped it, and merges once that session has resolved it.
 ```text
 ~/workspace/                            the root workspace: projects hang off this level, and the Worktree Space container root lives here too
 ├── repo-x/                             project x's main Workspace (a repository itself)
+│   └── .worktree-space/                the plugin's own directory in this source root; each entry appears only once it is used
+│       ├── deploy/                     the workspace's own deploy scripts, copied whole into each task space
+│       ├── tasks/repo-x/task-x.json    the task index: which task lives where, and which sessions worked in it
+│       ├── tasks-archive/repo-x/       finished tasks' indexes, ten per project
+│       └── .gitignore                  written only when this source root is itself a repository: ignores tasks/ and tasks-archive/, not deploy/
 ├── project1/                           project 1's main Workspace (several repositories)
 │   ├── repo-a/
 │   └── repo-b/
@@ -840,6 +852,16 @@ The **Worktree Space container root** is the plugin's zone: the first task space
 saying this is a worktree-only area and that `git init` / `clone` do not belong there (an existing one is
 never overwritten). Conversely, if the container root is itself a Git repository — it has a `.git` —
 creation is **refused**, and not a single directory is made.
+
+**A source root also gets its own `.worktree-space/`**, the same name as the one in a task space but a different
+job: `deploy/` holds the workspace's own deploy scripts, copied whole into each task space; `tasks/` is the task
+index, so a session working in the source checkout can find where a task lives without knowing the container
+root; `tasks-archive/` keeps finished tasks' indexes, ten per project. The directory **appears only once it is
+used** — a source root with no deploy scripts and no task looked up from its checkout will not have it. When the
+source root is itself a repository the plugin also writes a `.gitignore` there, ignoring `tasks/` and
+`tasks-archive/` and nothing else: whether `deploy/` is versioned is the workspace's decision, not the plugin's.
+To keep the whole `.worktree-space/` out of version control, add `.worktree-space/` to the repository root's
+own `.gitignore`; the file the plugin wrote is never overwritten.
 
 The archive root splits two levels further, `<project>/<task>-<YYYYMMDD-HHMMSS>/`, so its shape mirrors the
 Worktree Space container's and a project's documents stay in that project's own folder. By default it sits in the

@@ -1,6 +1,6 @@
 {
   "name": "dsh-worktree-space",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Worktree Space：一任务一空间，工作多路并行。把一个或多个 Git 仓库的工作任务放进独立任务空间，每个参与的仓库在同一个任务分支上各开一个 worktree，多任务并行推进互不干扰；收尾合并回各仓库目标分支，发生冲突可交给 agent 处理。One task, one space — work on parallel tracks. Put a task spanning one or more Git repositories into its own task space, give each repository a worktree on the same task branch, and let several tasks run in parallel without interfering with one another; merge back into each repository's target branch when you are done, or hand conflicts to an agent.",
   "icon": "./icon.svg",
   "repository": {
@@ -23,8 +23,8 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22.19.0",
-    "dsh": ">=0.2.1-rc.1 <0.3.0-0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1"
   },
   "main": "./lib/index.js",
   "exports": {
@@ -70,9 +70,59 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-client-connection": ">=0.2.1-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-api-remotes": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-remotes": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-session-controller": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-workspace-controller": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-locale": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings-plugins": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-sidebar": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-slots": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-workspace": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
   },
   "dsh": {
     "manifestVersion": 1,
@@ -95,8 +145,8 @@
       "platform": "web"
     },
     "compatibility": {
-      "dsh": ">=0.2.1-rc.1 <0.3.0-0",
-      "node": ">=22.19.0",
+      "dsh": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "node": "^22.19.0 || >=24.0.0",
       "profiles": [
         "web",
         "desktop"
@@ -113,6 +163,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-api-remotes": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
@@ -121,6 +172,7 @@
     "@deepseek-ai/dsh-client-ui-layout": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-sidebar": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-workspace": "0.2.0-rc.2",

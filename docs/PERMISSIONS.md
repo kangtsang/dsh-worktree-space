@@ -66,9 +66,11 @@
     `create` 传 `registerWorkspace: false` 就只做盘上那一半（任务空间建好但不进工作区列表），`done` 传
     `unregisterWorkspace: false` 就保留登记（会话继续归在那一组）。注销时**以列表的当前状态为准**：删失败
     会再读一次列表，登记确实还在才报告为失败，已经不在了就当作完成（那是这次注销想要的终态）。
-  - 会话：工具的 `create` 带 `prompt`、或 `action: "dispatch"`，会通过**宿主的会话服务**在任务空间里新建一个
-    会话，并向**该会话自己的日志**追加一条 `sandbox/mode` 策略事件（默认复制调用方会话**自己的显式覆盖**；
-    调用方没有覆盖时**不写**，新会话于是落在部署默认——不会比调用方更宽），随后把这一轮任务作为提示语投给它。
+  - 会话：工具的 `create` 带 `prompt`、或 `action: "dispatch"`（不带 `sessionId`），会通过**宿主的会话服务**在
+    任务空间里新建一个会话，并向**该会话自己的日志**追加一条 `sandbox/mode` 策略事件（默认复制调用方会话
+    **自己的显式覆盖**；调用方没有覆盖时**不写**，新会话于是落在部署默认——不会比调用方更宽），随后把这一轮
+    任务作为提示语投给它。`dispatch` 带 `sessionId` 时**不新建会话**：它只向该会话投递一条提示语，不写任何
+    策略事件——**它不改变那个会话的权限**，因为那权限是它被创建时就定下的。
     两个动作都是**调用方按次**触发的；界面上的「创建并打开」与「交由 agent」走的是另一条路。写的同样是 DSH
     自己的存储与会话日志，不是插件去写任何文件。部署没有会话服务时**不建也不报错**：工具如实回答「没有开成
      会话」，并指明去面板开。
@@ -309,11 +311,13 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
     `unregisterWorkspace: false` keeps the registration (its sessions stay in that group). An unregistration
     goes by **what the list says now**: a failed delete is followed by reading the list again, and only an entry
     that is still there is reported as a failure — one that has gone is the outcome, not a problem.
-  - Sessions: the tool's `create` with a `prompt`, or `action: "dispatch"`, **opens a session** in the task space
-    through DSH's own session service and appends one `sandbox/mode` policy event to **that session's own log**
-    (by default the calling session's **own explicit override** is copied; with no override, none is written and
-    the new session lands on the deployment default, so it is never wider than the caller). The turn of work is
-    then delivered to it as a prompt. Both actions are the caller's per-call decision; the interface's Create and
+  - Sessions: the tool's `create` with a `prompt`, or `action: "dispatch"` without a `sessionId`, **opens a
+    session** in the task space through DSH's own session service and appends one `sandbox/mode` policy event to
+    **that session's own log** (by default the calling session's **own explicit override** is copied; with no
+    override, none is written and the new session lands on the deployment default, so it is never wider than the
+    caller). The turn of work is then delivered to it as a prompt. A `dispatch` **with** a `sessionId` opens
+    nothing: it only delivers one more prompt to that session and writes no policy event — **it does not change
+    that session's permissions**, which were settled when it was opened. Both actions are the caller's per-call decision; the interface's Create and
     open, and its handoff buttons, are a different route. What is written is DSH's own store and the session log,
     not a file this plugin writes. With no session service in the deployment, **nothing is opened and nothing
     fails**: the tool answers that no session was opened, and says to open one from the panel.

@@ -7,6 +7,27 @@
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
 
+## 1.4.2 — 2026-11-11
+
+一件活分几轮做完时，第二件活可以直接交给已经在跑的那个会话，而它静默停手也会被告知。宿主依赖改为全部可选，`npm install` 不再往 profile 里装宿主自己的副本。
+
+### 新增
+
+- **同一件活分几轮做完时，把下一件交给已经在跑的会话。** `dispatch` 新增可选参数 `sessionId`：给了就把这一轮交给那个会话，不再新开一个。此前每一轮都要新开一个会话，而新会话不记得上一轮定下的设计、也不知道哪些文件已经动过；「先做出来、再冒烟、再修冒烟发现的问题」本来是一个任务的三轮，却成了三个彼此不相干的会话。
+- **漏报提醒按「这一次派活」判断，不再按「这个会话汇报过没有」。** 任务记录里现在记两个时间：最近一次把活交给它的时刻，和最近一次交完结报告的时刻；后者不早于前者才算这一轮已回报。以前只有一个「汇报过」的标记，所以会话汇报完第一轮、又被派了第二轮、第二轮静默停手时，提醒会被第一轮的报告静音——而那一次恰恰最该被通知。
+- **用 `send` 派活会被明确劝阻。** 工具的说明里写清了分工：`send` 是纠话、答问、改方向，不影响「是否已回报」；给一个新活要用 `dispatch`。这条分工不是措辞偏好——用 `send` 派的新活静默停手时，你不会收到提醒。
+
+### 变更
+
+- **宿主依赖全部标为可选。** `peerDependencies` 从 2 项声明扩展到 `dsh.client.inject` 里的全部 13 项，并全部写进 `peerDependenciesMeta` 标为 `optional`。这样用 `npm install` 装本插件时，安装器不再把宿主自己的包当依赖一起装进 profile——此前那批副本会与真正的宿主版本冲突，profile 启动时逐行报 `incompatible` 并拒绝启动。DSH 自己的插件安装命令不受影响，它本来就不装 peer。
+- **`engines.node` 收窄为 `^22.19.0 || >=24.0.0`**，把 23 这类奇数线明确排除在支持范围外：此前写的是 `>=22.19.0`，字面上接受 23。
+- **DSH 兼容范围改用生态通行的写法**：`>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`，按三条已发布的版本线各取一个下界。这条链没有上界，所以不再挡住 0.3 及以后；实际实测过哪些版本仍以 `dshReleases` 与
+[环境要求](README.md#-环境要求)一节为准。
+
+### 文档
+
+- **源码根下那个 `.worktree-space/` 有自己的说明。** 目录结构图以前只画了任务空间里那一个，于是从源码检出看过去、发现自己的仓库里多出一个同名目录时，没有任何地方说它是什么、从哪来、为什么里面有 `deploy/`。现在两处目录结构都列出它的四项，正文写明它是同名不同用途、用到才出现，以及插件写的那份 `.gitignore` 只忽略 `tasks/` 与 `tasks-archive/` 两项——`deploy/` 是否纳管由工作区自己决定。
+
 ## 1.4.1 — 2026-11-08
 
 任务是插件自动开的会话时，侧栏标题直接说明它属于哪个任务空间；结束任务的对话框改用与任务空间视图同一套数字，并且多个仓库时打开更快。只把任务空间注册成工作区，任务也能被发现了。
@@ -412,6 +433,53 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.4.2 — 2026-11-11
+
+When a task takes several rounds, the next round can be handed to the session already working on it,
+and a session that stops quietly after one is reported back to you. Host dependencies are all optional
+now, so `npm install` no longer writes copies of the host's own packages into a profile.
+
+### Added
+
+- **A later round of the same task can go to the session already working on it.** `dispatch` takes an
+  optional `sessionId`: give one and the round is handed to that session instead of opening another.
+  Every round used to open a session of its own, and a new session knows nothing about the design settled
+  in the last one or which files were already touched — "build it, then smoke it, then fix what the smoke
+  found" is one task in three rounds, and it became three unrelated sessions.
+- **The missing-report notice is judged per dispatch, not per session.** The task's record now carries two
+  times: when the session was last handed work, and when it last delivered a final report. The report
+  counts only if it is not earlier than the dispatch. There used to be one "has reported" mark, so a
+  session that reported round one, was given round two, and stopped round two quietly had that notice
+  suppressed by the first report — which is exactly the round nobody would hear about.
+- **Handing over work with `send` is now actively discouraged.** The tool's own description states the
+  split: `send` corrects, answers or redirects and does not touch "has reported"; a new piece of work goes
+  through `dispatch`. That split is not a matter of wording — work handed over with `send` and then
+  abandoned quietly is not announced to anyone.
+
+### Changed
+
+- **Every host dependency is marked optional.** `peerDependencies` went from 2 declared entries to all 13
+  packages named in `dsh.client.inject`, and all 13 are `optional` in `peerDependenciesMeta`. An installer
+  that installs peers automatically therefore no longer writes the host's own packages into the profile;
+  those copies used to disagree with the real host version, and the profile refused to start while
+  reporting `incompatible` on every plugin row. DSH's own plugin install command is unaffected — it never
+  installed peers in the first place.
+- **`engines.node` narrowed to `^22.19.0 || >=24.0.0`**, which puts odd lines such as 23 explicitly
+  outside the supported range; it used to read `>=22.19.0`, which accepted 23 on paper.
+- **The DSH compatibility range now uses the shape the ecosystem declares**:
+  `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`, one lower bound per published release line. That chain
+  has no upper bound, so it no longer blocks 0.3 and later; which releases were actually tested remains
+  what `dshReleases` and the [Requirements](README.md#-requirements) section say.
+
+### Documentation
+
+- **The `.worktree-space/` inside a source root has an explanation of its own.** The layout only ever
+  showed the one inside a task space, so finding a directory of the same name in your own repository —
+  seen from the source checkout — left nothing saying what it was, where it came from, or why `deploy/` is
+  in it. Both layouts now list its four entries, and the text says it is the same name with a different
+  job, that it appears only once it is used, and that the `.gitignore` the plugin writes names only
+  `tasks/` and `tasks-archive/` — whether `deploy/` is versioned is the workspace's own decision.
 
 ## 1.4.1 — 2026-11-08
 

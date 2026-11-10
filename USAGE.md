@@ -184,6 +184,10 @@
 **`.worktree-space/` 不是你的内容**：它装的是记录、由记录生成的说明和部署根，不归档，
 清除任务空间时随容器一起删除。
 
+源码根下也有一个同名目录，用途不同：`deploy/` 是工作区自己写的部署脚本（创建任务空间时整份复制进来），
+`tasks/` 与 `tasks-archive/` 是任务索引及其归档，让从源码检出工作的会话不必知道容器根也能查到任务。
+这个目录用到才出现，忽略规则见 [README 的任务目录结构](README.md#-任务目录结构)。
+
 ### 3.4 创建失败怎么办
 
 | 情况 | 码 | 怎么办 |
@@ -1074,6 +1078,12 @@ groups on its own in the Workspace list.
 
 **`.worktree-space/` is not your content**: it holds the record, the notes rendered from the record and
 the deploy root. It is never archived, and it goes with the container when the space is cleared.
+
+A source root carries a `.worktree-space/` of its own, with a different job: `deploy/` holds the workspace's
+deploy scripts (copied whole into each task space), and `tasks/` with `tasks-archive/` hold the task index and
+its archive, so a session working in the source checkout can find a task without knowing the container root.
+The directory appears only once it is used; the ignore rules are in
+[the README's layout of a task](README.md#-layout-of-a-task).
 
 ### 3.4 When a create is refused
 

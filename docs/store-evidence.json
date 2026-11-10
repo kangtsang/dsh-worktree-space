@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "baseline": {
-    "package": "dsh-worktree-space@1.4.1",
-    "commit": "64db4b1 (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
+    "package": "dsh-worktree-space@1.4.2",
+    "commit": "b2016ad (the tested tree; the final release commit differs from it only by these two evidence documents themselves - see the circularity note in docs/store-evidence.md section 5)",
     "note": "The manifest state, the acceptance procedure, the acceptance results and the boundary cases below all describe this version only; no other version is referenced.",
     "procedure": "docs/store-evidence.md"
   },
@@ -13,56 +13,44 @@
     "powershell": "$env:DSH_HOME = Join-Path ([System.IO.Path]::GetTempPath()) (\"dsh-evidence-\" + [guid]::NewGuid()); New-Item -ItemType Directory -Path $env:DSH_HOME | Out-Null"
   },
   "manifest": {
-    "version": "1.4.1",
-    "enginesNode": ">=22.19.0",
-    "enginesDsh": ">=0.2.0-rc.1 <0.3.0-0",
+    "version": "1.4.2",
+    "enginesNode": "^22.19.0 || >=24.0.0",
+    "enginesDsh": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
     "peers": {
-      "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.1 <0.3.0-0",
-      "@deepseek-ai/dsh-tools": ">=0.2.0-rc.1 <0.3.0-0"
+      "@deepseek-ai/cordis": "^4.0.2",
+      "@deepseek-ai/dsh-api-remotes": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-connection": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-locale": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-ui-settings": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-ui-settings-plugins": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-ui-sidebar": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/dsh-tools": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+      "@deepseek-ai/schemastery": "^3.18.2"
     },
-    "compatibilityDsh": ">=0.2.0-rc.1 <0.3.0-0",
-    "compatibilityNode": ">=22.19.0",
+    "peerDependenciesMeta": "every entry is optional, so an installer that resolves peers automatically writes no copy of a host package into the profile",
+    "compatibilityDsh": ">=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1",
+    "compatibilityNode": "^22.19.0 || >=24.0.0",
     "profiles": [
       "web",
       "desktop"
     ],
     "clientPlatform": "web",
     "dshReleases": {
-      "0.2.0-rc.1": "compatible",
-      "0.2.0-rc.2": "compatible",
-      "0.2.1-rc.1": "compatible",
-      "0.2.1-rc.2": "compatible"
+      "0.2.1-rc.2": "compatible",
+      "0.2.1-rc.3": "compatible",
+      "0.2.1-rc.4": "compatible",
+      "0.2.1-rc.5": "compatible",
+      "0.2.2-rc.1": "compatible"
     },
-    "dshOperations": {
-      "0.2.0-rc.1": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.2.0-rc.2": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.2.1-rc.1": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      },
-      "0.2.1-rc.2": {
-        "install": "passed",
-        "start": "passed",
-        "uninstall": "passed",
-        "rollback": "passed"
-      }
-    },
+    "dshOperations": {},
     "rangeShape": {
-      "oneString": "engines.dsh, both DSH peers and dsh.compatibility.dsh deliberately read the same string: from DSH 0.2.0 on install and startup enforce the peer range while the other two are declarative, so a manifest whose three disagree is a manifest whose gate is not the one it documents",
-      "upperBound": "<0.3.0-0 rather than <0.3.0: under the semver.satisfies(..., { includePrerelease: true }) call DSH makes, <0.3.0 would also admit 0.3.0-alpha.1, while the -0 prerelease floor excludes the 0.3.0 line's prereleases as well",
-      "lowerBound": ">=0.2.0-rc.1: support starts at the first release candidate of the 0.2.0 line; the 0.1.7 line is no longer declared supported as of 1.3.2"
+      "oneString": "engines.dsh and dsh.compatibility.dsh deliberately read the same string. From DSH 0.2.0 on, install and startup judge compatibility by engines.dsh when it is declared, so the peers are declarative and the two declared strings must not disagree with the gate.",
+      "upperBound": "none: the range is an OR chain of one lower bound per published release line (>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1), which accepts 0.2.0-rc.1 and everything after it. The earlier <0.3.0-0 form existed only to exclude 0.3.0's prereleases under semver.satisfies(..., { includePrerelease: true }); with no upper bound that question no longer arises, and the trade is accepted: the manifest no longer equals the tested set, which is what dshReleases records.",
+      "lowerBound": ">=0.2.0-rc.1: the chain starts at the first release candidate of the 0.2.0 line. 1.4.2 restores the three-line OR chain, so 0.2.0-rc.1 and 0.2.0-rc.2 are inside the declared range again - they are not in the tested window, and being installable is not the same as being verified."
     },
     "platformShape": "dsh.client.platform stays \"web\" because the desktop client runs the same web client and the same client/client.js build; the two clients are declared as profiles, not as platforms"
   },
@@ -79,37 +67,46 @@
     "status": "run",
     "note": "the store contract's clause 8 requires install -> configuration -> visible -> uninstall/rollback in a disposable profile, and unit tests do not substitute for it. Each row below comes from an actual run on that release's own DSH CLI, per docs/store-evidence.md sections 1 and 2.",
     "web": {
-      "ranOn": "2026-11-08",
-      "artifact": "dsh-worktree-space-1.4.1.tgz",
+      "ranOn": "2026-11-11",
+      "artifact": "dsh-worktree-space-1.4.2.tgz",
       "artifactFiles": 26,
-      "artifactBytes": 1099035,
-      "artifactSha256": "C6AB4002ECC070107B19483F0E6CA19738F4AED9BE0C22F9F051A3034F81270E",
-      "artifactCommit": "64db4b1",
-      "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (BCB7588A...3126, 392359 bytes) and lib/index.js (490BFB49...9B38, 434433 bytes), and unpacking the tested tarball gives those same two hashes",
+      "artifactBytes": 1106513,
+      "artifactSha256": "51E7B39E4FEF84F6833B69D86F326273755F6F4AF1E10BE2DFB13063E97C54AD",
+      "artifactCommit": "b2016ad",
+      "artifactNote": "the tested artifact is the one this release ships: check:tracked-bundle rebuilt and compared byte-for-byte with the committed client/client.js (17E66E3C...7E08, 392359 bytes) and lib/index.js (AF9D1AE6...8ED8, 442648 bytes), and unpacking the tested tarball gives those same two hashes",
       "ports": {
-        "0.2.1-rc.2": 34800,
-        "0.2.1-rc.1": 34801,
-        "0.2.0-rc.2": 34802,
-        "0.2.0-rc.1": 34803
+        "0.2.2-rc.1": 34800,
+        "0.2.1-rc.5": 34801,
+        "0.2.1-rc.4": 34802,
+        "0.2.1-rc.3": 34803,
+        "0.2.1-rc.2": 34804
       },
       "node": "v24.18.0",
       "pnpm": "12.6.0",
-      "totalSeconds": 57,
+      "totalSeconds": 49,
       "verdict": "PASS (5 passed, 0 failed)",
       "report": "D:\\dsh-acceptance\\dsh-worktree-space\\matrix\\logs\\matrix-report.md",
-      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.4.1, commit 64db4b1, 5 versions)"
+      "reportNote": "this run passed -Json, so the matrix-report.json beside the markdown is from the same run (pluginVersion 1.4.2, commit b2016ad, 5 versions)",
+      "perVersionSeconds": {
+        "0.2.2-rc.1": 11,
+        "0.2.1-rc.5": 9,
+        "0.2.1-rc.4": 10,
+        "0.2.1-rc.3": 9,
+        "0.2.1-rc.2": 10
+      },
+      "windowNote": "the window is the newest five published DSH releases, compared with the manifest's dshReleases before every run; a drift fails the run instead of silently carrying the previous window"
     },
     "desktop": "confirmed by the author outside this run; the desktop lifecycle does not go through the command line",
     "rows": [
       {
         "dsh": "0.2.2-rc.1",
         "node": "v24.18.0",
-        "seconds": 12,
+        "seconds": 11,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.4.1"
+          "installedVersion": "1.4.2"
         },
         "compose": {
           "result": "passed",
@@ -128,7 +125,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "7c43451ee9cd",
+          "bundleRev": "2fe97be17d07",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -148,12 +145,12 @@
       {
         "dsh": "0.2.1-rc.5",
         "node": "v24.18.0",
-        "seconds": 10,
+        "seconds": 9,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.4.1"
+          "installedVersion": "1.4.2"
         },
         "compose": {
           "result": "passed",
@@ -172,7 +169,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "14f2aff3944b",
+          "bundleRev": "571a531fa5c0",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -192,12 +189,12 @@
       {
         "dsh": "0.2.1-rc.4",
         "node": "v24.18.0",
-        "seconds": 11,
+        "seconds": 10,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.4.1"
+          "installedVersion": "1.4.2"
         },
         "compose": {
           "result": "passed",
@@ -216,7 +213,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "c80ad3b9101a",
+          "bundleRev": "8f64c439ddca",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -236,12 +233,12 @@
       {
         "dsh": "0.2.1-rc.3",
         "node": "v24.18.0",
-        "seconds": 12,
+        "seconds": 9,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.4.1"
+          "installedVersion": "1.4.2"
         },
         "compose": {
           "result": "passed",
@@ -260,7 +257,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "5c8f8aefaaa3",
+          "bundleRev": "aaf8a7866dc8",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
@@ -280,12 +277,12 @@
       {
         "dsh": "0.2.1-rc.2",
         "node": "v24.18.0",
-        "seconds": 12,
+        "seconds": 10,
         "install": {
           "result": "passed",
           "exit": 0,
           "incompatibleWarning": false,
-          "installedVersion": "1.4.1"
+          "installedVersion": "1.4.2"
         },
         "compose": {
           "result": "passed",
@@ -304,7 +301,7 @@
           "bundleType": "text/javascript; charset=utf-8",
           "bundleRegisters": 1,
           "bundleEndpoints": 1,
-          "bundleRev": "687dc23cf0dd",
+          "bundleRev": "24661fd6c4b3",
           "rpcOk": "HTTP 200 {\"ok\":true}",
           "rpcInventedEndpoint": "HTTP 404"
         },
