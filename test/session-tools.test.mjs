@@ -1313,8 +1313,15 @@ function taskToolContext(services = {}) {
   return { ctx, captured }
 }
 
-/** The `dispatch` services: a controller that opens `sessionId`, and no registry. */
-function dispatchServices(sessionId = "s-dispatched") {
+/**
+ * The `dispatch` services: a controller that opens `sessionId`, and no registry.
+ * @param sessionId - the id `create` answers with.
+ * @param options - `liveCwd` places the live agent's header, so a re-dispatch can be told
+ *   which directory the session it addresses actually works in; `promptFails` makes the
+ *   controller's `prompt` throw, which is the case where nothing may be stamped.
+ * @returns the recorded creates and prompts, and the services object.
+ */
+function dispatchServices(sessionId = "s-dispatched", { liveCwd, promptFails = false } = {}) {
   const created = []
   const prompts = []
   return {
@@ -1323,9 +1330,16 @@ function dispatchServices(sessionId = "s-dispatched") {
     services: {
       sessionController: {
         create: async (place) => { created.push(place); return { sessionId } },
-        prompt: async (request, signal) => { prompts.push({ request, signal }); return { accepted: true } },
+        prompt: async (request, signal) => {
+          if (promptFails) throw new Error("session/agent-busy: the session refused the turn")
+          prompts.push({ request, signal })
+          return { accepted: true }
+        },
       },
       sessions: { get: () => ({ append: () => {} }) },
+      ...(liveCwd === undefined
+        ? {}
+        : { agents: { get: (id) => (id === sessionId ? { session: { header: { cwd: liveCwd } } } : undefined) } }),
     },
   }
 }
@@ -1384,7 +1398,10 @@ describe("§4.3 — a dispatched session is recorded in the task's own record", 
       )
       expect(value.sessionId).toBe("s-inline")
       const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
-      expect(record.sessions).toEqual([{ sessionId: "s-inline", at: record.sessions[0].at, role: "task" }])
+      expect(record.sessions).toMatchObject([{ sessionId: "s-inline", at: record.sessions[0].at, role: "task" }])
+      // The job stamp is asserted in its own case; what this one checks is that the entry has
+      // the three fields it always had, and that no report was invented for it.
+      expect(record.sessions[0]).not.toHaveProperty("reportedAt")
     } finally {
       await rm(container, { recursive: true, force: true })
       await rm(source, { recursive: true, force: true })
@@ -1447,14 +1464,16 @@ describe("§4.3 — a dispatched session is recorded in the task's own record", 
     // cannot say who that work was asked of, so a reader wanting the dispatcher had to
     // guess from directories. Both ids are facts of the run now. The caller id comes from
     // `exec`, which the harness sets — an argument the model typed is not read for it,
-    // which the forged value below proves.
+    // which the forged value below proves. (The forged field is deliberately not
+    // `sessionId`: that argument now means "hand this job to an existing session", so it
+    // would be answered by a refusal rather than by opening one.)
     const fixture = await taskSpaceFixture()
     const { services } = dispatchServices("s-member")
     const { ctx, captured } = taskToolContext(services)
     try {
       registerTaskTool(ctx)
       const value = await captured[0].execute(
-        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go", sessionId: "forged-by-args" },
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go", callerSessionId: "forged-by-args" },
         { agent: { id: "caller-1", session: { id: "s-leader" } } },
       )
       expect(value.sessionId).toBe("s-member")
@@ -1526,7 +1545,29 @@ describe("§4.3 — a dispatched session is recorded in the task's own record", 
       )
       expect(value.warnings).toEqual([])
       const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
-      expect(record.sessions).toEqual([{ sessionId: "s-same", at: record.sessions[0].at, role: "task" }])
+      expect(record.sessions).toMatchObject([{ sessionId: "s-same", at: record.sessions[0].at, role: "task" }])
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("records when a session a dispatch opened was handed its job", async () => {
+    // The first job gets a stamp too: not because it changes a verdict now (a new session has
+    // no report), but because the record is where "when did this work start" lives, and
+    // because a second job this session is later given has a first stamp to compare against.
+    const fixture = await taskSpaceFixture()
+    const { services } = dispatchServices("s-opened")
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )
+      const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
+      const entry = record.sessions.find((one) => one.sessionId === "s-opened")
+      expect(typeof entry.dispatchedAt).toBe("string")
+      expect(entry).not.toHaveProperty("reportedAt")
     } finally {
       await fixture.cleanup()
     }
@@ -1550,7 +1591,7 @@ describe("§4.3 — a dispatched session is recorded in the task's own record", 
       expect(value.sessionId).toBe("s-member")
       expect(value.action).toBe("dispatch")
       const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
-      expect(record.sessions).toEqual([{ sessionId: "s-member", at: record.sessions[0].at, role: "task" }])
+      expect(record.sessions).toMatchObject([{ sessionId: "s-member", at: record.sessions[0].at, role: "task" }])
       expect(value.warnings.join(" ")).toMatch(/could not be written/)
       expect(value.warnings.join(" ")).toContain("s-leader")
     } finally {
@@ -1560,8 +1601,160 @@ describe("§4.3 — a dispatched session is recorded in the task's own record", 
   })
 })
 
-describe("§4.3 — list echoes what a deploy recorded", () => {
-  it("reports the acceptance URL and the last smoke", async () => {
+/**
+ * The dispatch record's session entry, as a previous dispatch would have left it.
+ * @param overrides - fields to merge onto the entry.
+ * @returns the entry.
+ */
+const memberEntry = (overrides = {}) => ({
+  sessionId: "s-member",
+  at: "2026-01-01 00:00:00",
+  role: "task",
+  ...overrides,
+})
+
+describe("dispatching a second job to a session already on the task", () => {
+  it("hands the job to the named session instead of opening another", async () => {
+    // The reason the argument exists: "make it, then smoke it, then fix what the smoke found"
+    // is one task with three jobs, and three sessions would each start from nothing. `create`
+    // must not be called - no session is opened - and the prompt must reach the named one.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry()] } })
+    const { created, prompts, services } = dispatchServices("s-member")
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "now smoke it", sessionId: "s-member" },
+        { agent: { id: "caller-1", session: { id: "s-leader" } } },
+      )
+      expect(value.sessionId).toBe("s-member")
+      expect(value.reissued).toBe(true)
+      expect(created).toEqual([])
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0].request.sessionId).toBe("s-member")
+      expect(prompts[0].request.content[0].text).toContain("now smoke it")
+      // The standing preamble goes with it, so the second job is told the same things as the
+      // first - the reporting contract above all.
+      expect(prompts[0].request.content[0].text).toContain("Reporting back is required")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("stamps dispatchedAt, which is what makes a later missing report noticeable", async () => {
+    // The whole point of the field: a report that answered the first job must stop counting
+    // once a second job is handed over, or the notice for the second is suppressed exactly
+    // when it matters.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry({ reportedAt: "2026-01-01 00:00:00" })] } })
+    const { services } = dispatchServices("s-member")
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "now smoke it", sessionId: "s-member" },
+        {},
+      )
+      const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
+      const entry = record.sessions.find((one) => one.sessionId === "s-member")
+      expect(typeof entry.dispatchedAt).toBe("string")
+      expect(entry.reportedAt).toBe("2026-01-01 00:00:00")
+      // The report is kept - it happened - and the two stamps are now comparable.
+      expect(entry.dispatchedAt >= entry.reportedAt).toBe(true)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a session its own record does not name", async () => {
+    // This call opens nothing, so it may only address work this task already handed out. A
+    // stranger's session is a mistake in the arguments, and delivering into it would be a
+    // message into an unrelated conversation.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry()] } })
+    const { created, prompts, services } = dispatchServices("s-member")
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go", sessionId: "s-stranger" },
+        {},
+      )
+      expect(value.sessionId).toBe("")
+      expect(value.reissued).toBeUndefined()
+      expect(created).toEqual([])
+      expect(prompts).toEqual([])
+      expect(value.warnings.join(" ")).toMatch(/not a session this task's record names/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("refuses a session that works somewhere other than this task space", async () => {
+    // A member of another task is named in that task's record, not this one - but a record
+    // can also be stale or hand-edited. Where the session actually works is the check the
+    // record cannot make on its behalf.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry()] } })
+    const { created, prompts, services } = dispatchServices("s-member", { liveCwd: "/somewhere/else" })
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go", sessionId: "s-member" },
+        {},
+      )
+      expect(value.sessionId).toBe("")
+      expect(created).toEqual([])
+      expect(prompts).toEqual([])
+      expect(value.warnings.join(" ")).toMatch(/is not this task space/)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("stamps nothing when the job never reached the session", async () => {
+    // A dispatch whose message was refused owes no report. Stamping first would make the
+    // watcher announce a missing report for work the session was never given - a notice
+    // about a failure that did not happen, which is the mirror of the one this feature
+    // exists to prevent.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry({ reportedAt: "2026-01-01 00:00:00" })] } })
+    const { services } = dispatchServices("s-member", { promptFails: true })
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go", sessionId: "s-member" },
+        {},
+      )
+      expect(value.warnings.join(" ")).toMatch(/could not be handed to/)
+      const record = JSON.parse(await readFile(recordAt(fixture.taskPath), "utf8"))
+      expect(record.sessions.find((one) => one.sessionId === "s-member")).not.toHaveProperty("dispatchedAt")
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+
+  it("still opens a new session when no sessionId is given", async () => {
+    // The negative control for the whole feature: the argument is optional, and a dispatch
+    // without it has to behave exactly as it did before.
+    const fixture = await taskSpaceFixture({ record: { sessions: [memberEntry()] } })
+    const { created, prompts, services } = dispatchServices("s-fresh")
+    const { ctx, captured } = taskToolContext(services)
+    try {
+      registerTaskTool(ctx)
+      const value = await captured[0].execute(
+        { action: "dispatch", task: "login", project: "kratos-admin", tasksRoot: fixture.container, prompt: "go" },
+        {},
+      )
+      expect(value.sessionId).toBe("s-fresh")
+      expect(value.reissued).toBeUndefined()
+      expect(created).toHaveLength(1)
+      expect(prompts).toHaveLength(1)
+    } finally {
+      await fixture.cleanup()
+    }
+  })
+})
+
+describe("§4.3 — list echoes what a deploy recorded", () => {  it("reports the acceptance URL and the last smoke", async () => {
     const fixture = await taskSpaceFixture({
       deployState: { url: "http://localhost:4321", lastSmoke: { result: "pass", at: "2026-10-10T00:00:00.000Z" } },
     })

@@ -523,10 +523,17 @@ export function normalizeSessions(value) {
     // empty, for the reason `at` and `reportedAt` are.
     const model = typeof entry.model === 'string' && entry.model !== '' ? entry.model : undefined
     const modelSource = typeof entry.modelSource === 'string' && entry.modelSource !== '' ? entry.modelSource : undefined
+    // `dispatchedAt` is the other half of `reportedAt`, and it is carried for the same
+    // reason: rebuilt entries drop what they do not name. The pair answers one question
+    // - "was the work this session is on now reported" - and a record that lost half of
+    // it would read as a session that never reported, or as one whose report covers work
+    // it has not been given yet. Absent rather than empty, for the reason `at` is.
+    const dispatchedAt = typeof entry.dispatchedAt === 'string' && entry.dispatchedAt !== '' ? entry.dispatchedAt : undefined
     normalized.push({
       sessionId,
       ...(at === undefined ? {} : { at }),
       ...(reportedAt === undefined ? {} : { reportedAt }),
+      ...(dispatchedAt === undefined ? {} : { dispatchedAt }),
       ...(model === undefined ? {} : { model }),
       ...(modelSource === undefined ? {} : { modelSource }),
       role,
@@ -603,6 +610,13 @@ export async function recordTaskSession(taskPath, metadata, sessionId, role = 't
  * without reporting; a session that stops after a full hand-over has reported. The two
  * are the same shape on the event feed, and this field is what separates them.
  *
+ * It is stored as a **time** rather than a boolean because a session outlives one job.
+ * A session dispatched twice has two reports, and "reported" alone cannot say whether the
+ * report covers the work it is on now; the comparison against {@link markSessionDispatched}'s
+ * `dispatchedAt` is what answers that. A record whose entry carries this stamp without a
+ * `dispatchedAt` is one written before that field existed, and a stamp with nothing to be
+ * later than is read as "reported" - the behaviour that predates it.
+ *
  * Two consequences of that meaning are load-bearing:
  *
  *   - **`done` never writes it.** Finishing a task without reporting is the case the
@@ -638,6 +652,49 @@ export async function markSessionReported(taskPath, sessionId) {
   const written = {
     ...metadata,
     sessions: known.map((entry, index) => (index === target ? { ...entry, reportedAt: stamp } : entry)),
+  }
+  try {
+    await writeTaskMetadata(taskPath, written)
+  } catch {
+    return false
+  }
+  await writeSourceTaskIndex(taskPath, written, taskSessionsOf(written)).catch(() => false)
+  return true
+}
+
+/**
+ * Note that a session has been handed work, in the task's own record.
+ *
+ * `dispatchedAt` is half of the pair {@link markSessionReported} completes. The question
+ * the watcher asks is not "did this session ever report" but "was the work it is on now
+ * reported" - and those stop being the same question the moment a session is given a
+ * second job. A session that reported once and was then handed something else has a
+ * `reportedAt` that predates its current work, so a stamp alone would read as "already
+ * reported" and the notice for the second job would never be sent.
+ *
+ * Written on the member's own entry, not the dispatcher's: it is a fact about the session
+ * that took the work.
+ *
+ * Same two consequences as the report stamp, for the same reasons: only an entry the
+ * record already names is updated, and nothing here throws. A dispatch whose bookkeeping
+ * write failed has still handed the work over, and failing it over the note would lose
+ * the work to keep the record tidy.
+ * @param taskPath - the task space directory.
+ * @param sessionId - the session the work was handed to.
+ * @returns whether the record now says this session was dispatched to.
+ */
+export async function markSessionDispatched(taskPath, sessionId) {
+  const id = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (id === '') return false
+  const metadata = await readTaskMetadata(taskPath).catch(() => undefined)
+  if (metadata === null || metadata === undefined || typeof metadata !== 'object') return false
+  const known = taskSessionsOf(metadata)
+  const target = known.findIndex((entry) => entry.sessionId === id)
+  if (target === -1) return false
+  const stamp = localStamp()
+  const written = {
+    ...metadata,
+    sessions: known.map((entry, index) => (index === target ? { ...entry, dispatchedAt: stamp } : entry)),
   }
   try {
     await writeTaskMetadata(taskPath, written)

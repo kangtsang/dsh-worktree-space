@@ -114,8 +114,9 @@ when a finish answers with `mergeInProgress` or `dirtyCheckout`, and
 
 - **`references/creating.md`** — asking the user before anything is made: the task name,
   the container root, and the acceptance fence; then the `create` call itself.
-- **`references/working.md`** — putting a session on the work, watching and correcting it
-  with `wts_session_tool`, and adding a repository to a task already under way.
+- **`references/working.md`** — putting a session on the work, giving it a *second* job
+  (a `dispatch` with `sessionId`, which is not a `send`), watching and correcting it with
+  `wts_session_tool`, and adding a repository to a task already under way.
 - **`references/finishing.md`** — the whole of a finish: the merge decision, work nobody
   committed, stray files, deleting a branch, and the deploy gate.
 - **`references/conflicts.md`** — the one part of a finish that is not routine: a conflict

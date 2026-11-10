@@ -384,10 +384,10 @@ worktree 里，可以就地处理。
 | --- | --- |
 | 先看一眼布局 | `suggest-root`：某个源码根下有哪些仓库、推荐容器根在哪 |
 | 建空间 + 派第一件活 | `create`：建目录与 worktree、注册工作区、开一个队员会话并把任务书交给它 |
-| 派第二件及以后的活 | `dispatch`：在同一个任务空间再开一个会话（**不要对着同一件活连着派两次**，两个会话改同一批文件会互相打断） |
+| 派第二件及以后的活 | `dispatch`：同一个会话还有活要接，就带 `sessionId` 交给它（**别同时开两个会话改同一批文件**，会互相打断）；省略 `sessionId` 则新开一个 |
 | 中途补仓库 | `add`：给已经存在的任务加一个 worktree |
 | 盯进度 | `wts_session_tool status` 的 `lastActivity` 判「卡住」还是「在跑长步骤」，不轮询 |
-| 中途改需求 | `wts_session_tool send` 以 `mode: "steer"` 注入，长回合里也送得到 |
+| 中途改需求 | `wts_session_tool send` 以 `mode: "steer"` 注入，长回合里也送得到。**这说明是纠话，不是派新活**——派新活要用上面的 `dispatch`，否则它静默停手时收不到漏报提醒 |
 | 异常回接 | 队员会话异常中断时会自动收到通知，按通知里的会话 id 把它拉回工作 |
 | 收尾合并 | `done` 带 `merge` 一次完成合并、移除 worktree、归档遗留内容；停在冲突或未提交上时，把队员会话指回来处理后再调一次 |
 | 部署验收 | 勾了部署的任务，用任务空间自己的入口 `up` / `smoke` 过冒烟闸门 |
@@ -1059,10 +1059,10 @@ Two roles on that route: the **leader** is the orchestrating one, the one you ar
 | --- | --- |
 | Read the layout first | `suggest-root`: which repositories are under a source root, and which container root it recommends |
 | Create + first dispatch | `create` does it in one call: make the directory and the worktrees, register the Workspace, open a member session and hand it the brief |
-| Dispatch the work after that | `dispatch` opens another session in that task space — **never dispatch the same piece of work twice**, as two sessions editing the same files interrupt each other's commits |
+| Dispatch the work after that | `dispatch` hands another job to the session already on the task when it is given a `sessionId` (**never run two sessions over the same files** — they interrupt each other's commits); without one it opens a new session |
 | Add a repository mid-task | `add` gives an existing task one more worktree |
 | Watch progress | `lastActivity` from `wts_session_tool status` tells "stuck" from "busy with a long step" - no polling |
-| Change the requirement | `wts_session_tool send` with `mode: "steer"`, which lands even inside one long turn |
+| Change the requirement | `wts_session_tool send` with `mode: "steer"`, which lands even inside one long turn. **That is a correction, not a new job** - give new work with `dispatch` above, or a silent stop is not reported back to you |
 | Recover a failure | an abnormal turn reports itself; the notice names the member session id to pull back to work |
 | Finish and merge | `done` with `merge` merges, removes the worktrees and files what was left in one call; a conflict or uncommitted work is handed back to the member, then `done` again |
 | Deploy and accept | for a deploying task, the space's own entry runs `up` / `smoke` to pass the smoke gate |
@@ -1122,9 +1122,10 @@ scenarios and can be adapted directly.
 
 Two points worth noting:
 
-- **Do not dispatch a second job to the same task while one is running.** Two sessions editing the same
-  files interrupt each other. To add a requirement, use `send` with `steer`; to dispatch a second job,
-  confirm the first has finished.
+- **Do not run two sessions over the same files at once.** They interrupt each other's commits. To correct
+  or redirect the session already running, use `send` with `steer`; to hand that same session its next job,
+  use `dispatch` with `sessionId` — that is what starts a new job, and what makes a silent stop reported back
+  to you. Without a `sessionId` a dispatch opens a new session, which is right when the work does not overlap.
 - **What still requires the user's decision**: abandoning a task space, discarding what was left behind,
   exempting the smoke gate. The agent stops and asks rather than deciding these.
 

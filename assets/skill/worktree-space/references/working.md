@@ -11,6 +11,21 @@ A session is a conversation with its own context: it does not see this one, so t
 - **`dispatch` with a `prompt`** hands a job to a session in a task space that
   already exists — for the second and later jobs (make it, then smoke it, then fix
   what the smoke found), because a task space outlives any one conversation.
+  **Name `sessionId` to give the job to the session already on the task**; leave it
+  out and a new session is opened, which is right only when the previous one is lost.
+
+**Giving a running session its next job is a `dispatch`, not a `send`.** The two are
+easy to confuse and the difference is not cosmetic:
+
+| You mean | Use | What it does to the report |
+| --- | --- | --- |
+| "here is your next job" | `dispatch` with `sessionId` | the session owes a **new** report; a silent stop is reported back to you |
+| "correct / answer / redirect the work you are on" | `wts_session_tool send` | nothing — a report already given still stands |
+
+A `send` never resets the reporting state, because a correction does not make the work
+a different job. That is precisely why the other direction matters: a session given new
+work through `send` and then stopping without a report is **not** reported back to you.
+When you are handing over work rather than commenting on it, say so with `dispatch`.
 
 Both open the session in the task space itself, so it reads under that task in the
 workspace list and can be followed from there, and both answer with the session id.
@@ -86,6 +101,14 @@ it — so `wts_session_tool find` is the fallback for when it is not.
   the second is the user stopping it on purpose. When a notice arrives, use
   `wts_session_tool status` to see where it stopped and `wts_session_tool send` to put
   it back to work.
+- **A session that stops quietly is reported too, and the report is per job.** A turn
+  that ends `completed` without a `finalReport: true` message sends you a different
+  notice: the turn did not fail, only the hand-over is missing. That judgement is a
+  comparison of two times in the task's record — when the session was last dispatched
+  to, and when it last reported — so **a report given for an earlier job does not
+  cover a job handed over afterwards**. Dispatch the next job (rather than `send`-ing
+  it) and the notice will fire if that job ends silently; that is the whole reason the
+  two tools are kept apart.
 - **There is no way to wait, and none is needed.** A session reports its own progress, and
   a turn that ends badly is pushed to you by the watcher, so nothing goes unnoticed while
   you are doing something else. Look with `status` or `read` when you have a reason to,

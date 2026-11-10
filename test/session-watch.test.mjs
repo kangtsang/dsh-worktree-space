@@ -40,15 +40,16 @@ async function tempRoot() {
 }
 
 /** The record's session entry, with the one field under test left out by default. */
-const sessionEntry = (reportedAt) => ({
+const sessionEntry = (reportedAt, dispatchedAt) => ({
   sessionId: CHILD,
   at: '2026-01-01 00:00:00',
   role: 'task',
   ...(reportedAt === undefined ? {} : { reportedAt }),
+  ...(dispatchedAt === undefined ? {} : { dispatchedAt }),
 })
 
 /** The task's own record, as a `done` would leave it just before removing the space. */
-const recordOf = (sourceRoot, reportedAt) => ({
+const recordOf = (sourceRoot, reportedAt, dispatchedAt) => ({
   version: 1,
   task: TASK,
   project: 'public',
@@ -56,7 +57,7 @@ const recordOf = (sourceRoot, reportedAt) => ({
   sourceRoot,
   repositories: [],
   createdAt: '2026-01-01T00:00:00.000Z',
-  sessions: [sessionEntry(reportedAt)],
+  sessions: [sessionEntry(reportedAt, dispatchedAt)],
 })
 
 /**
@@ -66,16 +67,18 @@ const recordOf = (sourceRoot, reportedAt) => ({
  * from it. `taskPath` is `<root>/<project>/<task>` on purpose, because the archive lookup
  * derives the project and task names from exactly those two segments.
  * @param reportedAt - the stamp to write, or undefined for a session that never reported.
+ * @param dispatchedAt - when the session's current job was handed over, or undefined for a
+ *   record written before that field existed.
  * @returns the source root the task was cut from, and the task space path.
  */
-async function liveSpace(reportedAt) {
+async function liveSpace(reportedAt, dispatchedAt) {
   const root = await tempRoot()
   const sourceRoot = join(root, 'src')
   const taskPath = join(root, 'spaces', 'public', TASK)
   await mkdir(join(taskPath, '.worktree-space'), { recursive: true })
   await writeFile(
     join(taskPath, '.worktree-space', 'worktree-space.json'),
-    JSON.stringify(recordOf(sourceRoot, reportedAt)),
+    JSON.stringify(recordOf(sourceRoot, reportedAt, dispatchedAt)),
     'utf8',
   )
   return { sourceRoot, taskPath }
@@ -88,9 +91,10 @@ async function liveSpace(reportedAt) {
  * removed, so this file is the only place its `sessions[]` survives - which makes it the only
  * thing that can stop the watcher reporting a report that happened.
  * @param reportedAt - the stamp to write, or undefined for a session that never reported.
+ * @param dispatchedAt - when the session's current job was handed over, or undefined.
  * @returns the source root, and the task space path that no longer exists.
  */
-async function archivedOnly(reportedAt) {
+async function archivedOnly(reportedAt, dispatchedAt) {
   const root = await tempRoot()
   const sourceRoot = join(root, 'src')
   const taskPath = join(root, 'spaces', 'public', TASK)
@@ -99,7 +103,7 @@ async function archivedOnly(reportedAt) {
   await writeFile(
     join(archive, '2026-01-02-03-04-05-report.json'),
     JSON.stringify({
-      ...recordOf(sourceRoot, reportedAt),
+      ...recordOf(sourceRoot, reportedAt, dispatchedAt),
       taskPath,
       createdAt: '2026-01-01 00:00:00',
       updatedAt: '2026-01-02 03:04:05',
@@ -206,6 +210,142 @@ describe('the dispatched-session watcher', () => {
     await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
 
     expect(steered).toHaveLength(0)
+  })
+
+  // A session outlives one job. The leader hands it a second piece of work with `dispatch`,
+  // and the report that answered the first job says nothing about the second - so the stamp
+  // alone is the wrong question, and it was the one asked before `dispatchedAt` existed.
+  describe('a session that has been given a second job', () => {
+    it('reports a completed turn whose only report predates the dispatch', async () => {
+      // The gap this half closes. The session reported at 03:04:05, was then handed more
+      // work at 05:00:00, and stopped without reporting that. Before the comparison this was
+      // silent: `reportedAt` was present, so the watcher read it as "already handed over".
+      const { sourceRoot, taskPath } = await liveSpace('2026-01-02 03:04:05', '2026-01-02 05:00:00')
+      const { watch, listeners, steered } = harness()
+      watch.install()
+      watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+
+      await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+
+      expect(steered).toHaveLength(1)
+      expect(steered[0].content[0].text).toMatch(/never sent a final report/)
+    })
+
+    it('stays silent once the report lands after the dispatch', async () => {
+      // The negative control for the case above, and it has to be a different turn than the
+      // report-free one: a report stamped later covers the job it was dispatched to, and the
+      // notice would then be a false accusation.
+      const { sourceRoot, taskPath } = await liveSpace('2026-01-02 05:30:00', '2026-01-02 05:00:00')
+      const { watch, listeners, steered } = harness()
+      watch.install()
+      watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+
+      await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+
+      expect(steered).toHaveLength(0)
+    })
+
+    it('counts a report in the same second as covering the dispatch', async () => {
+      // Local stamps have one-second resolution, and the two writes happen in different
+      // calls that can land inside the same second. Treating equal stamps as "older" would
+      // report a member that answered immediately after the hand-over.
+      const { sourceRoot, taskPath } = await liveSpace('2026-01-02 05:00:00', '2026-01-02 05:00:00')
+      const { watch, listeners, steered } = harness()
+      watch.install()
+      watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+
+      await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+
+      expect(steered).toHaveLength(0)
+    })
+
+    it('reads the pair out of the archive too, so a finished second job is still judged', async () => {
+      // The `done` path: the task space is gone, and the archived index is the only copy.
+      // An archive that kept `reportedAt` and dropped `dispatchedAt` would read every
+      // finished second job as reported - which is why both fields are carried there.
+      const stale = await archivedOnly('2026-01-02 03:04:05', '2026-01-02 05:00:00')
+      const first = harness()
+      first.watch.install()
+      first.watch.watch(CHILD, TASK, 'caller-1', stale.taskPath, stale.sourceRoot)
+      await feed(first.listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+      expect(first.steered).toHaveLength(1)
+
+      const covered = await archivedOnly('2026-01-02 05:30:00', '2026-01-02 05:00:00')
+      const second = harness()
+      second.watch.install()
+      second.watch.watch(CHILD, TASK, 'caller-1', covered.taskPath, covered.sourceRoot)
+      await feed(second.listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+      expect(second.steered).toHaveLength(0)
+    })
+
+    it('stands silent for a record written before dispatchedAt existed', async () => {
+      // The compatibility direction, and the one that matters for records already on disk:
+      // a report with no dispatch time to be later than is read as reported - the behaviour
+      // from before the comparison. Otherwise every existing task would be retroactively
+      // accused the first time a session ended a turn.
+      const { sourceRoot, taskPath } = await liveSpace('2026-01-02 03:04:05')
+      const { watch, listeners, steered } = harness()
+      watch.install()
+      watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+
+      await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+
+      expect(steered).toHaveLength(0)
+    })
+
+    it('reads a record with no dispatchedAt and no report as unreported, as before', async () => {
+      // The other half of the same compatibility question, and the pair is the point: an old
+      // record has to be able to answer both ways, or the silence above proves nothing. A
+      // record the previous version wrote for a session that never reported is still reported
+      // as missing.
+      const { sourceRoot, taskPath } = await liveSpace(undefined)
+      const { watch, listeners, steered } = harness()
+      watch.install()
+      watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+
+      await feed(listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+
+      expect(steered).toHaveLength(1)
+      expect(steered[0].content[0].text).toMatch(/never sent a final report/)
+    })
+
+    it('keeps both old meanings after a done, in the archived index', async () => {
+      // The archive is the only copy left once the task space is gone, and an index filed by
+      // the previous version has neither field. Both readings have to survive there too.
+      const missing = await archivedOnly(undefined)
+      const first = harness()
+      first.watch.install()
+      first.watch.watch(CHILD, TASK, 'caller-1', missing.taskPath, missing.sourceRoot)
+      await feed(first.listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+      expect(first.steered).toHaveLength(1)
+
+      const reported = await archivedOnly('2026-01-02 03:04:05')
+      const second = harness()
+      second.watch.install()
+      second.watch.watch(CHILD, TASK, 'caller-1', reported.taskPath, reported.sourceRoot)
+      await feed(second.listeners, sessionOf(CHILD), turnEnd(1, 'completed'))
+      expect(second.steered).toHaveLength(0)
+    })
+  })
+
+  it('keeps its dedup key when the same session is re-armed for a second job', async () => {
+    // Arming the watch again is what a second dispatch does. The new job's turn carries a new
+    // `seq`, so it is judged on its own; what must not happen is the previous job's `turn/end`
+    // being replayed and notified a second time because the key was cleared.
+    const { sourceRoot, taskPath } = await liveSpace(undefined)
+    const { watch, listeners, steered } = harness()
+    watch.install()
+    watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+    await feed(listeners, sessionOf(CHILD), turnEnd(7, 'completed'))
+    expect(steered).toHaveLength(1)
+
+    watch.watch(CHILD, TASK, 'caller-1', taskPath, sourceRoot)
+    await feed(listeners, sessionOf(CHILD), turnEnd(7, 'completed'))
+    expect(steered).toHaveLength(1)
+
+    // A genuinely new turn is still reported.
+    await feed(listeners, sessionOf(CHILD), turnEnd(8, 'completed'))
+    expect(steered).toHaveLength(2)
   })
 
   // The two cases a `done` creates, and the reason the archive is read at all: the task space is

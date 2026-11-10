@@ -2383,6 +2383,17 @@ const SESSION_DESCRIPTION = [
     + 'and send does not need one. Set finalReport true only when this message IS the finished work being handed over, '
     + 'never for a progress update or a question.',
 
+  // The division that the two tools would otherwise blur: a message into a running session
+  // looks like giving it work, and it is not. Only a dispatch resets what counts as reported,
+  // because only a dispatch is what resets the job - so a leader that means "here is your next
+  // job" has to say it with the other tool or the missing-report notice it relies on will not
+  // fire for that job.
+  'send is NOT how a new job is given. A message corrects, answers or redirects the work already in progress, and it '
+    + 'never resets what counts as reported - so a session that is given a new piece of work this way and then stops '
+    + 'without reporting it is not reported back to you. Use wts_worktree_space action dispatch with sessionId for the '
+    + 'next job to a session that is already running: that is what starts a new job, and what makes a silent stop '
+    + 'noticeable.',
+
   'read is how you see what a session has said, including whether a message you sent was delivered at all: it takes '
     + 'sinceSeq as a paging cursor, where -1 counts every event, which a brand-new session needs.',
 
@@ -2442,7 +2453,7 @@ const SESSION_PARAMETERS = {
   includeReasoning: { type: 'boolean', description: '(read) Include assistant reasoning blocks (default true).' },
   message: { type: 'string', description: '(send) Message text, sent as a user turn.' },
   mode: { type: 'string', enum: ['queue', 'steer'], description: '(send) steer (default) interrupts the running turn at its next step; queue waits for a turn boundary.' },
-  finalReport: { type: 'boolean', description: '(send) True only when this message IS the finished work being handed over. Defaults to false.' },
+  finalReport: { type: 'boolean', description: '(send) True only when this message IS the finished work being handed over. Defaults to false. It stamps when the report was made, which the watcher compares against when the session was last dispatched to - so a report given before a newer dispatch does not cover it.' },
   cwd: { type: 'string', description: '(create) ABSOLUTE working directory - the task space. One of cwd or workspaceId is required.' },
   workspaceId: { type: 'string', description: '(create) Workspace to open in; takes precedence over cwd.' },
   title: { type: 'string', description: '(create) Title shown in the interface; stops automatic title generation.' },

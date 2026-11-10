@@ -45,13 +45,24 @@
  * own entry when the call passes `finalReport: true`, and this module reads it when a watched
  * session's turn ends as `completed`:
  *
- *   - **stamped** - the report arrived; nothing to say;
- *   - **absent, or unreadable** - the session stopped without reporting, and the dispatcher is
- *     told. The read order is the live record first, then the source root's archive, because a
- *     `done` removes the task space and files the index that holds the field into
+ *   - **stamped at or after this session's `dispatchedAt`** - the report covers the work it was
+ *     given; nothing to say;
+ *   - **absent, unreadable, or older than the last dispatch** - the session stopped without
+ *     reporting the job it is on, and the dispatcher is told. The read order is the live record
+ *     first, then the source root's archive, because a `done` removes the task space and files
+ *     the index that holds the field into
  *     `<source root>/.worktree-space/tasks-archive/<project>/`. When neither can be read the
  *     answer is "unreported": an unnecessary notice is a sentence read once, where a missing one
  *     is a session nobody hears about.
+ *
+ * The comparison against `dispatchedAt` is why both are **times** and not booleans. A session
+ * that reported once and was then handed a second job is the case a single stamp gets wrong:
+ * its `reportedAt` still stands, but it answers the *first* job. Without the dispatch time the
+ * notice for the second would be suppressed exactly when it matters most - when that second job
+ * stopped quietly. Only `wts_worktree_space`'s `dispatch` (and a `create` that dispatches in the
+ * same call) writes `dispatchedAt`; `wts_session_tool send` never does, because a message into a
+ * running session is a correction, not a new job. A record whose entry predates the field has no
+ * dispatch time, and its report stands unqualified - the older behaviour, kept on purpose.
  *
  * `aborted` is deliberately **not** one of them. It is a turn something stopped on purpose - the
  * user from the interface, or a dispatcher through `wts_session_tool cancel` - so the session did
@@ -119,16 +130,30 @@ function phraseFor(kind) {
 const UNREPORTED_PHRASE = 'ended its turn normally without sending a final report'
 
 /**
- * Whether a session entry says a final report was delivered.
+ * Whether a session entry says the work it is on now has been reported.
  *
- * The test is presence, not content: this module only asks whether the session reported, and
- * the four things a report is supposed to state (the commits, the commands, the evidence, what
- * was not verified) are for the dispatcher to judge, not for a guard to second-guess.
+ * Not "did this session ever report" - a session outlives one job, and a leader that hands
+ * a second job to the same session makes those two questions different. The record carries
+ * both times, so the answer is a comparison: a report stamped at or after the moment the
+ * current job was handed over covers it, and one stamped before it does not.
+ *
+ * Both stamps are the same local `YYYY-MM-DD HH:MM:SS` shape, which sorts as text, so the
+ * comparison needs no parsing. A report with **no** dispatch time to be later than is an
+ * entry written before that field existed, and it is read as "reported" - the behaviour
+ * from before this comparison, kept so old records are not retroactively accused.
+ *
+ * The test is still presence and order, not content: the four things a report is supposed
+ * to state (the commits, the commands, the evidence, what was not verified) are for the
+ * dispatcher to judge, not for a guard to second-guess.
  * @param entry - a normalized session entry, from the record or from an archived index.
- * @returns whether it carries a `reportedAt`.
+ * @returns whether it carries a `reportedAt` that answers its `dispatchedAt`.
  */
 function hasReport(entry) {
-  return typeof entry?.reportedAt === 'string' && entry.reportedAt.trim() !== ''
+  const reportedAt = typeof entry?.reportedAt === 'string' ? entry.reportedAt.trim() : ''
+  if (reportedAt === '') return false
+  const dispatchedAt = typeof entry?.dispatchedAt === 'string' ? entry.dispatchedAt.trim() : ''
+  if (dispatchedAt === '') return true
+  return reportedAt >= dispatchedAt
 }
 
 /**
@@ -285,12 +310,18 @@ export class SessionWatch {
    */
   watch(sessionId, task, senderSessionId, taskPath = '', sourceRoot = '') {
     if (typeof sessionId !== 'string' || sessionId === '') return
+    // Re-arming an already-watched session keeps its dedup key. A second dispatch into the
+    // same session is an ordinary event, and clearing the key would let a replayed
+    // `turn/end` from the previous job notify the dispatcher again about a turn it has
+    // already been told about. The new job's own turn carries a new `seq`, so it is
+    // reported on its own merits without the reset.
+    const previous = this.watched.get(sessionId)
     this.watched.set(sessionId, {
       task: typeof task === 'string' ? task : '',
       sender: typeof senderSessionId === 'string' ? senderSessionId : '',
       taskPath: typeof taskPath === 'string' ? taskPath : '',
       sourceRoot: typeof sourceRoot === 'string' ? sourceRoot : '',
-      lastKey: undefined,
+      lastKey: previous?.lastKey,
     })
   }
 

@@ -12,7 +12,7 @@ import { addTaskRepositories, createTask, finishTask, listTasks, suggestTaskRoot
 import { absolutePath, canonicalPath, isInside } from './paths.js'
 import { coded } from './codes.js'
 import { deliveryPolicyOf } from './delivery.js'
-import { normalizeSessions, readTaskMetadata, recordTaskSession, taskSpacePath, taskSessionsOf, writeTaskMetadata } from './shared.js'
+import { markSessionDispatched, normalizeSessions, readTaskMetadata, recordTaskSession, taskSpacePath, taskSessionsOf, writeTaskMetadata } from './shared.js'
 import {
   applyRoute,
   currentSelectionOf,
@@ -143,6 +143,13 @@ const OUTPUT_SCHEMA = {
     tasksRoot: { type: 'string', required: true },
     suggested: { type: 'string', required: true },
     sessionId: { type: 'string', required: true },
+    /**
+     * Set by a `dispatch` that named an existing session: the job was handed to a member
+     * that was already running, rather than to one this call opened. It is on the envelope
+     * because the two shapes call for different reading afterwards - this one owes a report
+     * for the new job, and the watcher will say so if it stops without one.
+     */
+    reissued: { type: 'boolean' },
     /**
      * The sessions this task space has been worked in, newest first, as the
      * record carries them. Filled by `list`, and by the `create` / `dispatch`
@@ -1076,6 +1083,15 @@ async function dispatchToSession(ctx, exec, request, watcher) {
   const service = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined)
   const controller = service('sessionController')
   const sessions = service('sessions')
+  // A call that names a session hands a second job to work this plugin already opened,
+  // instead of opening another one. That is the ordinary shape of a task that is not
+  // finished after one turn ("do it, then smoke it, then fix what the smoke found"), and
+  // it is a different thing from `wts_session_tool send`: a send corrects a running turn,
+  // a dispatch starts a new job and resets what counts as "reported".
+  const existing = typeof request.sessionId === 'string' ? request.sessionId.trim() : ''
+  if (existing !== '') {
+    return await redispatchToSession(ctx, exec, request, watcher, existing, service)
+  }
   if (controller === undefined || controller === null
     || typeof controller.create !== 'function' || typeof controller.prompt !== 'function') {
     return {
@@ -1218,6 +1234,107 @@ async function dispatchToSession(ctx, exec, request, watcher) {
   // on a session whose work never arrived would report a failure that never happened.
   if (request.watch !== false) watchDispatchedSession(watcher, sessionId, request, exec)
   return { sessionId, reason, model }
+}
+
+/**
+ * Hand a further job to a session this plugin already opened.
+ *
+ * The dispatcher's second, third and later jobs go through here rather than opening one
+ * session per message. Two reasons, and the second is the one that shapes the code:
+ *
+ *   1. **A task is usually several turns.** "Make it, then smoke it, then fix what the
+ *      smoke found" is one task with three jobs, and three sessions would each start from
+ *      nothing - no memory of the design decided in the last one, no idea which files were
+ *      already touched.
+ *   2. **The record has to be able to say the new job is unreported.** `reportedAt` alone
+ *      could not: a session that reported its first job already carries the stamp, so the
+ *      notice for the second job would be suppressed exactly when it matters. Stamping
+ *      `dispatchedAt` here is what makes the watcher's comparison mean "the work it is on
+ *      now" instead of "some work, ever".
+ *
+ * The session must already be named in this task's record, and its directory must be the
+ * task space or below it. That is not a permission system - `wts_session_tool send`
+ * already decides who may reach whom - it is the same rule the create path applies: this
+ * call opens nothing, so it may only address a session this task already knows, working
+ * where this task works. Anything else is a mistake in the arguments, and it is refused
+ * before a message is delivered into an unrelated conversation.
+ *
+ * The brief carries the same standing preamble a fresh dispatch gets, so a second job is
+ * told the same things as the first: the reporting contract, the source checkouts being
+ * read-only, and the deploy section when the task deploys.
+ * @param ctx - the host plugin context.
+ * @param exec - the tool run context.
+ * @param request - the dispatch request, carrying the session id to address.
+ * @param watcher - the plugin's session watcher, when the entry made one.
+ * @param sessionId - the session the work is handed to.
+ * @param service - the host service lookup.
+ * @returns the session id, what the caller should be told, and the model when one applies.
+ */
+async function redispatchToSession(ctx, exec, request, watcher, sessionId, service) {
+  const controller = service('sessionController')
+  if (controller === undefined || controller === null || typeof controller.prompt !== 'function') {
+    return {
+      sessionId: '',
+      reason: 'this deployment serves no session controller, so the second job could not be handed to the existing '
+        + 'session; use wts_session_tool send to message it instead',
+    }
+  }
+  const metadata = await readTaskMetadata(request.taskPath).catch(() => undefined)
+  const known = taskSessionsOf(metadata).find((entry) => entry.sessionId === sessionId)
+  if (known === undefined) {
+    return {
+      sessionId: '',
+      reason: `${sessionId} is not a session this task's record names, so no new job was handed to it. `
+        + 'A dispatch reuses a session this task already opened; to start a new one, omit sessionId, and to correct a '
+        + 'running one, use wts_session_tool send.',
+    }
+  }
+  // Where the session actually works, read from the live header when it is live and from
+  // its persisted log when it is not. The record names the task space, so this is the one
+  // fact the record cannot supply on the session's behalf.
+  const agents = service('agents')
+  const live = agents === undefined || typeof agents.get !== 'function' ? undefined : agents.get(sessionId)
+  const directory = typeof live?.session?.header?.cwd === 'string' ? live.session.header.cwd : ''
+  if (directory !== '' && !isInside(request.taskPath, directory) && canonicalPath(directory) !== canonicalPath(request.taskPath)) {
+    return {
+      sessionId: '',
+      reason: `${sessionId} works in ${directory}, which is not this task space, so no job for ${request.task} `
+        + 'was handed to it',
+    }
+  }
+  let reason = ''
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const recorded = metadata
+    const deployTarget = recorded === undefined ? 'none' : deliveryPolicyOf(recorded).deploy.target
+    const preamble = taskBriefPreamble({
+      tasksRoot: request.tasksRoot,
+      project: request.project,
+      task: request.task,
+      branch: request.branch,
+      callerSessionId: exec?.agent?.session?.id,
+      deployTarget,
+    })
+    await controller.prompt({
+      requestId: randomUUID(),
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: `${preamble}${request.prompt}` }],
+      ...(typeof timeZone === 'string' && timeZone !== '' ? { clientTimeZone: timeZone } : {}),
+    }, new AbortController().signal)
+  } catch (error) {
+    return {
+      sessionId,
+      reason: `the job could not be handed to ${sessionId} (${String(error?.message ?? error)}); `
+        + 'it was not dispatched, so nothing has been reset and no report is owed for it',
+    }
+  }
+  // Stamped only after the prompt landed. A dispatch whose message never arrived owes no
+  // report, and stamping first would make the watcher announce a missing report for a job
+  // the session was never given.
+  await markSessionDispatched(request.taskPath, sessionId)
+  if (request.watch !== false) watchDispatchedSession(watcher, sessionId, request, exec)
+  return { sessionId, reason, reissued: true }
 }
 
 /**
@@ -1547,7 +1664,14 @@ function summarize(action, value) {
     const opened = value.sessionId === ''
       ? `No session was opened in task '${value.task}' at ${value.container}.`
       : `Session '${value.sessionId}' is on the work in task '${value.task}' at ${value.container}; open it from the Worktree Space panel, or from the workspace list.`
-    return `${opened}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
+    // A second job into an existing session says so, because the two shapes read very
+    // differently afterwards: this one carries a report owed for the new job, and a member
+    // that stops quietly is reported back to the caller about it.
+    const reissued = value.reissued === true
+      ? ' This is a new job for a session that was already running, so a report is owed for it;'
+        + ' if it stops without sending one you will be told.'
+      : ''
+    return `${opened}${reissued}${value.warnings.length === 0 ? '' : ` Warnings: ${value.warnings.join('; ')}.`}`
   }
   const failed = value.failed ? ' Some repositories need attention:' : ''
   // Three stops are worth a sentence of their own, because each names a next step rather
@@ -1807,6 +1931,7 @@ export function registerTaskTool(ctx, options = {}) {
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create, default true).' },
       merge: { type: 'boolean', description: 'REQUIRED for done: true lands the branches, false leaves them. There is no default (E7006).' },
       prompt: { type: 'string', description: 'The work itself (create, dispatch): what to do, where, and what counts as done. It must stand alone - the session shares no context with this conversation. Leave out reporting requirements, source-checkout rules and deploy-acceptance steps: those are supplied for every dispatched task, and repeating them only makes the brief harder to read.' },
+      sessionId: { type: 'string', description: 'A second job for a session already on this task (dispatch): the id `create`, `dispatch` or `list` answered with. The session must be named in this task\'s record and work in this task space. Omit it to open a NEW session. Use this - not `wts_session_tool send` - whenever the call gives the session a new job: a dispatch resets what counts as reported, so a member that stops without reporting the new job is reported back to you. `send` is for correcting the work in progress and never touches that.' },
       agentPreset: { type: 'string', description: '(create, dispatch) Agent preset id to compose the session from. Applies to the session a create with a prompt or a dispatch opens; a create without a prompt opens none. Omit for the deployment default. An unknown id is reported with the presets this host declares.' },
       model: { type: 'string', description: '(create, dispatch) Model the session runs on, as "provider/model" - the ids `wts_session_tool action "model"` lists. Omit it and the session starts on the model the Plugins page names for task sessions, or on this conversation\'s model when that names none.' },
       reasoningEffort: { type: 'string', description: '(create, dispatch) Reasoning effort for the model named in `model`. Omit for the provider\'s own default. Has no effect without `model`.' },
@@ -2029,6 +2154,15 @@ export function registerTaskTool(ctx, options = {}) {
             // And the model it runs on, beside the session it belongs to: a task space
             // outlives the conversation, and "which model ran this" is asked afterwards.
             await recordSessionModel(result.path, opened.sessionId, opened.model)
+            // When this session was handed its current job. Written last because the call
+            // above is what puts the entry on disk - `markSessionDispatched` updates an entry
+            // the record already names, and has nothing to stamp until it is there.
+            //
+            // A session opened now has no report yet, so this stamp changes no verdict
+            // today. It is written anyway because the record is where "when did this work
+            // start" lives, and because the second job this session may be given later needs
+            // a first stamp to be compared against.
+            await markSessionDispatched(result.path, opened.sessionId)
           }
         }
         value.repositories = result.repositories.map((entry) => ({ ...emptyRow(entry.name), path: entry.path, branch: result.branch }))
@@ -2276,6 +2410,10 @@ export function registerTaskTool(ctx, options = {}) {
         })
         // Same default as a create: watch unless the call says not to.
         const watch = args.watchSession !== false
+        // Whether this call hands the job to an existing session rather than opening one. Read
+        // once, here, because both the choice of code path and the stamping afterwards turn on
+        // it - and a value read twice is a value that can disagree with itself.
+        const namedSession = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
         const value = envelope(action)
         value.task = task
         value.project = project
@@ -2296,9 +2434,14 @@ export function registerTaskTool(ctx, options = {}) {
           agentPreset: typeof args.agentPreset === 'string' ? args.agentPreset : undefined,
           // Settled above, before the session was opened; only the write happens now.
           prepared,
+          // A session id here means "hand this job to the session already on the work",
+          // which is how a leader gives the same member a second job. Omitted, a new one
+          // is opened - the behaviour from before this argument existed.
+          ...(namedSession === '' ? {} : { sessionId: namedSession }),
         }, sessionWatch)
         value.sessionId = opened.sessionId
         if (opened.reason !== '') value.warnings.push(opened.reason)
+        if (opened.reissued === true) value.reissued = true
         if (opened.model?.route !== undefined) {
           value.model = `${opened.model.route.provider}/${opened.model.route.model}`
           value.modelSource = opened.model.source
@@ -2315,6 +2458,15 @@ export function registerTaskTool(ctx, options = {}) {
           // The other end of the dispatch, in the same record (see the create's own note above).
           await recordDispatchLeader(taskPath, opened.sessionId, exec, value.warnings)
           await recordSessionModel(taskPath, opened.sessionId, opened.model)
+          // When this session was handed its current job; see the create's own note above for
+          // why it is written after the member's entry exists and why it is written at all.
+          //
+          // Not when the call named a session: `redispatchToSession` stamps that one itself,
+          // and it stamps only after the prompt landed. Stamping here on the way out would
+          // announce a missing report for a job the session never received - the failure
+          // answer reaches the caller with `sessionId` set, which is why the flag is the call
+          // rather than the answer.
+          if (namedSession === '') await markSessionDispatched(taskPath, opened.sessionId)
         }
         value.summary = summarize(action, value)
         return value

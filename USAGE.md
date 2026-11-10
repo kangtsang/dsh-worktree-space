@@ -645,13 +645,21 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | --- | --- |
 | `suggest-root` | 先问一遍：某个源码根下有哪些仓库、推荐容器根在哪。这是「建议位置」的来源 |
 | `create` | 建空间，`prompt` 同时把第一件活交给一个新会话 |
-| `dispatch` | 空间已经存在，派第二件及以后的活：在同一个任务空间里**新开一个会话** |
+| `dispatch` | 空间已经存在，派第二件及以后的活：默认**新开一个会话**；给了 `sessionId` 就交给那个已经在跑的会话 |
 | `add` | 给已存在的任务补仓库 |
 | `list` | 列某个容器根下的任务空间、它们的分支与会话 |
 | `done` | 收尾：合并、移除 worktree、处理遗留内容、清理 |
 
-**别对同一个任务空间连着 `dispatch` 两次** —— `dispatch` 每次都是新开一个会话，两个都以为自己该干活的
-会话会改同一批文件、互相打断提交。要给已经在跑的会话补话，用 `wts_session_tool send`。
+**同一个会话的第二件活，用 `dispatch` 带 `sessionId` 派；只有「改一下、答一句」才用 `send`。** 两者都会把话送到，区别在于**回不回报**：
+
+| 你想说的 | 用哪个 | 对「是否已回报」的影响 |
+| --- | --- | --- |
+| 「这是下一件活」 | `dispatch` + `sessionId` | 该会话要**重新交一次**完结报告；停手不报会被提醒到队长 |
+| 「改一下这个 / 答我这个」 | `wts_session_tool send` | 不影响；之前交过的报告仍然算数 |
+
+`send` 故意不重置回报状态——纠一句话并不让这件事变成另一件活。也正因如此，反过来的方向才要写清：**用 `send` 派了新活、会话随后静默停手，队长不会收到提醒。**
+
+**别对同一个任务空间同时开两个都在这批文件上干活的会话** —— 它们会互相打断提交。要给已经在跑的会话补话，用 `wts_session_tool send`；要新开一个会话接别的活（不与前一个重叠），省略 `sessionId` 即可。
 
 **派出去的每一句话都会被前面一段标准前言兜住**：前言写清任务名、容器根、分支名、
 「git 命令在各自仓库子目录里跑」、禁止在源码检出里改文件或提交、不得手写 `git merge`、
@@ -691,9 +699,24 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 以 `completed` 结束时去记录里查这一笔，查不到就通知队长一条「已正常结束、但没有交完结报告」，
 文案同时说明**这不是失败**、并提醒**不要据此去唤醒那个会话**——先读它最后的输出再决定。
 
+**判据是「这一次派活有没有被回报」，不是「这个会话这辈子汇报过没有」。** 记录里存的是两个时间：
+`dispatchedAt`（最近一次把活交给它的时刻）与 `reportedAt`（最近一次交完结报告的时刻）。
+`reportedAt` 不早于 `dispatchedAt` 才算这一次已回报。这样分的理由是同一个会话会被派第二件活——
+「做完了，再冒烟，再修冒烟发现的问题」就是一个任务三件活，如果只看「有没有 `reportedAt`」，
+第一件活的报告会把第二件活的漏报静音掉，而那一次恰恰最该被通知。
+
+由此推出两条使用规则：
+
+- **给同一个会话派下一件活，用 `wts_worktree_space` 的 `dispatch` 并带上 `sessionId`**，它才会刷新
+  `dispatchedAt`；`wts_session_tool send` 是纠话、答问、改方向，**不写这个字段**，所以用它派的活漏报时
+  队长收不到提醒。这是两个工具分工的唯一实质区别。
+- **没交过报告的会话、以及本次版本之前的旧记录，判据不变**：`reportedAt` 缺失就是不回报；旧记录没有
+  `dispatchedAt`，有 `reportedAt` 即算已回报（不会追溯指控）。
+
 两条判据都落在任务空间的记录上：`finalReport: true` 会给该会话写下 `reportedAt`（可读本地时间），
 **中途的进展消息不写**，**收尾 `done` 也不写**——"收尾了但没回报"正是要报出来的情形，收尾绝不能
-把它标成已回报。队长若在面板上直接看记录，`reportedAt` 就是"谁交过完结报告"的唯一判据。
+把它标成已回报。队长若在面板上直接看记录，`reportedAt` 与 `dispatchedAt` 两个时间就是
+"这一次活交过完结报告没有"的唯一判据。
 
 `aborted` 一律不通知：那是被有意停下的（用户停的，或队长用 `cancel` 停的），不是"做完了没回报"。
 此时发通知只会让队长去唤醒一个别人刚有意停掉的会话。
@@ -801,7 +824,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `wts_session_tool find` | 按工作目录 / 标题 / id 找会话，返回 `sessionId`、是否在线、工作目录、标题 |
 | `wts_session_tool status` | 看进度：`running`、`openTurn`、`lastActivity`、`pendingWork`、`lastReply`、推理尾巴；离线会话从持久化日志回答 |
 | `wts_session_tool read` | 读消息（条数、`role` 过滤、`sinceSeq` 翻页），在线与离线都能读 |
-| `wts_session_tool send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告 |
+| `wts_session_tool send` | 发消息，`mode` 取 `queue` 或 `steer`；`finalReport: true` 表示这一条就是本任务的完结报告。**它不重置「是否已回报」**——派下一件活用 `wts_worktree_space` 的 `dispatch` + `sessionId` |
 | `wts_session_tool create` | 在指定目录（任务空间）开一个新会话，可同时交办一条自包含的 prompt |
 | `wts_session_tool resume` | 把离线会话拉回在线，之后可直接 `send` / `read` |
 | `wts_session_tool cancel` | 中止当前回合，可选是否保留排队中的工作 |
@@ -1567,14 +1590,21 @@ leader, so the existing parent-child channel (`send_message`) cannot reach it �
 | --- | --- |
 | `suggest-root` | Asks first: which repositories sit below this source root, and where the container root is recommended. This is where "the recommended place" comes from |
 | `create` | Builds the space; `prompt` hands the first piece of work to a new session in the same call |
-| `dispatch` | The space already exists and this is the second piece of work or later: it **opens another session** in the same task space |
+| `dispatch` | The space already exists and this is the second piece of work or later: it **opens another session** by default, or hands the job to the session named by `sessionId` |
 | `add` | Adds repositories to a task that already exists |
 | `list` | Lists the task spaces under a container root, with their branches and sessions |
 | `done` | Finishes: merges, removes the worktrees, deals with the strays, cleans up |
 
-**Do not `dispatch` into the same task space twice in a row** — a `dispatch` opens a session every time,
-and two sessions that each believe they own the work edit the same files and interrupt each other's
-commits. To add something for a session that is already running, use `wts_session_tool send`.
+**A second job for the session already on the task is a `dispatch` with `sessionId`; only "change this / answer this" is a `send`.** Both deliver a message; they differ in **what it does to reporting**:
+
+| You mean | Use | Effect on "has reported" |
+| --- | --- | --- |
+| "here is your next job" | `dispatch` with `sessionId` | the session owes a **new** final report; stopping without one is reported back to you |
+| "change this / answer this" | `wts_session_tool send` | none — a report already given still stands |
+
+A `send` deliberately does not reset the reporting state: correcting a sentence does not turn the work into a different job. Which is why the other direction has to be said plainly: **give a session new work with `send` and it stops quietly, and you will not be told.**
+
+**Do not run two sessions working on the same batch of files at once** — they interrupt each other's commits. To add something for a session that is already running, use `wts_session_tool send`; to start a session on separate work, omit `sessionId` and a new one is opened.
 
 **Everything handed out is prefaced by a standard preamble**, which states the task name, the container
 root, the branch name, that "git commands run in the per-repository subdirectories", that nothing may be
@@ -1627,10 +1657,26 @@ plugin looks for that mark in the record, and if it is absent the leader is told
 normally without delivering a final report**. The notice also says that this is **not a failure** and that
 it is **not** a reason to wake the session — read its last output first.
 
+**The judgement is "was *this* job reported", not "did this session ever report".** The record holds two
+times: `dispatchedAt` (when the session was last handed work) and `reportedAt` (when it last delivered a
+final report). A report counts only if it is **not earlier than** the last dispatch. The reason is that one
+session is given several jobs — "make it, then smoke it, then fix what the smoke found" is one task with
+three — and a stamp alone would let the report for the first job silence the notice for the second, which
+is exactly the job nobody hears about.
+
+Two rules follow, and they are the only substantive difference between the two tools:
+
+- **Give the next job to the same session with `wts_worktree_space` `dispatch` and `sessionId`**, which
+  refreshes `dispatchedAt`. `wts_session_tool send` corrects, answers or redirects, and **does not write
+  that field** — so work handed over with `send` and then abandoned quietly is not announced to the leader.
+- **Records from before this version, and sessions that never reported, behave as they did.** A missing
+  `reportedAt` is "unreported"; an entry with no `dispatchedAt` and a `reportedAt` counts as reported, so
+  existing tasks are not retroactively accused.
+
 Both judgements rest on the task space's record: `finalReport: true` writes a `reportedAt` stamp (readable
 local time) on that session's entry, **an interim progress message does not write it**, and **neither does
 the finish (`done`)** — "finished but never reported" is exactly what is being reported, so the finish must
-never mark it as reported. `reportedAt` is the one witness to "who delivered a final report", which is also
+never mark it as reported. Those two stamps are the one witness to "was this job reported", which is also
 what you read when you look at the record on the panel.
 
 `aborted` is never announced: a turn was stopped on purpose (by the user, or by the leader with `cancel`),
