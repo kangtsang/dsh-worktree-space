@@ -6,6 +6,39 @@
 
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
+## 1.4.3 — 2026-11-13
+
+验收方式从两个答案变成三个，字段也从 `deployTarget` 改名为 `acceptanceKind`。
+
+### 新增
+
+- **「只跑冒烟」：不部署也能有验收。** 以前只有两种任务：部署到 Docker 并在合并前冒烟，或者什么验收都不做。
+  想用一条通过的单元测试或集成测试当收尾闸门，唯一的做法是顺手搭一个永远用不上的部署环境。现在
+  **验收方式**有三档：**不做验收**、**只跑冒烟**、**部署到 Docker**。只跑冒烟的任务只需要入口脚本的
+  `smoke` 子命令，没有环境、没有验收地址、没有容器要拆，收尾闸门照样在——冒烟记录 `pass` 之前合并被拒
+  （E5006）。单元测试、集成测试、构建检查都可以放进那个 `smoke`，用什么方式由项目自己决定。
+
+### 变更
+
+- **`create` 的参数 `deployTarget` 改名为 `acceptanceKind`，取值也换了。** `docker` 现在是 `deploy`，
+  `none` 仍是 `none`，多了 `smoke`。旧参数名还留在声明里，但**传了会被拒绝**（E7008）并点出新名字，
+  绝不静默丢弃——一个被丢掉的围栏只在收尾时才暴露，而那时活已经干完了。
+- **任务记录里的策略从 `deploy.target` 变成 `acceptance.kind`（`version: 2`）。** 旧记录照常读：
+  `docker` 读作 `deploy`、`none` 读作 `none`，**不需要迁移脚本**，也不会因为缺少新字段被拒——这次没有
+  新增字段，正在跑的任务空间行为不变。
+- **卡片按验收方式分两种，各有自己的标题。** 只跑冒烟的任务是**冒烟验收**，部署的任务仍是**部署验收**——
+  一张没有环境的卡片叫「部署验收」会与内容不符。冒烟验收的卡片只有冒烟徽章和「执行冒烟」一个操作：
+  没有地址、没有刷新、没有部署与销毁按钮、不显示环境身份。
+- **分支值旁边的图标去掉了。** 当前分支、远端分支、任务分支、基线分支旁边本来就有文字说明那是什么，
+  图标说的是同一件事，却占掉一行里最该留给分支名的宽度。Git 仓库视图的仓库标题行、以及新建/添加仓库
+  对话框里的分支选择器保留图标——那里没有任何文字说明这是分支，图标是唯一的提示。
+
+### 兼容性
+
+- **实测范围改成「最新五个 + 每条声明版本线的下界」。** 本版声明三条版本线（见 `engines.dsh`），只测最新五个
+  会让两条线的下界永远没被跑过，而降级到那两条线的使用者恰好跑在那里。本版实测七个：最新五个
+  `0.2.2-rc.3`、`0.2.2-rc.2`、`0.2.2-rc.1`、`0.2.1-rc.5`、`0.2.1-rc.4`，加上 `0.2.1-rc.1` 与 `0.2.0-rc.1`
+  （`0.2.2-rc.1` 既是下界又在最新五个之内，只测一次）。这个取法写进了矩阵的窗口校验，以后每版都按它跑。
 
 ## 1.4.2 — 2026-11-11
 
@@ -433,6 +466,54 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+
+## 1.4.3 — 2026-11-13
+
+What a task owes before it lands has three answers instead of two, and the field behind it was
+renamed from `deployTarget` to `acceptanceKind`.
+
+### Added
+
+- **Smoke only: an acceptance without a deployment.** There used to be two kinds of task - one that
+  deployed to Docker and had to smoke before a merge, and one that recorded no acceptance at all.
+  Making a passing unit or integration suite the finish gate meant standing up a deployment
+  environment that would never be used for anything else. There are now three acceptance kinds:
+  **no acceptance**, **smoke only** and **deploy to Docker**. A smoke-only task needs nothing but the
+  `smoke` subcommand of its entry script: no environment, no acceptance URL, no containers to tear
+  down - and the finish gate still holds, refusing the merge (E5006) until a smoke is recorded as
+  `pass`. A unit suite, an integration suite or a build check all belong in that smoke; how the
+  project verifies itself is the project's own business.
+
+### Changed
+
+- **`create`'s `deployTarget` argument is now `acceptanceKind`, and its values changed with it.**
+  `docker` is `deploy`, `none` stays `none`, and `smoke` is new. The old name is still declared, but a
+  call that passes it is **refused** (E7008) with the new name in the message rather than quietly
+  ignored - a fence dropped in silence only shows up at the finish, by which time the work is done.
+- **The policy a task records is `acceptance.kind` instead of `deploy.target` (`version: 2`).** Older
+  records keep reading: `docker` reads as `deploy` and `none` as `none`, **no migration is needed**, and
+  no record is refused for want of a new field - this release adds none, so a task space already in
+  flight behaves exactly as before.
+- **The card has a title per acceptance kind.** A smoke-only task gets a **Smoke acceptance** card and
+  a deploying one keeps **Deployment acceptance** - a card with no environment called "Deployment
+  acceptance" would describe something it is not showing. A Smoke acceptance card carries the smoke
+  badge and one action, "Run smoke": no URL, no refresh, no deploy or destroy button, and no
+  environment id.
+- **The icon beside a branch value is gone.** Current branch, remote branch, task branch and base
+  branch each already carry a word saying what they are; the glyph said the same thing while taking
+  the width the branch name itself needs. It stays on the repository heading in the Git repositories
+  view and on the branch pickers in the create and add dialogs, where nothing else names the branch.
+
+### Compatibility
+
+- **The tested range is now "the newest five plus the lower bound of every declared release line".**
+  This version declares three lines (see `engines.dsh`), and measuring only the newest five would
+  leave two of those floors never booted - which is exactly where a downgraded user runs. This release
+  measures seven: the newest five (`0.2.2-rc.3`, `0.2.2-rc.2`, `0.2.2-rc.1`, `0.2.1-rc.5`,
+  `0.2.1-rc.4`) plus `0.2.1-rc.1` and `0.2.0-rc.1` (`0.2.2-rc.1` is both a floor and one of the newest
+  five, so it is measured once). The window gate encodes that rule, so every later release runs the
+  same way.
 
 ## 1.4.2 — 2026-11-11
 
