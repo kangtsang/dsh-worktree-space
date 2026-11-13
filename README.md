@@ -59,10 +59,12 @@ dsh plugin --profile web add dsh-worktree-space
 - DSH `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`（按三条已发布的版本线各取一个下界，写法与生态里其它插件一致；逐版本实测范围见本节末）
 - 客户端：**网页端与桌面端均可用**；桌面端由人工验证，命令行矩阵未覆盖
 
-**五个 DSH 版本逐个实测通过**：`0.2.2-rc.1`、`0.2.1-rc.5`、`0.2.1-rc.4`、`0.2.1-rc.3`、`0.2.1-rc.2`，
-每个版本都用**该版本自己**的 DSH CLI 在一次性 profile 里跑通了安装、启动、卸载、回滚。这套验证覆盖的是
-**命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。逐条记录见
-[`docs/store-evidence.md`](docs/store-evidence.md)。
+**七个 DSH 版本逐个实测通过**：最新五个 `0.2.2-rc.3`、`0.2.2-rc.2`、`0.2.2-rc.1`、`0.2.1-rc.5`、`0.2.1-rc.4`，
+加上上面三条版本线各自的下界 `0.2.1-rc.1` 与 `0.2.0-rc.1`（`0.2.2-rc.1` 既是系列下界又在最新五个之内，只测一次）。
+每个版本都用**该版本自己**的 DSH CLI 在一次性 profile 里跑通了安装、启动、卸载、回滚。实测范围这样取，
+是因为声明里三条版本线各有一个下界：只测最新五个，下界就永远没被跑过，而降级到那条线的使用者恰好跑在那里。
+这套验证覆盖的是**命令行与网页端**的路径；桌面端（Electron）只做了人工安装可用性确认，未纳入脚本矩阵。
+逐条记录见 [`docs/store-evidence.md`](docs/store-evidence.md)。
 
 兼容判定看清单里的 `engines.dsh`（本包声明 `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`）：只要声明了它，DSH 就按它单独判定，
 `peerDependencies` 不再参与 —— 运行时版本不满足会在安装前或启动时被拒绝，并给出 `dsh plugin allow-version`
@@ -661,12 +663,15 @@ top right.
 - Clients: **both the web client and the desktop client work**; the desktop client was verified by
   hand, the command-line matrix does not cover it
 
-**All five DSH releases were verified one by one** — `0.2.2-rc.1`, `0.2.1-rc.5`, `0.2.1-rc.4`,
-`0.2.1-rc.3` and `0.2.1-rc.2` — each against **its own** DSH CLI, in a disposable profile, through
-install, start, uninstall and rollback. That matrix covers the **command line and the web client**;
-the desktop client (Electron) was only confirmed installable by hand and is not part of the scripted
-matrix. The per-release record is in
-[`docs/store-evidence.md`](docs/store-evidence.md).
+**Seven DSH releases were verified one by one** — the newest five (`0.2.2-rc.3`, `0.2.2-rc.2`,
+`0.2.2-rc.1`, `0.2.1-rc.5`, `0.2.1-rc.4`) plus the lower bound of each declared release line
+(`0.2.1-rc.1` and `0.2.0-rc.1`; `0.2.2-rc.1` is both a floor and one of the newest five, so it is
+tested once) — each against **its own** DSH CLI, in a disposable profile, through install, start,
+uninstall and rollback. The range is measured that way because the declaration names three lines
+with three floors: measuring only the newest five would never boot a floor, and a downgraded user
+runs exactly there. That matrix covers the **command line and the web client**; the desktop client
+(Electron) was only confirmed installable by hand and is not part of the scripted matrix. The
+per-release record is in [`docs/store-evidence.md`](docs/store-evidence.md).
 
 Compatibility is decided by the manifest's `engines.dsh` (this package declares
 `>=0.2.0-rc.1 || >=0.2.1-rc.1 || >=0.2.2-rc.1`): when it is declared DSH judges by it alone and `peerDependencies` is not
