@@ -39,7 +39,7 @@ const RECORD = {
   branch: "task/login",
   sourceRoot: "/source",
   deploymentEnvId: "dsh-kratos-admin-login",
-  delivery: { version: 1, deploy: { target: "docker" } },
+  delivery: { version: 2, acceptance: { kind: "deploy" } },
   repositories: [{ name: "alpha", sourcePath: "/source/alpha", branch: "task/login" }],
 }
 

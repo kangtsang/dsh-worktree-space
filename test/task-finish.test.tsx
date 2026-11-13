@@ -194,7 +194,14 @@ describe("task view", () => {
     await user.click(screen.getByRole("button", { name: `${t("toggleTask")} antest` }))
     // The panel shows every path with forward slashes, whichever separator the host reported.
     expect(screen.getByText(container.replace(/\\/g, "/"))).toBeTruthy()
-    expect(screen.getByText(branch)).toBeTruthy()
+    // Twice, and both are wanted: the task header names the branch the task was filed
+    // under, and each repository row now names its own side of the comparison. The
+    // assertion is on the count rather than one node because both are the same name.
+    expect(screen.getAllByText(branch).length).toBeGreaterThanOrEqual(2)
+    // The task row names both ends of its comparison too: the branch the worktree carries,
+    // then the base one a merge would go into. One name alone left the counts belonging to
+    // a pair the page never stated.
+    expect(taskArticles()[0].querySelector(".dws-current-branch")?.textContent).toBe(`${t("currentBranchLabel")}：${branch}`)
     expect(screen.getByText("kratos-vue-admin")).toBeTruthy()
     expect(screen.getByText("kratos-vue-admin-web")).toBeTruthy()
     // The views read in the order they are offered: a Workspace a task starts from, a
@@ -1064,12 +1071,12 @@ describe("finishing a task", () => {
         changedFiles: 3,
         commits: 2,
         behind: 4,
-        committedChanges: { insertions: 41, deletions: 67 },
-        workingChanges: { insertions: 12, deletions: 5 },
+        committedChanges: { files: 2, insertions: 41, deletions: 67 },
+        workingChanges: { files: 3, insertions: 12, deletions: 5 },
         repositories: [{
           name: "alpha", path: `${container}\\alpha`, branch, target: "main", checkedOut: "main",
           branches: ["main"], commits: 2, behind: 4, changedFiles: 3,
-          committedChanges: { insertions: 41, deletions: 67 }, workingChanges: { insertions: 12, deletions: 5 },
+          committedChanges: { files: 2, insertions: 41, deletions: 67 }, workingChanges: { files: 3, insertions: 12, deletions: 5 },
         }],
       }),
     })
@@ -1084,11 +1091,14 @@ describe("finishing a task", () => {
     expect(status()).toContain("↓ 4")
     expect(status()).toContain("+41")
     expect(status()).toContain("−67")
+    // The file count rides in front of each pair, so "how many files" is answered on the
+    // line rather than only in a tooltip.
+    expect(status()).toContain(format(t("filesCount"), { files: "2" }))
     const ahead = document.querySelector(".dws-dialog-status .dws-ahead-behind") as HTMLElement | null
     expect(ahead?.getAttribute("title")).toBe(`${format(t("planAheadHint"), { count: "2" })} · ${format(t("planBehindHint"), { count: "4" })}`)
-    // The uncommitted pair reads like the committed one, and its file count lives in the
-    // hint rather than in the line.
+    // The uncommitted pair reads like the committed one, file count and all.
     expect(status()).toContain(t("workingChangesLabel"))
+    expect(status()).toContain(format(t("filesCount"), { files: "3" }))
     expect(status()).toContain("+12")
     expect(status()).toContain("−5")
 
@@ -1097,14 +1107,15 @@ describe("finishing a task", () => {
     expect(row()).toContain("↓ 4")
     expect(row()).toContain("+41")
     expect(row()).toContain("−67")
-    // Uncommitted work is the label plus its own pair, not a bare file count; the file
-    // count moves into that pair's hint so nothing is lost.
+    // Uncommitted work is the label plus its own pair, and that pair carries the file
+    // count the dialog used to print on its own.
     expect(row()).toContain(t("workingChangesLabel"))
+    expect(row()).toContain(format(t("filesCount"), { files: "3" }))
     expect(row()).toContain("+12")
     expect(row()).toContain("−5")
     const working = [...document.querySelectorAll(".dws-finish-repos .dws-changes-label")]
       .find((el) => (el.textContent || "").trim() === t("workingChangesLabel")) as HTMLElement | undefined
-    expect(working?.getAttribute("title")).toBe(format(t("planWorkingHint"), { count: "3", insertions: "12", deletions: "5" }))
+    expect(working?.getAttribute("title")).toBe(format(t("planWorkingHint"), { files: "3", insertions: "12", deletions: "5" }))
   })
 
   it("says there is nothing uncommitted rather than leaving a label with no numbers", async () => {

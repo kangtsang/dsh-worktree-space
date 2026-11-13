@@ -82,7 +82,7 @@ export const ERROR_CODES = {
   E4011: 'index.js - a handoff access request named no session',
   E4012: 'index.js - a session was to be given full access while the setting that grants it is off',
   E4014: 'create.js - the requested deploy script is not a file inside the source root',
-  E4015: 'create.js - the task is set to deploy but nothing in the source root or its repositories can deploy it',
+  E4015: 'create.js - the task records an acceptance but nothing in the source root or its repositories can produce it',
   E4016: 'tool.js - a dispatch named a model that is not a "provider/model" pair',
   E4017: 'session-tools.js - a model switch was asked for a session that is not a member of a task the caller leads',
   E4018: 'tool.js - a create or dispatch named a model this host was read as not serving, so nothing was created or dispatched',
@@ -110,6 +110,7 @@ export const ERROR_CODES = {
   E7005: 'tool.js - an unknown action was asked for',
   E7006: 'tool.js - a required argument for an action is missing',
   E7007: 'tool.js - an irreversible action was asked for through a tool call, where it is not the user\'s own decision',
+  E7008: 'tool.js - a create still passes the renamed deployTarget argument, so nothing was created',
 }
 
 /** The code reported when a failure has no code of its own. */

@@ -752,6 +752,21 @@ async function parseLegacyBreadcrumb(taskPath) {
 }
 
 /**
+ * The acceptance kind a stored policy names, read leniently.
+ *
+ * The note renders two sections whose whole content depends on this - which commands it
+ * prints, and whether a deployment even exists - so it is resolved once here rather than
+ * read three times from the record with its own fallback each time. A policy read back
+ * from an older record is answered by {@link coerceDeliveryPolicy}, which is where the
+ * `deploy.target` to `acceptance.kind` migration lives; this only names the result.
+ * @param delivery - the policy as the record holds it, possibly undefined.
+ * @returns the kind, `none` when nothing usable was recorded.
+ */
+function acceptanceKindOf(delivery) {
+  return coerceDeliveryPolicy(delivery).acceptance.kind
+}
+
+/**
  * Render the metadata as the note a session reads.
  *
  * The Deployment section is here, and not only in the bundled skill, because it
@@ -831,7 +846,10 @@ export function renderTaskMetadata(metadata) {
     '- Finishing is atomic: `done` merges, removes the worktrees and clears the task space in one call. `merge: true` lands the task branch on the target; `merge: false` leaves the branch alone - the commits are kept, but the worktree is removed, so a conflict left over would have to be resolved in the source repository instead of here.',
     '- A merge that lands is the one step a finish cannot take back, so `merge: true` is an authorisation rather than a formality: pass it when the user asked for the work to land, and not otherwise.',
     '',
-    ...(typeof deploymentEnvId === 'string' && deploymentEnvId !== '' ? [
+    // The acceptance this task was created under, as a kind. Read once here and used by
+    // both sections below: which commands the note prints, and what the finish gate is.
+    // `none` for a record that predates the field, which is what a finish reads too.
+    ...(acceptanceKindOf(delivery) === 'deploy' && typeof deploymentEnvId === 'string' && deploymentEnvId !== '' ? [
       '## Deployment',
       `- If this space holds deployable services — a repository with its own \`deploy/deploy.sh\`, or the \`${PLUGIN_ROOT}/${DEPLOY_ROOT}/\` orchestration root this space was created with — deploy them to an isolated Docker environment rather than starting them on the host.`,
       `- Environment id for this task: \`DEPLOY_ENV_ID=${deploymentEnvId}\`. Pass it to every deploy command: it is what keeps this task's containers, images and acceptance URL apart from every other task's. A command run without it builds containers under the entry's own default id, and the panel then cannot see them: the smoke and destroy buttons disappear, and a finish cannot take the environment down.`,
@@ -855,10 +873,24 @@ export function renderTaskMetadata(metadata) {
       `- **A slow step is not a hung step.** The plugin waits at most 10 minutes for \`up\` and 5 minutes for \`smoke\`, and stops the script at that point. If either genuinely needs longer, add a third subcommand to the entry printing one JSON line — \`echo '{"upSeconds":1200,"smokeSeconds":900}'\` — and the plugin runs it before each step and uses those budgets instead. Both keys are in seconds and may be left out, in which case that step keeps its default; anything the plugin cannot parse also keeps the default, so this is optional and never a thing to get right for the step to run. Values outside 1–3600 seconds are ignored for the same reason.`,
       '',
     ] : []),
+    // The smoke-only shape, which owes the same file and the same recorded verdict as a
+    // deployment and nothing else. It is written out rather than left to the bundled skill
+    // because the one thing a session gets wrong here is reaching for `up`: there is no
+    // environment, no acceptance URL and no container to tear down, and a session that goes
+    // looking for them spends a turn on a question this note can answer.
+    ...(acceptanceKindOf(delivery) === 'smoke' ? [
+      '## Running the smoke',
+      `- This task records an acceptance that is a smoke alone - there is no environment to stand up.`,
+      `- Its entry is \`./${deployEntry}\`. Run \`./${deployEntry} smoke${typeof deploymentEnvId === 'string' && deploymentEnvId !== '' ? ` ${deploymentEnvId}` : ''}\` and let it pass before reporting. What the smoke does is the project\'s own business: a unit suite, an integration suite, a build check - anything that ends in a recorded verdict.`,
+      `- **The entry owns the record.** The file is \`<task space>/${PLUGIN_ROOT}/${DEPLOY_ROOT}/.state.json\`, handed to every script as \`DEPLOY_STATE_FILE\`. The smoke must merge \`lastSmoke: {result, at}\` into it **without dropping what is already in it**, and nothing else may write it - not by hand, not from a transcript. \`done\` reads it as the evidence that the step happened and refuses the merge (E5006) without a \`pass\`.`,
+      `- A space this plugin scaffolded (no \`${DEPLOY_ROOT}/\` of its own was copied in) carries \`${PLUGIN_ROOT}/${DEPLOY_ROOT}/write-state.sh\`, run from that directory: \`./write-state.sh smoke pass|fail\` merges the one field the gate reads. A space that brought its own entry writes the file itself.`,
+      `- The plugin waits at most 5 minutes for the smoke and stops the script at that point. An entry that needs longer prints one JSON line from a third subcommand - \`echo '{"smokeSeconds":900}'\` - and the plugin uses that budget instead; values outside 1-3600 seconds are ignored.`,
+      '',
+    ] : []),
     ...(delivery === undefined ? [] : [
-      '## Delivery',
-      `- Deployment target: \`${delivery.deploy.target}\`.`,
-      '- `done` enforces this: with a target of `docker`, a merge is refused while the deployment state records no passing smoke (E5006 - either no state file at all, or one whose smoke is missing or red). With `none` there is no gate.',
+      '## Acceptance',
+      `- Acceptance kind: \`${acceptanceKindOf(delivery)}\`.`,
+      '- `done` enforces this: with `deploy` or `smoke`, a merge is refused while the acceptance state records no passing smoke (E5006 - either no state file at all, or one whose smoke is missing or red). With `none` there is no gate.',
       '- Everything else a finish decides — whether to merge, which branch, whether to delete it, and what happens to untracked files — is passed on the `done` call, not recorded here. `merge` is required; `strays` defaults to `archive`.',
       '',
     ]),

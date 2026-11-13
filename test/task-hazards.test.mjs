@@ -212,12 +212,12 @@ describe("the delivery gate preview", () => {
     return { dir, cleanup }
   }
 
-  const deploying = { deploy: { target: 'docker' } }
+  const deploying = { acceptance: { kind: 'deploy' } }
 
   it("applies nothing to a policy that deploys nothing", async () => {
     const { dir, cleanup } = await taskSpaceWith(undefined)
     try {
-      const preview = await deliveryGatePreview({ delivery: { deploy: { target: 'none' } } }, dir)
+      const preview = await deliveryGatePreview({ delivery: { acceptance: { kind: 'none' } } }, dir)
       expect(preview.applies).toBe(false)
       expect(preview.missing).toEqual([])
     } finally {

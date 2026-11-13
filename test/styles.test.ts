@@ -12,7 +12,7 @@ const styles = readFileSync(new URL("../src/client/styles.css", import.meta.url)
  * drops the declaration whole. So the list is pinned as written, and adding a
  * surface to it is a decision this file makes the reader look at.
  */
-const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker"
+const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker"
 
 /** One rule's declarations, by its exact selector. */
 function rule(selector: string) {
@@ -47,6 +47,22 @@ describe("floating panel surface", () => {
     // which read as a warning beside a green state dot; it is the ordinary label ink
     // now, and takes the foreground from the theme so it survives a dark surface.
     expect(rule(".dws-brand-glyph")).toContain("var(--dsw-alias-label-primary)")
+    // The star link must keep the same underline the two links beside it wear, rather than
+    // drawing its own line on the box: a border sits on the box's bottom edge, which the
+    // 13px glyph pushes below the text's underline, so the star's line hung a few pixels
+    // lower than the words next to it. It is an ordinary inline link with the shared rule.
+    expect(rule(".dws-star-link")).not.toContain("border-bottom")
+    expect(rule(".dws-star-link")).not.toContain("display: inline-flex")
+    // No positioning of its own either: the mark is a text character, so it sits on the
+    // line because the browser set it there. A `vertical-align` here would be the same
+    // mistake as the border, one property further along.
+    expect(rule(".dws-star-mark")).not.toContain("vertical-align")
+    expect(rule(".dws-feedback-link")).toContain("text-decoration: underline")
+
+    // The compact entry is the one place the mark does not wear that ink: it sits among
+    // the host's trailing controls, whose weight is the secondary label, so it takes its
+    // button's colour instead of the near-black the panel rows and the footer use.
+    expect(rule(".dws-compact-entry-button .dws-brand-glyph")).toContain("color: inherit")
     expect(styles).not.toContain("amber-400")
   })
 
@@ -140,13 +156,13 @@ describe("floating panel surface", () => {
     }
   })
 
-  it("defines the surface tokens on the panel too, not only on the dialog", () => {
-    // The management page has two hosts: the dialog and the main panel. The panel is a
-    // `dws-panel`, which is not a `dws-manage-page`, so leaving it out of the token
-    // scope left every `var(--wt-*)` inside it undefined - and the update capsule came
-    // out with no border and no background there while looking right in the dialog.
-    // Asserting the scope list is what keeps a third host from repeating it.
-    expect(TOKEN_SCOPE).toContain(".dws-panel")
+  it("defines the surface tokens on the compact entry, which is portalled out of the page", () => {
+    // The compact entry's button is portalled into the host's settings row, so it is a
+    // child of no surface the page draws and inherits none of these aliases. Leaving it
+    // out of the token scope would drop every `var(--wt-*)` inside it - and a dropped
+    // custom property is not a fallback, it is a declaration that disappears whole.
+    // Asserting the scope list is what keeps the next portalled surface from repeating it.
+    expect(TOKEN_SCOPE).toContain(".dws-compact-entry")
     const scope = rule(TOKEN_SCOPE)
     for (const token of ["--wt-surface", "--wt-line", "--wt-secondary"]) expect(scope).toContain(`${token}:`)
   })
@@ -163,28 +179,21 @@ describe("floating panel surface", () => {
     expect(rule(".dws-branch-picker")).toContain("background: var(--wt-surface)")
   })
 
-  it("draws one navigation for both hosts of the page", () => {
-    // The panel's column and the dialog's are one component, so the row geometry lives
-    // in one rule and the two frames differ only in the width and the inset they set. The
-    // width is the host's to declare, with the column's own as a fallback: the panel's back
-    // row sits outside the column, in the heading's band, and takes the same width from the
-    // same variable, which is what keeps the two bands one column.
+  it("draws the navigation column the dialog tunes, without moving its rows", () => {
+    // The column is one component and the dialog is its only frame, so the row geometry
+    // lives in one rule and the dialog only sets the width and the inset. The width is
+    // the frame's to declare, with the column's own as a fallback.
     const nav = rule(".dws-nav")
     expect(nav).toContain("width: var(--dws-nav-width, 167px)")
     expect(nav).toContain("padding: var(--dws-nav-pad)")
     expect(rule(".dws-nav-item")).toContain("justify-content: var(--dws-nav-align)")
-    // The label hugs the column's inner edge in both, the way the shell's own rows do:
-    // the dialog tunes the width and the inset, and must not move the text.
+    // The label hugs the column's inner edge, the way the shell's own rows do: the
+    // dialog tunes the width and the inset, and must not move the text.
     expect(nav).toContain("--dws-nav-align: flex-end")
-    expect(rule(".dws-panel")).toContain("--dws-nav-width: 167px")
-    expect(rule(".dws-panel-lead-nav")).toContain("width: var(--dws-nav-width)")
     const dialogNav = rule(".dws-manage-page .dws-nav")
     expect(dialogNav).toContain("border-right: 0")
     expect(dialogNav).not.toContain("--dws-nav-align")
-    // Both hosts narrowed by the same factor, so the dialog's column stays in the
-    // proportion to the panel's that it was in: they are two windows of one page,
-    // and a column that is a different share of each reads as two designs.
-    expect(width(rule(".dws-manage-page .dws-nav")) / width(rule(".dws-panel"))).toBeCloseTo(196 / 208, 2)
+    expect(width(rule(".dws-manage-page .dws-nav"))).toBeGreaterThan(0)
   })
 
   it("gives the search three eighths of the toolbar, and the nav a share of the page", () => {
@@ -305,45 +314,22 @@ describe("floating panel surface", () => {
     // The hairline that separates the toolbar from the rows belongs to the boundary
     // between them, so it stays where the rows start rather than riding the first row.
     expect(body).toContain("border-top: 1px solid var(--wt-line)")
-    // The two frames let the section fill them: the panel's column and the dialog's,
-    // each of which now hands its height down instead of scrolling by itself.
-    expect(rule(".dws-panel-content")).toContain("display: flex")
-    expect(rule(".dws-panel-content > .dws-settings")).toContain("flex: 1 1 auto")
+    // The dialog's column hands the section its height down instead of scrolling by
+    // itself, which is what keeps the pinned block pinned.
+    expect(rule(".dws-manage-page-content")).toContain("display: flex")
     expect(rule(".dws-manage-page-content")).toContain("overflow: hidden")
     // And nothing else claims the border the boundary just took over.
     expect(rule(".dws-repo-list")).not.toContain("border-top")
   })
 
-  it("hands the panel's height down instead of letting the panel scroll", () => {
-    // The section was a column, but the frame above it was not: `.dws-panel-scroll` kept
-    // `overflow: auto` while its child grew to its natural height, so in the panel (and
-    // not in the dialog, which is bounded) the heading and the toolbar scrolled away with
-    // the rows. The chain has to be bounded at every link for the list to be the only
-    // scroller, which is what both hosts promise.
-    const scroll = rule(".dws-panel-scroll")
-    expect(scroll).toContain("display: flex")
-    expect(scroll).toContain("flex-direction: column")
-    expect(scroll).toContain("overflow: hidden")
-    expect(scroll).not.toContain("overflow: auto")
-    expect(rule(".dws-panel-content")).toContain("flex: 1 1 auto")
-  })
-
-  it("starts the panel's view tabs on the toolbar's line, in a band of their own", () => {
-    // The panel held its navigation and its reading column in one row, with the way back
-    // leading the column. The tabs therefore began under the back row while the search box
-    // began under the page's heading, and the two columns disagreed about where their first
-    // row was. The page is two bands now: the back row and the heading share the first, and
-    // the second begins after it, which is what puts the tabs and the toolbar on one line.
-    expect(rule(".dws-panel")).toContain("flex-direction: column")
-    expect(rule(".dws-panel-lead")).toContain("flex: none")
-    expect(rule(".dws-panel-body")).toContain("flex: 1 1 auto")
-    expect(rule(".dws-panel-body")).toContain("overflow: hidden")
-    // The heading's top inset moved into the band it shares with the back row, and the
-    // reading column below lost its own, so nothing but the band positions the toolbar.
-    expect(rule(".dws-panel-heading")).toContain("padding: 28px 32px 20px 24px")
-    expect(rule(".dws-panel-content")).toContain("padding: 0 32px 48px 24px")
-    // The column carries the settings' own 2px and no top inset besides.
-    expect(rule(".dws-panel .dws-nav")).toContain("--dws-nav-pad: 2px 14px 24px")
+  it("draws no second frame for the page, because there is no second host", () => {
+    // The page used to be drawn twice - in the main column and in this dialog - with two
+    // sets of rules about where its bands begin. The panel form is gone: its selectors
+    // must not come back, or the two frames start disagreeing again about where the tabs
+    // and the toolbar sit.
+    expect(rule(".dws-panel")).toBe("")
+    expect(rule(".dws-panel-scroll")).toBe("")
+    expect(rule(".dws-panel-heading")).toBe("")
   })
 })
 

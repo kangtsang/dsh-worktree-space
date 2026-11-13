@@ -4,7 +4,7 @@
 
 **简体中文** · [English](#english) · [更新日志](https://github.com/kangtsang/dsh-worktree-space/blob/main/docs/CHANGELOG.md) · [<img src="https://cdn.simpleicons.org/github/6e7781" width="16" height="16" alt="GitHub"> GitHub](https://github.com/kangtsang/dsh-worktree-space)
 
-Worktree Space：一任务一空间，工作多路并行。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。建空间时可以定下**这个任务要不要部署验收**，勾了它，一条通过的冒烟记录就是收尾合并的闸门。任务结束时把任务分支合并回目标分支、移除 worktree，并把空间里遗留的文档归档到指定目录；也可以把未处理的提交和合并冲突交给一个 agent 会话处理。
+Worktree Space：一任务一空间，工作多路并行。把一个涉及一个或多个 Git 仓库的工作任务放进独立的任务空间目录——参与的每个仓库都在同一个任务分支上各开一个 worktree；任务空间自动注册为 DSH 工作区，会话直接在任务空间里开工；多个任务各建一个任务空间并行推进、互不干扰。建空间时可以定下**这个任务怎么验收**：不做验收、只跑冒烟，或部署到 Docker；选了后两者，一条通过的冒烟记录就是收尾合并的闸门。任务结束时把任务分支合并回目标分支、移除 worktree，并把空间里遗留的文档归档到指定目录；也可以把未处理的提交和合并冲突交给一个 agent 会话处理。
 
 两种使用方式：**在UI界面上使用**（[使用](#-使用)），或者**让 Agent 用工具自动编排**（[进阶用法](#-进阶用法让-agent-全自动编排)）。完整步骤、异常流程与错误码都在 [《Worktree Space 使用指南》](USAGE.md)。
 
@@ -12,7 +12,6 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 [![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![total downloads](https://img.shields.io/npm/dt/dsh-worktree-space?label=total%20downloads)](https://www.npmjs.com/package/dsh-worktree-space)
-[![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
 [![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
@@ -32,7 +31,7 @@ Worktree Space：一任务一空间，工作多路并行。把一个涉及一个
 - [⚡ 快速开始](#-快速开始)
 - [✨ 功能](#-功能)
 - [📂 任务目录结构](#-任务目录结构)
-- [🛠️ 使用](#-使用)　**面板手动流程**：[➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🚢 部署验收](#-部署验收) · [🏁 结束](#-结束-worktree-space)（[组合行为](#各选项组合的行为)）
+- [🛠️ 使用](#-使用)　**面板手动流程**：[➕ 创建](#-创建-worktree-space) · [🗂️ 管理](#-管理-worktree-space) · [🚢 验收](#-验收) · [🏁 结束](#-结束-worktree-space)（[组合行为](#各选项组合的行为)）
 - [🤖 进阶用法：让 Agent 全自动编排](#-进阶用法让-agent-全自动编排)
 - [🤖 把提交与冲突交给 agent](#-把提交与冲突交给-agent)
 - [⚙️ 插件配置](#-插件配置)
@@ -84,8 +83,8 @@ dsh plugin --profile web add dsh-worktree-space
 **这一步必须早于任何 git 操作**——需求未定时创建任务空间，中途变更方向意味着已建的 worktree
 与已产生的提交都要重来。
 
-需求明确后，Agent 会逐项确认任务空间的位置、参与的仓库、起点分支以及是否启用部署验收。
-其中**是否部署验收**在创建任务空间时即固定，事后无法追加或更改，须在此步一并确定。
+需求明确后，Agent 会逐项确认任务空间的位置、参与的仓库、起点分支以及验收方式。
+其中**验收方式**在创建任务空间时即固定，事后无法追加或更改，须在此步一并确定。
 
 ### 第二步：发送提示词，创建任务空间并派单
 
@@ -114,28 +113,35 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
   每个参与的仓库都会得到一份位于 `<分支前缀><任务名>` 的 worktree（前缀默认 `task/`）。起点默认是各仓库
   当前的 HEAD；面板另有一个下拉，列出**所有已勾选仓库共有**的分支，没有单独指定起点的仓库都从这里开始，
   而每张卡片也可以只给那一个仓库另选起点。走工具调用时，`baseRef` / `baseRefs` 接受任意 ref（含提交）。
-- **唯一一项交付选择：这个任务要不要部署验收。** 任务信息最后就是一个勾选框 —— **部署到 Docker**，
-  勾上后会多出一个 **部署脚本** 输入框（留空则用 `工作区/.worktree-space/deploy/deploy.sh`）。
-  它之所以在建的时候就问，是因为**交付策略只在创建时落一次，事后没有入口能加、能改**：没勾等于定了
-  「这个任务不做验收」，之后也不会有任何东西再提起这件事。反过来，勾了却找不到可用的入口脚本时
-  **创建会被直接拒绝**，而不是留一个永远部署不起来的任务空间。
+- **唯一一项交付选择：这个任务怎么验收。** 任务信息最后是一个 **验收方式** 下拉，三选一：
+  **不做验收**（默认）、**只跑冒烟**、**部署到 Docker**。选后两者时会多出一个 **部署脚本** 输入框
+  （留空则用 `工作区/.worktree-space/deploy/deploy.sh`）。
+  它之所以在建的时候就问，是因为**验收方式只在创建时落一次，事后没有入口能加、能改**：不选等于定了
+  「这个任务不做验收」，之后也不会有任何东西再提起这件事。反过来，选了后两者却找不到可用的入口脚本时
+  **创建会被直接拒绝**，而不是留一个永远做不了验收的任务空间。
   其余收尾时的决定 —— 合到哪条分支、要不要删分支、冲突怎么办、遗留文档怎么处理 —— 都不在这里预定，
   留给结束任务那一刻当场决定。
-- **部署验收**（勾了才有）。任务空间自带一个部署根：源码根的 `.worktree-space/deploy/` 会被复制进来，
-  入口脚本提供 `up`（起环境、写验收地址）与 `smoke`（跑冒烟、把结果写进 `.state.json`）。
-  每个任务的环境身份互不相同，任务之间不会互相顶掉。**合并之前有一道闸门**：`<部署根>/.state.json`
+- **验收**（选了后两项才有）。任务空间自带一个部署根：源码根的 `.worktree-space/deploy/` 会被复制进来，
+  入口脚本提供 `smoke`（跑冒烟、把结果写进 `.state.json`）；选了「部署到 Docker」时另有 `up`
+  （起环境、写验收地址）。**只跑冒烟**没有环境：单元测试、集成测试、构建检查都可以放在 `smoke` 里，
+  用什么方式由项目自己决定。选了部署时每个任务的环境身份互不相同，任务之间不会互相顶掉，而且
+  **重新部署之后要重新冒烟**，上一次的通过记录不再算数。
+  **合并之前有一道闸门**：`<部署根>/.state.json`
   里没有一条 `result: "pass"` 的 `lastSmoke`，合并就被拒；面板会问「冒烟还没过，仍要结束吗？」，
   这份豁免只有人能给。
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— 在任务空间里
   改代码，不会动到源码检出。
 - **管理页面**，分三个视图（入口见「管理 Worktree Space」一节）：
-  - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库。每个源码仓库带一行
-    `远端分支：<分支>` + 领先/落后提交数（`↑` / `↓`）+ 这些提交的增删行数，工作区头部是它下面
-    所有仓库的合计（**已提交与未提交合计在一对行数里**）；
+  - **工作区视图**：哪些工作区可以建任务空间，以及每个工作区里有几个仓库。每条路径的悬停提示写明它是
+    **工作区目录**还是**仓库目录**。每个源码仓库带一行 `当前分支：<分支>` + `远端分支：<分支>`，
+    再跟领先/落后提交数（`↑` / `↓`），以及**已提交变更**与**未提交变更**各自的 `+545 −455 3文件`
+    （先增删行数、再几个文件）—— 当前分支是比的那一端，只写远端分支时看不出这些数字
+    属于哪条分支；工作区头部是它下面所有仓库的合计（**已提交与未提交合计在一对里，文件数一并相加**）；
   - **Git 仓库视图**：扫到的每个 Git 仓库，以及它链接的 worktree；
   - **任务空间视图**：把每个任务下面的仓库列在一起（分支、改动数、是否被锁定、是否可清理），
     任务行下面就是它的部署卡片。任务行显示**任务分支**与整个任务的合计（已提交与未提交合计在一对
-    行数里），展开后每个仓库显示自己的**基线分支**与那一份数字。
+    行数里），展开后每个仓库先给**当前分支**（这条 worktree 检出的那条，也就是任务分支），再给
+    **基线分支**与那一份数字（同样是「+新增 −删除 文件数」）。
   - **任务空间自己注册成工作区时也能被发现**：任务的 worktree 由源仓库报出，所以源仓库不在任何工作区里
     时，任务本来查不到。此时插件读任务记录里记下的源仓库，用它们把任务找出来 —— 只列出属于这个任务空间的
     worktree，同一源仓库下没在工作区里的其它任务不会跟着露出来；而源仓库本身被注册成工作区时，它下面
@@ -150,7 +156,7 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 - **新建任务空间**与**结束任务空间**也在工作区列表自己的 `⋯` 菜单里 —— 前者只对包含代码仓库的工作区显示，
   后者只对确属任务空间的目录显示，点开的就是同一个对话框。
 - **界面跟随 DSH 的语言设置**，管理页、对话框、配置项与错误提示均有中英文。
-  勾了「部署到 Docker」的任务另有一层前提：这台机器上要有可用的容器引擎，见[部署验收](#-部署验收)。
+  选了「部署到 Docker」的任务另有一层前提：这台机器上要有可用的容器引擎，见[验收](#-验收)。
 
 ## 📂 任务目录结构
 
@@ -224,7 +230,7 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
 
 ## 🛠️ 使用
 
-本节是**面板手动流程**的简述：从创建、干活、部署验收到结束任务，全程在界面上点完，
+本节是**面板手动流程**的简述：从创建、干活、验收到结束任务，全程在界面上点完，
 不需要「队长 / 队员」或工具调用那一套。每一步的完整说明、会遇到的异常与被拒之后怎么办，
 见 [《Worktree Space 使用指南》](USAGE.md)。各项设置见[插件配置](#-插件配置)。
 另一条路 —— 让一个 Agent 用 `wts_worktree_space` 把整条链自动跑完 —— 见
@@ -253,7 +259,7 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
    **设为默认分支前缀** —— 勾选后，点「创建并打开会话」时把这次的值写回插件设置。
 5. **Worktree Space 容器根目录**：界面已填好推荐值（**根工作空间的下一层** `worktree-space`），通常无需修改；
    改动时同样出现 **设为默认…**，勾选后把这次的路径写回设置。容器根自身是 Git 仓库会被拒绝。
-6. **部署到 Docker**（默认不勾）：勾上后多出 **部署脚本** 输入框，留空则用
+6. **验收方式**（默认「不做验收」）：选「只跑冒烟」或「部署到 Docker」后多出 **部署脚本** 输入框，留空则用
    `工作区/.worktree-space/deploy/deploy.sh`。这一格定的是「合并要不要冒烟这道闸门」，
    **只在创建时这一回落一次**，之后没有入口能补。
 7. **预览**：跟着上面的输入实时算出这次的**分支名**与**空间目录名**。
@@ -267,37 +273,42 @@ worktree 与分支一起，不会留半个任务在那儿。
 
 ![管理页面：工作区 / Git 仓库 / 任务空间三个视图](docs/img/manage-worktree-space.png)
 
-打开 **管理页面**，两种形态：
+打开 **管理页面**，三个入口，都以**对话框**打开，由配置里的 **侧边栏入口** 决定用哪一个：
 
-- **侧边栏底部的 Worktree Space**（默认显示）—— 以**对话框**打开；
-- **侧边栏「新会话」下方的 Worktree Space 行**（默认隐藏，在**配置**里打开）—— 在主区域**整页**打开，
-  导航第一项是 **返回会话**。
+- **标准**：侧边栏「新会话」下方的一行；
+- **快捷**（默认）：侧边栏底部的 Worktree Space；
+- **简洁**：设置行右侧的一个图标。
 
-两种形态共用同一条左侧导航，下面三项在**工作区 / Git 仓库 / 任务空间**三个视图间切换；导航底部是
+三个入口打开的是同一个页面：左侧导航的三项在**工作区 / Git 仓库 / 任务空间**三个视图间切换；导航底部是
 **⚙ 插件设置**，跳到宿主的插件页改本插件的配置。右侧的统计跟着视图变（`N 个任务` / `N 个工作区` /
 `N 个仓库 · M 个 Worktree`）。
 
 面板每次打开都会重新扫描，但会先用宿主缓存的上一次扫描结果绘制界面，打开即可显示数据。这份记忆只放在
 DSH 实例的内存里，实例关闭时随之清空。
 
-### 🚢 部署验收
+### 🚢 验收
 
-勾了「部署到 Docker」的任务，任务空间里会多一张**部署卡片**（管理页面的任务行下面），提供两件事：
+选了「只跑冒烟」或「部署到 Docker」的任务，任务空间里会多一张验收卡片（管理页面的任务行下面）：
+只跑冒烟的叫**冒烟验收**，部署的叫**部署验收**。
+入口脚本按验收方式提供子命令：
 
-- **`up`** —— 跑入口脚本把环境起来，并把**验收地址**写进 `<部署根>/.state.json`；
-- **`smoke`** —— 跑冒烟，由脚本自己把 `lastSmoke: { result, at }` 合进同一个状态文件。
+- **`smoke`** —— 跑冒烟，由脚本自己把 `lastSmoke: { result, at }` 合进 `<部署根>/.state.json`。
+  **只跑冒烟**的任务只有这一个：单元测试、集成测试、构建检查都可以放在里面，用什么方式由项目自己决定。
+- **`up`** —— 只有**部署到 Docker**的任务才有：跑入口脚本把环境起来，并把**验收地址**写进同一个状态文件。
 
-环境身份由容器根、项目、任务名与本地端口一起算出，**每个任务一份，互不干扰**；动态端口每次部署都可能变，
-所以状态（地址、最后一次冒烟）都是每次读了实时拿的，而不是某次读到的缓存。结束任务时若有这套环境，
-会把它拆掉 —— 随它一起消失的是那个 URL（动态端口已经没了），而冒烟的通过与否会留在记录里。
+部署时环境身份由容器根、项目、任务名与本地端口一起算出，**每个任务一份，互不干扰**；动态端口每次部署都可能变，
+所以状态（地址、最后一次冒烟）都是每次读了实时拿的，而不是某次读到的缓存。**重新部署之后要重新冒烟**：
+上一次的通过记录说的是上一个环境，不再算数。结束任务时若有这套环境，会把它拆掉 —— 随它一起消失的是那个 URL
+（动态端口已经没了），而冒烟的通过与否会留在记录里。只跑冒烟的任务没有环境，结束任务时也不会去问容器引擎。
 
 合并之前还有一道闸门：`<部署根>/.state.json` 里没有一条 `result: "pass"` 的 `lastSmoke`，合并就被拒，
 对话框直接说出缺的是部署还是冒烟。**这份豁免只有面板上的你能给** —— 你可以在对话框里确认「冒烟没过仍要结束」，
-任务记录里会留下一条 `delivery-gate-bypassed` 警告；走工具调用那条路时，越过闸门的唯一办法是把环境起来、
-把冒烟跑过。
+任务记录里会留下一条 `delivery-gate-bypassed` 警告；走工具调用那条路时，越过闸门的唯一办法是把冒烟跑过
+（部署任务还要把环境起来）。这条闸门是**规范约束**：它防的是「忘了冒烟就收尾」，不核对代码是否改过、
+也不要求先提交 —— 冒烟通过之后继续改代码，闸门不会察觉。
 
 > 部署根的复制规则、状态文件契约、环境身份怎么算，见
-> [使用指南第 6 节](USAGE.md#6-部署验收)。
+> [使用指南第 6 节](USAGE.md#6-验收)。
 
 ### 🏁 结束 Worktree Space
 
@@ -313,7 +324,7 @@ DSH 实例的内存里，实例关闭时随之清空。
 「删除分支」在不合并也没勾强制时不可用。
 
 **「确认结束任务」按不下去，只有三种原因**，对话框会当场点名：任务空间里还有会话在干活、还有仓库带着未提交的
-改动（而「强制」没勾）、或者部署验收还差一次通过的冒烟。
+改动（而「强制」没勾）、或者验收还差一次通过的冒烟。
 
 结束任务是一条标准流程，分三步：
 
@@ -375,7 +386,7 @@ worktree 里，可以就地处理。
 ## 🤖 进阶用法：让 Agent 全自动编排
 
 面板手动操作之外，还有一条同样受支持的路：给一个 Agent 装上 `wts_worktree_space` 与
-`wts_session_tool` 两个工具，它可以自己把整条链跑完 —— 建空间、派单、盯进度、插话纠偏、部署验收、收尾合并，
+`wts_session_tool` 两个工具，它可以自己把整条链跑完 —— 建空间、派单、盯进度、插话纠偏、验收、收尾合并，
 全程不需要人在面板上按任何按钮。
 
 这两个工具**不常驻在每个会话里**：两者加起来约 3.6k token，而多数会话跟任务空间无关。所以普通会话只会
@@ -397,7 +408,7 @@ worktree 里，可以就地处理。
 | 中途改需求 | `wts_session_tool send` 以 `mode: "steer"` 注入，长回合里也送得到。**这说明是纠话，不是派新活**——派新活要用上面的 `dispatch`，否则它静默停手时收不到漏报提醒 |
 | 异常回接 | 队员会话异常中断时会自动收到通知，按通知里的会话 id 把它拉回工作 |
 | 收尾合并 | `done` 带 `merge` 一次完成合并、移除 worktree、归档遗留内容；停在冲突或未提交上时，把队员会话指回来处理后再调一次 |
-| 部署验收 | 勾了部署的任务，用任务空间自己的入口 `up` / `smoke` 过冒烟闸门 |
+| 验收 | 选了验收方式的任务，用任务空间自己的入口过冒烟闸门；部署任务另有 `up` 起环境 |
 
 盯住一个会话靠的是 `wts_session_tool` 的八个 action：`find` / `status` / `read` / `send` / `create` /
 `resume` / `cancel` / `model`。参数与「何时用哪个」见[使用指南附录](USAGE.md#附录会话控制工具参考)。
@@ -483,8 +494,7 @@ worktree 里，可以就地处理。
 
 | 设置 | 取值 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| 插件槽位入口 | 显示 / 隐藏 | **隐藏** | 侧边栏面板列表里那一行，整页打开管理页面（页面自带左侧导航和「返回会话」）；默认隐藏 |
-| 侧边栏底部快捷入口 | 显示 / 隐藏 | 显示 | 侧边栏底部那个快捷入口，以**对话框**打开同一个管理页面 |
+| 侧边栏入口 | 标准 / 快捷 / 简洁 | **快捷** | 三选一：**标准**是侧边栏面板列表里的一行（「新会话」下方）；**快捷**是侧边栏底部的快捷入口；**简洁**把入口收成设置行右侧的一个图标。三者都以**对话框**打开管理页面，切换后立即生效 |
 | 交由 agent 处理冲突和提交的会话使用完全权限 | 关 / 开 | **关** | 打开后，这两个会话开在**任务空间**上并立即置为「完全权限」（`danger-full-access`）；**代价是该会话此后可以写到这台机器上 DSH 进程能写的任何位置**，不再逐次询问。只影响之后开起的会话，结束任务对话框里可以就地切换。 |
 | 操作日志 | 开 / 关 | **开** | 容器根下 `worktree-space-log.jsonl` 的开关。关掉只是不再写新记录，磁盘上已有的日志原样保留 |
 | 扫描深度 | 1–5 层 | 3 层 | 从工作区目录（第 0 层）往下找 Git 仓库的层级数 |
@@ -555,7 +565,7 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | 解决后的文件里仍有冲突标记 | `the resolved merge still has conflict markers in <files>`，原样保留，不替任何一方取舍 |
 | 试合并撞上冲突 | 不自动 `merge --abort`，保留合并现场（`mergeSite` 与 `conflictedFiles`），待解决并提交后可继续 |
 | 真合并撞上期间的新提交 | 试合并通过后，真合并时目标分支出现新提交，插件撤销本次合并（`merge --abort`，分支恢复原状）并原样带出 Git 的诊断；worktree 与任务分支保留，再次点「继续结束任务」会重新试合并 |
-| 部署验收没通过就想合并 | 拒绝合并并说明缺什么（`up` 还是 `smoke`）；冒烟通过后直接重试即可 |
+| 验收没通过就想合并 | 拒绝合并并说明缺什么（部署任务是 `up` 与 `smoke`，只跑冒烟的任务是 `smoke`）；冒烟通过后直接重试即可 |
 | worktree 删除失败 | 报 `failed to remove the worktree (uncommitted changes? force it deliberately)`，保留该 worktree 并报告，可用 `git worktree prune` 清理 |
 | 任务目录非空 | 保留目录与工作区注册，不强行删除 |
 | 无法确认的事实 | 在文档里写「未知」，不把「没有搜到」推断成「不访问」 |
@@ -579,7 +589,7 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 
 | 文档 | 内容 |
 | --- | --- |
-| [USAGE.md](USAGE.md) | **《Worktree Space 使用指南》**：分**面板手动流程**（1–9 节：管理页面、新建、工作、补仓库、部署验收、结束任务、冲突处理、排障）与**Agent 自动编排**（10–14 节）两部分，另有错误码速查与「会话控制工具」附录。英文部分见[本文档英文区](#english) |
+| [USAGE.md](USAGE.md) | **《Worktree Space 使用指南》**：分**面板手动流程**（1–9 节：管理页面、新建、工作、补仓库、验收、结束任务、冲突处理、排障）与**Agent 自动编排**（10–14 节）两部分，另有错误码速查与「会话控制工具」附录。英文部分见[本文档英文区](#english) |
 | [PERMISSIONS.md](docs/PERMISSIONS.md) | 权限与失败边界的完整声明：读什么、写什么、执行哪些 `git` 子命令、失败时如何处理 |
 | [docs/store-evidence.md](docs/store-evidence.md) | 一次性 profile 的安装、启动、卸载与回滚验收步骤与逐版本记录 |
 | [CHANGELOG.md](docs/CHANGELOG.md) | 版本发布历史 |
@@ -601,7 +611,6 @@ Two ways to use it: **through the UI** ([Usage](#-usage)), or **letting an agent
 [![npm version](https://img.shields.io/npm/v/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-worktree-space)](https://www.npmjs.com/package/dsh-worktree-space)
 [![total downloads](https://img.shields.io/npm/dt/dsh-worktree-space?label=total%20downloads)](https://www.npmjs.com/package/dsh-worktree-space)
-[![Build](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml/badge.svg)](https://github.com/kangtsang/dsh-worktree-space/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/dsh-worktree-space)](https://github.com/kangtsang/dsh-worktree-space/blob/main/LICENSE)
 [![dshfind](https://dshfind.com/api/badge/kangtsang/dsh-worktree-space?lang=zh)](https://dshfind.com/zh/plugins/kangtsang/dsh-worktree-space?ref=badge)
 [![dsh.so risk](https://cdn.dsh.so/badge/dsh-worktree-space.svg)](https://www.dsh.so/artifact/dsh-worktree-space/?ref=badge)
@@ -620,7 +629,7 @@ Two ways to use it: **through the UI** ([Usage](#-usage)), or **letting an agent
 - [⚡ Quick start](#-quick-start)
 - [✨ Features](#-features)
 - [📂 Layout of a task](#-layout-of-a-task)
-- [🛠️ Usage](#-usage)　**the manual route**: [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🚢 Deploy and acceptance](#-deploy-and-acceptance) · [🏁 Finish](#-finish-a-worktree-space) ([combinations](#what-each-combination-does))
+- [🛠️ Usage](#-usage)　**the manual route**: [➕ Create](#-create-a-worktree-space) · [🗂️ Manage](#-manage-a-worktree-space) · [🚢 Acceptance](#-acceptance) · [🏁 Finish](#-finish-a-worktree-space) ([combinations](#what-each-combination-does))
 - [🤖 Advanced: letting an agent orchestrate end to end](#-advanced-letting-an-agent-orchestrate-end-to-end)
 - [🤖 Handing the commits and the conflicts to an agent](#-handing-the-commits-and-the-conflicts-to-an-agent)
 - [⚙️ Plugin configuration](#-plugin-configuration)
@@ -723,21 +732,27 @@ the repository that stopped it, and merges once that session has resolved it.
   branches **every ticked repository carries** and every repository without a start point of its own
   starts there, while a card can name a start point for that one repository alone. Through the tool,
   `baseRef` / `baseRefs` accept any ref, commits included.
-- **One delivery choice, and only one: does this task deploy for acceptance?** The bottom of Task
-  details is a single tick box — **Deploy to Docker** — which, once ticked, adds one **Deploy script**
-  field (empty means `workspace/.worktree-space/deploy/deploy.sh`). It is asked at creation because
-  **the delivery choice is made once, when the space is created, and nothing afterwards can add or
-  change it**: not ticking it settles "this task needs no acceptance", and nothing later will mention
-  that again. Ticking it while no usable entry script exists **refuses the create outright**, rather
-  than leaving a task space that can never deploy.
+- **One acceptance choice, and only one: how is this task accepted?** The bottom of Task details is
+  an **Acceptance** menu with three answers — **No acceptance** (the default), **Smoke only** and
+  **Deploy to Docker**. The last two add one **Deploy script** field (empty means
+  `workspace/.worktree-space/deploy/deploy.sh`). It is asked at creation because **the choice is made
+  once, when the space is created, and nothing afterwards can add or change it**: not choosing one
+  settles "this task needs no acceptance", and nothing later will mention that again. Choosing the
+  last two while no usable entry script exists **refuses the create outright**, rather than leaving a
+  task space that can never be accepted.
+  **Smoke only** is the answer for a task whose acceptance is a test suite: the entry needs a `smoke`
+  subcommand and nothing else, there is no environment and no acceptance URL, and the finish gate
+  still waits for a recorded `pass`.
   Everything a finish decides — which branch to merge into, whether to delete it, what a conflict
   does, what happens to the documents left behind — is deliberately not settled here, and is asked at
   the finish, where you can see the work it applies to.
-- **Deploy and acceptance** (when it was ticked). The task space carries its own deploy root: the
-  source root's `.worktree-space/deploy/` is copied into it, and its entry script answers `up` (raise
-  the environment, write the acceptance URL) and `smoke` (run the smoke test, write the result into
-  `.state.json`). The environment identity is computed from the container root, the project, the task
-  name and a local port, so **each task gets its own, and tasks cannot crowd each other out**. There
+- **Acceptance** (when one was chosen). The task space carries its own deploy root: the source
+  root's `.worktree-space/deploy/` is copied into it, and its entry script answers `smoke` (run the
+  smoke test, write the result into `.state.json`) — plus `up` (raise the environment, write the
+  acceptance URL) when the answer was **Deploy to Docker**. **Smoke only** has no environment: a unit
+  or integration suite recorded through `smoke` is a complete answer. For a deploying task the
+  environment identity is computed from the container root, the project, the task name and a local
+  port, so **each task gets its own, and tasks cannot crowd each other out**. There
   is **a gate before the merge**: without a `lastSmoke` carrying `result: "pass"` in
   `<deploy root>/.state.json`, the merge is refused; the panel then asks whether to finish anyway,
   and that exemption is one only a person can give.
@@ -746,16 +761,21 @@ the repository that stopped it, and merges once that session has resolved it.
   source checkouts.
 - **A management page**, with three views (the ways in are listed under Manage a Worktree Space):
   - **Workspaces** shows which Workspaces can host a task space, and how many repositories
-    each one has. Every source repository carries `Remote branch: <branch>` with the commits
-    ahead and behind (`↑` / `↓`) and the lines those commits add and remove; the Workspace
-    header carries the sum over its repositories, with **committed and uncommitted lines
-    added up into one pair**;
+    each one has. Hovering a path says whether it is the **Workspace directory** or a
+    **repository directory**. Every source repository names both ends of its comparison -
+    `Current branch: <branch>` and `Remote branch: <branch>` - with the commits ahead and
+    behind (`↑` / `↓`), and **committed** and **uncommitted** figures that each read
+    `+545 -455, 3 files` (the lines added and removed, then how many files): one name alone
+    left the figures belonging to a branch the page never stated. The Workspace header
+    carries the sum over its repositories, with **committed and uncommitted summed into
+    one pair, file counts included**;
   - **Git repositories** lists every Git repository found and the worktrees linked to it;
   - **Task spaces** puts each task's repositories together (branch, how many files changed,
     whether it is locked or prunable), with that task's deployment card under its row. A task
     row carries the **task branch** and the whole task's totals, with committed and
-    uncommitted lines in one pair; opened, each repository shows its own **base branch** and
-    that repository's figures.
+    uncommitted lines in one pair; opened, each repository names its own **current branch**
+    (the one that worktree carries, which is the task branch) and then its **base branch**
+    and that repository's figures, in the same `+added -removed, files` shape.
   - **A registered task space is found on its own**: a task's worktrees are reported by its
     source repositories, so a task whose source repositories are in no Workspace used to be
     invisible. The recorded source repositories are read instead, and the task is listed -
@@ -778,9 +798,9 @@ the repository that stopped it, and merges once that session has resolved it.
   first for Workspaces that hold repositories, the second for directories that really are task
   spaces; both open the same dialog the rest of this document describes.
 - **The interface follows DSH's language setting**; the page, the dialogs, the configuration
-  items and the error messages all come in Chinese and English. A task ticked **Deploy to Docker**
-  has one prerequisite of its own — a container engine this machine can reach; see
-  [Deploy and acceptance](#-deploy-and-acceptance).
+  items and the error messages all come in Chinese and English. A task accepted by **Deploy to
+  Docker** has one prerequisite of its own — a container engine this machine can reach; see
+  [Acceptance](#-acceptance).
 
 ## 📂 Layout of a task
 
@@ -911,9 +931,10 @@ top down:
 5. **Worktree Space container root**: pre-filled with the recommendation, one level below the root
    workspace, and rarely changed; moving it offers the same **Set as the default…** box, which writes
    the path back the same way. A container root that is itself a Git repository is refused.
-6. **Deploy to Docker** (unticked to start with): ticked, it adds one **Deploy script** field, empty
-   meaning `workspace/.worktree-space/deploy/deploy.sh`. This box settles whether a passing smoke
-   gates the merge, and it is **recorded once, at creation** — nothing afterwards can add it.
+6. **Acceptance** (No acceptance to start with): choosing **Smoke only** or **Deploy to Docker** adds
+   one **Deploy script** field, empty meaning `workspace/.worktree-space/deploy/deploy.sh`. This menu
+   settles whether a passing smoke gates the merge, and it is **recorded once, at creation** — nothing
+   afterwards can add it.
 7. **Preview**: the branch name and the space's directory this task will use, live as you type.
 8. Press **Create and open session**: the space is built and a session is opened in it.
 
@@ -926,13 +947,14 @@ half task is left behind.
 
 ![The management page: Workspaces, Git repositories and Task spaces views](docs/img/manage-worktree-space.png)
 
-Open the **management page** — two ways in:
+Open the **management page** — three ways in, all of them a **dialog**, and the
+**sidebar entry** setting decides which one is offered:
 
-- **The Worktree Space shortcut at the sidebar foot** (shown by default) — opens it as a **dialog**;
-- **The Worktree Space row under New session** (hidden by default, turn it on in the
-  **configuration**) — opens it **full width** in the main column, leading with **Back to conversation**.
+- **standard** — a row in the sidebar, under New session;
+- **quick** (the default) — the Worktree Space shortcut at the sidebar foot;
+- **compact** — one icon at the end of the settings row.
 
-Both forms share one left-hand navigation: three entries switch between the **Workspaces**, **Git
+All three open the same page, whose left-hand navigation switches between the **Workspaces**, **Git
 repositories** and **Task spaces** views, and **⚙ Plugin Settings** at the foot jumps to this
 plugin's configuration on the Host's Plugins page. The statistics on the right follow the view
 (`N tasks` / `N workspaces` / `N repositories · M worktrees`).
@@ -941,30 +963,38 @@ The panel rescans every time it is opened, but it first paints what the Host sti
 previous scan, so it shows data straight away. That memory lives in the DSH instance's own process
 only, and is gone when the instance exits.
 
-### 🚢 Deploy and acceptance
+### 🚢 Acceptance
 
-A task created with deployment ticked gains a **deployment card** in its row on the management page,
-answering two calls:
+A task created with **Smoke only** or **Deploy to Docker** gains an acceptance card in its row on the
+management page. The two kinds are titled apart - **Smoke acceptance** for one with no environment,
+**Deployment acceptance** for one that deploys - so the heading describes what the card actually shows.
+The entry script answers one call, and a second when it deploys:
 
-- **`up`** — runs the entry script to raise the environment, and writes the **acceptance URL** into
-  `<deploy root>/.state.json`;
-- **`smoke`** — runs the smoke test, the script merging `lastSmoke: { result, at }` into that same
-  state file.
+- **`smoke`** — runs the smoke test, the script merging `lastSmoke: { result, at }` into
+  `<deploy root>/.state.json`. A **Smoke only** task has just this one: a unit suite, an integration
+  suite or a build check all belong there, and how the project verifies itself is its own business.
+- **`up`** — only for a **Deploy to Docker** task: runs the entry script to raise the environment, and
+  writes the **acceptance URL** into that same state file.
 
 The environment identity comes from the container root, the project, the task name and a local port,
 so **each task has its own and they do not crowd each other out**; that port can change with every
 deploy, which is why the state — the URL, the last smoke — is read live on every call rather than
-cached. When such a task is finished, its environment is taken down: what dies with the containers is
-the URL, since that dynamic port is gone, while the smoke's own verdict stays in the task's record.
+cached. **A rebuilt deployment needs a fresh smoke**: the earlier `pass` describes the environment
+before it, so it stops counting. When such a task is finished, its environment is taken down: what dies
+with the containers is the URL, since that dynamic port is gone, while the smoke's own verdict stays
+in the task's record. A smoke-only task has no environment, so no container engine is asked about it.
 
 Before the merge there is one gate: absent a `lastSmoke` with `result: "pass"` in
 `<deploy root>/.state.json`, the merge is refused and the dialog names what is missing, a deployment
 or a smoke. **That exemption is only yours to give on the panel** — you can confirm "finish anyway"
 and the task's record keeps a `delivery-gate-bypassed` warning; down the tool route, the only way past
-the gate is raising the environment and running the smoke.
+the gate is running the smoke — plus raising the environment first, for a deploying task. This gate is
+**a convention, not a check on the code**: it exists so that "smoke it before you finish" is not a thing
+anyone has to remember, and it does not inspect what changed or ask for a commit first — editing after a
+passing smoke leaves the gate open.
 
 > How the deploy root is copied, the state file's contract, and how the environment identity is
-> computed: [section 6 of the manual](USAGE.md#6-deploy-and-acceptance).
+> computed: [section 6 of the manual](USAGE.md#6-acceptance).
 
 ### 🏁 Finish a Worktree Space
 
@@ -1202,8 +1232,7 @@ data directory, which needs a DSH restart.
 
 | Setting | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| Plugin slot entry | show / hide | **hide** | The row in the sidebar's panel list that opens the management page full-width (the page brings its own left-hand navigation and its Back to conversation); hidden by default |
-| Shortcut in the sidebar footer | show / hide | show | The shortcut at the sidebar foot, opening that same page as a **dialog** |
+| Sidebar entry | standard / quick / compact | **quick** | One of three: **standard** is a row in the sidebar's panel list, under New session; **quick** is the shortcut at the sidebar foot; **compact** reduces the entry to one icon at the end of the settings row. All three open the management page as a **dialog**, and a change applies immediately |
 | Full access for the sessions handed to the agent for conflicts and commits | off / on | **off** | On, those two sessions are opened in the **task space** and widened to `danger-full-access` straight away. **The cost is that such a session can afterwards write anywhere the DSH process can**, without asking again, and the grant survives a restart. It governs only the sessions opened after it, and the finish dialog can switch it where it matters. |
 | Operation log | on / off | **on** | The switch for `worktree-space-log.jsonl` at the container root. Off stops new records only; a log already on disk is left alone |
 | Scan depth | 1–5 levels | 3 levels | How many levels below a Workspace directory (level 0) the scan looks for Git repositories |
@@ -1287,7 +1316,7 @@ uninstall and rollback acceptance evidence is in [docs/store-evidence.md](docs/s
 | The resolved files still carry conflict markers | `the resolved merge still has conflict markers in <files>` — kept as they stand, no side is taken |
 | The rehearsal merge conflicts | Does **not** auto `merge --abort`; the merge site is kept (with `mergeSite` and `conflictedFiles`) until it is resolved and committed, then carry on |
 | The real merge meets a fresh commit | The rehearsal passed, then the real merge ran into a commit someone pushed in between: the merge is undone (`merge --abort`, the branch is left as it was) and Git's own words are surfaced; the worktree and the task branch are kept, and pressing **Continue finishing** rehearses again |
-| Deploy and acceptance blocks the merge | Refuses the merge and names what is missing — a deployment or a smoke — and takes the merge again once there is a passing smoke |
+| Acceptance blocks the merge | Refuses the merge and names what is missing — a deployment and a smoke, or just the smoke for a smoke-only task — and takes the merge again once there is a passing smoke |
 | Worktree removal fails | Reports `failed to remove the worktree (uncommitted changes? force it deliberately)`; the worktree is kept and reported, and `git worktree prune` is the remedy |
 | A task directory is not empty | The directory and the Workspace registration are kept rather than force-deleted |
 | A fact cannot be confirmed | It is written as "unknown" — absence of evidence is never inferred as absence of access |

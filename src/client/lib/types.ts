@@ -57,6 +57,13 @@ export interface WorktreeStatus {
 export interface UpstreamStatus {
   upstream: string | null
   /**
+   * The branch this comparison starts from, where `upstream` is where it ends.
+   *
+   * The row names both, because one name alone left the reader to guess which pair of
+   * branches the counts belong to. Absent on a detached HEAD, which has no name to show.
+   */
+  branch?: string
+  /**
    * Whether this answer came after a successful fetch, so the numbers are against
    * what the remote had a moment ago rather than against the last fetch.
    */
@@ -81,13 +88,18 @@ export interface UpstreamStatus {
 }
 
 /**
- * How many lines a set of changes adds and removes.
+ * How many files a set of changes touches, and how many lines it adds and removes.
  *
- * Two numbers rather than a preformatted string: the panel colours them separately
- * (green for what arrives, red for what goes), and a string would have had to be
- * parsed back apart to do it.
+ * The counts rather than a preformatted string: the panel colours the lines separately
+ * (green for what arrives, red for what goes) and draws the file count in front of them,
+ * and a string would have had to be parsed back apart to do both.
+ *
+ * `files` is optional because the Host that predates the field answers without it; the
+ * panel then draws the two line counts alone rather than claiming "0 files" about a
+ * measurement nobody took.
  */
 export interface LineChanges {
+  files?: number
   insertions: number
   deletions: number
 }
@@ -531,7 +543,20 @@ export interface DeploymentContainer {
  */
 export interface DeploymentStatus {
   envId: string
+  /**
+   * What this task owes before its work may land: `none`, `smoke` or `deploy`.
+   *
+   * Optional because a Host from before the rename does not send it; `target` is read
+   * as the fallback there, since `docker` then meant what `deploy` means now.
+   */
+  kind?: string
+  /**
+   * The kind under its old name. Kept as a fallback for an older Host, and as the
+   * value `deploys` is derived from on this side of the rename.
+   */
   target: string
+  /** Whether there is an environment at all. `true` only for `deploy`. */
+  deploys?: boolean
   /**
    * The acceptance URL, or null when the deployment recorded none.
    *
@@ -570,10 +595,12 @@ export interface DeployDestroyResult {
  * refusals use - so the card can say them in the reader's language.
  */
 export interface DeliveryGatePreview {
-  /** Whether the policy gates a merge at all. A `deploy.target` of `none` does not. */
+  /** Whether the policy gates a merge at all. An acceptance kind of `none` does not. */
   applies: boolean
   missing: string[]
   target: string
+  /** The same answer as `target`, under the name the policy now uses. Absent on an older Host. */
+  kind?: string
 }
 
 /** What re-running the smoke through the deploy script answered. A failed smoke is a result, not an error. */

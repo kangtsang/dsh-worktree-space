@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
 import { WorktreesPage } from "../src/client/components/WorktreePanel"
 import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
-import { ISSUES_URL, VIDEO_URL } from "../src/client/lib/links"
+import { ISSUES_URL, STAR_URL, VIDEO_URL } from "../src/client/lib/links"
 
 /**
  * Every prop the components read on mount has to be answered - a missing one throws
@@ -54,10 +54,12 @@ describe("the plugin description carries a feedback link", () => {
     // description, not a newline inside it - the host wraps both in one <p>.
     expect(description!.querySelector(".dws-usage-flow")?.textContent).toContain("使用流程")
 
-    // The flow line ends with two links in Chinese: the video first, then the
-    // feedback link. Both wear the same class, so each is picked out by its text.
+    // The flow line ends with three links in Chinese: the video, the feedback link and
+    // the star. They wear the same class, so each is picked out by its text. The star's
+    // mark is a character in the run rather than an SVG, so it is part of that text -
+    // which is exactly what makes one underline cover both.
     const links = [...description!.querySelectorAll<HTMLAnchorElement>("a.dws-feedback-link")]
-    expect(links.map(link => link.textContent), "the video, then the feedback link").toEqual(["视频介绍", "使用反馈"])
+    expect(links.map(link => link.textContent), "the video, the feedback link, then the star").toEqual(["视频介绍", "使用反馈", "\u2606 Star"])
     const video = links[0]
     expect(video.getAttribute("href")).toBe(VIDEO_URL)
     expect(video.getAttribute("target")).toBe("_blank")
@@ -68,13 +70,29 @@ describe("the plugin description carries a feedback link", () => {
     expect(link!.textContent).toBe("使用反馈")
     expect(link!.getAttribute("target")).toBe("_blank")
     expect(link!.getAttribute("rel")).toContain("noreferrer")
+    // The star goes to the repository, not to its issues page: a star is given to the
+    // project, and a reader who lands on the issue tracker has to navigate away again.
+    const star = links[2]
+    expect(star.getAttribute("href")).toBe(STAR_URL)
+    expect(star.getAttribute("target")).toBe("_blank")
+    expect(star.getAttribute("rel")).toContain("noreferrer")
+    // The mark is a text character, not an inline SVG: an SVG is a replaced box that
+    // `text-decoration` skips, so the word was underlined and the star beside it was not.
+    // A character shares the run, which is what makes one underline cover both.
+    const mark = star.querySelector(".dws-star-mark")
+    expect(mark, "the star carries its own mark").not.toBeNull()
+    // U+2606, the hollow star: a filled one would claim the reader had already starred
+    // the project, which this side does not know.
+    expect(mark!.textContent).toBe("\u2606")
+    expect(mark!.getAttribute("aria-hidden")).toBe("true")
+    expect(star.querySelector("svg"), "no replaced box in the link").toBeNull()
 
     // Nothing but one space stands between the sentence and the link. A middot read
     // as punctuation belonging to the sentence it was attached to, and the copy now
     // ends on a bracket, so the link needs its own air.
     expect(description!.querySelector(".dws-feedback-sep"), "no separator is rendered").toBeNull()
     expect(description!.textContent, "the links follow the sentence directly")
-      .toMatch(/销毁任务空间）\s+视频介绍\s+使用反馈$/)
+      .toMatch(/销毁任务空间）\s+视频介绍\s+使用反馈\s+\u2606\s+Star$/)
   })
 
   it("is not on the tab description, which names the current view", async () => {
@@ -86,20 +104,18 @@ describe("the plugin description carries a feedback link", () => {
     expect(viewDescription!.querySelector("a"), "the tab description is not where the link goes").toBeNull()
   })
 
-  it("is on the sidebar panel too, which says the same sentence and now links it", async () => {
+  it("is on the page itself, whose navigation brings no heading of its own", async () => {
+    // The page has one frame now - the dialog - and the sentence moved with it. What
+    // the page draws is the navigation column and the lists; the description belongs
+    // to the dialog's header, so a reader who lands here still has a way to report a
+    // problem from the place that is offering the feature.
     const s = stubs()
-    render(<WorktreesPage api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} variant="panel" />)
+    render(<WorktreesPage api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} />)
     await settle()
-    const sidebar = document.body.querySelector(".dws-panel-lead")
-    expect(sidebar, "the sidebar panel renders its own heading").not.toBeNull()
-    expect(sidebar!.textContent, "the sidebar still says what the plugin does").toContain("一个包含多个 Git 仓库的工作任务")
-    // The link was once left off this host on purpose. That was wrong: the panel is
-    // the way most readers reach the page, and the one place they want to report a
-    // problem from is the place that offered no way to do it.
-    const link = sidebar!.querySelectorAll<HTMLAnchorElement>("a.dws-feedback-link")
-    expect(link.length, "the panel's heading carries both links in Chinese").toBe(2)
-    expect(link[1].getAttribute("href")).toBe(ISSUES_URL)
-    expect(link[1].textContent).toBe("使用反馈")
+    const nav = document.body.querySelector(".dws-nav")
+    expect(nav, "the page draws its navigation column").not.toBeNull()
+    // The page no longer repeats the description the dialog's header says once.
+    expect(document.body.querySelector(".dws-feedback-link"), "the page carries no second copy").toBeNull()
   })
 
   it("offers the video only in Chinese, because it has no English narration", async () => {
@@ -122,8 +138,8 @@ describe("the plugin description carries a feedback link", () => {
     const dispose = installLocale({ get: (name: string) => (name === "locale" ? locale : undefined) })
     try {
       const s = stubs()
-      // The manage dialog is where the description is rendered; WorktreesSettings alone
-      // omits it unless asked for a heading, and the app never does.
+      // The manage dialog is the only place the description is rendered: the section below
+      // its header starts on the toolbar and carries no title of its own.
       render(<WorktreeManagePanel api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} onClose={vi.fn()} />)
       await settle()
       expect(document.body.querySelector("a[href='" + VIDEO_URL + "']"), "English offers no video link").toBeNull()
@@ -136,18 +152,6 @@ describe("the plugin description carries a feedback link", () => {
     }
   })
 
-  // WorktreesSettings renders its own <h2> + description header when `heading` is set,
-  // and the only production caller passes heading={false} - so that branch never runs
-  // in the app. A test that renders the component directly would exercise it happily
-  // and prove nothing about what a reader can reach.
-  it("has no dead copy of the description that only tests can see", async () => {
-    const s = stubs()
-    const { container } = render(<WorktreesSettings api={s.api} workspaces={s.workspaces} uiWorkspace={s.uiWorkspace} sessions={s.sessions} onCreate={s.onCreate} heading />)
-    await settle()
-    const header = container.querySelector(".dws-settings-header")
-    expect(header, "the heading branch still renders when asked for").not.toBeNull()
-    expect(header!.querySelector("a.dws-feedback-link"), "that unreachable branch carries no second link").toBeNull()
-  })
 
   it("is reachable by role and name, not only by CSS class", async () => {
     // A link that only a stylesheet can find is not one a keyboard can press.

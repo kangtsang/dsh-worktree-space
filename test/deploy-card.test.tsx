@@ -12,7 +12,9 @@ const settle = () => act(async () => {})
 
 const status = (over = {}) => ({
   envId: "dsh-public-login",
-  target: "docker",
+  kind: "deploy",
+  deploys: true,
+  target: "deploy",
   url: "http://localhost:51555",
   urlSource: "state",
   lastSmoke: { at: "2026-10-05T00:00:00Z", result: "pass" },
@@ -36,7 +38,7 @@ describe("the deployment card", () => {
   })
 
   it("hides itself entirely for a task whose policy deployed nothing", async () => {
-    const api = { deployStatus: vi.fn().mockResolvedValue(status({ target: "none", url: null, stateFound: false, containers: [], lastSmoke: null })) }
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ kind: "none", target: "none", deploys: false, url: null, stateFound: false, containers: [], lastSmoke: null })) }
     const { container } = render(<DeployCard api={api} path="/task" />)
     await settle()
     expect(container.firstElementChild).toBeNull()
@@ -46,12 +48,45 @@ describe("the deployment card", () => {
     // Containers can stand in a space whose policy deploys nothing: someone deployed it outside
     // this flow. The Host refuses to start or smoke such a space, so the card must not offer
     // those two; teardown is what stays meaningful, because nobody else can remove them.
-    const api = { deployStatus: vi.fn().mockResolvedValue(status({ target: "none" })) }
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ kind: "none", target: "none", deploys: false })) }
     render(<DeployCard api={api} path="/task" />)
     await settle()
     expect(screen.queryByRole("button", { name: t("deploySmoke") })).toBeNull()
     expect(screen.queryByRole("button", { name: t("deployUp") })).toBeNull()
     expect(screen.getByRole("button", { name: t("deployDestroy") })).toBeTruthy()
+  })
+
+  it("titles a smoke-only card as smoke acceptance, and keeps the deployment furniture off it", async () => {
+    // A smoke-only task has no environment: no URL, nothing standing, nothing to destroy.
+    // The card is the recorded verdict and one action, and both the refresh button and the
+    // deploy/destroy pair belong to a deployment, so neither appears here.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status({ kind: "smoke", target: "smoke", deploys: false, url: null, containers: [], envId: "dsh-public-login" })) }
+    const { container } = render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(container.textContent).toContain("冒烟验收")
+    expect(container.textContent).not.toContain("部署验收")
+    // The badge is the whole record, and the caption that used to explain it is gone.
+    expect(screen.getByText(/冒烟通过 \d{4}-\d{2}-\d{2}/)).toBeTruthy()
+    // One action, and only one.
+    expect(screen.getByRole("button", { name: t("deploySmoke") })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: t("deployRefresh") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("deployUp") })).toBeNull()
+    expect(screen.queryByRole("button", { name: t("deployDestroy") })).toBeNull()
+    // No URL row and no environment id: neither exists for this kind.
+    expect(container.textContent).not.toContain(t("deployNoUrl"))
+    expect(container.textContent).not.toContain("dsh-public-login")
+  })
+
+  it("keeps the deployment title and the refresh button on a deploying card", async () => {
+    // The other half of the split: the kind that does have an environment keeps every
+    // control it had, under the title that describes it.
+    const api = { deployStatus: vi.fn().mockResolvedValue(status()) }
+    const { container } = render(<DeployCard api={api} path="/task" />)
+    await settle()
+    expect(container.textContent).toContain("部署验收")
+    expect(container.textContent).not.toContain("冒烟验收")
+    expect(screen.getByRole("button", { name: t("deployRefresh") })).toBeTruthy()
+    expect(container.textContent).toContain("dsh-public-login")
   })
 
   it("names what is missing when containers stand with nothing recorded", async () => {

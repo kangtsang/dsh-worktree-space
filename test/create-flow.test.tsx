@@ -108,21 +108,19 @@ describe("native task create flow", () => {
     expect(containerRow?.querySelector(".dws-field-hint")).not.toBeNull()
     expect(containerRow?.querySelector("label.dws-field-label > .dws-field-note")?.textContent).toBe(t("containerLocationHint"))
 
-    // The delivery tick carries no separate field name - the tick's label IS the name - so
-    // its explanation shares the tick's own line, pushed right, the same way every named
-    // field's note sits beside its name. It is NOT under the tick, where it read as a
-    // caption for the checkbox rather than as the field's own note. Ticked or not, it is
-    // there: someone deciding whether to tick it is exactly who needs it.
-    const deployBox0 = screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") })
-    const deployRow = deployBox0.closest(".dws-field-row")
-    expect(deployRow?.querySelector(".dws-field-label")).toBeNull()
-    const deployLine = deployRow?.querySelector(".dws-deploy-line")
-    expect(deployLine).not.toBeNull()
-    // The note is a sibling of the tick's label, on that one line…
-    expect(deployLine?.querySelector(":scope > label.dws-deploy-option")).not.toBeNull()
-    const deployNote = deployLine?.querySelector(":scope > .dws-field-note")
-    expect(deployNote?.textContent).toBe(t("deliveryDeployCheckboxHint"))
-    // …and nothing repeats it below.
+    // The acceptance menu carries a field name of its own now that it has three answers,
+    // and its explanation rides on that name's line, pushed right, the same way every named
+    // field's note sits beside its name. Whichever kind is chosen, the menu is there and so
+    // is the note: someone deciding between the three is exactly who needs it.
+    const kindSelect = screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") })
+    const deployRow = kindSelect.closest(".dws-field-row")
+    const deployLabel = deployRow?.querySelector("label.dws-field-label")
+    expect(deployLabel).not.toBeNull()
+    // The chosen answer's cost, in one line, beside the field's name - and it changes with
+    // the menu rather than being a caption for it.
+    const costNote = deployRow?.querySelector(`label.dws-field-label > .dws-field-note`)
+    expect(costNote?.textContent).toBe(t("deliveryAcceptanceNoneHint"))
+    // And nothing repeats it below.
     expect([...(deployRow?.querySelectorAll("p.dws-field-note") ?? [])]).toHaveLength(0)
 
     // The group is named by the field alone; its count is a live region beside the bulk
@@ -189,33 +187,31 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
-    // A tick, not a dropdown: there are only two answers and one of them is "no", so the
-    // question reads as one the user either opts into or does not. No other delivery
-    // control stands here - the seven that used to were defaults recorded for decisions a
-    // finish takes. What it does not show, it does not send.
-    expect(document.querySelectorAll("select.dws-select").length).toBe(0)
-    const deployBox = screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }) as HTMLInputElement
-    expect(deployBox.checked).toBe(false)
-    // The tick is NOT one of the repository cards. It wore `dws-check-option` at first,
-    // which is the class the selection count and the bulk actions select on - so the
-    // count read one too many and "select all" would have swept the deployment tick up
-    // with the repositories. Asserted through the same selector those use.
+    // A menu, not a tick: there are three answers now, and two of them record an acceptance
+    // the finish waits on - a single tick could not say which. No other delivery control
+    // stands here - the seven that used to were defaults recorded for decisions a finish
+    // takes. What it does not show, it does not send.
+    const kindSelect = screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }) as HTMLSelectElement
+    expect(kindSelect.value).toBe("none")
+    // Its three answers are exactly the policy's three, in the order the menu lists them.
+    expect([...kindSelect.options].map((option) => option.value)).toEqual(["none", "smoke", "deploy"])
+    // The menu is NOT one of the repository cards. The selection count and the bulk actions
+    // select on the repository cards' own class, and this field must not be swept up by them.
     expect(offered()).toHaveLength(suggestion.repositories.length)
-    expect(offered()).not.toContain(deployBox)
 
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
-      const payload = calls[calls.length - 1]?.[0] as { deployTarget?: string; delivery?: string }
+      const payload = calls[calls.length - 1]?.[0] as { acceptanceKind?: string; delivery?: string }
       // Sent flat rather than as a policy blob, and sent even at the default, so what the
       // user chose is what the Host records.
-      expect(payload.deployTarget).toBe("none")
+      expect(payload.acceptanceKind).toBe("none")
       expect(payload.delivery).toBeUndefined()
     })
   })
 
-  it("sends the deployment target the dialog shows once it is changed", async () => {
+  it("sends the acceptance kind the dialog shows once it is changed", async () => {
     const next = setup()
     next.mount()
     const user = userEvent.setup()
@@ -223,27 +219,48 @@ describe("native task create flow", () => {
 
     // The one choice this dialog records, so it travels alone: no merge mode, no
     // verification, no conflict or stray policy alongside it any more.
-    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
+    await user.selectOptions(screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }), "deploy")
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
     await waitFor(() => {
       const calls = next.api.createTask.mock.calls
-      const payload = calls[calls.length - 1]?.[0] as { deployTarget?: string; delivery?: string }
-      expect(payload.deployTarget).toBe("docker")
+      const payload = calls[calls.length - 1]?.[0] as { acceptanceKind?: string; delivery?: string }
+      expect(payload.acceptanceKind).toBe("deploy")
       expect(payload.delivery).toBeUndefined()
     })
   })
 
-  it("sends the deploy script a chosen deployment names", async () => {
+  it("sends the smoke-only kind, which owes no environment", async () => {
     const next = setup()
     next.mount()
     const user = userEvent.setup()
     await ready()
 
-    // The field belongs to the deployment decision: naming a script for a task that
-    // deploys nowhere would say nothing, so it appears only once a target is chosen.
+    // The third answer is the whole reason the field lost its boolean shape: a task whose
+    // acceptance is a test suite and nothing else. It still wants an entry script, because
+    // that is what records the verdict, so the script field appears for it too.
     expect(screen.queryByRole("textbox", { name: t("deployScript") })).toBeNull()
-    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
+    await user.selectOptions(screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }), "smoke")
+    expect(screen.getByRole("textbox", { name: t("deployScript") })).not.toBeNull()
+    // And the cost line beside the field says which debt this answer records - scoped to
+    // the acceptance field's own row, since every named field carries a note of its own.
+    const kindRow = screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }).closest(".dws-field-row")
+    expect(kindRow?.querySelector("label.dws-field-label > .dws-field-note")?.textContent).toBe(t("deliveryAcceptanceSmokeHint"))
+    await user.type(nameField(), "Fix login")
+    fireEvent.submit(form())
+    await waitFor(() => expect(next.api.createTask).toHaveBeenCalledWith(expect.objectContaining({ acceptanceKind: "smoke" })))
+  })
+
+  it("sends the deploy script a chosen acceptance names", async () => {
+    const next = setup()
+    next.mount()
+    const user = userEvent.setup()
+    await ready()
+
+    // The field belongs to the acceptance: naming a script for a task that owes none would
+    // say nothing, so it appears only once a kind that runs a script is chosen.
+    expect(screen.queryByRole("textbox", { name: t("deployScript") })).toBeNull()
+    await user.selectOptions(screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }), "deploy")
     const script = screen.getByRole("textbox", { name: t("deployScript") })
     expect(script).toHaveProperty("placeholder", t("deployScriptPlaceholder"))
     await user.type(script, ".worktree-space/deploy/notify.sh")
@@ -259,7 +276,7 @@ describe("native task create flow", () => {
     const user = userEvent.setup()
     await ready()
 
-    await user.click(screen.getByRole("checkbox", { name: t("deliveryDeployCheckbox") }))
+    await user.selectOptions(screen.getByRole("combobox", { name: t("deliveryAcceptanceKind") }), "deploy")
     expect(screen.getByRole("textbox", { name: t("deployScript") })).toHaveProperty("value", "")
     await user.type(nameField(), "Fix login")
     fireEvent.submit(form())
@@ -294,9 +311,9 @@ describe("native task create flow", () => {
     // the source root, and what identifies them is where they are. The Host cannot
     // rebuild a repository from a directory name when discovery reached it through
     // a level in between.
-    // `deployTarget` rides along on every create; what it means is asserted in the
-    // delivery tests above, so here it only has to be the flat field the Host reads.
-    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", deployTarget: "none" })
+    // `acceptanceKind` rides along on every create; what it means is asserted in the
+    // acceptance tests above, so here it only has to be the flat field the Host reads.
+    expect(next.api.createTask).toHaveBeenCalledExactlyOnceWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", acceptanceKind: "none" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: created.path })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-task", "App/fix-login")
     expect(next.onCreated).toHaveBeenCalledWith(created.path)

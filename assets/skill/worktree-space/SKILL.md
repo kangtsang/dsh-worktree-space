@@ -106,7 +106,7 @@ when you are in it** — nothing below is loaded for you merely because the skil
 | **Finishing** | merging, cleaning up, closing the task out | `references/finishing.md` |
 
 Three more, read when the task calls for them rather than on every start:
-`references/deploying.md` for a task deployed for acceptance, `references/conflicts.md`
+`references/deploying.md` for a task that records an acceptance, `references/conflicts.md`
 when a finish answers with `mergeInProgress` or `dirtyCheckout`, and
 `references/failures.md` for what a refusal code is telling you to do.
 
@@ -118,12 +118,13 @@ when a finish answers with `mergeInProgress` or `dirtyCheckout`, and
   (a `dispatch` with `sessionId`, which is not a `send`), watching and correcting it with
   `wts_session_tool`, and adding a repository to a task already under way.
 - **`references/finishing.md`** — the whole of a finish: the merge decision, work nobody
-  committed, stray files, deleting a branch, and the deploy gate.
+  committed, stray files, deleting a branch, and the acceptance gate.
 - **`references/conflicts.md`** — the one part of a finish that is not routine: a conflict
   left standing on `mergeInProgress`, and a checkout of the user's own that a merge would
   overwrite (`dirtyCheckout`).
-- **`references/deploying.md`** — deploying the task space's services to Docker for
-  acceptance: the deploy root, `up` and `smoke`, the acceptance URL, and what "finished"
-  means for a task that deploys.
+- **`references/deploying.md`** — recording an acceptance: the entry script and its
+  `smoke` subcommand, the state file the gate reads, and how a `deploy` task adds `up`, an
+  environment and an acceptance URL on top of that. What "finished" means for a task that
+  records an acceptance.
 - **`references/failures.md`** — the refusals worth knowing by their code — E2002, E4015,
   E5011, E5006, E5012, E7006, E7007 and the rest — and what each is telling you to do.

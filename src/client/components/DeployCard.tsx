@@ -156,11 +156,17 @@ export function DeployCard({ api, path }: Props) {
 
   if (failed || status === null) return null
   const containers = status.containers.length > 0
-  if (status.target === "none" && !status.stateFound && !containers) return null
-  // A policy that deploys nothing offers no deployment to start or smoke - the Host refuses
+  // The Host answers `kind`; `target` is kept beside it for a Host from before the rename,
+  // where `docker` meant the same thing `deploy` does now.
+  const kind = status.kind ?? (status.target === "docker" ? "deploy" : "none")
+  // A task that records no acceptance offers nothing to start or smoke - the Host refuses
   // both - but the space can still hold containers from a deploy made outside this flow, so the
   // card keeps showing them and keeps the one action that stays meaningful: tearing them down.
-  const deploys = status.target !== "none"
+  const deploys = kind === "deploy"
+  // A smoke-only task has no environment, so its card is the badge and one action. Nothing
+  // else here applies to it: there is no URL to show, nothing to start, nothing to destroy.
+  const smokeOnly = kind === "smoke"
+  if (kind === "none" && !status.stateFound && !containers) return null
 
   const smoke = status.lastSmoke
   const smokeBadge = smoke?.result === "pass"
@@ -176,10 +182,17 @@ export function DeployCard({ api, path }: Props) {
 
   return <div className="dws-deploy">
     <div className="dws-deploy-head">
-      <span className="dws-deploy-title">{t("deployTitle")}</span>
-      <span className="dws-deploy-env" title={status.envId}>{status.envId}</span>
+      {/* The title names the kind this card is about: a smoke-only task has no deployment,
+          so "deployment acceptance" over it would describe something the card does not show. */}
+      <span className="dws-deploy-title">{t(smokeOnly ? "deploySmokeTitle" : "deployTitle")}</span>
+      {/* The environment id names a container set. A smoke-only task has none, so the row
+          would carry an id nothing on the machine answers to. */}
+      {smokeOnly ? null : <span className="dws-deploy-env" title={status.envId}>{status.envId}</span>}
       {containers ? <span className="dws-deploy-containers">{format(t("deployContainers"), { count: String(status.containers.length) })}</span> : null}
-      <Button className="dws-button-ghost dws-deploy-refresh" disabled={working} aria-label={t("deployRefresh")} title={t("deployRefresh")} onClick={() => run(() => Promise.resolve())}><RefreshCw size={13} /></Button>
+      {/* Refresh reads the deployment status again - a live docker query for what is standing
+          now. A smoke-only task has nothing standing, so the button would ask a question with
+          no answer; its one state is the recorded smoke, which "Run smoke" below re-reads. */}
+      {smokeOnly ? null : <Button className="dws-button-ghost dws-deploy-refresh" disabled={working} aria-label={t("deployRefresh")} title={t("deployRefresh")} onClick={() => run(() => Promise.resolve())}><RefreshCw size={13} /></Button>}
     </div>
     {/* The smoke is the whole of the acceptance record now: it is what the finish
         gate reads, and a green one is the verdict. There used to be a second badge
@@ -198,14 +211,20 @@ export function DeployCard({ api, path }: Props) {
       </div>
       : null}
     <div className="dws-deploy-row">
-      <span className="dws-deploy-label">{t("deployUrlLabel")}</span>
-      {url
-        ? <a className="dws-deploy-url" href={url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{url}</a>
-        : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
+      {smokeOnly ? null : <>
+        <span className="dws-deploy-label">{t("deployUrlLabel")}</span>
+        {url
+          ? <a className="dws-deploy-url" href={url} target="_blank" rel="noreferrer" title={t("deployOpen")}>{url}</a>
+          : <span className="dws-deploy-muted">{t("deployNoUrl")}</span>}
+      </>}
       <div className="dws-deploy-actions">
-        {deploys && containers
+        {/* A smoke-only task is the one case where the smoke runs with no environment, so
+            it must not be conditioned on containers: there are none, and there never will be. */}
+        {smokeOnly
           ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
-          : null}
+          : deploys && containers
+            ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
+            : null}
         {deploys && !containers
           ? <Button className="dws-button-ghost dws-deploy-up" disabled={working} title={t("deployUp")} onClick={() => run(() => api.deployUp(path))}><RefreshCw size={14} /><span>{t("deployUp")}</span></Button>
           : null}

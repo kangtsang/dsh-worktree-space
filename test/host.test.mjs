@@ -704,18 +704,68 @@ describe("worktree RPC contract", () => {
     const handler = handleFor({
       "rev-parse --abbrev-ref main@{upstream}": "origin/main\n",
       "rev-list --left-right --count origin/main...HEAD": "3\t1",
-      "diff --shortstat origin/main": "1 file changed, 7 insertions(+), 2 deletions(-)\\n",
+      "diff --shortstat origin/main...HEAD": "1 file changed, 7 insertions(+), 2 deletions(-)\\n",
       "diff --shortstat HEAD": "1 file changed, 4 deletions(-)\\n",
     })
 
     expect((await handler("worktree.upstream", { path: "/repo", target: "main" })).value)
       .toMatchObject({
         upstream: "origin/main",
+        // A named target is the branch on this side of the comparison, so the row can
+        // name both ends without asking git a second time.
+        branch: "main",
         commits: 1,
         behind: 3,
         committedChanges: { insertions: 7, deletions: 2 },
         workingChanges: { insertions: 0, deletions: 4 },
       })
+  })
+
+  it("names the branch the comparison starts from, and leaves a detached HEAD unnamed", async () => {
+    // The row used to name only the remote's branch, so the counts belonged to a pair the
+    // page never stated. The near end is read from the checkout unless the caller named it.
+    const asked = []
+    const handler = handleFor({
+      "rev-parse --abbrev-ref HEAD": "main",
+      "rev-parse --abbrev-ref @{upstream}": "origin/main",
+      "rev-list --left-right --count origin/main...HEAD": "0 0",
+    }, {}, asked)
+
+    const value = (await handler("worktree.upstream", { path: "/repo" })).value
+    expect(value).toMatchObject({ upstream: "origin/main", branch: "main" })
+    expect(asked).toContain("rev-parse --abbrev-ref HEAD")
+
+    // A detached checkout answers `HEAD`, which is what git says when there is no branch
+    // name - not a name to put in front of a reader.
+    const detached = handleFor({
+      "rev-parse --abbrev-ref HEAD": "HEAD",
+      "rev-parse --abbrev-ref @{upstream}": "origin/main",
+      "rev-list --left-right --count origin/main...HEAD": "0 0",
+    })
+    expect((await detached("worktree.upstream", { path: "/repo" })).value).not.toHaveProperty("branch")
+  })
+
+  it("counts the committed pair from the commits alone, so uncommitted work is not counted twice", async () => {
+    // `git diff <commit>` answers "that commit against the working tree", which put every
+    // uncommitted line into the committed half as well. A checkout in step with its remote
+    // but dirty on disk therefore reported one pair under both labels, and the collapsed
+    // row's total counted those lines twice - read on screen as thousands of changed lines
+    // on a branch with nothing to push.
+    const asked = []
+    const handler = handleFor({
+      "rev-parse --abbrev-ref main@{upstream}": "origin/main",
+      "rev-list --left-right --count origin/main...HEAD": "0 0",
+      // Nothing committed between the merge base and HEAD; twelve lines dirty on disk.
+      "diff --shortstat HEAD": "2 files changed, 12 insertions(+), 12 deletions(-)",
+    }, {}, asked)
+
+    const value = (await handler("worktree.upstream", { path: "/repo", target: "main" })).value
+    expect(value).not.toHaveProperty("committedChanges")
+    expect(value.workingChanges).toEqual({ files: 2, insertions: 12, deletions: 12 })
+    // The range is what was asked for. One revision would have answered with the working
+    // tree's numbers and handed them back as committed.
+    expect(asked).toContain("diff --shortstat origin/main...HEAD")
+    expect(asked).not.toContain("diff --shortstat origin/main")
   })
 
   it("answers a branch that tracks nothing with a null upstream, not an error", async () => {
@@ -774,7 +824,7 @@ describe("worktree RPC contract", () => {
       "fetch --quiet --no-tags": { stdout: "", stderr: "fatal: could not read from remote", exitCode: 128 },
       "rev-parse --abbrev-ref @{upstream}": "origin/main\n",
       "rev-list --left-right --count origin/main...HEAD": "1\t2",
-      "diff --shortstat origin/main": "1 file changed, 9 insertions(+)\n",
+      "diff --shortstat origin/main...HEAD": "1 file changed, 9 insertions(+)\n",
       "diff --shortstat HEAD": "",
     }, { autoFetchRemote: { get: () => true } }, asked)
 
@@ -791,7 +841,7 @@ describe("worktree RPC contract", () => {
       "status --short --branch": "## feat/antest",
       // `--left-right --count develop...HEAD` prints "<behind> <ahead>".
       "rev-list --left-right --count develop...HEAD": "2\t4",
-      "diff --shortstat develop": "2 files changed, 12 insertions(+), 3 deletions(-)\n",
+      "diff --shortstat develop...HEAD": "2 files changed, 12 insertions(+), 3 deletions(-)\n",
       "diff --shortstat HEAD": "1 file changed, 5 insertions(+)\n",
     })
 

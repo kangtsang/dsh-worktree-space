@@ -1,10 +1,22 @@
-## Deploying for acceptance
+## Acceptance: a smoke, and a deployment when the task has one
 
-When the user wants to try the work, or a change only shows itself at runtime,
-deploy the task space's services to an isolated Docker environment instead of
-starting them on the host: ports cannot collide with anything the user already
-runs, the services reach each other over their own network, and tearing the
-whole environment down afterwards is one command.
+A task created with `acceptanceKind: smoke` or `deploy` owes a recorded verdict before its
+work may land. Both use the same entry script and the same state file; they differ in whether
+there is an environment.
+
+**Smoke only** (`smoke`) is the answer for a task whose acceptance is the project's own
+checks: the entry needs a `smoke` subcommand that runs them and records the result, and that
+is the whole contract. There is no environment, no acceptance URL and no container to tear
+down — do not stand one up to satisfy it, and do not go looking for a URL. A unit suite, an
+integration suite or a build check all belong here, and how the project verifies itself is
+the project's own business. Skip the rest of this file except the state-file contract below.
+
+**Deploy to Docker** (`deploy`) additionally gives the task an environment, which is what the
+rest of this file is about. When the user wants to try the work, or a change only shows
+itself at runtime, deploy the task space's services to an isolated Docker environment instead
+of starting them on the host: ports cannot collide with anything the user already runs, the
+services reach each other over their own network, and tearing the whole environment down
+afterwards is one command.
 
 A task space is deployable when one of its repositories carries a
 `deploy/deploy.sh` of its own, or when the space holds the plugin's own deploy root,
@@ -24,8 +36,8 @@ directory, or naming no file, is refused (E4014) before anything is made.
 There is no manifest to declare targets in: the entry script is the whole contract,
 and docker is the only target.
 
-**A task created with `deployTarget: docker` needs something to deploy with**, and a
-create that has none is refused (E4015) rather than made undeployable. Any one of the
+**A task created with either gated kind needs something to run**, and a create that has none
+is refused (E4015) rather than made unable to record an acceptance. Any one of the
 three counts: a `.worktree-space/deploy/deploy.sh` at the source root, a script named by `deployScript`,
 or a selected repository carrying its own `deploy/deploy.sh`. So before creating a
 deploying task, check that one of those exists — and if the user wants a deployment and
@@ -40,7 +52,8 @@ every script it runs as
 `DEPLOY_STATE_FILE`, so a script writes `${DEPLOY_STATE_FILE}` and never has to work out
 where the deploy root is. It is what the panel and the merge gate read:
 
-- `<entry> up` writes `url` (and whatever `services` it likes) once the environment is up;
+- `<entry> up` writes `url` (and whatever `services` it likes) once the environment is up — a
+  `smoke`-only task has no `up` and writes no `url`;
 - `<entry> smoke` merges `lastSmoke: { result, at }` into it **without dropping the fields
   already there** — a pretty rewrite that loses `destroyedAt` forgets that the environment is
   down;

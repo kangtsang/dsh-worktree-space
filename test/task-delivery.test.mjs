@@ -40,7 +40,7 @@ const STATE = {
 const isDeployEntry = (argv) => argv.length >= 3 && (argv[2] === 'up' || argv[2] === 'smoke')
 
 /** A task space directory carrying a metadata record and, when asked, a deploy root's state file. */
-async function taskFixture({ state, metadataDelivery } = {}) {
+async function taskFixture({ state, metadataDelivery, deployScript } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-delivery-'))
   const metadata = {
     version: 1,
@@ -59,48 +59,64 @@ async function taskFixture({ state, metadataDelivery } = {}) {
     await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
     await writeFile(join(root, PLUGIN_ROOT, 'deploy', '.state.json'), JSON.stringify(state, null, 2), 'utf8')
   }
+  // An entry script, for the calls that must be refused *before* running one: a space with
+  // no script would be refused for the absence rather than for the policy.
+  if (deployScript !== undefined) {
+    await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
+    await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), deployScript, { mode: 0o755 })
+  }
   return { root, metadata, statePath: join(root, PLUGIN_ROOT, 'deploy', '.state.json') }
 }
 
 describe('delivery policy', () => {
-  it('defaults to a delivery that turns nothing on', () => {
-    expect(DEFAULT_DELIVERY_POLICY.deploy.target).toBe('none')
+  it('defaults to an acceptance that turns nothing on', () => {
+    expect(DEFAULT_DELIVERY_POLICY.acceptance.kind).toBe('none')
     expect(normalizeDeliveryPolicy(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
     // One field, and a partial policy is completed rather than rejected: the caller
     // says only what it cares about, and there is nothing else left to say.
-    expect(normalizeDeliveryPolicy({ deploy: { target: 'docker' } })).toEqual({
-      version: 1,
-      deploy: { target: 'docker' },
+    expect(normalizeDeliveryPolicy({ acceptance: { kind: 'deploy' } })).toEqual({
+      version: 2,
+      acceptance: { kind: 'deploy' },
+    })
+    // The third answer, which is the reason the field was renamed: a task whose
+    // acceptance is a smoke and nothing else.
+    expect(normalizeDeliveryPolicy({ acceptance: { kind: 'smoke' } })).toEqual({
+      version: 2,
+      acceptance: { kind: 'smoke' },
     })
   })
 
-  it('refuses a target that is not one of the allowed ones, at create time', () => {
-    expect(() => normalizeDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(/deploy\.target/)
-    expect(() => normalizeDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(expect.objectContaining({ code: 'E4010' }))
-    // `host` was a target once. It is refused here rather than quietly read back,
-    // because a create that names a target this plugin cannot observe is a create
-    // whose deployment could never be diagnosed; the lenient read below is where a
-    // record that already says `host` gets its fallback.
-    expect(() => normalizeDeliveryPolicy({ deploy: { target: 'host' } })).toThrow(/deploy\.target/)
-    expect(normalizeDeliveryPolicy({ deploy: { target: 'none' } }).deploy.target).toBe('none')
+  it('refuses a kind that is not one of the allowed ones, at create time', () => {
+    expect(() => normalizeDeliveryPolicy({ acceptance: { kind: 'kubernetes' } })).toThrow(/acceptance\.kind/)
+    expect(() => normalizeDeliveryPolicy({ acceptance: { kind: 'kubernetes' } })).toThrow(expect.objectContaining({ code: 'E4010' }))
+    // `host` was a target once and is not a kind now. It is refused here rather than
+    // quietly read back, because a create that names something this plugin cannot
+    // observe is a create whose acceptance could never be met; the lenient read below
+    // is where a record that already says `host` gets its fallback.
+    expect(() => normalizeDeliveryPolicy({ acceptance: { kind: 'host' } })).toThrow(/acceptance\.kind/)
+    expect(normalizeDeliveryPolicy({ acceptance: { kind: 'none' } }).acceptance.kind).toBe('none')
     // A field the schema no longer has is not a value to validate: the request is
     // read as the one answer it does carry, and everything else is dropped.
-    expect(normalizeDeliveryPolicy({ verification: 'vibes', deploy: { target: 'docker' } })).toEqual({
-      version: 1,
-      deploy: { target: 'docker' },
+    expect(normalizeDeliveryPolicy({ verification: 'vibes', acceptance: { kind: 'deploy' } })).toEqual({
+      version: 2,
+      acceptance: { kind: 'deploy' },
     })
   })
 
   it('substitutes the default when the record is read back', () => {
-    // A record from before the schema shrank still reads: every field that no longer
+    // A record from before the schema changed still reads: every field that no longer
     // exists is dropped, and a value this side can no longer serve falls back to the
     // default. For the removed `host` target that means the gate is dropped rather
     // than invented, which is the safe direction for a target nothing can serve.
     const old = coerceDeliveryPolicy({ deploy: { target: 'host', mode: 'auto' }, verification: 'agent', merge: { mode: 'auto' } })
     expect(old).toEqual(DEFAULT_DELIVERY_POLICY)
-    expect(coerceDeliveryPolicy({ deploy: { target: 'docker' } })).toEqual({ version: 1, deploy: { target: 'docker' } })
+    // A `version: 1` record keeps working, which is the whole of the migration: its
+    // `deploy.target` reads as the kind that means the same thing.
+    expect(coerceDeliveryPolicy({ acceptance: { kind: 'deploy' } })).toEqual({ version: 2, acceptance: { kind: 'deploy' } })
+    expect(coerceDeliveryPolicy({ acceptance: { kind: 'none' } })).toEqual(DEFAULT_DELIVERY_POLICY)
     // And a policy read off the record is what the gate reads, whatever the record's age.
-    expect(deliveryPolicyOf({ delivery: { deploy: { target: 'docker' } } }).deploy.target).toBe('docker')
+    expect(deliveryPolicyOf({ delivery: { acceptance: { kind: 'deploy' } } }).acceptance.kind).toBe('deploy')
+    expect(deliveryPolicyOf({ delivery: { acceptance: { kind: 'smoke' } } }).acceptance.kind).toBe('smoke')
     expect(deliveryPolicyOf(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
   })
 
@@ -108,26 +124,26 @@ describe('delivery policy', () => {
     // The request's own policy is taken whole. There is no stored per-project layer
     // between it and the default any more, so nothing else can complete it or
     // contradict it - what a create states is what the finish later reads.
-    expect(resolveDeliveryPolicy({ deploy: { target: 'docker' } }).deploy.target).toBe('docker')
+    expect(resolveDeliveryPolicy({ acceptance: { kind: 'deploy' } }).acceptance.kind).toBe('deploy')
     expect(resolveDeliveryPolicy(undefined)).toEqual(DEFAULT_DELIVERY_POLICY)
     expect(resolveDeliveryPolicy(null)).toEqual(DEFAULT_DELIVERY_POLICY)
     // A request that cannot be stated unambiguously still refuses the create.
-    expect(() => resolveDeliveryPolicy({ deploy: { target: 'kubernetes' } })).toThrow(/deploy\.target/)
+    expect(() => resolveDeliveryPolicy({ acceptance: { kind: 'kubernetes' } })).toThrow(/acceptance\.kind/)
   })
 })
 
 describe('the delivery gate', () => {
   it('stands open when the policy deploys nothing, whatever the state says', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'none' } } })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'none' } } }, root, { merge: true })).resolves.toBeUndefined()
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'none' } } })
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'none' } } }, root, { merge: true })).resolves.toBeUndefined()
   })
 
   it('refuses a merge with no deployment recorded, under the same code as a failed smoke', async () => {
     // One code for both shapes of "no passing smoke": the state file was never written, or
     // it was and the smoke is missing or red. They used to be E5005 and E5006, which read as
     // two different problems - they are not, because the next step is the same either way.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } } })
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
   })
 
@@ -136,17 +152,17 @@ describe('the delivery gate', () => {
     // there is no second debt a policy can record, and no third refusal left for a
     // request to fail on.
     const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'fail' } },
     })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
   })
 
   it('lets a deploying task merge on a green smoke alone, and skips the gate without a merge', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: false })).resolves.toBeUndefined()
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: STATE })
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true })).resolves.toBeUndefined()
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: false })).resolves.toBeUndefined()
   })
 
   it('yields to the user\'s own overrule, as a warning rather than a refusal', async () => {
@@ -155,23 +171,23 @@ describe('the delivery gate', () => {
     // carries the sentence the Host writes for its log and the keys a screen needs to
     // say the same thing in the reader's own language.
     const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'fail' } },
     })
-    const warning = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true, bypass: true })
+    const warning = await assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true, bypass: true })
     expect(warning.code).toBe('delivery-gate-bypassed')
     expect(warning.message).toContain('passing smoke')
     expect(warning.values).toEqual({ missing: ['smoke'] })
     // Without the overrule the same request is still refused - the bypass is the
     // user's say-so, not a hole the gate forgot it had.
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
 
     // The other shape of the same refusal - no state file at all - is overruled the same
     // way, and its warning names both facts a missing file leaves unrecorded: there was no
     // deployment and therefore no smoke.
-    const bare = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
-    const none = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, bare.root, { merge: true, bypass: true })
+    const bare = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } } })
+    const none = await assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, bare.root, { merge: true, bypass: true })
     expect(none.code).toBe('delivery-gate-bypassed')
     expect(none.values).toEqual({ missing: ['deployment', 'smoke'] })
   })
@@ -182,21 +198,21 @@ describe('the delivery gate', () => {
     // open B's merge. `deployedAt` is written by the host, so a script cannot date a
     // deployment that never happened.
     const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: {
         ...STATE,
         lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' },
         deployedAt: '2026-10-06T00:00:00Z',
       },
     })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
     // And it says which of the shapes it is, so the reader is not sent after a red smoke.
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toThrow(/older than the last deployment/)
     // The user's own overrule still steps over it: this is a warning to the user, never a
     // wall, and a gate the user could not answer would leave them unable to finish at all.
-    const bypassed = await assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true, bypass: true })
+    const bypassed = await assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true, bypass: true })
     expect(bypassed.code).toBe('delivery-gate-bypassed')
   })
 
@@ -207,7 +223,7 @@ describe('the delivery gate', () => {
     // merge that had just been smoked. `stampDeployedAt` truncates to seconds for exactly
     // this; the fixture writes the same shape the script does.
     const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: {
         ...STATE,
         // The deploy and the smoke it ran, both inside one second, script-style.
@@ -215,7 +231,7 @@ describe('the delivery gate', () => {
         deployedAt: '2026-10-06T12:00:00Z',
       },
     })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true })).resolves.toBeUndefined()
   })
 
   it('treats a deploy the host did not run as datable evidence, not as a refusal', async () => {
@@ -223,17 +239,17 @@ describe('the delivery gate', () => {
     // its absence would refuse work the plugin never saw and cannot date - the panel would
     // then have to talk the user out of a gate it invented.
     const { root } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: { ...STATE, lastSmoke: { at: '2026-10-05T00:00:00Z', result: 'pass' } },
     })
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true })).resolves.toBeUndefined()
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true })).resolves.toBeUndefined()
   })
 })
 
 describe('the acceptance URL a state file recorded', () => {
   /** The status a state file with one given `url` produces, with docker answering nothing. */
   async function statusWithUrl(url) {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url } })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: { ...STATE, url } })
     const subprocess = { spawn: () => ({
       done: Promise.resolve({ exitCode: 0, signal: null }),
       collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
@@ -247,7 +263,7 @@ describe('the acceptance URL a state file recorded', () => {
     // answer and an object in the other. A shared accessor is the whole fix, and this
     // is the assertion that says so.
     for (const value of [{ evil: true }, 'javascript:alert(1)', 'http://127.0.0.1:8080/', null]) {
-      const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url: value } })
+      const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: { ...STATE, url: value } })
       const subprocess = { spawn: () => ({
         done: Promise.resolve({ exitCode: 0, signal: null }),
         collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
@@ -296,7 +312,7 @@ describe('the acceptance URL a state file recorded', () => {
 
 describe('deployment state reads and writes', () => {
   it('answers the status live: state file for the facts, docker for the containers', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: STATE })
     const calls = []
     const subprocess = { spawn({ argv }) {
       calls.push(argv)
@@ -313,8 +329,12 @@ describe('deployment state reads and writes', () => {
     expect(calls[0].join(' ')).toContain('dsh.env-id=dsh-public-login')
     // What the record's policy says is the one manifest-like fact left; the
     // manifest's own answers - a target list, an autoAllowed flag, a verification
-    // mode and a human ack - are gone from this shape entirely.
-    expect(status.target).toBe('docker')
+    // mode and a human ack - are gone from this shape entirely. `kind` and `target`
+    // say the same thing: the second is the old name, kept for a Host from before the
+    // rename, and both are answered so neither reader has to fall back.
+    expect(status.kind).toBe('deploy')
+    expect(status.target).toBe('deploy')
+    expect(status.deploys).toBe(true)
     expect(status.targets).toBeUndefined()
     expect(status.autoAllowed).toBeUndefined()
     expect(status.verification).toBeUndefined()
@@ -348,7 +368,7 @@ describe('deployment state reads and writes', () => {
   })
 
   it('rebuilds the environment through the task space\'s own deploy script', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: { ...STATE, url: null, destroyedAt: '2026-10-06T00:00:00Z' } })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: { ...STATE, url: null, destroyedAt: '2026-10-06T00:00:00Z' } })
     await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
     await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up "$@"\n', 'utf8')
     const calls = []
@@ -375,7 +395,7 @@ describe('deployment state reads and writes', () => {
     // against, and this side is the one that writes it - after `up` exited zero, never
     // before, so a failed build cannot date itself.
     const { root, statePath } = await taskFixture({
-      metadataDelivery: { deploy: { target: 'docker' } },
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
       state: { ...STATE, lastSmoke: { at: '2020-01-01T00:00:00Z', result: 'pass' } },
     })
     await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
@@ -396,14 +416,37 @@ describe('deployment state reads and writes', () => {
     expect(written.lastSmoke).toEqual({ at: '2020-01-01T00:00:00Z', result: 'pass' })
     expect(written.url).toBe(STATE.url)
     // And the older smoke is now stale, so the gate refuses rather than opening on it.
-    await expect(assertDeliveryGate({ delivery: { deploy: { target: 'docker' } } }, root, { merge: true }))
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true }))
       .rejects.toMatchObject({ code: 'E5006' })
   })
 
   it('refuses to rebuild when the space carries no deploy script', async () => {
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } } })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } } })
     const subprocess = { spawn: vi.fn() }
     await expect(deployEnvironment(subprocess, root)).rejects.toMatchObject({ code: 'E5008' })
+    expect(subprocess.spawn).not.toHaveBeenCalled()
+  })
+
+  it('refuses to deploy a task that owes no environment, whatever its script says', async () => {
+    // `up` is the deploying kind's own subcommand. A smoke-only entry was never asked to
+    // implement it, and running it anyway would either fail on `Usage:` or - worse - stand
+    // up a stack the task never smokes and the finish never tears down. The refusal is made
+    // from the record, before any script runs, because the script cannot know the policy.
+    const smokeOnly = await taskFixture({
+      metadataDelivery: { acceptance: { kind: 'smoke' } },
+      deployScript: '#!/bin/sh\ntouch "$DEPLOY_STATE_FILE"\n',
+    })
+    const subprocess = { spawn: vi.fn() }
+    await expect(deployEnvironment(subprocess, smokeOnly.root)).rejects.toMatchObject({ code: 'E5008' })
+    await expect(deployEnvironment(subprocess, smokeOnly.root)).rejects.toThrow(/smoke only/)
+    expect(subprocess.spawn).not.toHaveBeenCalled()
+
+    // And a task that records no acceptance at all says so in its own words.
+    const none = await taskFixture({
+      metadataDelivery: { acceptance: { kind: 'none' } },
+      deployScript: '#!/bin/sh\ntouch "$DEPLOY_STATE_FILE"\n',
+    })
+    await expect(deployEnvironment(subprocess, none.root)).rejects.toThrow(/acceptance kind is `none`/)
     expect(subprocess.spawn).not.toHaveBeenCalled()
   })
 
@@ -433,7 +476,7 @@ describe('deployment state reads and writes', () => {
     // made outside this flow, and refusing to take those down is the one answer that leaves the
     // user stuck with them. Teardown is docker-only now - there is no per-target branch left that
     // could be reached instead - so it goes through the label path, which finds them.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'none' } } })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'none' } } })
     const calls = []
     const subprocess = { spawn({ argv }) {
       calls.push(argv.join(' '))
@@ -520,7 +563,7 @@ describe('deployment state reads and writes', () => {
     // containers under another project name, or under no label, left an environment this
     // side cannot see - and the finish then found no containers, reported "nothing to
     // remove", and deleted the task space with the containers still on the machine.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: STATE })
     await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
     await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up\n', 'utf8')
     const subprocess = { spawn: ({ argv }) => ({
@@ -547,7 +590,7 @@ describe('deployment state reads and writes', () => {
   it('does not warn when `up` leaves a labelled container, or when docker cannot be asked', async () => {
     // The two controls for the warning above: a fix that always warned would pass it, and
     // a warning that fired on a machine without docker would be noise rather than a signal.
-    const { root } = await taskFixture({ metadataDelivery: { deploy: { target: 'docker' } }, state: STATE })
+    const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: STATE })
     await mkdir(join(root, PLUGIN_ROOT, 'deploy'), { recursive: true })
     await writeFile(join(root, PLUGIN_ROOT, 'deploy', 'deploy.sh'), 'echo up\n', 'utf8')
 
@@ -586,7 +629,7 @@ describe('task metadata carries the policy', () => {
     expect(metadata.deploymentEnvId).toBe('dsh-public-login')
     // One field, and the record says exactly that: `mode` is not carried over from
     // the request, because there is no longer a field for it to land in.
-    expect(metadata.delivery).toEqual({ version: 1, deploy: { target: 'docker' } })
+    expect(metadata.delivery).toEqual({ version: 2, acceptance: { kind: 'deploy' } })
   })
 })
 

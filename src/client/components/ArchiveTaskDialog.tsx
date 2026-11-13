@@ -9,6 +9,7 @@ import { DEFAULT_ARCHIVE_PREFERENCE, documentsDirectoryFor } from "../lib/docume
 import { commonAncestor, containerRootOf, nameOf, projectOf, sameLocation, slashPath } from "../lib/paths"
 import { clearFinishScene, readFinishScene, saveFinishScene, type FinishSceneSession } from "../lib/finish-scene"
 import type { ConfigFormLike } from "./PluginConfigCard"
+import { LineCounts } from "./LineCounts"
 import type { FinishTaskResult, TaskPlan, TaskPlanRepository, WorkspaceNavigation, WorkspacesService } from "../lib/types"
 import type { ISessions, SessionTarget } from "@deepseek-ai/dsh-api-session-controller/client"
 import { Button, Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui"
@@ -992,10 +993,7 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   measured it, and so is the label that would introduce it. */}
               {plan.committedChanges === undefined ? null : <>
                 <span className="dws-changes-label">{t("committedChangesLabel")}</span>
-                <span className="dws-lines" title={format(t("committedChangesHint"), { insertions: String(plan.committedChanges.insertions), deletions: String(plan.committedChanges.deletions) })}>
-                  <span className="dws-line-add">+{plan.committedChanges.insertions}</span>
-                  <span className="dws-line-del">−{plan.committedChanges.deletions}</span>
-                </span>
+                <LineCounts changes={plan.committedChanges} hint={t("committedChangesHint")} />
                 <span aria-hidden="true">·</span>
               </>}
               {/* Nothing uncommitted reads as the same sentence the task view uses for it,
@@ -1005,13 +1003,10 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                 : <>
                   <span className="dws-changes-label" title={plan.workingChanges === undefined
                     ? format(t("dirty"), { count: String(plan.changedFiles) })
-                    : format(t("planWorkingHint"), { count: String(plan.changedFiles), insertions: String(plan.workingChanges.insertions), deletions: String(plan.workingChanges.deletions) })}>
+                    : format(t("planWorkingHint"), { files: String(plan.workingChanges.files ?? 0), insertions: String(plan.workingChanges.insertions), deletions: String(plan.workingChanges.deletions) })}>
                     {t("workingChangesLabel")}
                   </span>
-                  {plan.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("planWorkingHint"), { count: String(plan.changedFiles), insertions: String(plan.workingChanges.insertions), deletions: String(plan.workingChanges.deletions) })}>
-                    <span className="dws-line-add">+{plan.workingChanges.insertions}</span>
-                    <span className="dws-line-del">−{plan.workingChanges.deletions}</span>
-                  </span>}
+                  {plan.workingChanges === undefined ? null : <LineCounts changes={plan.workingChanges} hint={t("planWorkingHint")} />}
                 </>}
             </p>
           </div> : null}
@@ -1055,23 +1050,17 @@ export function ArchiveTaskDialog({ path, api, workspaces, sessions, uiWorkspace
                   pair inside an element whose colour was already set, and the two
                   coloured halves then inherited it instead of their own. */}
               {entry.committedChanges === undefined ? null : <>
-                <span className="dws-changes-label" title={format(t("committedChangesHint"), { insertions: String(entry.committedChanges.insertions), deletions: String(entry.committedChanges.deletions) })}>{t("committedChangesLabel")}</span>
-                <span className="dws-lines" title={format(t("committedChangesHint"), { insertions: String(entry.committedChanges.insertions), deletions: String(entry.committedChanges.deletions) })}>
-                  <span className="dws-line-add">+{entry.committedChanges.insertions}</span>
-                  <span className="dws-line-del">−{entry.committedChanges.deletions}</span>
-                </span>
+                <span className="dws-changes-label" title={format(t("committedChangesHint"), { files: String(entry.committedChanges.files ?? 0), insertions: String(entry.committedChanges.insertions), deletions: String(entry.committedChanges.deletions) })}>{t("committedChangesLabel")}</span>
+                <LineCounts changes={entry.committedChanges} hint={t("committedChangesHint")} />
               </>}
               {entry.changedFiles > 0
                 ? <>
                   <span className="dws-changes-label" title={entry.workingChanges === undefined
                     ? format(t("dirty"), { count: String(entry.changedFiles) })
-                    : format(t("planWorkingHint"), { count: String(entry.changedFiles), insertions: String(entry.workingChanges.insertions), deletions: String(entry.workingChanges.deletions) })}>
+                    : format(t("planWorkingHint"), { files: String(entry.workingChanges.files ?? 0), insertions: String(entry.workingChanges.insertions), deletions: String(entry.workingChanges.deletions) })}>
                     {t("workingChangesLabel")}
                   </span>
-                  {entry.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("planWorkingHint"), { count: String(entry.changedFiles), insertions: String(entry.workingChanges.insertions), deletions: String(entry.workingChanges.deletions) })}>
-                    <span className="dws-line-add">+{entry.workingChanges.insertions}</span>
-                    <span className="dws-line-del">−{entry.workingChanges.deletions}</span>
-                  </span>}
+                  {entry.workingChanges === undefined ? null : <LineCounts changes={entry.workingChanges} hint={t("planWorkingHint")} />}
                 </>
                 : <span>{t("clean")}</span>}
               {/* Saying it before the merge, not after: a target the source

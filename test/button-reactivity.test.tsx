@@ -79,6 +79,12 @@ function setup() {
       },
     } },
     uiWorkspace: {},
+    // The plugin tracks which panel the reader was on, so that the sidebar row can hand
+    // the main column back where it found it. These tests never select a panel.
+    layout: {
+      selectPanel: vi.fn(),
+      panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+    },
     effect: (effect: () => (() => void)) => { effects.push(effect()) },
     slots: {
       inject: (_name: string, register: () => void) => register(),

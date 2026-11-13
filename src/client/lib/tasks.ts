@@ -1,4 +1,5 @@
 import { cleanPath, containerRootOf, nameOf, parentOf, projectOf } from "./paths"
+import { sumLines } from "./lines"
 import type { LineChanges, Worktree, WorktreeList } from "./types"
 
 /** One repository inside a task container, with the status the page already read. */
@@ -155,10 +156,11 @@ export function groupTasks(repos: WorktreeList[]): TaskGroup[] {
       entry.group.behind += behind
       // Summed only when at least one repository reported them: a task whose
       // repositories all failed to answer has no line counts, and a zero would claim
-      // "nothing changed" about a read that never happened.
+      // "nothing changed" about a read that never happened. The file count rides along
+      // through the same helper, so a task's total counts files the way its rows do.
       const add = (current: LineChanges | undefined, next: LineChanges | undefined) => next === undefined
         ? current
-        : { insertions: (current?.insertions ?? 0) + next.insertions, deletions: (current?.deletions ?? 0) + next.deletions }
+        : sumLines(current, next)
       entry.group.committedChanges = add(entry.group.committedChanges, worktree.committedChanges)
       entry.group.workingChanges = add(entry.group.workingChanges, worktree.workingChanges)
       if (worktree.locked) entry.group.lockedRepositories += 1

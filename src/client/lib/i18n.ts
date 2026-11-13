@@ -41,7 +41,6 @@ const zh: Dict = {
   collapseAll: "全部收起",
   worktreesTitle: "Worktree Space 管理",
   pluginSettings: "插件设置",
-  backToConversation: "返回会话",
   repositories: "个仓库",
   worktreeCount: "个 worktree",
   worktreeCountHint: "{count} 个 worktree",
@@ -59,6 +58,11 @@ const zh: Dict = {
   baseBranchLabel: "基线分支",
   remoteBranchLabel: "远端分支",
   noRemoteBranch: "未跟踪远端",
+  // The tooltip on a path in the workspace view. A bare path reads as a directory, but
+  // not as *which* directory: the Workspace root and the repository inside it look
+  // alike, and the row is the one place a reader tells the two apart.
+  workspacePathLabel: "工作区目录",
+  repositoryPathLabel: "仓库目录",
   aheadLabel: "领先",
   behindLabel: "落后",
   aheadHint: "任务分支领先基线分支 {count} 个提交",
@@ -78,11 +82,24 @@ const zh: Dict = {
   planAheadBehindLabel: "领先/落后",
   upstreamAheadHint: "当前分支领先远端跟踪分支 {count} 个提交",
   upstreamBehindHint: "远端跟踪分支领先当前分支 {count} 个提交",
-  upstreamCommittedHint: "当前分支相对远端跟踪分支新增 {insertions} 行、删除 {deletions} 行",
-  upstreamWorkingHint: "工作区里尚未提交的部分：新增 {insertions} 行、删除 {deletions} 行",
+  upstreamCommittedHint: "当前分支相对远端跟踪分支的已提交变更：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
+  /**
+   * The one place a tooltip could be misread: "工作区" here is git's working tree, not a
+   * DSH Workspace. The panel uses the same word for both, so this one says "Git 工作区"
+   * to keep the two apart - a reader told about "工作区" beside a Workspace's name has no
+   * way to know which of the two is meant.
+   */
+  upstreamWorkingHint: "Git 工作区未提交变更：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
   committedChangesLabel: "已提交变更",
   workingChangesLabel: "未提交变更",
-  committedChangesHint: "任务分支相对基线分支累计新增 {insertions} 行、删除 {deletions} 行",
+  /**
+   * The file count in front of a pair of line counts.
+   *
+   * Drawn as "3文件" rather than "3 个文件" because it sits in a row beside "+545 −455"
+   * and has to read as one phrase with them; the tooltip spells it out in words.
+   */
+  filesCount: "{files}文件",
+  committedChangesHint: "任务分支相对基线分支的已提交变更：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
   /**
    * The collapsed task row's one pair, hovered.
    *
@@ -91,17 +108,16 @@ const zh: Dict = {
    * number would read as the committed half alone and disagree with the repositories
    * listed below it.
    */
-  totalChangesHint: "已提交与未提交合计：新增 {insertions} 行、删除 {deletions} 行",
-  workingChangesHint: "工作区里尚未提交的部分：新增 {insertions} 行、删除 {deletions} 行",
+  totalChangesHint: "已提交与未提交合计：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
+  workingChangesHint: "Git 工作区未提交变更：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
   /**
    * The finish dialog's uncommitted summary, hovered.
    *
-   * The row shows the two line counts and drops the file count, so the file count is
-   * kept here rather than lost: "how many lines" is what the reader compares against
-   * the committed pair beside it, and "how many files" is the second question a hover
-   * is the right place to answer.
+   * The row shows the pair and the file count, so the hint carries the same three
+   * numbers in words: "how many files" and "how many lines" are the two questions a
+   * reader compares against the committed pair beside it.
    */
-  planWorkingHint: "未提交变更：{count} 个文件，新增 {insertions} 行、删除 {deletions} 行",
+  planWorkingHint: "未提交变更：新增 {insertions} 行、删除 {deletions} 行，共 {files} 个文件",
   deliveryGateContinue: "继续",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -115,9 +131,14 @@ const zh: Dict = {
   selectAll: "全选",
   selectNone: "全不选",
   detailsLabel: "任务信息",
-  deliveryDeployCheckbox: "部署到 Docker",
-  deliveryDeployCheckboxHint: "勾选后任务空间列表支持一键部署、销毁 Docker 容器，或执行冒烟测试",
-  deliveryDeployNote: "Docker 部署脚本不在面板设置：任务空间的部署入口脚本（默认 .worktree-space/deploy/deploy.sh）实现三个子命令 up/smoke/destroy[可选]。\nup：docker容器（组）部署启动脚本命令；smoke：冒烟测试脚本命令；destroy[可选]：docker容器（组）销毁脚本命令。\n勾选后，创建任务空间时会把工作区的 .worktree-space/deploy/ 整个复制到任务空间里的同一位置。",
+  deliveryAcceptanceKind: "验收方式",
+  deliveryAcceptanceNone: "不做验收",
+  deliveryAcceptanceSmoke: "只跑冒烟",
+  deliveryAcceptanceDeploy: "部署到 Docker",
+  deliveryAcceptanceNoneHint: "收尾时没有闸门",
+  deliveryAcceptanceSmokeHint: "收尾前必须有一条通过的冒烟记录",
+  deliveryAcceptanceDeployHint: "部署环境并冒烟，收尾前必须通过",
+  deliveryAcceptanceNote: "验收方式在创建任务空间时定下，事后不能追加或更改。只跑冒烟：任务空间的入口脚本（默认 .worktree-space/deploy/deploy.sh）提供 smoke 子命令，脚本自己把 lastSmoke: { result, at } 写进状态文件；单元测试、集成测试、构建检查都可以放在里面，用什么方式由项目自己决定。部署到 Docker：同一个入口脚本另有 up 子命令，起环境并把验收地址写进同一个状态文件，smoke 再验一遍这个环境，重新部署之后要重新冒烟。destroy 是可选子命令，面板自己按标签拆环境，不依赖它。两种验收方式都会在创建时把工作区的 .worktree-space/deploy/ 整个复制到任务空间里的同一位置。",
   deployScript: "部署脚本",
   deployScriptHint: "留空则用 工作区/.worktree-space/deploy/deploy.sh",
   deployScriptNote: "工作区/.worktree-space/deploy/ 目录下的文件路径，可以放在它的任意子目录里（例：.worktree-space/deploy/notify.sh）；该目录之外的路径会被拒绝（E4014）。这个路径相对工作区：创建任务空间时工作区的 .worktree-space/deploy/ 会整个复制到任务空间里的同一位置，所以同一个路径在两边都成立，这个入口脚本随后就在那里运行。",
@@ -304,6 +325,7 @@ const zh: Dict = {
   archiveWorkspaceKept: "工作区注册未移除：{error}",
   archiveWorkspaceKeptIntact: "工作区注册保留：任务空间还在，处理完后再结束一次任务。",
   deployTitle: "部署验收",
+  deploySmokeTitle: "冒烟验收",
   deploySmokePass: "冒烟通过",
   deploySmokeFail: "冒烟失败",
   deploySmokeNone: "未冒烟",
@@ -347,14 +369,15 @@ const zh: Dict = {
   scanDepth: "扫描深度",
   scanDepthOption: "{count} 层",
   maxScanDirectories: "最大遍历目录数",
-  entryPanelLabel: "插件槽位入口",
-  entrySidebarLabel: "侧边栏底部快捷入口",
-  configShow: "显示",
-  configHide: "隐藏",
+  entryStyleLabel: "侧边栏入口",
+  entryStyleHint: "「标准」是侧边栏面板列表里的一行（「新会话」下方）；「快捷」是侧边栏底部的快捷入口；「简洁」把入口收成设置行右侧的一个图标。切换后立即生效，三者都以对话框打开管理页面。",
+  entryStyleStandard: "标准",
+  entryStyleQuick: "快捷",
+  entryStyleCompact: "简洁",
   configOn: "开启",
   configOff: "关闭",
   autoFetchRemote: "自动拉取远端分支",
-  autoFetchRemoteHint: "打开页面时先对该仓库执行 git fetch，再比较领先/落后与增删行数，这样数字反映远端此刻的状态；关闭后只与本地已有的远端跟踪引用比较。fetch 只更新远端跟踪引用，不改动工作区和本地分支。",
+  autoFetchRemoteHint: "打开页面时先对该仓库执行 git fetch，再比较领先/落后与增删行数，这样数字反映远端此刻的状态；关闭后只与本地已有的远端跟踪引用比较。fetch 只更新远端跟踪引用，不改动 Git 工作区和本地分支。",
   fetchTimeoutSeconds: "拉取超时",
   fetchTimeoutSecondsHint: "单个仓库的 fetch 超过这个时间就放弃，改用本地已有的远端引用比较；各仓库独立计时，一个仓库超时不影响其它仓库。",
   fetchTimeoutOption: "{seconds} 秒",
@@ -415,6 +438,7 @@ const zh: Dict = {
   viewTasksDescription: "展示任务空间（Worktree Space）列表和状态，可选择任务空间结束任务。",
   worktrees: "Worktree Space",
   feedbackLink: "使用反馈",
+  starLink: "Star",
   videoLink: "视频介绍",
 
   // ── F1 · 通用按钮与状态 ──────────────────────────────────────
@@ -469,7 +493,7 @@ const zh: Dict = {
   hostE4011: "没有指明要给哪个会话放宽权限。",
   hostE4012: "「交由 agent 处理冲突和提交的会话使用完全权限」是关闭的，所以没有给任何会话放宽权限。",
   hostE4014: "创建时指定的部署脚本必须是一个位于源码根内部的现有文件；这个路径不在源码根里、或者不是一个文件，所以什么都没有创建。",
-  hostE4015: "这条任务勾选了部署，但没有任何东西可以部署：没有指定部署脚本，工作区的 .worktree-space/deploy/ 下没有 deploy.sh，所选仓库也都不自带。请补上这个文件、或用「部署脚本」指定一个现有文件，或者不勾部署改为手动部署。任务空间没有创建。",
+  hostE4015: "这个任务选了验收方式，但没有任何东西能产出验收：没有指定部署脚本，工作区的 .worktree-space/deploy/ 下没有 deploy.sh，所选仓库也都不自带。请补上这个文件、或用「部署脚本」指定一个现有文件，或者把验收方式改成「不做验收」自行验证。任务空间没有创建。创建时只能确认入口文件存在，入口是否实现了那个子命令，要等第一次运行才知道。",
   hostE4019: "baseRefs 点名了本次没有选中的仓库：{named}。本次选中的是：{repositories}。请改用这些名字之一——写错的名字静默不生效，所以这里直接拒绝。",
   hostE5006: "没有记录到通过的冒烟：要么 .worktree-space/deploy/.state.json 根本不存在，要么里面的 lastSmoke.result 不是 pass。跑一次部署，再跑一次这个任务空间的冒烟，并让那个脚本把 lastSmoke: { result, at } 合并写进 .worktree-space/deploy/.state.json，然后再合并。",
   hostE5011: "有 {count} 个 worktree 被本进程之外的东西占着，删不掉，所以还没有合并、删除或归档任何东西：\n{held}\n  通常是从任务空间启动的开发服务、浏览器或编辑器；关掉它，再结束一次任务。",
@@ -542,7 +566,6 @@ const en: Dict = {
   collapseAll: "Collapse all",
   worktreesTitle: "Manage Worktree Space",
   pluginSettings: "Plugin settings",
-  backToConversation: "Back to conversation",
   repositories: "repositories",
   worktreeCount: "worktrees",
   worktreeCountHint: "{count} worktrees",
@@ -553,6 +576,10 @@ const en: Dict = {
   baseBranchLabel: "Base branch",
   remoteBranchLabel: "Remote branch",
   noRemoteBranch: "No upstream",
+  // The tooltip on a path in the workspace view: a bare path reads as a directory, but
+  // not as which one - the Workspace root and a repository inside it look alike.
+  workspacePathLabel: "Workspace directory",
+  repositoryPathLabel: "Repository directory",
   aheadLabel: "Ahead",
   behindLabel: "Behind",
   aheadHint: "{count} commits ahead of the base branch",
@@ -562,14 +589,15 @@ const en: Dict = {
   planAheadBehindLabel: "Ahead/behind",
   upstreamAheadHint: "{count} commits ahead of the remote-tracking branch",
   upstreamBehindHint: "{count} commits behind the remote-tracking branch",
-  upstreamCommittedHint: "This branch adds {insertions} lines and removes {deletions} against the remote-tracking branch",
-  upstreamWorkingHint: "Not committed yet: {insertions} lines added, {deletions} removed",
+  upstreamCommittedHint: "Committed changes against the remote-tracking branch: {insertions} lines added, {deletions} removed, across {files} files",
+  upstreamWorkingHint: "Uncommitted changes in the Git working tree: {insertions} lines added, {deletions} removed, across {files} files",
   committedChangesLabel: "Committed changes",
   workingChangesLabel: "Uncommitted changes",
-  committedChangesHint: "The task branch adds {insertions} lines and removes {deletions} against the base branch",
-  totalChangesHint: "Committed and uncommitted together: {insertions} lines added, {deletions} removed",
-  workingChangesHint: "Not committed yet: {insertions} lines added, {deletions} removed",
-  planWorkingHint: "Uncommitted changes: {count} files, {insertions} lines added and {deletions} removed",
+  filesCount: "{files} files",
+  committedChangesHint: "Committed changes against the base branch: {insertions} lines added, {deletions} removed, across {files} files",
+  totalChangesHint: "Committed and uncommitted together: {insertions} lines added, {deletions} removed, across {files} files",
+  workingChangesHint: "Uncommitted changes in the Git working tree: {insertions} lines added, {deletions} removed, across {files} files",
+  planWorkingHint: "Uncommitted changes: {insertions} lines added, {deletions} removed, across {files} files",
   deliveryGateContinue: "Continue",
 
   // ── B · 新建任务空间 ──────────────────────────────────────────
@@ -583,9 +611,14 @@ const en: Dict = {
   selectAll: "Select all",
   selectNone: "Deselect all",
   detailsLabel: "Task details",
-  deliveryDeployCheckbox: "Deploy to Docker",
-  deliveryDeployCheckboxHint: "When ticked, the task space list offers one-click deploy or destroy of its Docker containers, and a smoke-test run.",
-  deliveryDeployNote: "The Docker deploy script is not configured in the panel: the task space's deploy entry (by default .worktree-space/deploy/deploy.sh) implements three subcommands — up, smoke and destroy [optional].\nup: the docker container(s) deploy/start script command; smoke: the smoke test script command; destroy [optional]: the docker container(s) destroy script command.\nWhen ticked, creating a task space copies the workspace's .worktree-space/deploy/ whole to the same relative place in the task space.",
+  deliveryAcceptanceKind: "Acceptance",
+  deliveryAcceptanceNone: "No acceptance",
+  deliveryAcceptanceSmoke: "Smoke only",
+  deliveryAcceptanceDeploy: "Deploy to Docker",
+  deliveryAcceptanceNoneHint: "No gate at the finish",
+  deliveryAcceptanceSmokeHint: "A passing smoke is required before the merge",
+  deliveryAcceptanceDeployHint: "Deploy the environment and smoke it; a passing smoke is required before the merge",
+  deliveryAcceptanceNote: "The acceptance kind is settled when the task space is created and cannot be added or changed later. Smoke only: the task space's entry (by default .worktree-space/deploy/deploy.sh) provides a smoke subcommand, and the script itself merges lastSmoke: { result, at } into the state file. A unit suite, an integration suite or a build check all belong there - how the project verifies itself is the project's own business. Deploy to Docker: the same entry also provides an up subcommand, which stands the environment up and writes the acceptance URL into that same state file; smoke then verifies that environment, and a rebuilt deployment needs a fresh smoke. destroy is optional: the panel tears the environment down by its label and does not depend on it. Both kinds copy the workspace's .worktree-space/deploy/ whole to the same relative place in the task space.",
   deployScript: "Deploy script",
   deployScriptHint: "Empty uses workspace/.worktree-space/deploy/deploy.sh",
   deployScriptNote: "A file path under workspace/.worktree-space/deploy/, in any subdirectory of it (e.g. .worktree-space/deploy/notify.sh); a path outside that directory is refused (E4014). The path is relative to the workspace: creating a task space copies the workspace's .worktree-space/deploy/ whole to the same relative place in the task space, so one path holds on either side, and this entry then runs there.",
@@ -771,6 +804,7 @@ const en: Dict = {
   archiveWorkspaceKept: "The workspace registration was kept: {error}",
   archiveWorkspaceKeptIntact: "The workspace registration is kept: the task space is still there, so finish it again once that is handled.",
   deployTitle: "Deployment acceptance",
+  deploySmokeTitle: "Smoke acceptance",
   deploySmokePass: "Smoke passed",
   deploySmokeFail: "Smoke failed",
   deploySmokeNone: "Not smoked",
@@ -812,14 +846,15 @@ const en: Dict = {
   scanDepth: "Scan depth",
   scanDepthOption: "{count} level(s)",
   maxScanDirectories: "Max directories to scan",
-  entryPanelLabel: "Plugin slot entry",
-  entrySidebarLabel: "Shortcut in the sidebar footer",
-  configShow: "Show",
-  configHide: "Hide",
+  entryStyleLabel: "Sidebar entry",
+  entryStyleHint: "Standard is a row in the sidebar's panel list, under New session; Quick is the shortcut at the sidebar foot; Compact reduces the entry to one icon at the end of the settings row. Toggling applies immediately, and all three open the management page as a dialog.",
+  entryStyleStandard: "Standard",
+  entryStyleQuick: "Quick",
+  entryStyleCompact: "Compact",
   configOn: "On",
   configOff: "Off",
   autoFetchRemote: "Fetch remotes automatically",
-  autoFetchRemoteHint: "Opening the page runs git fetch in each repository before comparing ahead/behind and line counts, so the numbers reflect what the remote has right now; off compares against the remote-tracking refs already on disk. A fetch updates those refs only - it never touches the working tree or a local branch.",
+  autoFetchRemoteHint: "Opening the page runs git fetch in each repository before comparing ahead/behind and line counts, so the numbers reflect what the remote has right now; off compares against the remote-tracking refs already on disk. A fetch updates those refs only - it never touches the Git working tree or a local branch.",
   fetchTimeoutSeconds: "Fetch timeout",
   fetchTimeoutSecondsHint: "A repository's fetch is abandoned after this long and the comparison falls back to the local refs. Each repository is timed on its own, so one slow remote does not hold up the others.",
   fetchTimeoutOption: "{seconds} s",
@@ -880,6 +915,7 @@ const en: Dict = {
   viewTasksDescription: "Lists the task spaces (Worktree Spaces) and their status; select one to finish the task.",
   worktrees: "Worktree Space",
   feedbackLink: "Feedback",
+  starLink: "Star",
   videoLink: "Video introduction",
 
   // ── F1 · 通用按钮与状态 ──────────────────────────────────────
@@ -932,7 +968,7 @@ const en: Dict = {
   hostE4011: "No session was named to widen.",
   hostE4012: "Full access for the sessions handed to the agent for conflicts and commits is switched off, so no session was widened.",
   hostE4014: "The deploy script named at creation has to be an existing file inside the source root; this path is outside it, or is not a file, so nothing was created.",
-  hostE4015: "This task is set to deploy, but nothing can deploy it: no deploy script was named, the workspace carries no .worktree-space/deploy/deploy.sh, and none of the selected repositories carries one. Add that file, name an existing one with the deploy-script field, or leave deployment unticked and deploy by hand. No task space was created.",
+  hostE4015: "This task records an acceptance, but nothing can produce one: no deploy script was named, the workspace carries no .worktree-space/deploy/deploy.sh, and none of the selected repositories carries one. Add that file, name an existing one with the deploy-script field, or set the acceptance kind to \"No acceptance\" and verify it by hand. No task space was created. A create can confirm only that the entry file exists - whether it implements the subcommand is settled by its first run.",
   hostE4019: "baseRefs names a repository this call does not select: {named}. It selects: {repositories}. Use one of those names - a misspelled one would silently do nothing, so it is refused instead.",
   hostE5006: "No passing smoke is recorded: either .worktree-space/deploy/.state.json does not exist at all, or its lastSmoke.result is not pass. Deploy the task space, run its smoke, and have that script merge lastSmoke: { result, at } into .worktree-space/deploy/.state.json, then merge.",
   hostE5011: "{count} worktree cannot be removed while something outside this process is holding it, so nothing has been merged, removed or filed yet:\n{held}\n  A dev server, a browser or an editor started in the task space is the usual one; close it, then finish the task again.",

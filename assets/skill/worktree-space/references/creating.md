@@ -43,17 +43,20 @@ Follow this order. Never create a workspace with a guessed location.
    choice as `branchPrefix` and expect the branch to be that prefix plus the task
    name (`hotfix/<task>`, `release-<task>`, …).
 8. **Ask about the acceptance fence — before the create, and before any session is
-   opened in it.** The one delivery decision a create makes is `deployTarget`, it is
-   settled there, and nothing can add or change it afterwards. Put the question plainly:
-   is this task deployed for acceptance — the task space brings its own environment up
-   and a smoke has to pass before the work may land (`deployTarget: "docker"`) — or is
-   there nothing to deploy (`deployTarget: "none"`, the built-in default)?
+   opened in it.** The one acceptance decision a create makes is `acceptanceKind`, it is
+   settled there, and nothing can add or change it afterwards. Put the question with all
+   three answers in view: is there **nothing to accept** (`"none"`, the built-in default)?
+   Does a **smoke alone** decide it (`"smoke"` — a unit suite, an integration suite, a
+   build check; no environment, no acceptance URL)? Or does the task space bring its own
+   **environment** up and smoke that (`"deploy"`, which hands over an acceptance URL)?
    **Do not answer it for the user, and do not create the space, or open a session in
    one, with the question still open.** A fence nobody chose cannot be fitted afterwards,
    and no record says one was ever wanted, so the task goes on with no acceptance check
    at all and nothing in the interface says so. `none` is a good answer for work that
-   carries no runtime behaviour to accept; state which answer is being passed and why.
-   `references/deploying.md` says what a deploying space owes.
+   carries no runtime behaviour to accept, and `smoke` is the right answer for a task
+   whose acceptance is a test suite — do not steer a test-only task to `deploy` just
+   because that answer existed first. State which answer is being passed and why.
+   `references/deploying.md` says what a space that records an acceptance owes.
 9. **Run `action: "create"`.** It does both halves: it makes the task directory,
    the branch and one worktree per repository **and registers the result as a DSH
    Workspace**, which is what puts the task space in the workspace list under
@@ -65,21 +68,23 @@ Follow this order. Never create a workspace with a guessed location.
    **Create and open** does in one press, except that the session there starts empty
    and this one is already working. Do that when the user wants the work started, not
    merely a place to work in; see *Putting a session on the work* below.
-   **The delivery answer is step 8's `deployTarget`, and it is settled here.** `docker`
-   means the task expects a deployment, and its finish gate is live: `done` with
-   `merge: true` is refused until `.worktree-space/deploy/.state.json` records a passing
-   smoke — and that smoke is the finish line rather than a formality: `up` writes the
-   acceptance URL, `smoke` records the pass, and those two are what a completion report
-   carries. `none` means no deployment and no gate. A create that passes `docker` with
-   nothing to deploy with is refused (E4015). Everything else a finish
+   **The acceptance answer is step 8's `acceptanceKind`, and it is settled here.** Both
+   `smoke` and `deploy` make the finish gate live: `done` with `merge: true` is refused
+   until `.worktree-space/deploy/.state.json` records a passing smoke — and that smoke is
+   the finish line rather than a formality, so it is what a completion report carries.
+   `deploy` adds an environment, so `up` also writes an acceptance URL and that URL is
+   part of the report; a rebuilt deployment needs a fresh smoke. `none` means no
+   acceptance and no gate. A create that chooses either gated kind with no entry script to
+   run is refused (E4015), and that check confirms the file exists only — whether the
+   subcommand is implemented is settled by its first run. Everything else a finish
    decides (whether to merge, which branch, whether to delete it, what happens to
    untracked files) is passed on the `done` call instead, where you can see the work
    it applies to. See `references/finishing.md`.
    **The gate is not something this tool can sign off.** `done` takes no
    acknowledgement argument, and `force` is refused outright (E7007); the user's own
    overrule exists only on the Worktree Space panel. When `done` answers with E5006,
-   the way past is to deploy and run the smoke through the task space's own deploy entry
-   — report what is missing and do that, or tell the user they can
+   the way past is to run the smoke through the task space's own entry (deploying first,
+   for a `deploy` task) — report what is missing and do that, or tell the user they can
    finish anyway from the panel. Never retry the same call expecting a different
    answer, and never reach for a flag this tool does not have.
 10. **Report where it is, and say which entry opens the session.** When this call

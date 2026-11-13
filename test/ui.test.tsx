@@ -67,7 +67,7 @@ describe("CreateWorktreeDialog", () => {
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
     await waitFor(() => expect(next.uiWorkspace.openWorkspace).toHaveBeenCalledWith("ws-wt"))
-    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", deployTarget: "none" })
+    expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: undefined, branchPrefix: "task/", acceptanceKind: "none" })
     expect(next.workspaces.create).toHaveBeenCalledWith({ path: "/tasks/fix-login" })
     expect(next.workspaces.rename).toHaveBeenCalledWith("ws-wt", "apple/fix-login")
     expect(onClose).toHaveBeenCalled()
@@ -84,7 +84,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha"], baseRef: undefined, branchPrefix: "task/", deployTarget: "none" }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha"], baseRef: undefined, branchPrefix: "task/", acceptanceKind: "none" }))
   })
 
   it("starts every branch from the shared ref the user chose", async () => {
@@ -114,7 +114,7 @@ describe("CreateWorktreeDialog", () => {
     await user.type(screen.getByLabelText(new RegExp(`^${t("taskName")}`)), "Fix login")
     await user.click(screen.getByRole("button", { name: t("createAndOpen") }))
 
-    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: "main", branchPrefix: "task/", deployTarget: "none" }))
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith({ sourceRoot: "/repo", task: "fix-login", tasksRoot: "/tasks", repos: ["/repo/alpha", "/repo/beta"], baseRef: "main", branchPrefix: "task/", acceptanceKind: "none" }))
   })
 
   it("refuses to create without a valid name or a selected repository", async () => {

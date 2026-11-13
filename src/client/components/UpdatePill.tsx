@@ -25,8 +25,8 @@ const COPIED_MS = 1600
  * A capsule beside the page's title, when the registry has something newer.
  *
  * It renders nothing at all when there is no update - not an empty box, not a spacer -
- * because the heading row is shared by the panel and the dialog and must not reflow when
- * an answer arrives a moment after the page paints.
+ * because the row it sits in must not reflow when an answer arrives a moment after the
+ * page paints.
  *
  * Two actions, because there are two things a reader does with this news:
  *

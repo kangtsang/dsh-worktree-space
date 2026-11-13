@@ -69,7 +69,12 @@ describe("WorktreesSettings loading lifecycle", () => {
     next.mount()
     showRepositories()
     expect(screen.getByRole("status").textContent).toContain(t("scanningUnknown"))
-    expect(screen.queryByText(t("noWorktrees"))).toBeNull()
+    // Nothing is claimed about the list while the scan is out: no rows, and no empty
+    // state either. Asserting on a copy key here used to name `noWorktrees`, which no
+    // dictionary has ever carried - `t` answered with the key itself, so the assertion
+    // could not fail. These two read the structure instead.
+    expect(document.querySelectorAll(".dws-repo")).toHaveLength(0)
+    expect(document.querySelector(".dws-empty")).toBeNull()
     expect(screen.getByRole("button", { name: t("refresh") })).toHaveProperty("disabled", true)
     expect(next.api.scan).toHaveBeenCalledWith(["/projects", "/projects/narrow"], expect.any(AbortSignal), undefined)
 

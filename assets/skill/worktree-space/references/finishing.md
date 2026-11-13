@@ -3,7 +3,8 @@
 Run `action: "done"`. It **removes the worktrees** and, by default, **keeps every branch**.
 Two arguments carry the decision, and one of them is required.
 
-**A deploying task is not finished until its fence has passed.** With `deployTarget: docker`
+**A task that records an acceptance is not finished until its fence has passed.** With
+`acceptanceKind: smoke` or `deploy`
 the finish is defined by the smoke, not merely gated by it: the work is done when the task
 space's own smoke has recorded `pass`, and the acceptance URL `up` wrote is what the user is
 handed. Never report such a task complete because the code is written, and never treat the

@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorktreesSettings } from "../src/client/components/WorktreesSettings"
+import { WorktreeManagePanel } from "../src/client/components/WorktreeManagePanel"
 import { scanAnswer } from "./scan-answer.helper"
 
 const clean = { changedFiles: 0, branchLine: "", output: "" }
@@ -61,8 +62,24 @@ describe("WorktreesSettings discovery controls", () => {
     // The entry stays short enough for the sidebar; the page title can say what
     // the page is for. They are deliberately not one string.
     expect(t("worktrees")).not.toBe(t("worktreesTitle"))
-    expect(screen.getByRole("heading", { name: t("worktreesTitle") })).toBeTruthy()
+    // The title is the dialog's, not the section's: the section is the body under that
+    // header, so it names itself by what it holds ("Worktree Space") and carries no
+    // second title of its own.
     expect(screen.getByRole("region", { name: t("worktrees") })).toBeTruthy()
+    expect(screen.queryByRole("heading", { name: t("worktreesTitle") })).toBeNull()
+    cleanup()
+
+    const s = setup()
+    render(<WorktreeManagePanel
+      api={s.api as any}
+      workspaces={s.workspaces as any}
+      uiWorkspace={s.uiWorkspace as any}
+      sessions={{ list: { getSnapshot: () => ({ byId: {} }) } } as any}
+      onCreate={s.onCreate}
+      onClose={vi.fn()}
+    />)
+    await settled()
+    expect(screen.getByRole("heading", { name: t("worktreesTitle") })).toBeTruthy()
   })
 
   const repos = [

@@ -1,7 +1,6 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import AlertCircleIcon from "@hugeicons/core-free-icons/AlertCircleIcon"
 import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon"
-import ArrowLeft01Icon from "@hugeicons/core-free-icons/ArrowLeft01Icon"
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon"
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon"
 import CheckIcon from "@hugeicons/core-free-icons/CheckIcon"
@@ -89,7 +88,6 @@ export const Check = iconOf(CheckIcon)
 /** The spinner: a loader, turned by the `dws-spin` animation its call sites add. */
 export const Loader2 = iconOf(Loading03Icon)
 export const X = iconOf(Cancel01Icon)
-export const ChevronLeft = iconOf(ArrowLeft01Icon)
 export const ChevronRight = iconOf(ArrowRight01Icon)
 export const ChevronDown = iconOf(ArrowDown01Icon)
 export const Plus = iconOf(PlusSignIcon)

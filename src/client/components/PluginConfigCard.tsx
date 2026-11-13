@@ -3,6 +3,7 @@ import { Check, ChevronDown, Loader2 } from "./icons"
 import { Button, Dialog, DialogContent, DialogDescription, Input } from "./ui"
 import { format, useT } from "../lib/i18n"
 import { previewValue, setPreview, settlePreview, subscribePreview } from "../lib/config-preview"
+import { ENTRY_STYLE_FALLBACK, ENTRY_STYLE_FIELD, entryStyleOf } from "../lib/entry-style"
 import { ScanIgnoreEditor } from "./ScanIgnoreEditor"
 import { DEFAULT_IGNORED_SCAN_DIRECTORIES, forcedIgnoreNames, sameIgnoreNames } from "../lib/scan-ignore"
 
@@ -30,7 +31,15 @@ interface Choice {
 
 /** One row of this plugin's configuration. */
 interface ChoiceField {
-  kind?: "choices"
+  /**
+   * `choices` opens a menu; `segmented` draws the same choice as a row of buttons.
+   *
+   * The segmented form is for a setting with two or three answers where the reader is
+   * comparing them rather than looking one up - all of them stay on screen, so the
+   * difference between them is visible without opening anything. A menu is better for
+   * the longer lists, where the current value is what matters and the rest is a lookup.
+   */
+  kind?: "choices" | "segmented"
   field: string
   label: string
   fallback: string
@@ -167,16 +176,21 @@ const HANDOFF_ACCESS_OFF = "off"
  */
 const fieldsFor = (t: (key: string) => string): Field[] => [
   {
-    field: "panelEntry",
-    label: t("entryPanelLabel"),
-    fallback: "hide",
-    choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
-  },
-  {
-    field: "sidebarEntry",
-    label: t("entrySidebarLabel"),
-    fallback: "show",
-    choices: [{ value: "show", key: "configShow" }, { value: "hide", key: "configHide" }],
+    // One row rather than two switches. The pair described two facts and offered four
+    // arrangements, and the fourth - neither entry - put the plugin nowhere in the
+    // sidebar; three named answers say what the three arrangements actually are. The
+    // order is the order they sit in on screen: top of the sidebar, its foot, then the
+    // one icon beside the settings row.
+    kind: "segmented",
+    field: ENTRY_STYLE_FIELD,
+    label: t("entryStyleLabel"),
+    fallback: ENTRY_STYLE_FALLBACK,
+    hint: t("entryStyleHint"),
+    choices: [
+      { value: "standard", key: "entryStyleStandard" },
+      { value: "quick", key: "entryStyleQuick" },
+      { value: "compact", key: "entryStyleCompact" },
+    ],
   },
   {
     // How much access those two entries get. Off is what the plugin has always done -
@@ -765,7 +779,7 @@ function TaskModelRow({ provider, model, catalog, loading, unavailable, onRetry,
 /** The pending choices, as the controls read them. */
 function previewValues(): Record<string, string> {
   const values: Record<string, string> = {}
-  for (const field of ["panelEntry", "sidebarEntry", HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "autoFetchRemote", "fetchTimeoutSeconds", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
+  for (const field of [ENTRY_STYLE_FIELD, HANDOFF_ACCESS_FIELD, "scanDepth", "maxScanDirectories", "autoFetchRemote", "fetchTimeoutSeconds", "defaultBranchPrefix", TASKS_ROOT_STRATEGY_FIELD, TASKS_ROOT_DIRECTORY_FIELD, ARCHIVE_STRATEGY_FIELD, "archiveDocumentsDirectory", AUDIT_LOG_FIELD, TASK_MODEL_PROVIDER_FIELD, TASK_MODEL_FIELD]) {
     const value = previewValue(field)
     if (value !== undefined) values[field] = value
   }
@@ -971,13 +985,39 @@ export function PluginConfigCard({ form, models, loadModels }: PluginConfigCardP
       }
       const { field: name, label, fallback, numeric, choices, hint } = field
       const fieldBoolean = field.boolean === true
-      const current = chosen[name] ?? served[name] ?? fallback
+      // The entry row shows what is actually in force, which for a configuration written
+      // before this field existed is derived from the two switches it replaced. Reading
+      // only the served field would label the row "quick" to someone whose entry is the
+      // panel row - and the first click would then move an entry that never moved.
+      // An empty string is how a field the Host does not serve at all arrives here - the
+      // text projection turns an absent value into "" - so it counts as absent too.
+      const current = name === ENTRY_STYLE_FIELD && chosen[name] === undefined && (served[name] ?? "") === ""
+        ? entryStyleOf({ panelEntry: served.panelEntry, sidebarEntry: served.sidebarEntry })
+        : chosen[name] ?? served[name] ?? fallback
       // A value in force that the list does not offer joins it, so the control
       // shows what is set rather than the nearest preset.
       const offered = choices.some((choice) => choice.value === current)
       const all: Choice[] = offered ? choices : [...choices, { value: current, text: current }]
       const labelOf = (choice: Choice) => choice.text ?? t(choice.key ?? choice.value)
       const active = all.find((choice) => choice.value === current)
+      // A segmented row keeps every answer on screen: three short labels are cheaper to
+      // compare than a menu that has to be opened to see what the other two are, and the
+      // choice itself is the whole setting - there is nothing else in the row to read.
+      if (field.kind === "segmented") {
+        return <div className="dws-plugin-config-row" key={name}>
+          <span className="dws-plugin-config-label">{label}{hint === undefined ? null : <span className="dws-plugin-config-hint">{hint}</span>}</span>
+          <span className="dws-plugin-config-field">
+            <span className="dws-plugin-config-segmented" role="group" aria-label={label}>
+              {all.map((choice) => <button type="button" key={choice.value}
+                className="dws-plugin-config-segment"
+                aria-pressed={choice.value === current}
+                onClick={() => pick(name, choice, numeric, fieldBoolean)}>
+                {labelOf(choice)}
+              </button>)}
+            </span>
+          </span>
+        </div>
+      }
       return <div className="dws-plugin-config-row" key={name}>
         <span className="dws-plugin-config-label">{label}{hint === undefined ? null : <span className="dws-plugin-config-hint">{hint}</span>}</span>
         <span className="dws-plugin-config-field">

@@ -1,5 +1,5 @@
 import { isChinese, useLanguage, useT } from "../lib/i18n"
-import { ISSUES_URL, VIDEO_URL } from "../lib/links"
+import { ISSUES_URL, STAR_URL, VIDEO_URL } from "../lib/links"
 
 /**
  * The two lines that say what this plugin does and how a task walks through it,
@@ -35,7 +35,22 @@ export function PluginDescription() {
             a reader who cannot follow the narration is better served by the
             written flow above than by a link they would have to abandon. */}
         {chinese ? <><a className="dws-feedback-link" href={VIDEO_URL} target="_blank" rel="noreferrer">{t("videoLink")}</a>{" "}</> : null}
-        <a className="dws-feedback-link" href={ISSUES_URL} target="_blank" rel="noreferrer">{t("feedbackLink")}</a>
+        <a className="dws-feedback-link" href={ISSUES_URL} target="_blank" rel="noreferrer">{t("feedbackLink")}</a>{" "}
+        {/* The star follows the feedback link rather than leading the line: a reader
+            who has just been told where to report a problem is the one most likely to
+            have an opinion worth a star, and the mark is a glyph plus one word rather
+            than a sentence of its own.
+
+            The mark is the character U+2606 rather than an icon component, and that is
+            the whole reason it is one: `text-decoration` paints under every glyph in the
+            run, but an inline SVG is a replaced box that the decoration line skips - so
+            the word was underlined and the star beside it was not. A text character is
+            part of the same run, so one underline covers both and the link reads as the
+            single target it is. It is also the hollow star, which is the honest drawing:
+            a filled one would claim the reader had already starred the project. */}
+        <a className="dws-feedback-link dws-star-link" href={STAR_URL} target="_blank" rel="noreferrer">
+          <span className="dws-star-mark" aria-hidden="true">☆</span>{" "}{t("starLink")}
+        </a>
       </span>
     </>
   )

@@ -2,7 +2,8 @@
  * The delivery policy: what finishing a task owes, and to whom.
  *
  * This used to be eight fields a create declared once and every later step read
- * back. It is now one: whether the task expects a deployment at all. Everything
+ * back. It is now one: what the task owes before it may land - nothing, a passing
+ * smoke, or a passing smoke of a deployment. Everything
  * else moved to where the decision is actually made - the `done` call, whose
  * arguments say what to merge, what to do with leftovers and which branch to land
  * on. A policy recorded at create time and consulted at finish time could only
@@ -10,9 +11,18 @@
  * out to be read by nobody at all (see the repository's own notes on
  * `deploy.mode`, `conflicts`, `merge.target` and `verification`).
  *
- * What is left is the one answer a later step cannot derive: does this task have
- * an environment whose smoke has to pass before the work may land? That is
- * `deploy.target`, and it is the switch that turns the finish gate on.
+ * What is left is the one answer a later step cannot derive: what does this task
+ * owe before its work may land? That is `acceptance.kind`, and it is the switch
+ * that turns the finish gate on - at one of two strengths, a smoke alone or a
+ * deployment whose smoke has to pass.
+ *
+ * The field was `deploy.target` while the only answer worth recording was whether
+ * a deployment was expected. It was renamed when a task that only ever runs tests
+ * turned out to owe the same thing a deploying task does: a recorded verdict. A
+ * name that asks about deploying cannot carry "a smoke and nothing else" without
+ * reading as an exception; a name that asks about acceptance carries all three
+ * answers, and the one that deploys becomes the detailed case rather than the
+ * default everything else is described against.
  *
  * The schema is deliberately flat and closed: the field names one decision, the
  * value comes from a fixed list, and an invalid value is refused at create time (a
@@ -25,40 +35,63 @@ import { posix, win32 } from 'node:path'
 import { coded } from './codes.js'
 
 /**
- * What carries the acceptance: an isolated compose environment, or nothing.
+ * What a task owes before its work may land: a deployment and its smoke, a smoke
+ * on its own, or nothing.
  *
- * `host` was removed: it ran whatever command a `deploy.yaml` named, which meant
- * the plugin owned none of the observability a deployment needs - no container to
- * find, no log to read, no label to tear down by. A failure there surfaced as an
- * exit code and 4000 characters of output, which is not enough to debug a port
- * conflict or a compile error. Docker is kept because it is the target the plugin
- * can actually see: containers carry the environment id, so the status, the
- * teardown and the "is anything running" question all have real answers.
+ * The three are one decision, not a deployment with an optional add-on, because a
+ * task that only ever runs a test suite has the same thing to show as one that
+ * brings a stack up: a recorded verdict on the work. Accepting the second shape is
+ * what makes "run `npm test`, write `lastSmoke: pass`" a complete answer - there is
+ * no container to start, no URL to hand over, and nothing for the teardown to look
+ * for, but there is still a fence.
  *
- * `dsh-acceptance` was removed earlier, for its own reason: a DSH plugin is
- * accepted on a web instance too, and that instance is a node process in a
- * container like any other - it belongs to docker, as a documented recipe, not as
- * a category.
+ * `deploy` and `smoke` differ in exactly two ways, and both are about what the
+ * environment can answer: a deployment hands over an acceptance URL and has
+ * containers to tear down, and its smoke is evidence about the stack that is
+ * standing rather than only about the tree. Everything else - the entry script, the
+ * state file, the recorded smoke, the gate - is the same file and the same code.
+ *
+ * Two targets were removed to leave these three. `host` ran whatever command a
+ * `deploy.yaml` named, which meant the plugin owned none of the observability a
+ * deployment needs - no container to find, no log to read, no label to tear down
+ * by - and a failure surfaced as an exit code and 4000 characters of output, which
+ * is not enough to debug a port conflict. `dsh-acceptance` was a DSH web instance,
+ * which is a node process in a container like any other: a documented recipe, never
+ * a category of its own.
  */
-export const DEPLOY_TARGETS = ['docker', 'none']
+export const ACCEPTANCE_KINDS = ['none', 'smoke', 'deploy']
 
 /**
  * The policy a task carries when nobody said otherwise: the manual flow.
  *
- * `target: 'none'` means no deployment is expected, which closes the finish gate
- * entirely - the task is as finishable as it was before delivery policies existed.
- * A default that deployed and gated would turn every task the user has today into
- * one that refuses to finish until a smoke passes.
+ * `kind: 'none'` means nothing is expected, which closes the finish gate entirely -
+ * the task is as finishable as it was before delivery policies existed. A default
+ * that gated would turn every task the user has today into one that refuses to
+ * finish until something is recorded, and a fence nobody chose is not a fence.
  */
 export const DEFAULT_DELIVERY_POLICY = Object.freeze({
-  version: 1,
-  deploy: Object.freeze({ target: 'none' }),
+  version: 2,
+  acceptance: Object.freeze({ kind: 'none' }),
 })
 
-const FIELDS = {
-  deploy: {
-    target: DEPLOY_TARGETS,
-  },
+/**
+ * How a `version: 1` record's target reads as a kind.
+ *
+ * Read-time only, and it is the whole of the migration: every reader of a stored
+ * policy goes through {@link coerceDeliveryPolicy}, so pointing the one function at
+ * this map is what makes a record written before the rename keep working. Nothing
+ * rewrites the old shape on disk - a record's meaning is decided by the function
+ * that reads it, not by what a later write happened to normalise it to - and no
+ * field was added to the new shape, so an old record is not short of anything.
+ *
+ * `docker` becomes `deploy` because that is what it always meant: the one target
+ * that has an environment, an acceptance URL and a label to tear down by. `host` is
+ * absent, which is deliberate - it is not in the current list either, so it falls
+ * through to the default, exactly as it did before this rename.
+ */
+const LEGACY_TARGET_KINDS = {
+  docker: 'deploy',
+  none: 'none',
 }
 
 function isPlainObject(value) {
@@ -81,23 +114,38 @@ function oneOf(list, value, field, { strict }) {
  * the note. Lenient (read time): every invalid or missing field falls back to the
  * default, because a record from an older version must still finish.
  *
- * A record from before this schema shrank still reads: its `host` target is not in
- * the list any more, so it falls back to `none` - which drops the gate rather than
- * inventing one. That is the safe direction for a value this side can no longer
- * serve, and it is the same rule every other removed field follows.
+ * The two shapes are both read, and which one arrives is decided by what the input
+ * carries rather than by its `version`: a record with `acceptance` is this schema,
+ * one with `deploy` is the schema before the rename. Keying on the fields means a
+ * hand-edited record that got its `version` wrong is still read as what it plainly
+ * is, and a caller stating a policy at create time cannot pick a shape by claiming
+ * a version.
  * @param input - the partial policy, as stored or as requested.
  * @param mode - `strict` refuses invalid values; `lenient` substitutes defaults.
  * @returns the complete policy.
  */
 function buildPolicy(input, { strict }) {
   const source = isPlainObject(input) ? input : {}
-  const sourceDeploy = isPlainObject(source.deploy) ? source.deploy : {}
+  const current = isPlainObject(source.acceptance) ? source.acceptance : undefined
+  // The legacy shape, read only when the current one is absent: a record carrying
+  // both is one this side wrote and then somebody edited, and the field the current
+  // schema names is the one to trust.
+  const legacy = current === undefined && isPlainObject(source.deploy) ? source.deploy : undefined
 
-  const target = oneOf(DEPLOY_TARGETS, sourceDeploy.target, 'deploy.target', { strict }) ?? DEFAULT_DELIVERY_POLICY.deploy.target
-
+  const stated = current === undefined
+    ? oneOf(Object.keys(LEGACY_TARGET_KINDS), legacy?.target, 'deploy.target', { strict })
+    : oneOf(ACCEPTANCE_KINDS, current.kind, 'acceptance.kind', { strict })
+  // A legacy target that is in its own list but has no kind - nothing today, since the
+  // map covers both - falls back like any other unreadable value rather than inventing
+  // a fence. `LEGACY_TARGET_KINDS` is keyed off for `oneOf` so a `version: 1` record's
+  // `kubernetes`/`host` is refused at create time and defaulted at read time, which is
+  // the same two moods the current value gets.
+  const kind = current === undefined
+    ? (stated === undefined ? undefined : LEGACY_TARGET_KINDS[stated])
+    : stated
   return {
-    version: 1,
-    deploy: { target },
+    version: 2,
+    acceptance: { kind: kind ?? DEFAULT_DELIVERY_POLICY.acceptance.kind },
   }
 }
 

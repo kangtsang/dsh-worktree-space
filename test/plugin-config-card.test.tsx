@@ -14,8 +14,7 @@ function configForm(prefix = "task/", accepted = true, archiveDirectory = "", ar
   tasksRootStrategy = "default", tasksRootDirectory = "", ignoredScanDirectories: string[] = [], removedScanDirectories: string[] = [],
   taskModelProvider = "", taskModel = "") {
   let value: Record<string, unknown> = {
-    panelEntry: "hide",
-    sidebarEntry: "show",
+    entryStyle: "quick",
     scanDepth: 2,
     maxScanDirectories: 2000,
     defaultBranchPrefix: prefix,
@@ -147,6 +146,59 @@ describe("the configuration card's branch prefix row", () => {
     // Editing is the one moment the note changes, because what to do next has changed.
     fireEvent.click(editButton())
     expect(hintIn(t("defaultBranchPrefixSettingsLabel"))).toBe(t("configPrefixEditHint"))
+  })
+})
+
+describe("the configuration card's sidebar entry row", () => {
+  it("offers the three entries at once, and saves the one chosen", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // Three answers on screen rather than behind a menu: this setting IS the choice, so
+    // the row shows all of them and marks the one in force.
+    const group = screen.getByRole("group", { name: t("entryStyleLabel") })
+    expect(within(group).getAllByRole("button").map((button) => button.textContent))
+      .toEqual([t("entryStyleStandard"), t("entryStyleQuick"), t("entryStyleCompact")])
+    expect(within(group).getByRole("button", { name: t("entryStyleQuick") }).getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.click(within(group).getByRole("button", { name: t("entryStyleCompact") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("entryStyle", "compact"))
+    expect(read()).toMatchObject({ entryStyle: "compact" })
+    expect(within(group).getByRole("button", { name: t("entryStyleCompact") }).getAttribute("aria-pressed")).toBe("true")
+  })
+})
+
+describe("the configuration card's sidebar entry row", () => {
+  it("offers the three entries at once, and saves the one chosen", async () => {
+    const { form, read } = configForm()
+    render(<PluginConfigCard form={form} />)
+
+    // Three answers on screen rather than behind a menu: this setting IS the choice, so
+    // the row shows all of them and marks the one in force.
+    const group = screen.getByRole("group", { name: t("entryStyleLabel") })
+    expect(within(group).getAllByRole("button").map((button) => button.textContent))
+      .toEqual([t("entryStyleStandard"), t("entryStyleQuick"), t("entryStyleCompact")])
+    expect(within(group).getByRole("button", { name: t("entryStyleQuick") }).getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.click(within(group).getByRole("button", { name: t("entryStyleCompact") }))
+    await waitFor(() => expect(form.set).toHaveBeenCalledWith("entryStyle", "compact"))
+    expect(read()).toMatchObject({ entryStyle: "compact" })
+    expect(within(group).getByRole("button", { name: t("entryStyleCompact") }).getAttribute("aria-pressed")).toBe("true")
+  })
+
+  it("shows the entry a configuration written before this row is actually using", async () => {
+    // `entryStyle` is absent from every profile that has never chosen one, and the entry
+    // in force is then derived from the two switches this replaced. A row that read only
+    // the new field would label itself "quick" to someone whose entry is the panel row,
+    // and the first click would move an entry that had never moved.
+    const { form } = configForm()
+    const snapshot = form.getSnapshot
+    form.getSnapshot = () => ({ status: "ready", value: { ...(snapshot().value as Record<string, unknown>), entryStyle: undefined, panelEntry: "show", sidebarEntry: "hide" } })
+    render(<PluginConfigCard form={form} />)
+
+    const group = screen.getByRole("group", { name: t("entryStyleLabel") })
+    expect(within(group).getByRole("button", { name: t("entryStyleStandard") }).getAttribute("aria-pressed")).toBe("true")
+    expect(within(group).getByRole("button", { name: t("entryStyleQuick") }).getAttribute("aria-pressed")).toBe("false")
   })
 })
 

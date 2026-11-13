@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitBranch, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
+import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
+import { sumLines } from "../lib/lines"
 import { errorText } from "../lib/error-text"
 import { previewValue, subscribePreview } from "../lib/config-preview"
 import { mapWithLimit } from "../lib/concurrency"
@@ -12,6 +13,7 @@ import type { RememberedScan, LineChanges, SourceRootClassification, UpstreamSta
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
 import { AddRepositoryDialog } from "./AddRepositoryDialog"
 import { ArchiveTaskDialog } from "./ArchiveTaskDialog"
+import { LineCounts } from "./LineCounts"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { DeployCard } from "./DeployCard"
 import { finishScenes } from "../lib/finish-scene"
@@ -50,8 +52,7 @@ interface Props {
    * drive the browse step without one.
    */
   pickDirectory?: () => Promise<string | null>
-  /** Render the section's own header. Off when the host supplies the heading. */
-  heading?: boolean
+
   onCreate?: (target: Pick<Workspace, "path" | "title">) => void
   /**
    * The view and its setter, for a host that offers the switcher itself — the main
@@ -107,21 +108,19 @@ function fetchFailureText(error: string, t: (key: string) => string) {
 }
 
 /**
- * The two line totals of a group, added into one pair.
+ * The two changing sets of a group, added into one pair.
  *
  * A collapsed row answers "how much is this carrying" in one number, so the committed
  * and uncommitted halves are summed rather than drawn as two pairs: the pair is a
  * magnitude, and splitting it made the row say the same thing twice. Either half may be
  * absent - git could not measure it - and the other still counts, which is why this adds
- * whatever is there rather than requiring both.
+ * whatever is there rather than requiring both. The file count is summed the same way,
+ * and stays absent when neither half reported one.
  * @param group - the task or Workspace whose totals are being drawn.
  * @returns the summed pair.
  */
 function totalLines(group: { committedChanges?: LineChanges; workingChanges?: LineChanges }): LineChanges {
-  return {
-    insertions: (group.committedChanges?.insertions ?? 0) + (group.workingChanges?.insertions ?? 0),
-    deletions: (group.committedChanges?.deletions ?? 0) + (group.workingChanges?.deletions ?? 0),
-  }
+  return sumLines(group.committedChanges, group.workingChanges)
 }
 
 /**
@@ -153,10 +152,22 @@ function ChangeSummary({ committed, working, committedHint, workingHint }: {
  * One component for the three views that show a worktree row, because the numbers
  * and the branch they belong to have to stay one answer: a row that named the base
  * but not the counts, or the counts under a different branch, would read as two
- * independent facts. The source repository's own row is deliberately not a caller -
- * it is the base everything is compared to, so comparing it to itself says nothing.
+ * independent facts. Both ends of the comparison are named whenever the caller has
+ * both: one name on its own left the reader to guess what the counts were measured
+ * against, which is the question a comparison is asked to answer.
  */
-function BranchDetail({ baseBranch, baseLabel, ahead, behind, aheadHint, behindHint, committedChanges, workingChanges }: {
+function BranchDetail({ currentBranch, currentLabel, baseBranch, baseLabel, ahead, behind, aheadHint, behindHint, committedChanges, workingChanges }: {
+  /**
+   * The branch the comparison starts from, when the row should name both ends.
+   *
+   * A row that shows only the far end leaves the reader guessing which pair of branches
+   * the counts describe: "origin/main" beside a Workspace, or "main" beside a task's
+   * branch, is one branch out of two. Absent means the far end alone is enough - the
+   * rows that have no second name to give.
+   */
+  currentBranch?: string
+  /** The word in front of {@link currentBranch}, defaulting to "current branch". */
+  currentLabel?: string
   baseBranch?: string
   /** The word in front of the branch, defaulting to "base branch". */
   baseLabel?: string
@@ -177,13 +188,17 @@ function BranchDetail({ baseBranch, baseLabel, ahead, behind, aheadHint, behindH
 }) {
   const t = useT()
   const label = baseLabel ?? t("baseBranchLabel")
+  const currentWord = currentLabel ?? t("currentBranchLabel")
   const aheadText = format(aheadHint ?? t("aheadHint"), { count: String(ahead) })
   const behindText = format(behindHint ?? t("behindHint"), { count: String(behind) })
   return (
     <>
+      {currentBranch === undefined ? null : <span className="dws-branch-label dws-current-branch" title={`${currentWord}: ${currentBranch}`}>
+        <span className="dws-branch-name">{currentWord}：</span>
+        <span className="dws-branch-value">{currentBranch}</span>
+      </span>}
       <span className="dws-branch-label dws-base-branch" title={`${label}: ${baseBranch ?? t("branchesDiffer")}`}>
         <span className="dws-branch-name">{label}：</span>
-        <GitBranch size={12} />
         <span className="dws-branch-value">{baseBranch ?? t("branchesDiffer")}</span>
       </span>
       {ahead > 0 || behind > 0 ? <span className="dws-ahead-behind" title={`${aheadText} · ${behindText}`}>
@@ -194,22 +209,10 @@ function BranchDetail({ baseBranch, baseLabel, ahead, behind, aheadHint, behindH
   )
 }
 
-/** Two coloured counts, or a dash when git could not measure them. */
-function LineCounts({ changes, hint }: { changes?: LineChanges; hint: string }) {
-  if (changes === undefined) return <span className="dws-line-none">—</span>
-  const title = format(hint, { insertions: String(changes.insertions), deletions: String(changes.deletions) })
-  return (
-    <span className="dws-lines" title={title}>
-      <span className="dws-line-add">+{changes.insertions}</span>
-      <span className="dws-line-del">−{changes.deletions}</span>
-    </span>
-  )
-}
-
 const STATUS_CONCURRENCY = 6
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pickDirectory, heading = true, onCreate, control, onLeave, config }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pickDirectory, onCreate, control, onLeave, config }: Props) {
   const t = useT()
   const [ownView, setOwnView] = useState<WorktreeView>("spaces")
   const view = control?.view ?? ownView
@@ -915,16 +918,13 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
    *  controls because it describes the list they are about to narrow. */
   const viewDescription = view === "spaces" ? t("viewSpacesDescription") : view === "repos" ? t("viewReposDescription") : t("viewTasksDescription")
 
-  // The list is the only thing that scrolls: one reading column holds the heading,
-  // the toolbar and the filters, and the rows move under them. The dialog says the
-  // first half for both hosts and borrows the toolbar for the switcher it owns; the
-  // panel's own frame draws the heading, because it has one.
+  // The list is the only thing that scrolls: one reading column holds the toolbar and
+  // the filters, and the rows move under them. The heading is the dialog's, from its
+  // own header, so the section starts on the toolbar.
   const listBody = view === "repos" || view === "tasks" || view === "spaces"
   return <section className="dws-settings" aria-label={t("worktrees")}>
     <div className="dws-settings-pinned">
-      {heading ? <header className="dws-settings-header">
-        <div><h2>{t("worktreesTitle")}</h2><p>{t("panelDescription")}</p></div>
-      </header> : null}
+
       <div className="dws-toolbar">
         <label className="dws-search"><Search size={16} aria-hidden="true" /><Input aria-label={t("searchPlaceholder")} placeholder={t("searchPlaceholder")} value={query} onChange={event => setQuery(event.target.value)} />{query ? <Button className="dws-icon-button" aria-label={t("clearFilters")} onClick={() => setQuery("")}><X size={14} /></Button> : null}</label>
         <Button className="dws-button dws-refresh" aria-label={t("refresh")} title={t("refresh")} disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} className={busy ? "dws-spin" : undefined} />{t("refresh")}</Button>
@@ -1011,7 +1011,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                         the branch rather than the role it plays. */}
                     <span className="dws-branch-label dws-worktree-branch" title={`${t("currentBranchLabel")}: ${row.branch ?? t("detached")}`}>
                       <span className="dws-branch-name">{t("branchLabel")}：</span>
-                      <GitPullRequest size={12} />
                       <strong className="dws-branch-value">{row.branch ?? t("detached")}</strong>
                     </span>
                     <span className={`dws-status dws-status-${state}`} title={row.statusError}><span className="dws-status-dot" />{statusLabel(row)}</span>
@@ -1039,7 +1038,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
           <span className="dws-task-heading">
             <span className="dws-task-title">
               <h3>{task.name}</h3>
-              <span className="dws-branch-label" title={`${t("taskBranchLabel")}: ${task.branch ?? t("branchesDiffer")}`}><span className="dws-branch-name">{t("taskBranchLabel")}：</span><GitPullRequest size={12} /><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
+              <span className="dws-branch-label" title={`${t("taskBranchLabel")}: ${task.branch ?? t("branchesDiffer")}`}><span className="dws-branch-name">{t("taskBranchLabel")}：</span><span className="dws-branch-value">{task.branch ?? t("branchesDiffer")}</span></span>
               {/* The task's own totals. The per-repository detail - the base branch,
                   the ahead/behind counts and the line changes - lives on the rows
                   that open below, so the collapsed row answers "how much is this task
@@ -1048,10 +1047,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                 <span className="dws-ahead">↑ {task.commits}</span>
                 <span className="dws-behind">↓ {task.behind}</span>
               </span> : null}
-              {task.committedChanges === undefined && task.workingChanges === undefined ? null : <span className="dws-count dws-lines" title={format(t("totalChangesHint"), { insertions: String(totalLines(task).insertions), deletions: String(totalLines(task).deletions) })}>
-                <span className="dws-line-add">+{totalLines(task).insertions}</span>
-                <span className="dws-line-del">−{totalLines(task).deletions}</span>
-              </span>}
+              {task.committedChanges === undefined && task.workingChanges === undefined ? null : <LineCounts className="dws-count" changes={totalLines(task)} hint={t("totalChangesHint")} />}
               {/* The same hint the repository rows carry: both numbers answer "how many
                   worktrees", one under a repository and one under a task space. */}
               <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(listed.length) })}>{listed.length}</span>
@@ -1074,7 +1070,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                   {/* What this repository is measured against, named where the
                       measurement is: the base is the branch its source checkout
                       sits on, which is where a merge would land. */}
-                  <BranchDetail baseBranch={repository.baseBranch} ahead={repository.commits} behind={repository.behind} />
+                  <BranchDetail currentBranch={repository.branch} baseBranch={repository.baseBranch} ahead={repository.commits} behind={repository.behind} />
                   {repository.locked ? <span className="dws-status">{t("locked")}</span> : null}
                 </div>
                 <div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div>
@@ -1149,13 +1145,14 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
           all.ahead += answer.commits ?? 0
           all.behind += answer.behind ?? 0
           // Both halves, summed into the one pair the row draws - the same rule the task
-          // row follows, so a Workspace's number means what a task's number means.
+          // row follows, so a Workspace's number means what a task's number means. The
+          // sum keeps a file count only when some answer carried one: a row that drew
+          // "0文件" over three unknown repositories would be inventing a number.
           if (answer.committedChanges === undefined && answer.workingChanges === undefined) return all
-          all.insertions += (answer.committedChanges?.insertions ?? 0) + (answer.workingChanges?.insertions ?? 0)
-          all.deletions += (answer.committedChanges?.deletions ?? 0) + (answer.workingChanges?.deletions ?? 0)
+          all.changes = sumLines(all.changes, sumLines(answer.committedChanges, answer.workingChanges))
           all.lines += 1
           return all
-        }, { read: 0, ahead: 0, behind: 0, insertions: 0, deletions: 0, lines: 0 })
+        }, { read: 0, ahead: 0, behind: 0, lines: 0, changes: undefined as LineChanges | undefined })
         return <article className="dws-repo" key={workspace.workspaceId}>
           <header className="dws-repo-header">
             {/* A Workspace is a folder like a task is, and it wears the same closed one:
@@ -1187,10 +1184,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                     {/* One pair for the root, committed and uncommitted together - the
                         same rule the task row follows, and the reason the hint says
                         "together" rather than naming only the committed half. */}
-                    {totals.lines > 0 ? <span className="dws-lines" title={format(t("totalChangesHint"), { insertions: String(totals.insertions), deletions: String(totals.deletions) })}>
-                      <span className="dws-line-add">+{totals.insertions}</span>
-                      <span className="dws-line-del">−{totals.deletions}</span>
-                    </span> : null}
+                    {totals.lines > 0 && totals.changes !== undefined ? <LineCounts changes={totals.changes} hint={t("totalChangesHint")} /> : null}
                   </>
                   : <>
                     {/* The same line the task view draws for this directory, in the same
@@ -1201,7 +1195,6 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                         and not a per-repository answer. */}
                     <span className="dws-branch-label" title={`${t("taskBranchLabel")}: ${asTask.branch ?? t("branchesDiffer")}`}>
                       <span className="dws-branch-name">{t("taskBranchLabel")}：</span>
-                      <GitPullRequest size={12} />
                       <span className="dws-branch-value">{asTask.branch ?? t("branchesDiffer")}</span>
                     </span>
                     {asTask.commits > 0 || asTask.behind > 0 ? <span className="dws-ahead-behind" title={`${format(t("aheadHint"), { count: String(asTask.commits) })} · ${format(t("behindHint"), { count: String(asTask.behind) })}`}>
@@ -1211,10 +1204,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                     {/* One pair here too, committed and uncommitted together: this row
                         is the task row seen from another view, and the two have to read
                         the same number for the same directory. */}
-                    {asTask.committedChanges === undefined && asTask.workingChanges === undefined ? null : <span className="dws-lines" title={format(t("totalChangesHint"), { insertions: String(totalLines(asTask).insertions), deletions: String(totalLines(asTask).deletions) })}>
-                      <span className="dws-line-add">+{totalLines(asTask).insertions}</span>
-                      <span className="dws-line-del">−{totalLines(asTask).deletions}</span>
-                    </span>}
+                    {asTask.committedChanges === undefined && asTask.workingChanges === undefined ? null : <LineCounts changes={totalLines(asTask)} hint={t("totalChangesHint")} />}
                     {/* A count of worktrees, not of repositories: this directory holds one
                         worktree per repository, and "holds no Git repository" was a verdict
                         about starting a task space here rather than a fact about what is
@@ -1222,7 +1212,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                     <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(asTask.repositories.length) })}>{asTask.repositories.length}</span>
                   </>}
               </span>
-              <span className="dws-repo-path" title={slashPath(workspace.path)}>{slashPath(workspace.path)}</span>
+              <span className="dws-repo-path" title={`${t("workspacePathLabel")}: ${slashPath(workspace.path)}`}>{slashPath(workspace.path)}</span>
             </span>
             {empty && asTask === undefined ? <span className="dws-status dws-space-status">{t("workspaceCannot")}</span> : null}
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
@@ -1248,6 +1238,9 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                         the worktree rows use - the branch, then ahead/behind, then the
                         line counts - so one row reads like the next. */}
                     <BranchDetail
+                      // The branch on this side of the comparison, so the pair reads as
+                      // "this branch against the remote's" rather than one name alone.
+                      currentBranch={remote?.branch}
                       baseBranch={remote?.upstream ?? t("noRemoteBranch")}
                       baseLabel={t("remoteBranchLabel")}
                       ahead={remote?.commits ?? 0}
@@ -1291,7 +1284,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                         </span>}
                     {repository.worktrees.length > 0 ? <span className="dws-count" title={format(t("worktreeCountHint"), { count: String(repository.worktrees.length) })}>{repository.worktrees.length}</span> : null}
                   </div>
-                  <div className="dws-worktree-path" title={slashPath(repository.repoPath)}>{slashPath(relativePath(workspace.path, repository.repoPath))}</div>
+                  <div className="dws-worktree-path" title={`${t("repositoryPathLabel")}: ${slashPath(repository.repoPath)}`}>{slashPath(relativePath(workspace.path, repository.repoPath))}</div>
                   <ChangeSummary committed={remote?.committedChanges} working={remote?.workingChanges} committedHint={t("upstreamCommittedHint")} workingHint={t("upstreamWorkingHint")} />
                 </div>
               </div>})
@@ -1300,7 +1293,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                 <div className="dws-worktree-info">
                   <div className="dws-worktree-title">
                     <strong>{repository.name}</strong>
-                    <BranchDetail baseBranch={repository.baseBranch} ahead={repository.commits} behind={repository.behind} />
+                    <BranchDetail currentBranch={repository.branch} baseBranch={repository.baseBranch} ahead={repository.commits} behind={repository.behind} />
                     {repository.locked ? <span className="dws-status">{t("locked")}</span> : null}
                   </div>
                   <div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(relativePath(workspace.path, repository.path))}</div>

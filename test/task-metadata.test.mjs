@@ -100,32 +100,17 @@ describe('task metadata', () => {
       // task space, so the note has to say where a reader finds it.
       expect(note).toContain(`${PLUGIN_ROOT}/${TASK_METADATA}`)
       expect(note).toContain('- `alpha`')
-      // The deployment section states this task's own id, copied verbatim into
-      // every deploy command; nothing else is what keeps environments apart. The
-      // delivery policy renders beside it, so a session reads both from one note.
-      expect(note).toContain('## Deployment')
-      expect(note).toContain('DEPLOY_ENV_ID=dsh-public-login')
-      // The commands printed in that section carry the id themselves. A note that
-      // says "pass it to every deploy command" and then prints one without it is
-      // the contradiction that cost a task its containers once: the session copied
-      // the command, the entry fell back to its own default id, the panel found no
-      // `dsh.env-id` label and offered deploy instead of smoke and destroy. The
-      // instruction and the copyable string have to agree.
-      expect(note).toContain('deploy.sh up dsh-public-login')
-      expect(note).toContain('deploy.sh smoke dsh-public-login')
-      // And the consequence is stated, because "pass it" alone does not tell a
-      // session what goes wrong when it does not.
-      expect(note).toContain('the smoke and destroy buttons disappear')
-      // Every printed deploy command in the section names this task's own id - no
-      // command may be left to default, whichever line it came from.
-      for (const line of note.split('\n').filter((l) => l.includes('deploy.sh up') || l.includes('deploy.sh smoke'))) {
-        expect(line).toContain('dsh-public-login')
-      }
-      // The delivery section is one line now, because the policy behind it is one
-      // field: whether this task expects a deployment. Everything else a finish
-      // decides is passed on the `done` call, so the note does not record it.
-      expect(note).toContain('## Delivery')
-      expect(note).toContain('- Deployment target: `none`.')
+      // This record records no acceptance, so the note carries no Deployment section:
+      // guidance about an environment no create asked for would invite a session to
+      // stand one up. What it does carry is the one-line record of the answer.
+      expect(note).not.toContain('## Deployment')
+      expect(note).not.toContain('DEPLOY_ENV_ID=dsh-public-login')
+      // The acceptance section is one line, because the policy behind it is one
+      // field. Everything else a finish decides is passed on the `done` call, so
+      // the note does not record it.
+      expect(note).toContain('## Acceptance')
+      expect(note).toContain('- Acceptance kind: `none`.')
+      expect(note).not.toContain('Deployment target')
 
       expect(await readTaskMetadata(root)).toEqual(metadata)
     } finally {
@@ -184,7 +169,8 @@ describe('task metadata', () => {
     expect(renderTaskMetadata({ ...metadata, repositories: [{ name: 'alpha', sourcePath: 'x' }] })).not.toContain('## Start points')
   })
 
-  it('renders without the deployment sections when the record predates them', () => {    // A container old enough to hold neither field renders no guidance that names
+  it('renders without the acceptance sections when the record predates them', () => {
+    // A container old enough to hold neither field renders no guidance that names
     // an id or a policy: a session asked to guess either would guess worse than
     // no section at all.
     const { deploymentEnvId, delivery, ...legacy } = taskMetadata({
@@ -198,7 +184,63 @@ describe('task metadata', () => {
     expect(deploymentEnvId).toBeDefined()
     expect(delivery).toBeDefined()
     expect(renderTaskMetadata(legacy)).not.toContain('## Deployment')
-    expect(renderTaskMetadata(legacy)).not.toContain('## Delivery')
+    expect(renderTaskMetadata(legacy)).not.toContain('## Acceptance')
+  })
+
+  it('renders the smoke-only section instead of a deployment one', () => {
+    // The third kind, from the note's side: a task whose acceptance is a smoke and
+    // nothing else gets a section that says so, and never the container guidance a
+    // deployment needs - a session that went looking for an environment here would
+    // spend a turn on a question this note can answer.
+    const smoke = taskMetadata({
+      task: 'login',
+      project: 'public',
+      tasksRoot: 'E:\\worktree-space',
+      sourceRoot: 'E:\\workspace\\public',
+      branch: 'task/login',
+      delivery: { acceptance: { kind: 'smoke' } },
+      repositories: [{ name: 'alpha', sourcePath: 'E:\\workspace\\public\\alpha' }],
+    })
+    const note = renderTaskMetadata(smoke)
+    expect(note).toContain('## Acceptance')
+    expect(note).toContain('- Acceptance kind: `smoke`.')
+    expect(note).toContain('there is no environment to stand up')
+    // Two sections, not one heading twice: the smoke's own instructions and the
+    // one-line record of the policy both live here, and they must not collide.
+    expect(note).toContain('## Running the smoke')
+    expect(note.match(/## Acceptance/g) ?? []).toHaveLength(1)
+    expect(note).toContain('write-state.sh smoke pass|fail')
+    // No deployment guidance at all: naming an env id or an `up` command for a task
+    // that has no environment is the confusion this section exists to prevent.
+    expect(note).not.toContain('## Deployment')
+    expect(note).not.toContain('deploy.sh up')
+    expect(note).not.toContain('DEPLOY_ENV_ID')
+  })
+
+  it('renders the deployment section for a record that asks for one', () => {
+    const deploying = taskMetadata({
+      task: 'login',
+      project: 'public',
+      tasksRoot: 'E:\\worktree-space',
+      sourceRoot: 'E:\\workspace\\public',
+      branch: 'task/login',
+      delivery: { acceptance: { kind: 'deploy' } },
+      repositories: [{ name: 'alpha', sourcePath: 'E:\\workspace\\public\\alpha' }],
+    })
+    const note = renderTaskMetadata(deploying)
+    expect(note).toContain('## Deployment')
+    expect(note).toContain('DEPLOY_ENV_ID=dsh-public-login')
+    expect(note).toContain('deploy.sh up dsh-public-login')
+    expect(note).toContain('deploy.sh smoke dsh-public-login')
+    // The env id is what keeps environments apart, and the consequence of dropping it
+    // has to be stated: "pass it" alone does not tell a session what goes wrong.
+    expect(note).toContain('the smoke and destroy buttons disappear')
+    // Every printed deploy command in the section names this task's own id - no
+    // command may be left to default, whichever line it came from.
+    for (const line of note.split('\n').filter((l) => l.includes('deploy.sh up') || l.includes('deploy.sh smoke'))) {
+      expect(line).toContain('dsh-public-login')
+    }
+    expect(note).toContain('- Acceptance kind: `deploy`.')
   })
 
   it('keeps reading a container that only has the legacy note', async () => {

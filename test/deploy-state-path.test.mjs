@@ -27,7 +27,7 @@ async function taskSpaceWith(entry) {
   await writeFile(join(deployRoot(dir), '.state.json'), `${JSON.stringify(STATE)}\n`, 'utf8')
   await writeTaskMetadata(dir, taskMetadata({
     task: 'login', project: 'public', tasksRoot: join(dir, '..'), sourceRoot: '/repo',
-    branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+    branch: 'task/login', delivery: { acceptance: { kind: 'deploy' } },
     ...(entry === `${PLUGIN_ROOT}/deploy/deploy.sh` ? {} : { deployScript: entry }),
   }))
   return dir
@@ -113,7 +113,7 @@ describe('the deploy scripts are told where their state lives', () => {
       await writeFile(join(deployRoot(dir), 'deploy.sh'), 'echo default\n', 'utf8')
       await writeTaskMetadata(dir, taskMetadata({
         task: 'login', project: 'public', tasksRoot: join(dir, '..'), sourceRoot: '/repo',
-        branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+        branch: 'task/login', delivery: { acceptance: { kind: 'deploy' } },
         deployScript: `${PLUGIN_ROOT}/deploy/gone.sh`,
       }))
       const { subprocess } = spawnRecorder()
@@ -149,7 +149,7 @@ describe('a recorded deploy script is confined to the deploy root at run time', 
     await mkdir(deployRoot(dir), { recursive: true })
     await writeTaskMetadata(dir, taskMetadata({
       task: 'login', project: 'public', tasksRoot: join(dir, '..'), sourceRoot: '/repo',
-      branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+      branch: 'task/login', delivery: { acceptance: { kind: 'deploy' } },
       deployScript: entry,
     }))
     return dir
@@ -170,7 +170,7 @@ describe('a recorded deploy script is confined to the deploy root at run time', 
       await mkdir(deployRoot(space), { recursive: true })
       await writeTaskMetadata(space, taskMetadata({
         task: 'login', project: 'proj', tasksRoot: container, sourceRoot: '/repo',
-        branch: 'task/login', delivery: { deploy: { target: 'docker' } },
+        branch: 'task/login', delivery: { acceptance: { kind: 'deploy' } },
         deployScript: '../../../evil.sh',
       }))
       const { subprocess, envs } = spawnRecorder()

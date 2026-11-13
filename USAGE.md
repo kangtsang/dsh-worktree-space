@@ -35,7 +35,7 @@
 - [1. 一次任务的完整生命周期](#1-一次任务的完整生命周期)
 - [2. 打开管理页面](#2-打开管理页面)　[3. 新建任务空间](#3-新建任务空间)
 - [4. 在任务空间里工作](#4-在任务空间里工作)　[5. 给任务补仓库](#5-给任务补仓库)
-- [6. 部署验收](#6-部署验收)　[7. 结束任务](#7-结束任务)
+- [6. 验收](#6-验收)　[7. 结束任务](#7-结束任务)
 - [8. 冲突与「停在工作上」](#8-冲突与停在工作上)　[9. 排障](#9-排障)
 
 **第二部分 · Agent 自动编排**
@@ -77,13 +77,13 @@
 | 1 | **新建任务空间** | 管理页面（或会话按钮）→ 填写「新建任务空间」对话框 → **创建并打开会话** | 一个任务空间目录、一条任务分支、每个选中仓库一份 worktree；它注册成工作区并直接开一个会话 |
 | 2 | **在任务空间里工作** | 在那个会话里干活，或自己在各仓库子目录里改和提交 | 每个仓库各自独立的提交 |
 | 3 | **补仓库**（可选） | 任务行的 **添加仓库** | 新仓库加入任务现有的那条分支 |
-| 4 | **部署验收**（勾了部署时） | 部署卡片的 **部署验收** → **执行冒烟** | 验收地址 + 一次通过的冒烟 |
+| 4 | **验收**（选了验收方式时） | 验收卡片的 **执行冒烟**（部署验收卡先 **部署**） | 一次通过的冒烟；部署验收卡另有验收地址 |
 | 5 | **结束任务** | 任务行的 **结束任务** → 勾选 → **确认结束任务** | 合并回目标分支、移除 worktree、清理任务空间、归档遗留内容 |
 | 6 | **处理冲突**（需要时） | 解决冲突并提交合并 → **继续结束任务** | 合并继续，走到第 5 步的收尾 |
 
 **插件只在两处替你强制把关**，其余每一步都等你点：
 
-- **交付闸门**：勾了部署的任务，冒烟没通过就不能合并（[6.6](#66-收尾闸门)）；
+- **验收闸门**：选了验收方式的任务，冒烟没通过就不能合并（[6.7](#67-收尾闸门)）；
 - **收尾守卫**：任务空间里还有会话在活动，或 worktree 被别的进程占着，结束任务会被拒（[7.7](#77-收尾前的守卫与收尾后的清理)）。
 
 第 4 步只在勾了「部署到 Docker」时存在；没勾的任务，第 3 步之后直接到第 5 步。
@@ -98,13 +98,12 @@
 
 | 入口 | 在哪 | 打开什么 | 默认 |
 | --- | --- | --- | --- |
-| **侧边栏底部快捷入口** | 侧边栏底部的 **Worktree Space** | 以**对话框**打开管理页面 | 显示 |
-| **插件槽位入口** | 侧边栏「新会话」下方的 **Worktree Space** 行 | 在**主区域整页**打开同一个管理页面 | 隐藏（在插件设置里打开） |
+| **侧边栏入口** | 由插件设置里的「侧边栏入口」决定：**标准**是「新会话」下方的一行，**快捷**是侧边栏底部的 Worktree Space，**简洁**是设置行右侧的一个图标 | 以**对话框**打开管理页面 | 快捷 |
 | **会话里的按钮** | 空白会话输入框旁的插件图标（悬停提示「新建 Worktree Space」） | 直接打开**新建**对话框 | 只在当前会话是空白、且所在工作区能建任务空间时出现 |
 | **工作区列表的 `⋯` 菜单** | 某个工作区行的菜单 | **新建 Worktree Space**；确属任务空间的目录另有 **结束 Worktree Space** | 显示 |
 
-两种形态（对话框 / 整页）共用同一条左侧导航：整页形态第一项是 **返回会话**，下面三项切换视图，
-导航底部 **⚙ 插件设置** 跳到宿主的插件页改本插件的配置。
+三种侧边栏入口打开的是同一个对话框：左侧三项切换视图，导航底部 **⚙ 插件设置** 跳到宿主的插件页
+改本插件的配置。
 
 ### 2.2 三个视图
 
@@ -152,15 +151,18 @@
 7. **预览**：算出这个任务会用到的**分支名**和**空间目录名**，跟着上面的输入实时更新。
 8. **创建并打开会话**：建完直接在该任务空间开一个会话。
 
-### 3.2 「要不要部署验收」必须在创建之前定
+### 3.2 「验收方式」必须在创建之前定
 
-**交付策略只在创建时落一次，事后没有任何入口能加、能改**，任务记录里也不会留下「当初想要过围栏」
-的痕迹。所以没勾就等于定了「这个任务不做验收」，而且之后没有任何东西提示这件事。
+**验收方式只在创建时落一次，事后没有任何入口能加、能改**，任务记录里也不会留下「当初想要过围栏」
+的痕迹。所以不选就等于定了「这个任务不做验收」，而且之后没有任何东西提示这件事。
 
-- **不勾（`none`）是个好答案**：没有运行时行为要验收的任务本来就不该勾。但它要是**你自己选的**答案。
-- **勾了（`docker`）**：冒烟通过就是这个任务的完成线。`up` 写验收地址、`smoke` 记下结果，
-  收尾时合并会被闸门检查（[6.6](#66-收尾闸门)）。
-- 勾了却没有任何可用入口脚本时，**创建直接被拒**（`E4015`），而不是建出一个永远部署不了的任务空间。
+- **不做验收（`none`）是个好答案**：本来就不需要一条记录的活不该选。但它要是**你自己选的**答案。
+- **只跑冒烟（`smoke`）**：冒烟通过就是这个任务的完成线，而任务只需要入口脚本的 `smoke` 子命令 ——
+  没有环境、没有验收地址、没有容器要拆。单元测试、集成测试、构建检查都可以放在这里，用哪种方式
+  由项目自己决定。收尾时同样会被闸门检查（[6.7](#67-收尾闸门)）。
+- **部署到 Docker（`deploy`）**：在「只跑冒烟」之上再加一个 `up` 子命令 —— 起环境、写验收地址，
+  冒烟验的是这个站起来的环境。**重新部署之后要重新冒烟**，上一次的通过记录不再算数。
+- 选了后两者却没有任何可用入口脚本时，**创建直接被拒**（`E4015`），而不是建出一个永远做不了验收的任务空间。
 
 ### 3.3 创建出来的是什么
 
@@ -197,7 +199,7 @@
 | 分支已被占用 | `E3001` | 换任务名 |
 | 起点 ref 在某个仓库里不存在 | `E3002` | 换一个每个选中仓库都有的分支，或给缺它的那个仓库单独传 `baseRefs[仓库名]` |
 | 部署脚本路径越界或不存在 | `E4014` | 把脚本放进工作区的 `.worktree-space/deploy/`，或改路径 |
-| 勾了部署却没有入口 | `E4015` | 补一个入口脚本，或先不勾部署 |
+| 选了验收方式却没有入口 | `E4015` | 补一个入口脚本，或先选「不做验收」 |
 | 创建中途失败 | `E2005` / `E2006` | 前者已完整回滚（名字可原样重试）；后者有残留，按对话框里点名的路径手工清理 |
 
 **注册失败只是警告不是失败**：任务空间是真的、能用的，缺的只是工作区列表里的那一行，
@@ -235,11 +237,23 @@ DSH 里切到那个工作区开新的会话接手 —— 多个任务各占一�
 
 ---
 
-## 6. 部署验收
+## 6. 验收
 
-只适用于创建时勾了「部署到 Docker」的任务。
+适用于创建时选了「只跑冒烟」或「部署到 Docker」的任务。两者的契约是同一个入口脚本与同一个状态文件，
+区别只有两处：**部署的任务多一个 `up` 子命令**，于是它有环境、有验收地址、有容器要拆；
+**只跑冒烟的任务没有这些，闸门一样在**。
 
-**前提：这台机器上要有可用的容器引擎** —— `docker` 命令在 PATH 上、守护进程在跑。Docker Desktop、
+### 6.0 只跑冒烟不需要容器
+
+选「只跑冒烟」时，这一节里讲容器引擎、环境身份、验收地址、销毁按钮的部分**全都不适用** —— 没有环境可查，
+面板也不会去问容器引擎。要做的只有一件事：入口脚本的 `smoke` 子命令跑完，把 `lastSmoke` 合进状态文件
+（[6.5](#65-状态文件契约)）。跑什么由项目自己决定，单元测试、集成测试、构建检查都算。
+
+**下面 6.1 起讲部署到 Docker 的部分**，只跑冒烟的任务读到 [6.5](#65-状态文件契约) 就够。
+
+### 6.1 部署到 Docker 的前提
+
+**这台机器上要有可用的容器引擎** —— `docker` 命令在 PATH 上、守护进程在跑。Docker Desktop、
 Podman、colima、原生 Linux 引擎都可以。插件不检查也不代替这一层：它只按 `dsh.env-id` 标签调 docker
 查容器、拆容器，其余（构建、起停、冒烟）全交给入口脚本，所以引擎不可用时报错来自脚本，不是插件。
 
@@ -251,7 +265,7 @@ Podman、colima、原生 Linux 引擎都可以。插件不检查也不代替这�
 - **验收地址只在 localhost 上可达**，因为动态端口是引擎映射出来的。换台机器、或从引擎外面
   访问，都打不开这个地址。
 
-### 6.1 契约：一个入口脚本
+### 6.2 契约：一个入口脚本
 
 部署契约就是一个入口脚本实现两个子命令：
 
@@ -282,7 +296,7 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 **这一步没有得做对才有**：脚本没实现这个子命令、非零退出、输出不是 JSON、值不在 1 到 3600 秒之间
 —— 任何一种都当作没回答，沿用默认时限。理由和 `destroy` 一样：它只改插件等多久，不改这一步跑不跑。
 
-### 6.2 部署根与复制
+### 6.3 部署根与复制
 
 创建时会把工作区自己的 `.worktree-space/deploy/` **整个**复制到任务空间里的同一相对位置。
 所以要把脚本**和它引用的兄弟文件一起**放进工作区那个目录，之后每个新建的任务空间直接可用；
@@ -291,7 +305,7 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 因为两侧位置相同，任务记录里的「部署脚本」路径对工作区和任务空间同时成立。
 **注意部署根比早先深了一层**：compose 文件里原本写 `../<仓库>` 的 build context 现在是 `../../<仓库>`。
 
-### 6.3 环境身份
+### 6.4 环境身份
 
 每个任务有一个推导出来的环境 id：`dsh-<项目名>-<任务名>`（小写、非字母数字折成连字符）。
 它以 `DEPLOY_ENV_ID` 交给每个部署脚本，也是容器上的 `dsh.env-id` 标签值 —— 容器、镜像、端口、
@@ -300,7 +314,7 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 **不要猜、也不要复用别的任务的 id**：面板的销毁按钮就是按这个标签找容器的，张冠李戴会拆掉别人的环境。
 值写在 `.worktree-space/worktree-space.md` 里，直接读。
 
-### 6.4 状态文件契约
+### 6.5 状态文件契约
 
 部署脚本**自己拥有**状态文件，面板和收尾闸门都读它。位置固定，与入口脚本叫什么、放在哪一层无关：
 
@@ -335,9 +349,10 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 **这个脚本不是每个任务空间都有**：只在创建时该空间还没有部署根的情况下才被写入 —— 工作区自带
 `.worktree-space/deploy/` 时整份复制进来，已有目录就不再脚手架。那种任务空间里，合并写要由部署脚本自己做。
 
-### 6.5 部署卡片
+### 6.6 部署卡片
 
-任务行下面的部署卡片**每次实时查询**，不缓存 —— 动态端口每次部署都在变，所以面板只问不记。
+部署到 Docker 的任务，任务行下面多一张**部署验收卡片**，**每次实时查询**，不缓存 —— 动态端口每次部署都在变，
+所以面板只问不记。
 
 | 元素 | 含义 |
 | --- | --- |
@@ -350,22 +365,31 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 
 按钮按状态出现：
 
-- **部署验收** —— 任务勾了部署、而当前没有容器在跑时；
+- **部署** —— 任务选了部署、而当前没有容器在跑时；
 - **执行冒烟** —— 有容器在跑时。**失败也是结果**，卡片的红色徽章照样刷新；
 - **销毁环境** —— 有容器在跑时，**两段确认**（先变「确认销毁」，再点一次才执行）。
-- 策略是 `none` 的任务不显示部署和冒烟按钮，但**仍会显示容器并保留销毁按钮** —— 一个没勾部署的任务
+- **只跑冒烟**的任务另有一张更简单的卡片：冒烟徽章 + 一行「这个任务只跑冒烟，没有部署环境」+ 一个
+  **执行冒烟**按钮。没有地址行、没有环境 id、没有部署与销毁按钮 —— 它本来就没有环境。
+- 验收方式是 `none` 的任务不显示部署和冒烟按钮，但**仍会显示容器并保留销毁按钮** —— 一个没选验收的任务
   也可能带着别处起的容器，而拆不掉的东西比策略的意外更糟。
 
-改完代码的循环是：**部署验收 → 执行冒烟 → 通过后结束任务**。
-**验收事实跟随任务空间**：销毁环境不会清掉冒烟结果，重新部署也照样保留。
+改完代码的循环是：**部署 → 执行冒烟 → 通过后结束任务**；只跑冒烟的任务少掉第一步，
+**执行冒烟 → 通过后结束任务** 即可。**验收事实跟随任务空间**：销毁环境不会清掉冒烟结果，
+重新部署也照样保留。
 
 > **卡片上的红字不是显示问题。** 「容器在跑，但脚本没有写交付状态」说明 `up` 没写 `url`、
 > `smoke` 没合并 `lastSmoke` —— **改脚本，不要手改文件**。
 
-### 6.6 收尾闸门
+### 6.7 收尾闸门
 
-勾了部署的任务，**合并必须有通过的冒烟**：没有状态文件、或里面的 `lastSmoke.result` 不是 `pass`，
-合并就被拒（`E5006`）。这是服务端真拦，不是提示。
+选了验收方式（`smoke` 或 `deploy`）的任务，**合并必须有通过的冒烟**：没有状态文件、或里面的
+`lastSmoke.result` 不是 `pass`，合并就被拒（`E5006`）。这是服务端真拦，不是提示。
+
+**部署到 Docker 的任务还多一条：冒烟不能早于最近一次本侧部署。** 重新部署换了一个环境，
+上一次的通过记录说的是上一个环境，**重新部署之后要重新冒烟**。只跑冒烟的任务没有部署，这条对它无意义。
+
+**这道闸门是规范约束，不是对代码的核对。** 它防的是「忘了冒烟就收尾」，不检查改了什么、也不要求先提交 ——
+冒烟通过之后再改代码，闸门不会察觉。要的是那一步真的跑过、结果真的记下来了。
 
 面板在你点 **结束任务** 的那一刻就会先查一次；闸门没过时会先问一句
 **「尚未完成冒烟验证，是否要结束任务？」**，你点 **继续** 之后才打开对话框，
@@ -391,8 +415,8 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 | 区域 | 内容 |
 | --- | --- |
 | 目录行 | `空间目录名` + 任务空间路径，单独一行 |
-| 汇总行 | `领先/落后` + `↑` / `↓` 两个提交数 · `已提交变更` + 增删行数 · `未提交变更` + 增删行数（没有未提交改动时写「无未提交变更」）。悬停「未提交变更」还会给出涉及几个文件 |
-| 仓库列表 | 每行：仓库名、任务分支、`→` **目标分支**；同一行右边接着该仓库的 `领先/落后`、`已提交变更`、`未提交变更` 三组数字。目标点开是一个可搜索的分支列表，换完立刻按新目标重算上面所有数字；该目标不是源仓库当前检出时会标「会在临时 worktree 中合并」 |
+| 汇总行 | `领先/落后` + `↑` / `↓` 两个提交数 · `已提交变更` + `+545 −455 3文件`（增删行数在前、文件数在后） · `未提交变更` + 同样的三数（没有未提交改动时写「无未提交变更」）。悬停任一对会给出完整句子：新增多少行、删除多少行、共几个文件 |
+| 仓库列表 | 每行：仓库名、任务分支、`→` **目标分支**；同一行右边接着该仓库的 `领先/落后`、`已提交变更`、`未提交变更` 三组数字（后两组都是 `+新增 −删除 文件数`）。目标点开是一个可搜索的分支列表，换完立刻按新目标重算上面所有数字；该目标不是源仓库当前检出时会标「会在临时 worktree 中合并」 |
 | 任务空间内其他内容 | 会被归档或删除的条目名 + 文档数；另有几项构建/编辑器产物会一并删除；底部一句说明 `.worktree-space/` 不属于可归档内容 |
 
 ### 7.2 四个选项
@@ -553,8 +577,8 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | 症状 | 先看这里 |
 | --- | --- |
 | 创建被拒 | [3.4 创建失败怎么办](#34-创建失败怎么办) |
-| 部署起不来 / 验收地址不显示 | [6.5 部署卡片](#65-部署卡片)、[6.4 状态文件](#64-状态文件契约) |
-| 合并被拒说没有通过的冒烟 | [6.6 收尾闸门](#66-收尾闸门)（代码 `E5006`） |
+| 部署起不来 / 验收地址不显示 | [6.6 部署卡片](#66-部署卡片)、[6.5 状态文件](#65-状态文件契约) |
+| 合并被拒说没有通过的冒烟 | [6.7 收尾闸门](#67-收尾闸门)（代码 `E5006`） |
 | 「确认结束任务」点不动 | [7.3 第一步](#73-三步提交合并冲突)：有未提交改动，或者还有会话在活动 |
 | 收尾停在某个仓库上 | [第 8 节](#8-冲突与停在工作上) |
 | 认不出这是一个任务空间 | `E2005`（[7.7](#77-收尾前的守卫与收尾后的清理)） |
@@ -596,7 +620,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | 中途改需求 | 用 `steer` 把话插进正在跑的回合，长回合里也送得到 |
 | 异常回接与漏报提醒 | 插件主动通知队长：回合异常结束时报，正常结束却没交完结报告也报 |
 | 收尾合并 | `done` 一次完成合并、移除 worktree、清理；停在冲突或未提交上时，把会话指回去处理后再调一次 |
-| 部署验收 | 勾了部署的任务，由任务空间自己的入口 `up` / `smoke` 过冒烟闸门 |
+| 验收 | 选了验收方式的任务，由任务空间自己的入口过冒烟闸门；部署任务另有 `up` 起环境 |
 
 | 适合 | 不适合 |
 | --- | --- |
@@ -621,7 +645,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 ```
 ① 建空间 + 派活
    wts_worktree_space({ action: "create", task, sourceRoot, tasksRoot,
-                        deployTarget, prompt })     ← prompt 让建空间与派第一件活一次完成
+                        acceptanceKind, prompt })     ← prompt 让建空间与派第一件活一次完成
    → 返回 { container, branch, sessionId }
 
 ② 盯进度（不轮询，有理由时才看一眼）
@@ -634,7 +658,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 ④ 异常回合会被主动告知（默认开）
    收到通知 = 活没干完 → status 看停在哪 → send 把会话拉回工作
 
-⑤ 部署验收（勾了部署时）
+⑤ 验收（选了验收方式时）
    任务空间自己的入口 up → smoke → 冒烟 pass 之后 ⑥ 才能过闸门
 
 ⑥ 收尾
@@ -774,7 +798,7 @@ best effort，失败只记一条警告，**绝不阻塞收尾**。想再看一�
 | `E4001` | 一个仓库都没选 | 至少选一个 |
 | `E4002` | 一个任务里两个仓库同名 | 改名后再选 |
 | `E4014` | 部署脚本不是工作区 `.worktree-space/deploy/` 下的现有文件 | 把脚本放进那个目录，或改路径 |
-| `E4015` | 勾了部署，但没有任何可用的部署入口 | 补一个入口脚本，或先用 `none` |
+| `E4015` | 选了验收方式，但没有任何可用的入口脚本 | 补一个入口脚本，或先用 `none` |
 | `E5008` | 部署脚本不存在，或重建环境时失败 | 看报错输出尾部；或补上部署资产 |
 | `E6001` | 指定的目录不是源仓库 | 换一个真的 Git 仓库 |
 
@@ -903,7 +927,7 @@ in section 15 serve both.
 - [1. The whole life of one task](#1-the-whole-life-of-one-task)
 - [2. Opening the management page](#2-opening-the-management-page)　[3. Creating a task space](#3-creating-a-task-space)
 - [4. Working inside a task space](#4-working-inside-a-task-space)　[5. Adding a repository to a task](#5-adding-a-repository-to-a-task)
-- [6. Deploy and acceptance](#6-deploy-and-acceptance)　[7. Finishing a task](#7-finishing-a-task)
+- [6. Acceptance](#6-acceptance)　[7. Finishing a task](#7-finishing-a-task)
 - [8. Conflicts and the "stopped on work" flag](#8-conflicts-and-the-stopped-on-work-flag)　[9. Troubleshooting](#9-troubleshooting)
 
 **Part two · an agent orchestrating end to end**
@@ -956,7 +980,7 @@ hold in your head.
 **The plugin forces your hand in exactly two places**; every other step waits for a click:
 
 - **The finish gate**: a task Deploy was ticked for cannot merge while its smoke has not passed
-  ([6.6](#66-the-finish-gate));
+  ([6.7](#67-the-finish-gate));
 - **The finish guards**: a session still working inside the space, or a worktree held by another process,
   refuses the finish ([7.7](#77-the-guards-before-finishing-the-cleanup-after)).
 
@@ -1051,8 +1075,8 @@ answers "this task does not get accepted", and nothing later reminds you that it
   But it has to be **your** answer.
 - **Ticked (`docker`)**: a passing smoke *is* this task's finish line. `up` writes the acceptance URL,
   `smoke` records the result, and the finishing merge is checked against the gate
-  ([6.6](#66-the-finish-gate)).
-- Tick it with no usable entry script and **the create itself is refused** (`E4015`) rather than leaving
+  ([6.7](#67-the-finish-gate)).
+- Choose either gated kind with no usable entry script and **the create itself is refused** (`E4015`) rather than leaving
   you a task space that can never deploy.
 
 ### 3.3 What a create produces
@@ -1094,7 +1118,7 @@ The directory appears only once it is used; the ignore rules are in
 | The branch is already taken | `E3001` | Pick another task name |
 | The start ref does not exist in one of the repositories | `E3002` | Name a branch every ticked repository has, or give the one repository without it a `baseRefs[repository name]` of its own |
 | The deploy script's path is outside the deploy root, or missing | `E4014` | Move the script into the Workspace's `.worktree-space/deploy/`, or change the path |
-| Deploy ticked, no entry available | `E4015` | Add an entry script, or leave Deploy unticked for now |
+| An acceptance chosen, no entry available | `E4015` | Add an entry script, or choose No acceptance for now |
 | Something failed part way through | `E2005` / `E2006` | The first has been rolled back whole (retry the name as it is); the second left something behind — clear the paths the dialog names by hand |
 
 **A failed registration is a warning, not a failure**: the task space is real and usable, and only its
@@ -1142,10 +1166,24 @@ a second task space, and do not run `git worktree add` by hand.
 
 ---
 
-## 6. Deploy and acceptance
+## 6. Acceptance
 
-Only for tasks **Deploy to Docker** was ticked for at creation.
+For tasks created with **Smoke only** or **Deploy to Docker**. Both answer to the same entry script and
+the same state file; they differ in exactly two ways: **a deploying task has one more subcommand, `up`**,
+so it has an environment, an acceptance URL and containers to tear down; **a smoke-only task has none of
+those, and the gate is still there**.
 
+### 6.0 Smoke only needs no container
+
+With **Smoke only**, everything below about the container engine, the environment identity, the
+acceptance URL and the destroy button **does not apply** — there is no environment to look at, and the
+panel never asks the container engine about it. One step is owed: the entry script's `smoke` subcommand
+runs and merges `lastSmoke` into the state file ([6.5](#65-the-state-file-contract)). What it runs is the
+project's own choice — a unit suite, an integration suite, a build check all count.
+
+**Sections 6.2 onward describe Deploy to Docker.** A smoke-only task can stop at 6.5.
+
+### 6.1 The prerequisite for Deploy to Docker
 **Prerequisite: a container engine this machine can reach** — the `docker` command on PATH, with
 its daemon running. Docker Desktop, Podman, colima, a native Linux engine: any of them will do.
 The plugin neither checks nor stands in for that layer: it calls docker to find and remove
@@ -1162,7 +1200,7 @@ Two that catch people:
 - **The acceptance URL is reachable on localhost only**, because the dynamic port is published by
   the engine. From another machine, or from outside the engine, it will not answer.
 
-### 6.1 The contract: one entry script
+### 6.2 The contract: one entry script
 
 The whole deploy contract is one entry script answering two subcommands:
 
@@ -1199,7 +1237,7 @@ subcommand, exits non-zero, prints something that is not JSON, or names a value 
 is read as having no opinion and the default deadlines stand. The reason is the same as for `destroy`: it
 changes how long the plugin waits, never whether the work runs.
 
-### 6.2 The deploy root and the copy
+### 6.3 The deploy root and the copy
 
 A create copies the Workspace's own `.worktree-space/deploy/` **whole** to the same relative place inside
 the task space. So put the script **together with whatever it references** into that directory once, and
@@ -1210,7 +1248,7 @@ Because both sides sit at the same relative position, the "deploy script" path i
 for the Workspace and for the task space alike. **Note that the deploy root is one level deeper than it
 used to be**: a build context that read `../<repository>` in a compose file now reads `../../<repository>`.
 
-### 6.3 Environment identity
+### 6.4 Environment identity
 
 Every task gets an environment id derived for it: `dsh-<project>-<task>` (lower case, everything that is
 not alphanumeric folded to a hyphen). It reaches every deploy script as `DEPLOY_ENV_ID`, and it is the
@@ -1221,7 +1259,7 @@ of each other's way because of that one id.
 this label, and the wrong id takes someone else's environment down. The value is written into
 `.worktree-space/worktree-space.md`; read it there.
 
-### 6.4 The state-file contract
+### 6.5 The state-file contract
 
 The deploy script **owns** the state file, and both the card and the finish gate read it. Its location is
 fixed, whatever the entry script is called and wherever it sits:
@@ -1259,10 +1297,12 @@ A scaffolded task space ships `.worktree-space/deploy/write-state.sh`, which wri
 at creation. When the Workspace carries a `.worktree-space/deploy/`, the whole directory is copied in and
 nothing is scaffolded — in those task spaces the merging write is the deploy script's job.
 
-### 6.5 The deploy card
+### 6.6 The deploy card
 
-The deploy card under the task's row **queries live every time** and caches nothing — the port a dynamic
- mapping hands out changes with every deploy, so the panel asks rather than remembers.
+A **Deploy to Docker** task gains a **deployment acceptance** card under its row - a **Smoke only**
+task gets a **smoke acceptance** card instead, with no environment behind it - and it **queries live every time**
+and caches nothing — the port a dynamic mapping hands out changes with every deploy, so the panel asks
+rather than remembers.
 
 | Element | Meaning |
 | --- | --- |
@@ -1275,27 +1315,40 @@ The deploy card under the task's row **queries live every time** and caches noth
 
 Buttons appear according to state:
 
-- **Deploy for acceptance** — the task ticked Deploy and nothing is currently running;
+- **Deploy** — the task deploys and nothing is currently running;
 - **Run smoke** — when something is running. **A failure is a result too**: the card's red badge refreshes
   all the same;
 - **Destroy environment** — when something is running, behind **two confirmations** (it turns into
   "Confirm destroy" first, and only the second press executes).
-- A task whose policy is `none` shows neither deploy nor smoke, but **still lists containers and keeps the
-  destroy button** — a task that never ticked Deploy may nonetheless have containers raised elsewhere, and
-  something you cannot take down is worse than an accident of policy.
+- A **Smoke only** task has a simpler card: the smoke badge, one line saying the task records a smoke only
+  and has no deployment, and a **Run smoke** button. No URL row, no environment id, and no deploy or
+  destroy button — it has no environment to act on.
+- A task whose acceptance is `none` shows neither deploy nor smoke, but **still lists containers and keeps
+  the destroy button** — a task that never chose an acceptance may nonetheless have containers raised
+  elsewhere, and something you cannot take down is worse than an accident of policy.
 
-The loop after changing code is: **deploy → smoke → finish the task once it passes**. **Acceptance facts
-follow the task space**: destroying the environment does not clear the smoke result, and redeploying keeps
-it too.
+The loop after changing code is: **deploy → smoke → finish the task once it passes**; a smoke-only task
+drops the first step and goes **smoke → finish once it passes**. **Acceptance facts follow the task space**:
+destroying the environment does not clear the smoke result, and redeploying keeps it too.
 
 > **Red text on the card is not a display problem.** "Containers are running, but the script wrote no
 > delivery state" means `up` never wrote `url` and `smoke` never merged `lastSmoke` — **fix the script, do
 > not edit the file by hand**.
 
-### 6.6 The finish gate
+### 6.7 The finish gate
 
-For a task Deploy was ticked for, **a merge needs a passing smoke**: no state file, or a `lastSmoke.result`
-that is not `pass`, and the merge is refused (`E5006`). That is the host refusing, not a hint.
+A task that records an acceptance (`smoke` or `deploy`) **may only merge on a passing smoke**: without a
+state file, or with a `lastSmoke.result` that is not `pass`, the merge is refused (`E5006`). That is the host
+refusing, not a hint.
+
+**A deploying task has one more rule: the smoke may not predate the last deployment this side ran.** A
+rebuild stands up a new environment, so an earlier `pass` describes the one before it — **a rebuilt
+deployment needs a fresh smoke**. A smoke-only task deploys nothing, so the rule does not apply to it.
+
+**This gate is a convention, not a check on the code.** It exists so that "smoke it before you finish" is
+not a thing anyone has to remember; it does not inspect what changed and does not ask for a commit first —
+editing after a passing smoke leaves the gate open. What it wants is that the step ran and its result was
+written down.
 
 The panel checks once the moment you press **Finish task**. If the gate has not cleared it asks first —
 **"The smoke has not passed yet. Finish the task anyway?"** — and only after you press **Carry on** does
@@ -1325,8 +1378,8 @@ lays out what is about to happen:
 | Area | Contents |
 | --- | --- |
 | Directory line | `Space directory` and the task space's path, on a line of its own |
-| Totals line | `Ahead/behind` with the `↑` / `↓` commit counts · `Committed changes` with its added and removed lines · `Uncommitted changes` with its own (or "no uncommitted changes" when there are none). Hovering the uncommitted pair also says how many files it covers |
-| Repository list | Per row: repository name, task branch, `→` **target branch**; on the same line, that repository's `ahead/behind`, `committed` and `uncommitted` figures. The target opens a **searchable branch list**, and changing it recomputes every figure above at once against the new target; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
+| Totals line | `Ahead/behind` with the `↑` / `↓` commit counts · `Committed changes` with `+545 -455, 3 files` (the lines added and removed, then how many files) · `Uncommitted changes` with the same three numbers (or "no uncommitted changes" when there are none). Hovering either pair spells it out: how many lines added, how many removed, across how many files |
+| Repository list | Per row: repository name, task branch, `→` **target branch**; on the same line, that repository's `ahead/behind`, `committed` and `uncommitted` figures (the last two read `+added -removed, files`). The target opens a **searchable branch list**, and changing it recomputes every figure above at once against the new target; a target that is not the source repository's current checkout is marked "will merge in a temporary worktree" |
 | Other content in the task space | Names of the entries that will be archived or deleted, plus a document count; several build/editor artefacts are deleted alongside them; the note at the foot says `.worktree-space/` is not archiveable content |
 
 ### 7.2 The four options
@@ -1513,8 +1566,8 @@ settings; switching off stops new records only and leaves whatever is already on
 | Symptom | Where to look first |
 | --- | --- |
 | A create is refused | [3.4 When a create is refused](#34-when-a-create-is-refused) |
-| Nothing comes up / no acceptance URL | [6.5 The deploy card](#65-the-deploy-card), [6.4 The state file](#64-the-state-file-contract) |
-| The merge is refused for want of a passing smoke | [6.6 The finish gate](#66-the-finish-gate) (code `E5006`) |
+| Nothing comes up / no acceptance URL | [6.6 The deploy card](#66-the-deploy-card), [6.5 The state file](#65-the-state-file-contract) |
+| The merge is refused for want of a passing smoke | [6.7 The finish gate](#67-the-finish-gate) (code `E5006`) |
 | **Confirm finish** will not press | [7.3, step one](#73-three-steps-commit-merge-conflict): uncommitted changes, or a session still working |
 | A finish stopped on one repository | [section 8](#8-conflicts-and-the-stopped-on-work-flag) |
 | It does not read as a task space | `E2005` ([7.7](#77-the-guards-before-finishing-the-cleanup-after)) |
@@ -1572,7 +1625,7 @@ leader, so the existing parent-child channel (`send_message`) cannot reach it �
 ```
 ① Create the space and hand out the first piece of work
    wts_worktree_space({ action: "create", task, sourceRoot, tasksRoot,
-                        deployTarget, prompt })     ← prompt does the create and the first hand-out together
+                        acceptanceKind, prompt })     ← prompt does the create and the first hand-out together
    → returns { container, branch, sessionId }
 
 ② Follow progress (no polling; look when there is a reason)
@@ -1748,7 +1801,7 @@ the plugin is broken, and worth reporting) · `E9` an unknown failure.
 | `E4001` | No repository was selected | Select at least one |
 | `E4002` | Two repositories in one task share a name | Rename one, then select it |
 | `E4014` | The deploy script is not an existing file under the Workspace's `.worktree-space/deploy/` | Put the script in that directory, or change the path |
-| `E4015` | Deploy ticked, no usable deploy entry | Add an entry script, or use `none` for now |
+| `E4015` | An acceptance chosen, but no usable entry script | Add an entry script, or use `none` for now |
 | `E5008` | The deploy script is missing, or rebuilding the environment failed | Read the tail of the error output; or supply the deploy assets |
 | `E6001` | The directory named is not a source repository | Name a directory that really is a git repository |
 

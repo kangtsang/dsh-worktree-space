@@ -36,7 +36,7 @@ import {
  *
  * Two rules stay, and only because breaking either is not recoverable by reading a
  * reference afterwards: the work belongs to a dispatched session (a leader that does it
- * itself has built the isolation and worked outside it), and `deployTarget` is settled
+ * itself has built the isolation and worked outside it), and `acceptanceKind` is settled
  * on the create (a fence nobody chose cannot be fitted later). Both are one clause each;
  * the skill says the rest.
  */
@@ -58,13 +58,16 @@ const DESCRIPTION = [
     + 'the space already exists. Every answer below repeats this where the next step is yours to choose.',
 
   '**Ask about the acceptance fence before you create a task space or dispatch a session into one, and never answer '
-    + 'it for the user.** deployTarget "docker" means the task expects a deployment and **the smoke is the finish line** '
-    + '- the acceptance URL and a recorded pass are what a completion report carries, not the fact that the code is '
-    + 'written - and "none" (the built-in default) means no deployment and no gate. The answer is settled on the create '
+    + 'it for the user.** acceptanceKind says what the task owes before its work may land, and there are three answers: '
+    + '"none" (the built-in default) records nothing and gates nothing; "smoke" gates the merge on a recorded passing '
+    + 'smoke, which may be a unit or integration suite - no environment, no acceptance URL; "deploy" adds an environment, '
+    + 'so the smoke is evidence about a stack that is standing and the URL `up` wrote is what a completion report hands '
+    + 'over. The answer is settled on the create '
     + 'and cannot be added or changed afterwards, so never create a space, or open a session in one, with the question '
     + 'still open: a fence nobody chosen leaves the task with no acceptance record and no way to fit one. Where the task '
     + 'space goes is the user\'s question too - suggest-root answers with a recommendation, and never name a directory '
-    + 'inside the source root or one that holds it. `references/deploying.md` says what a deploying space owes.',
+    + 'inside the source root or one that holds it. `references/deploying.md` says what a space that records an '
+    + 'acceptance owes.',
 
   'done REQUIRES merge: true to land the branches, or false to leave the work where it is. There is no default and a '
     + 'finish without it is refused (E7006), because a merge is the one step here that cannot be walked back. This tool '
@@ -80,11 +83,12 @@ const DESCRIPTION = [
     + 'session\'s child, so send_message cannot reach it. You are told when it dies mid-turn unless watchSession is false, '
     + 'because a session that dies cannot report itself - treat that notice as the task not being done.',
 
-  'A deploying task is not finished until its smoke passes, and running that smoke needs no skill: read '
-    + '`.worktree-space/worktree-space.md` in the task space, which names this task\'s deploy entry, its DEPLOY_ENV_ID '
-    + 'and the state file the gate reads. Its commands are the ones to run as written - `./<entry> up <env-id>` builds '
-    + 'and prints the acceptance URL, `./<entry> smoke <env-id>` records the result. Pass the env id to every deploy '
-    + 'command: without it the containers land under the entry\'s own id and the panel cannot see them. Then `done` with '
+  'A task that records an acceptance is not finished until its smoke passes, and running that smoke needs no skill: read '
+    + '`.worktree-space/worktree-space.md` in the task space, which names this task\'s acceptance kind, its entry, its '
+    + 'DEPLOY_ENV_ID when it deploys, and the state file the gate reads. Its commands are the ones to run as written - '
+    + '`./<entry> smoke <env-id>` records the result, and `./<entry> up <env-id>` builds and prints the acceptance URL when '
+    + 'the kind is deploy. Pass the env id to every deploy command: without it the containers land under the entry\'s own '
+    + 'id and the panel cannot see them. Then `done` with '
     + 'merge: true is refused (E5006) until that smoke is recorded as pass - never retry it, and never ask for an '
     + 'override, because this tool cannot send one. `references/deploying.md` is for writing or fixing an entry, not for '
     + 'running one that already works.',
@@ -641,11 +645,12 @@ function renameDispatchedSession(ctx, sessionId, title) {
  * matter, what "done" means, what to clean up) is deliberately absent rather than
  * guessed: a preamble that invented the acceptance criteria would be worse than none.
  * @param facts - the container root, project, task, branch, the caller's session id, and
- *   the delivery target the task's record settled (`docker` adds the completion line).
+ *   the acceptance kind the task's record settled (`deploy` and `smoke` add the
+ *   completion line, each in its own words).
  * @returns the standing section, as text, or '' when there is nothing to state.
  */
 function taskBriefPreamble(facts) {
-  const { tasksRoot, project, task, branch, callerSessionId, deployTarget } = facts
+  const { tasksRoot, project, task, branch, callerSessionId, acceptanceKind } = facts
   if (typeof task !== 'string' || task === '') return ''
   const lines = [
     dispatchTitle(project, branch),
@@ -674,11 +679,18 @@ function taskBriefPreamble(facts) {
     // Present only when the task space was created to deploy: the policy is settled at
     // create and this is the session that has to carry it out, so the one thing it must
     // not be able to say afterwards is that nobody told it the smoke was the finish line.
-    ...(deployTarget === 'docker' ? [
+    ...(acceptanceKind === 'deploy' ? [
       '- **This task is deployed for acceptance, so its smoke is the finish line.** Nothing is finished',
       '  until this task space\'s own deploy entry has run `smoke` and the result recorded is `pass`, and the',
       '  acceptance URL `up` wrote is what the report hands over. Code that is written is not the finish, and',
       '  a summary of it is not either: say what the smoke actually reported, or say that it has not run yet.',
+      '  A deployment this side rebuilt is not covered by an earlier smoke: re-run it after every `up`.',
+    ] : acceptanceKind === 'smoke' ? [
+      '- **This task\'s acceptance is a smoke, and nothing else is owed.** There is no environment to stand up',
+      '  here: run this task space\'s entry (`smoke` subcommand) and let it record `lastSmoke: pass`. What that',
+      '  smoke does is the project\'s own business - a unit suite, an integration suite, a build check.',
+      '  "The code is written" is not the finish and neither is a summary of it: say what the smoke reported,',
+      '  or say that it has not run yet.',
     ] : []),
     '- **The acceptance stack is this task\'s own.** Do not reuse a dev server or a stack that is',
     '  already running: a repository\'s own e2e configuration often points at one, and a suite run',
@@ -1201,7 +1213,7 @@ async function dispatchToSession(ctx, exec, request, watcher) {
     // nothing about the smoke it has to pass. A space with no record - one made before the
     // policy existed - answers the built-in default, `none`, exactly as a finish reads it.
     const recorded = await readTaskMetadata(request.taskPath)
-    const deployTarget = recorded === undefined ? 'none' : deliveryPolicyOf(recorded).deploy.target
+    const acceptanceKind = recorded === undefined ? 'none' : deliveryPolicyOf(recorded).acceptance.kind
     // The standing section is put in front of whatever the caller wrote, so a brief
     // that forgot the reporting channel or the isolation rule still carries them.
     // Prepended rather than appended because these are instructions the work is read
@@ -1212,7 +1224,7 @@ async function dispatchToSession(ctx, exec, request, watcher) {
       task: request.task,
       branch: request.branch,
       callerSessionId: exec?.agent?.session?.id,
-      deployTarget,
+      acceptanceKind,
     })
     await controller.prompt({
       requestId: randomUUID(),
@@ -1306,14 +1318,14 @@ async function redispatchToSession(ctx, exec, request, watcher, sessionId, servi
   try {
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
     const recorded = metadata
-    const deployTarget = recorded === undefined ? 'none' : deliveryPolicyOf(recorded).deploy.target
+    const acceptanceKind = recorded === undefined ? 'none' : deliveryPolicyOf(recorded).acceptance.kind
     const preamble = taskBriefPreamble({
       tasksRoot: request.tasksRoot,
       project: request.project,
       task: request.task,
       branch: request.branch,
       callerSessionId: exec?.agent?.session?.id,
-      deployTarget,
+      acceptanceKind,
     })
     await controller.prompt({
       requestId: randomUUID(),
@@ -1926,8 +1938,9 @@ export function registerTaskTool(ctx, options = {}) {
         description: 'Per-repository start points by repository NAME (create, add), e.g. {"repo-a":"develop"}. A name here wins over baseRef; repositories it leaves out fall back to baseRef, then to their own HEAD. A name that is not one of the selected repositories is refused (E4019).',
       },
       branchPrefix: { type: 'string', description: 'Branch prefix (create, suggest-root): the branch is this plus the task name. Omit for task/.' },
-      deployTarget: { type: 'string', enum: ['docker', 'none'], description: 'Deployed for acceptance (create). Ask the user before anything is created or dispatched: it is settled on the create and cannot be added or changed afterwards. "none" is the default and has no gate; "docker" needs something to deploy with, or the create is refused (E4015).' },
-      deployScript: { type: 'string', description: 'Deploy entry (create): a path relative to the workspace, under its .worktree-space/deploy/ directory; anything outside is refused (E4014). Omitted it is .worktree-space/deploy/deploy.sh. Only with deployTarget docker.' },
+      deployTarget: { type: 'string', enum: ['docker', 'none'], description: 'Renamed to acceptanceKind and accepted here only so an old caller is refused rather than silently obeyed: a create that passes this and no acceptanceKind gets E7008. Do not use it.' },
+      acceptanceKind: { type: 'string', enum: ['none', 'smoke', 'deploy'], description: 'Recorded acceptance (create): what this task owes before its work may land. ASK THE USER - never answer it for them: it is settled on the create and cannot be added or changed afterwards. "none" is the default and has no gate. "smoke" requires a passing smoke before a merge, and its entry needs only a `smoke` subcommand - a unit or integration suite recorded as `lastSmoke: pass` is a complete answer. "deploy" additionally needs `up`, and its smoke must be no older than the last deployment. Both of those need an entry script or the create is refused (E4015).' },
+      deployScript: { type: 'string', description: 'Entry script (create): a path relative to the workspace, under its .worktree-space/deploy/ directory; anything outside is refused (E4014). Omitted it is .worktree-space/deploy/deploy.sh. Only with acceptanceKind smoke or deploy.' },
       registerWorkspace: { type: 'boolean', description: 'Register what this create made as a DSH Workspace (create, default true).' },
       merge: { type: 'boolean', description: 'REQUIRED for done: true lands the branches, false leaves them. There is no default (E7006).' },
       prompt: { type: 'string', description: 'The work itself (create, dispatch): what to do, where, and what counts as done. It must stand alone - the session shares no context with this conversation. Leave out reporting requirements, source-checkout rules and deploy-acceptance steps: those are supplied for every dispatched task, and repeating them only makes the brief harder to read.' },
@@ -2023,14 +2036,28 @@ export function registerTaskTool(ctx, options = {}) {
             configuredModel,
           })
           : undefined
-        // The one delivery decision this call makes: whether the task expects a
-        // deployment. It is a plain argument now, not a JSON policy blob, so the
-        // schema's own enum refuses a bad value before this line and the value
-        // travels as what it is. A create that names nothing gets the built-in
-        // default, which deploys nothing and therefore gates nothing.
-        const deployTarget = typeof args.deployTarget === 'string' && args.deployTarget.trim() !== ''
-          ? args.deployTarget.trim()
+        // The one acceptance decision this call makes: what the task owes before its work
+        // may land. It is a plain argument now, not a JSON policy blob, so the schema's own
+        // enum refuses a bad value before this line and the value travels as what it is. A
+        // create that names nothing gets the built-in default, which records no acceptance
+        // and therefore gates nothing.
+        const acceptanceKind = typeof args.acceptanceKind === 'string' && args.acceptanceKind.trim() !== ''
+          ? args.acceptanceKind.trim()
           : undefined
+        // The superseded name, refused rather than ignored. A schema that silently drops an
+        // unknown key would let a caller that still says `deployTarget: "docker"` create a
+        // task with no fence while believing it made one - the worst shape this design can
+        // fail in, because the gap only shows up at the finish, after the work is done.
+        if (typeof args.deployTarget === 'string' && args.deployTarget.trim() !== '') {
+          throw coded(
+            'E7008',
+            '`deployTarget` has been renamed to `acceptanceKind`, and this call also changed its values: '
+              + '"docker" is now "deploy", "none" stays "none", and there is a new "smoke" for a task whose acceptance '
+              + 'is a smoke alone. Nothing was created. Ask the user which of none / smoke / deploy this task owes, then '
+              + 'call create again with `acceptanceKind`.',
+            { argument: 'deployTarget', replacement: 'acceptanceKind' },
+          )
+        }
         const result = await createTask(subprocessOf(ctx), {
           sourceRoot,
           task: required(args.task, 'task'),
@@ -2045,8 +2072,8 @@ export function registerTaskTool(ctx, options = {}) {
           deployScript: typeof args.deployScript === 'string' ? args.deployScript : undefined,
           configuredRoot: configuredRoot(),
           // Stated by this call, or nothing: create.js resolves it once, before
-          // anything is made. An invalid target is refused there, with E4010.
-          delivery: deployTarget === undefined ? undefined : { deploy: { target: deployTarget } },
+          // anything is made. An invalid kind is refused there, with E4010.
+          delivery: acceptanceKind === undefined ? undefined : { acceptance: { kind: acceptanceKind } },
         })
         const value = envelope(action)
         value.task = result.task

@@ -684,7 +684,10 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
         // dialog's picker re-reads the plan, so the number follows the choice.
         const [counted, diffstat, workstat] = await Promise.all([
           tryRunGit(subprocess, worktreePath, ['rev-list', '--left-right', '--count', `${plan.target}...HEAD`]),
-          tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', plan.target]),
+          // The merge base to HEAD, for the same reason `rev-list` above counts that
+          // span: `plan.target` alone means "against the working tree", which put the
+          // uncommitted lines in the committed half as well.
+          tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', `${plan.target}...HEAD`]),
           tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', 'HEAD']),
         ])
         // Left out rather than claimed as zero when git will not answer the count:
@@ -714,23 +717,24 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
   // rather than counted as nothing - and the top level keeps its number, because
   // the dialog prints it as the headline of what this would bring.
   const commits = repositories.reduce((sum, row) => sum + (row.commits ?? 0), 0)
-  // The same rule for the two new totals: a repository git would not answer for is
-  // left out rather than counted as zero. `behind` sums across repositories because
-  // each one is measured against its own target, and the headline is what the whole
-  // task is behind by. The line totals follow the panel's own two pairs.
+  // The line totals follow the panel's own two pairs - file count included, because the
+  // dialog prints the same "files, added, removed" the panel does and a total that left
+  // files out would be the one number on the page answering a different question.
   const behind = repositories.reduce((sum, row) => sum + (row.behind ?? 0), 0)
   const committedChanges = repositories.reduce((sum, row) => {
     if (row.committedChanges === undefined) return sum
+    sum.files += row.committedChanges.files
     sum.insertions += row.committedChanges.insertions
     sum.deletions += row.committedChanges.deletions
     return sum
-  }, { insertions: 0, deletions: 0 })
+  }, { files: 0, insertions: 0, deletions: 0 })
   const workingChanges = repositories.reduce((sum, row) => {
     if (row.workingChanges === undefined) return sum
+    sum.files += row.workingChanges.files
     sum.insertions += row.workingChanges.insertions
     sum.deletions += row.workingChanges.deletions
     return sum
-  }, { insertions: 0, deletions: 0 })
+  }, { files: 0, insertions: 0, deletions: 0 })
   // Absent rather than a zero pair when nothing was measured, which is how the panel
   // tells "nothing has changed" from "this could not be read" - the rule `worktree.status`
   // already follows for the same two fields.
@@ -1893,7 +1897,10 @@ async function finishTaskLocked(subprocess, options) {
     if (cause === undefined) {
       const policy = deliveryPolicyOf(recorded)
       const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
-      if (policy.deploy.target !== 'none' && envId !== '') {
+      // Only a deploying task has containers to take down. A smoke-only task runs no
+      // environment, so asking docker about it would be a query with no possible answer -
+      // and on a machine with no docker it would cost a failed spawn per finished task.
+      if (policy.acceptance.kind === 'deploy' && envId !== '') {
         try {
           const outcome = await destroyDeployment(subprocess, taskPath, envId)
           if (outcome.warning !== undefined) warnings.push(outcome.warning)

@@ -553,7 +553,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "nothing",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
       })).rejects.toMatchObject({ code: "E4015" })
 
       expect(keys()).toEqual([])
@@ -579,7 +579,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "noentry",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
       })).rejects.toMatchObject({ code: "E4015" })
     } finally {
       await source.cleanup()
@@ -599,7 +599,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "hasentry",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
       })
 
       expect(existsSync(deployAt(result.path, "deploy.sh"))).toBe(true)
@@ -628,7 +628,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "oldplace",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
       })).rejects.toMatchObject({ code: "E4015" })
 
       // Nothing was made, and the old deploy root is still where the user left it.
@@ -654,7 +654,7 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "namedonly",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
         deployScript: `${PLUGIN_ROOT}/deploy/notify.sh`,
       })
 
@@ -682,12 +682,12 @@ describe("createTask", () => {
         sourceRoot: source.root,
         task: "repoentry",
         tasksRoot: container.root,
-        delivery: { deploy: { target: "docker" } },
+        delivery: { acceptance: { kind: "deploy" } },
       })
 
       expect(result.path).toBeTruthy()
       const metadata = JSON.parse(await readFile(recordAt(result.path), "utf8"))
-      expect(metadata.delivery.deploy.target).toBe("docker")
+      expect(metadata.delivery.acceptance.kind).toBe("deploy")
     } finally {
       await source.cleanup()
       await container.cleanup()
@@ -3515,9 +3515,9 @@ describe("planTask", () => {
       // and none behind. One call answers both directions, which is why the reply is
       // `<behind> <ahead>` rather than a single number.
       "rev-list --left-right --count develop...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "2\t3\n" : "0\t1\n",
-      // The two line pairs the panel draws: the commits against the target, and the
-      // working tree against HEAD. `alpha` carries both, `beta` neither.
-      "diff --shortstat develop": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 41 insertions(+), 67 deletions(-)\n" : "",
+      // The two line pairs the panel draws: the range from the target's merge base to
+      // HEAD, and the working tree against HEAD. `alpha` carries both, `beta` neither.
+      "diff --shortstat develop...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 41 insertions(+), 67 deletions(-)\n" : "",
       "diff --shortstat HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 12 insertions(+), 5 deletions(-)\n" : "",
     }
     return { root, taskPath, handlers, cleanup: () => rm(root, { recursive: true, force: true }) }
@@ -3550,8 +3550,8 @@ describe("planTask", () => {
         behind: 2,
         changedFiles: 2,
         // The same two pairs the task view draws, read from the same two commands.
-        committedChanges: { insertions: 41, deletions: 67 },
-        workingChanges: { insertions: 12, deletions: 5 },
+        committedChanges: { files: 2, insertions: 41, deletions: 67 },
+        workingChanges: { files: 2, insertions: 12, deletions: 5 },
       })
       // A repository that carries nothing reports no line pair at all, which is how the
       // dialog tells "nothing changed" from "this could not be read".
@@ -3574,7 +3574,7 @@ describe("planTask", () => {
       // choosing which comparison the row is showing, so `behind` follows the choice
       // rather than staying on the default target's number.
       "rev-list --left-right --count main...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? "5\t7\n" : "1\t2\n",
-      "diff --shortstat main": ({ cwd }) => basename(cwd) === "alpha" ? " 1 file changed, 9 insertions(+), 3 deletions(-)\n" : "",
+      "diff --shortstat main...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 1 file changed, 9 insertions(+), 3 deletions(-)\n" : "",
     })
     try {
       const plan = await planTask(subprocess, { task: "login", project: PROJECT, tasksRoot: fixtureUnderTest.root, targets: { alpha: "main" } })
@@ -3583,7 +3583,7 @@ describe("planTask", () => {
       // The chosen branch, the count that goes with it, and the note that it is not
       // the branch the source repository is on — everything the second click needs.
       expect(byName.alpha).toMatchObject({ target: "main", checkedOut: "develop", commits: 7, behind: 5 })
-      expect(byName.alpha.committedChanges).toEqual({ insertions: 9, deletions: 3 })
+      expect(byName.alpha.committedChanges).toEqual({ files: 1, insertions: 9, deletions: 3 })
       // A repository left alone keeps its own default.
       expect(byName.beta).toMatchObject({ target: "develop", commits: 1 })
     } finally {

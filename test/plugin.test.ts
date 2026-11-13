@@ -7,31 +7,41 @@ function context(registeredSlots: string[], configForms?: { get: (name: string) 
     connection: { rpc: { call: vi.fn() } },
     workspaces: { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} } },
     uiWorkspace: {},
-    // Only the panel page uses it, to show the conversation again.
-    layout: { selectPanel: vi.fn() },
+    // The panel the sidebar row selects redirects through these: it opens the dialog and
+    // hands the column back to the panel that was selected before, which it tracks by
+    // subscribing to the selection.
+    layout: {
+      selectPanel: vi.fn(),
+      panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+    },
     effect: (effect: () => unknown) => effect(),
     slots: { inject: (name: string) => { registeredSlots.push(name); return () => {} } },
-    inject: (names: string[], run: (ctx: unknown) => void) => { run(configForms === undefined ? {} : { configForms }) },
+    inject: (names: string[], run: (ctx: unknown) => void) => { run(configForms === undefined ? {} : { configForms }) }
   }
 }
 
-/** The configuration the Host serves, with the two entry preferences spelled out. */
-function served(values: { panelEntry?: string; sidebarEntry?: string }) {
+/** The configuration the Host serves, with the entry choice spelled out. */
+function served(values: { entryStyle?: string; panelEntry?: string; sidebarEntry?: string }) {
   const form = {
-    getSnapshot: () => ({ status: "ready", value: { panelEntry: "hide", sidebarEntry: "show", ...values } }),
+    getSnapshot: () => ({ status: "ready", value: { entryStyle: "quick", panelEntry: "hide", sidebarEntry: "show", ...values } }),
     subscribe: () => () => {},
   }
   return { get: () => form, whileServed: (_names: string[], run: () => void) => { run(); return () => {} } }
 }
 
+/** The slots a run registered, in registration order. */
+function slotsOf(config?: ReturnType<typeof served>) {
+  const registeredSlots: string[] = []
+  WorktreePlugin.apply(context(registeredSlots, config) as any)
+  return registeredSlots
+}
+
 describe("WorktreePlugin compatibility", () => {
   it("loads against the DSH client contract without a DOM", () => {
-    const registeredSlots: string[] = []
-    const ctx = context(registeredSlots)
+    const registeredSlots = slotsOf()
 
-    expect(() => WorktreePlugin.apply(ctx as any)).not.toThrow()
-    // Without the configuration service the defaults stand: the sidebar footer's
-    // shortcut to the page, and not the panel row — that one is asked for.
+    // Without the configuration service the fallback stands: the shortcut in the sidebar
+    // footer, which is the arrangement every existing configuration derives to.
     expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.footer.action"])
     // `remote` carries the host's open-in-app and directory-picker namespaces, and a
     // nested namespace is declared separately: `remote` alone does not make
@@ -44,31 +54,40 @@ describe("WorktreePlugin compatibility", () => {
     ])
   })
 
-  it("adds the panel row when the configuration asks for it", () => {
-    const registeredSlots: string[] = []
-    WorktreePlugin.apply(context(registeredSlots, served({ panelEntry: "show" })) as any)
-
-    // The panel row joins the footer shortcut, and the card that fills the Plugins
-    // page's configuration section for this bundle stays either way.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "sidebar.footer.action", "plugins.bundle.config"])
+  it("puts the entry in the panel list for the standard form, and nowhere else", () => {
+    // One form at a time, which is what replaced the two switches: those offered four
+    // arrangements, and the fourth put the plugin nowhere in the sidebar at all.
+    expect(slotsOf(served({ entryStyle: "standard" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config"])
   })
 
-  it("keeps the panel row when the configuration hides the footer shortcut", () => {
-    const registeredSlots: string[] = []
-    WorktreePlugin.apply(context(registeredSlots, served({ panelEntry: "show", sidebarEntry: "hide" })) as any)
-
-    // Hiding a shortcut may not hide the way in: the panel row stays.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config"])
+  it("keeps the footer shortcut for the quick form", () => {
+    expect(slotsOf(served({ entryStyle: "quick" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.footer.action", "plugins.bundle.config"])
   })
 
-  it("registers neither entry when the configuration asks for neither, but keeps the page", () => {
-    const registeredSlots: string[] = []
-    WorktreePlugin.apply(context(registeredSlots, served({ panelEntry: "hide", sidebarEntry: "hide" })) as any)
+  it("registers neither slot for the compact form, which the overlay draws instead", () => {
+    // The compact entry has no slot to register into: its button is portalled into the
+    // host's settings row, so it is rendered by the overlay rather than registered here.
+    // The `main` panel stays registered either way - the row addresses it by key.
+    expect(slotsOf(served({ entryStyle: "compact" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config"])
+  })
 
-    // Both ways in hidden, so neither slot is registered — but the `main` panel is:
-    // the row is a preference, the page itself is what the id means, and hiding a row
-    // must not leave the shell with a selection it cannot resolve.
-    expect(registeredSlots).toEqual(["conversation.input.dock", "shell.overlay", "main", "plugins.bundle.config"])
+  it("derives the entry from the two switches a configuration may still carry", () => {
+    // `entryStyle` is empty for every configuration written before it existed. The footer
+    // shortcut was the shipped default, so a configuration that still has it on keeps it -
+    // including the both-on arrangement, where the footer is the entry actually in use and
+    // the panel row was an addition beside it. Losing the row costs a second way in;
+    // losing the shortcut costs the one the reader had been clicking.
+    expect(slotsOf(served({ entryStyle: undefined as unknown as string, panelEntry: "show", sidebarEntry: "show" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.footer.action", "plugins.bundle.config"])
+    expect(slotsOf(served({ entryStyle: undefined as unknown as string, panelEntry: "hide", sidebarEntry: "show" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.footer.action", "plugins.bundle.config"])
+    // The panel row is what a configuration gets when the footer was switched off and the
+    // row left on: the only arrangement where the row was the sole way in.
+    expect(slotsOf(served({ entryStyle: undefined as unknown as string, panelEntry: "show", sidebarEntry: "hide" })))
+      .toEqual(["conversation.input.dock", "shell.overlay", "main", "sidebar.panellist", "plugins.bundle.config"])
   })
 })
 
@@ -85,7 +104,10 @@ describe("the Plugins-page registrations", () => {
       connection: { rpc: { call: vi.fn() } },
       workspaces: { list: { getSnapshot: () => ({ items: [] }), subscribe: () => () => {} } },
       uiWorkspace: {},
-      layout: { selectPanel: vi.fn() },
+      layout: {
+        selectPanel: vi.fn(),
+        panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+      },
       effect: (effect: () => unknown) => effect(),
       slots: {
         inject: (_name: string, run: () => unknown) => { run(); return () => {} },

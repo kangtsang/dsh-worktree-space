@@ -582,18 +582,29 @@ export async function deploymentStatus(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const policy = deliveryPolicyOf(recorded)
+  const kind = policy.acceptance.kind
   const found = await readDeliveryState(taskPath)
   const stateUrl = acceptanceUrl(found?.state?.url)
+  // A smoke-only task has no environment, so it is not asked about containers and its
+  // recorded URL is not reported: the script is free to write one, and a URL shown as the
+  // task's deliverable would promise something no `up` ever stood up. The card decides what
+  // to render from `kind`; this is the same decision made once, on the side that knows.
+  const deploys = kind === 'deploy'
   return {
     envId,
-    target: policy.deploy.target,
-    url: stateUrl,
-    urlSource: stateUrl !== null ? 'state' : 'none',
+    kind,
+    target: kind,
+    // Whether anything was deployed is a fact of the policy, not of the state file: a
+    // deploying task whose file is missing has no URL either, and the two absences mean
+    // different things to the reader.
+    deploys,
+    url: deploys ? stateUrl : null,
+    urlSource: deploys && stateUrl !== null ? 'state' : 'none',
     lastSmoke: found?.state?.lastSmoke ?? null,
     destroyedAt: found?.state?.destroyedAt ?? null,
     stateFound: found !== undefined,
     statePath: found?.path ?? null,
-    containers: envId === '' ? [] : await containersFor(subprocess, envId, { signal }),
+    containers: deploys && envId !== '' ? await containersFor(subprocess, envId, { signal }) : [],
   }
 }
 
@@ -629,25 +640,33 @@ export async function deliveryStateSummary(taskPath) {
 }
 
 /**
- * The gate a merge has to pass when the policy ties it to a deployment.
+ * The gate a merge has to pass when the policy asks for an acceptance.
  *
- * One refusal: the deployment records no passing smoke. That covers both shapes of "no
+ * One refusal: the task records no passing smoke. That covers both shapes of "no
  * green smoke" - the state file was never written, or it was and its smoke is missing or
- * red - because the action they ask for is the same one either way: deploy, run the smoke,
- * and let that script write the result down.
+ * red - because the action they ask for is the same one either way: run the smoke, and let
+ * that script write the result down.
  *
  * They used to be two codes (E5005 for no state at all, E5006 for a smoke that did not
  * pass). The split read as two different problems and was not: a task whose script never
- * wrote the file and a task whose smoke failed are both "the environment has not been shown
- * to work", and the person reading it does the same next thing. The missing-file message
+ * wrote the file and a task whose smoke failed are both "the work has not been shown to
+ * work", and the person reading it does the same next thing. The missing-file message
  * also carried the whole delivery-policy explanation, which no longer described anything -
  * there is no policy field left for it to name. So the two became one.
+ *
+ * What a smoke is evidence about is the one difference between the two kinds that gate, and
+ * it is a difference in what can go stale rather than in what is required. A `smoke` task
+ * records a verdict on the work, which nothing about the machine makes out of date: the
+ * step is "run it and write it down", and once written it stays true of that tree. A
+ * `deploy` task's smoke is evidence about the stack standing right now, so it has to be no
+ * older than the last `up` this side ran, or a green light from the environment before a
+ * rebuild would open the merge of the one after it.
  *
  * `bypass` is the user's own overrule, and it exists because the user's
  * instruction outranks the policy: the panel asks ("the smoke has not passed -
  * finish anyway?") and, on their yes, finishes with this flag set. What arrives
  * through the model-facing tool never carries it - the gate the model meets is the
- * hard one, and its way past is deploying and smoking, never retrying.
+ * hard one, and its way past is running the smoke, never retrying.
  * @param recorded - the task's own record.
  * @param taskPath - the task space directory, where the state is looked up.
  * @param options - `merge` is the request under judgement; `bypass` overrules on
@@ -659,29 +678,36 @@ export async function deliveryStateSummary(taskPath) {
 export async function assertDeliveryGate(recorded, taskPath, { merge = false, bypass = false } = {}) {
   if (merge !== true) return undefined
   const policy = deliveryPolicyOf(recorded)
-  if (policy.deploy.target === 'none') return undefined
+  const kind = policy.acceptance.kind
+  if (kind === 'none') return undefined
   const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const found = await readDeliveryState(taskPath)
-  // No state file is the same answer as a state file with no green smoke: the deployment
-  // has not been shown to work. `missing` still says which of the two it is, so a screen
-  // can name the step rather than the code.
+  // No state file is the same answer as a state file with no green smoke: the task's
+  // acceptance has not been recorded. `missing` still says which of the two it is, so a
+  // screen can name the step rather than the code.
   const smoke = found?.state?.lastSmoke
   const passing = smoke !== null && typeof smoke === 'object' && smoke.result === 'pass'
-  // A green smoke is only evidence about the environment it was run against, so the smoke
-  // has to be no older than the last `up` this side ran. `deployedAt` is written by the
-  // host rather than by the script, so a script cannot date a deployment that never
-  // happened. Without this, deploy A -> smoke passes -> edit -> deploy B -> A's green
+  // A green smoke is only evidence about the environment it was run against, so for a
+  // deployment the smoke has to be no older than the last `up` this side ran. `deployedAt` is
+  // written by the host rather than by the script, so a script cannot date a deployment that
+  // never happened. Without this, deploy A -> smoke passes -> edit -> deploy B -> A's green
   // light still opens B's merge, which is the stale-green shape of this gate.
+  //
+  // Only for `deploy`: a smoke-only task runs no `up`, so it has no `deployedAt` to compare
+  // against, and requiring one would make the kind impossible to satisfy.
   //
   // A check on evidence, never a wall: `bypass` - the user's own say-so from the panel -
   // steps over it exactly as it steps over a red smoke. `deployedAt` is absent for a
-  // deploy run by a session rather than by this side, and an absent one is not a refusal:
-  // the alternative would be to refuse work the plugin never saw and cannot date.
-  const deployedAt = typeof found?.state?.deployedAt === 'string' ? found.state.deployedAt : ''
+  // deployment run by a session rather than by this side, and an absent one is not a
+  // refusal: the alternative would be to refuse work the plugin never saw and cannot date.
+  const deployedAt = kind === 'deploy' && typeof found?.state?.deployedAt === 'string' ? found.state.deployedAt : ''
   const smokeAt = smokeTime(smoke)
   const stale = deployedAt !== '' && smokeAt !== undefined && smokeAt < Date.parse(deployedAt)
   if (passing && !stale) return undefined
-  const missing = found === undefined ? ['deployment', 'smoke'] : ['smoke']
+  // A deploying task's absent file is missing two steps; a smoke-only one is missing the
+  // only step it has, and naming a deployment it was never asked for would send the reader
+  // looking for a container that is nobody's business here.
+  const missing = found === undefined ? (kind === 'deploy' ? ['deployment', 'smoke'] : ['smoke']) : ['smoke']
   if (bypass) {
     return warned('delivery-gate-bypassed', 'the user acknowledged finishing without a passing smoke', { missing })
   }
@@ -690,12 +716,16 @@ export async function assertDeliveryGate(recorded, taskPath, { merge = false, by
     : stale
       ? `the recorded smoke (${smoke.at}) is older than the last deployment this side ran (${deployedAt}), so it says nothing about the environment standing now`
       : 'it carries no `lastSmoke` with `result: "pass"`'
+  const remedy = kind === 'deploy'
+    ? 'Deploy the task space and run its smoke, having that script merge `lastSmoke: { result, at }` into the state file, '
+      + 'then merge.'
+    : 'Run the task space\'s smoke, having that script merge `lastSmoke: { result, at }` into the state file, then merge. '
+      + 'A unit or integration suite recorded that way is a complete answer - there is nothing to deploy here.'
   throw coded(
     'E5006',
-    `the deployment records no passing smoke, so the merge is refused: ${because}${envId === '' ? '' : ` (environment ${envId})`}. `
-      + 'Deploy the task space and run its smoke, having that script merge `lastSmoke: { result, at }` into the state file, '
-      + 'then merge.',
-    { target: policy.deploy.target, envId, missing },
+    `the task records no passing smoke, so the merge is refused: ${because}${envId === '' ? '' : ` (environment ${envId})`}. `
+      + remedy,
+    { target: kind, kind, envId, missing },
   )
 }
 
@@ -736,22 +766,28 @@ function smokeTime(smoke) {
  */
 export async function deliveryGatePreview(recorded, taskPath) {
   const policy = deliveryPolicyOf(recorded)
-  // A policy that deploys nothing has no gate to preview, and saying otherwise would
+  const kind = policy.acceptance.kind
+  // A policy that records no acceptance has no gate to preview, and saying otherwise would
   // invent a requirement the finish will not enforce.
-  if (policy.deploy.target === 'none') return { applies: false, missing: [], target: 'none' }
+  if (kind === 'none') return { applies: false, missing: [], target: 'none', kind }
   const found = await readDeliveryState(taskPath)
   // The same keys the gate reports, by the same judgement - one function, so a screen
   // cannot say "nothing is missing" about a merge the gate then refuses. The smoke is
-  // read through the gate's own rule: green, run against an environment that is up, and
-  // no older than the last deployment this side ran.
-  if (found === undefined) return { applies: true, missing: ['deployment', 'smoke'], target: policy.deploy.target }
+  // read through the gate's own rule: green, and for a deployment no older than the last
+  // deployment this side ran. A smoke-only task has no deployment to be stale against, so
+  // its only requirement is the green itself.
+  // An absent state file is missing only the smoke for a smoke-only task: naming a
+  // deployment would ask for a step the task was never set up to have.
+  if (found === undefined) {
+    return { applies: true, missing: kind === 'deploy' ? ['deployment', 'smoke'] : ['smoke'], target: kind, kind }
+  }
   const missing = []
   const smoke = found.state?.lastSmoke
-  const deployedAt = typeof found.state.deployedAt === 'string' ? found.state.deployedAt : ''
+  const deployedAt = kind === 'deploy' && typeof found.state.deployedAt === 'string' ? found.state.deployedAt : ''
   const smokeAt = smokeTime(smoke)
   const stale = deployedAt !== '' && smokeAt !== undefined && smokeAt < Date.parse(deployedAt)
   if (smoke === null || typeof smoke !== 'object' || smoke.result !== 'pass' || stale) missing.push('smoke')
-  return { applies: true, missing, target: policy.deploy.target }
+  return { applies: true, missing, target: kind, kind }
 }
 
 /**
@@ -1107,10 +1143,26 @@ export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
  * @param taskPath - the task space directory.
  * @param options - `signal`, when the caller has one, to stop the run in flight.
  * @returns the deploy output and the deployment status as it stands after it.
- * @throws Error carrying E5008 when there is no deploy script, or the build failed.
+ * @throws Error carrying E5008 when there is no deploy script, or the build failed, or
+ *   the task records no deployment to build.
  */
 export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
+  // A smoke-only task owes no environment, so there is nothing `up` could produce that
+  // its acceptance would use - and running the subcommand anyway would either fail on an
+  // entry that was never asked to implement it or, worse, stand up a stack the task will
+  // never smoke and never tear down. Refused here rather than at the entry, because this
+  // side knows the policy and the script does not.
+  const kind = deliveryPolicyOf(recorded).acceptance.kind
+  if (kind !== 'deploy') {
+    throw coded(
+      'E5008',
+      kind === 'smoke'
+        ? 'this task records a smoke only, so it has no environment to deploy: run its smoke instead'
+        : 'this task records no acceptance, so it has nothing to deploy: its acceptance kind is `none`',
+      { kind },
+    )
+  }
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
   const found = await findDeployScript(taskPath, recorded)
   if (found === undefined) {

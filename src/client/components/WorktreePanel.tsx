@@ -3,9 +3,7 @@ import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { worktreeNavItems, WorktreesSettings } from "./WorktreesSettings"
 import type { WorktreeView } from "./WorktreesSettings"
-import { BrandGlyph, ChevronLeft, Settings } from "./icons"
-import { PluginDescription } from "./PluginDescription"
-import { UpdatePill } from "./UpdatePill"
+import { BrandGlyph, Settings } from "./icons"
 import type { createWorktreeApi } from "../lib/api"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import type { ISessions } from "@deepseek-ai/dsh-api-session-controller/client"
@@ -16,7 +14,7 @@ export interface WorktreesPageProps {
   workspaces: WorkspacesService
   uiWorkspace: WorkspaceNavigation
   sessions: ISessions
-  /** Opens the create form; the host decides whether it covers the page or steps aside. */
+  /** Opens the create form; the dialog steps aside for it. */
   onCreate: (target: Pick<Workspace, "path" | "title">) => void
   /**
    * Shows this plugin's own configuration on the Host's Plugins panel. Left
@@ -26,8 +24,8 @@ export interface WorktreesPageProps {
   onOpenSettings?: () => void
   /**
    * The host's own way out of the page, for following a session out of the finish
-   * dialog. The panel leaves it out — its way back to the conversation says the same
-   * thing, so that stands in — and the dialog passes its own close.
+   * dialog. The dialog passes its own close, so following a session there leaves the
+   * page too rather than covering the conversation it just opened.
    */
   onLeave?: () => void
   /**
@@ -52,18 +50,15 @@ export interface WorktreesPageProps {
  * The page's three views as a navigation column, the way the shell's sidebar draws a
  * list — the same radius, height, inset and fill its own rows use.
  *
- * Both hosts read this one column, so the panel's navigation and the dialog's cannot
- * drift apart: the alignment is the shell sidebar's own right-aligned row in both, since
- * a label reads from the same edge wherever the column sits. Only the views are in it:
- * the panel's way back to the conversation is the panel's own chrome, and it leads the
- * heading instead — see `WorktreeNavBack` — so that this column begins on the toolbar's
- * own line in both hosts.
+ * Every host of the page reads this one column, so its views cannot drift apart: the
+ * alignment is the shell sidebar's own right-aligned row, since a label reads from the
+ * same edge wherever the column sits.
  *
  * The gear row is the one thing under the views, pinned to the foot of the column the
  * way the shell pins its own settings control to the foot of its sidebar: this is where
- * a reader who wants to change how the plugin behaves looks, and both hosts get it from
- * here rather than growing a second copy. It is offered only when the host can actually
- * reach the Plugins page — a row that goes nowhere is worse than no row.
+ * a reader who wants to change how the plugin behaves looks. It is offered only when
+ * the host can actually reach the Plugins page — a row that goes nowhere is worse than
+ * no row.
  */
 export function WorktreesNav({ view, onView, onOpenSettings }: {
   view: WorktreeView
@@ -88,99 +83,32 @@ export function WorktreesNav({ view, onView, onOpenSettings }: {
 }
 
 /**
- * The panel's way back to the conversation, in the shell's own row shape.
+ * The management views, in the frame the dialog gives them.
  *
- * It is not one of the three views, so it cannot sit in the view column without pushing
- * them off the toolbar's line; it leads the heading's band instead. The cell keeps the
- * column's width and its edge line whether or not there is somewhere to go back to, so
- * the two bands stay one column.
+ * The view lives here rather than in the dialog, so a switch means the same thing every
+ * time the page opens, and only the rows the view lists scroll.
  */
-function WorktreeNavBack({ onBack }: { onBack?: () => void }) {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onLeave, config, pickDirectory }: WorktreesPageProps) {
   const t = useT()
-  return <div className="dws-panel-lead-nav">
-    {onBack === undefined ? null : <>
-      <button type="button" className="dws-nav-item" onClick={onBack}>
-        <ChevronLeft size={16} aria-hidden="true" />
-        <span>{t("backToConversation")}</span>
-      </button>
-      <span className="dws-nav-rule" aria-hidden="true" />
-    </>}
-  </div>
-}
-
-/**
- * The management views, in the frame their host asks for.
- *
- * The view lives here rather than in either host, so both open on the same one and a
- * switch means the same thing in both. The hosts differ only in their chrome: the panel
- * keeps its heading and its way back above the two columns, the dialog puts the title in
- * the window's own header, and either way only the rows the view lists scroll.
- */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, variant, onBack, onLeave, config, pickDirectory }: WorktreesPageProps & {
-  variant: "panel" | "dialog"
-  /** Panel only: the way back to the conversation. */
-  onBack?: () => void
-}) {
-  const t = useT()
-  // A view is state, not a prop, so neither host has to hold it: React unmounts this
-  // component whenever the page closes, so both hosts open on the same view anyway.
+  // A view is state, not a prop, so the dialog does not have to hold it: React unmounts
+  // this component whenever the page closes, so every opening starts on the same view.
   const [view, setView] = useState<WorktreeView>("spaces")
-  const settings = <WorktreesSettings
-    api={api}
-    workspaces={workspaces}
-    uiWorkspace={uiWorkspace}
-    sessions={sessions}
-    pickDirectory={pickDirectory}
-    heading={false}
-    onCreate={onCreate}
-    control={{ view, onView: setView }}
-    onLeave={onLeave ?? onBack}
-    config={config}
-  />
-  if (variant === "dialog") return <section className="dws-manage-page" aria-label={t("worktreesTitle")}>
+  return <section className="dws-manage-page" aria-label={t("worktreesTitle")}>
     <WorktreesNav view={view} onView={setView} onOpenSettings={onOpenSettings} />
-    <div className="dws-manage-page-content">{settings}</div>
-  </section>
-  // The two bands of the panel's own chrome. The way back to the conversation and the
-  // page's heading share the first one; the second one holds the view column and the
-  // reading column, so the three tabs begin exactly where the toolbar above the rows
-  // begins. That is the alignment the dialog has for free — it has no back row — and it
-  // is why the back row cannot simply lead the view column.
-  return <section className="dws-panel" aria-label={t("worktreesTitle")}>
-    <div className="dws-panel-lead">
-      <WorktreeNavBack onBack={onBack} />
-      <header className="dws-panel-heading">
-        <div className="dws-title-row">
-          <h1>{t("worktreesTitle")}</h1>
-          <UpdatePill />
-        </div>
-        <p><PluginDescription /></p>
-      </header>
-    </div>
-    <div className="dws-panel-body">
-      <WorktreesNav view={view} onView={setView} onOpenSettings={onOpenSettings} />
-      <div className="dws-panel-scroll">
-        <div className="dws-panel-content">{settings}</div>
-      </div>
+    <div className="dws-manage-page-content">
+      <WorktreesSettings
+        api={api}
+        workspaces={workspaces}
+        uiWorkspace={uiWorkspace}
+        sessions={sessions}
+        pickDirectory={pickDirectory}
+        onCreate={onCreate}
+        control={{ view, onView: setView }}
+        onLeave={onLeave}
+        config={config}
+      />
     </div>
   </section>
-}
-
-interface WorktreePanelPageProps extends WorktreesPageProps {
-  /** Shows the conversation again: this page took the column it was in. */
-  onBack: () => void
-}
-
-/**
- * The management page as a main panel, beside the conversation.
- *
- * The main column is the shell's own seat for a plugin's own page — the sidebar row
- * in the panel list selects it by this panel's key — so the page gets the window
- * rather than the settings panel's column. The way back to the conversation leads that
- * column, because selecting this panel took the column's place.
- */
-export function WorktreePanelPage({ onBack, ...props }: WorktreePanelPageProps) {
-  return <WorktreesPage {...props} variant="panel" onBack={onBack} />
 }
 
 /**

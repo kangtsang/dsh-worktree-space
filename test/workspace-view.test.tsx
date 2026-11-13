@@ -197,8 +197,8 @@ describe("WorktreesSettings workspace view", () => {
     })
     next.api.upstream = vi.fn().mockImplementation(async (repoPath: string) => (
       repoPath === "/projects/one"
-        ? { upstream: "origin/main", fetched: false, commits: 1, behind: 0, committedChanges: { insertions: 20, deletions: 4 }, workingChanges: { insertions: 5, deletions: 1 } }
-        : { upstream: "origin/main", fetched: false, commits: 0, behind: 2, committedChanges: { insertions: 10, deletions: 2 }, workingChanges: { insertions: 2, deletions: 3 } }
+        ? { upstream: "origin/main", fetched: false, commits: 1, behind: 0, committedChanges: { files: 3, insertions: 20, deletions: 4 }, workingChanges: { files: 2, insertions: 5, deletions: 1 } }
+        : { upstream: "origin/main", fetched: false, commits: 0, behind: 2, committedChanges: { files: 2, insertions: 10, deletions: 2 }, workingChanges: { files: 1, insertions: 2, deletions: 3 } }
     ))
     next.mount()
     fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
@@ -206,8 +206,66 @@ describe("WorktreesSettings workspace view", () => {
 
     const projects = [...document.querySelectorAll(".dws-repo")].find((row) => (row.textContent || "").includes("Projects"))!
     const pair = projects.querySelector(".dws-lines") as HTMLElement
-    // 20 + 5 + 10 + 2 = 37 added, 4 + 1 + 2 + 3 = 10 removed.
-    expect(pair.textContent).toBe("+37−10")
-    expect(pair.getAttribute("title")).toBe(format(t("totalChangesHint"), { insertions: "37", deletions: "10" }))
+    // 20 + 5 + 10 + 2 = 37 added, 4 + 1 + 2 + 3 = 10 removed, 3 + 2 + 2 + 1 = 8 files.
+    // The file count comes last, after the two coloured counts: it qualifies them rather
+    // than opening the pair.
+    expect(pair.querySelector(".dws-line-add")?.textContent).toBe("+37")
+    expect(pair.querySelector(".dws-line-del")?.textContent).toBe("−10")
+    expect(pair.querySelector(".dws-line-files")?.textContent).toBe("8文件")
+    expect(pair.lastElementChild?.className).toBe("dws-line-files")
+    expect(pair.getAttribute("title")).toBe(format(t("totalChangesHint"), { files: "8", insertions: "37", deletions: "10" }))
+
+    // A repository row's two pairs read the same way, and the hovered sentence ends on
+    // the file count. The row opens folded, so its repositories have to be unfolded first.
+    fireEvent.click(within(projects as HTMLElement).getByRole("button", { name: /Projects/ }))
+    await waitFor(() => expect(projects.querySelectorAll(".dws-worktree").length).toBeGreaterThan(0))
+    const repoPairs = projects.querySelectorAll(".dws-worktree .dws-worktree-changes .dws-lines")
+    const [committedPair, workingPair] = [...repoPairs]
+    expect(committedPair.querySelector(".dws-line-add")?.textContent).toBe("+20")
+    expect(committedPair.querySelector(".dws-line-files")?.textContent).toBe("3文件")
+    expect(committedPair.getAttribute("title")).toBe(format(t("upstreamCommittedHint"), { files: "3", insertions: "20", deletions: "4" }))
+    expect(workingPair.querySelector(".dws-line-add")?.textContent).toBe("+5")
+    expect(workingPair.querySelector(".dws-line-files")?.textContent).toBe("2文件")
+    expect(workingPair.getAttribute("title")).toBe(format(t("upstreamWorkingHint"), { files: "2", insertions: "5", deletions: "1" }))
+  })
+
+  it("names the branch on both sides of the comparison, and which directory each path is", async () => {
+    // A row that named only the remote's branch left the reader to guess whose counts
+    // these were: "origin/main" beside a repository says nothing about the branch the
+    // numbers belong to. A bare path had the same problem one level down - the Workspace
+    // root and the repository inside it were two directories drawn the same way.
+    const next = setup((path) => {
+      if (path === "/projects") {
+        return {
+          path, isRepository: false, isSourceRoot: true, repositoryCount: 2,
+          repositories: [{ name: "one", path: "/projects/one" }, { name: "two", path: "/projects/two" }],
+        }
+      }
+      return { path, isRepository: false, isSourceRoot: false, repositoryCount: 0, repositories: [] }
+    })
+    next.api.upstream = vi.fn().mockResolvedValue({ upstream: "origin/main", branch: "main", fetched: false, commits: 0, behind: 3 })
+    next.mount()
+    fireEvent.click(screen.getByRole("button", { name: t("viewWorkspaces") }))
+    await waitFor(() => expect(document.querySelectorAll(".dws-repo")).toHaveLength(3))
+
+    const projects = [...document.querySelectorAll(".dws-repo")].find((row) => (row.textContent || "").includes("Projects"))!
+    // The row opens folded, so the repository rows it holds have to be unfolded first:
+    // the arrows are one control per Worktree, not decoration.
+    fireEvent.click(within(projects as HTMLElement).getByRole("button", { name: /Projects/ }))
+    await waitFor(() => expect(projects.querySelectorAll(".dws-worktree").length).toBeGreaterThan(0))
+    const current = projects.querySelector(".dws-current-branch")
+    expect(current?.textContent).toBe(`${t("currentBranchLabel")}：main`)
+    expect(current?.getAttribute("title")).toBe(`${t("currentBranchLabel")}: main`)
+    expect(projects.querySelector(".dws-branch-label.dws-base-branch")?.textContent).toBe(`${t("remoteBranchLabel")}：origin/main`)
+    // A branch figure that already says what it is in words carries no icon: the mark
+    // repeated "this is a branch" beside "当前分支：" and "远端分支：" and cost the row
+    // width it does not get back. The assertion is on the rendered row, not on the
+    // component's props, because the icon was a child of exactly these spans.
+    for (const label of [current, projects.querySelector(".dws-branch-label.dws-base-branch")]) {
+      expect(label?.querySelector("svg"), "a named branch figure keeps no icon").toBeNull()
+    }
+    expect(projects.querySelector(".dws-repo-path")?.getAttribute("title")).toBe(`${t("workspacePathLabel")}: /projects`)
+    const repoPath = projects.querySelector(".dws-worktree-path")?.getAttribute("title") ?? ""
+    expect(repoPath.startsWith(`${t("repositoryPathLabel")}: /projects/`)).toBe(true)
   })
 })

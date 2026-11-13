@@ -5,7 +5,7 @@ import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabled
 import { coded, UNKNOWN } from './task/codes.js'
 import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
 import { resolveDeliveryPolicy } from './task/delivery.js'
-import { detectDefaultBranch, parseWorktrees, runGit, tryRunGit } from './task/git.js'
+import { detectDefaultBranch, parseShortstat, parseWorktrees, runGit, tryRunGit } from './task/git.js'
 import { mapWithLimit, SCAN_CONCURRENCY } from './task/concurrency.js'
 import { recordedSourceRepositories } from './task/discover.js'
 import { absolutePath, canonicalPath, isInside } from './task/paths.js'
@@ -66,7 +66,7 @@ export const PUBLIC_ERROR_CODES = new Set([
   'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015', 'E4016', 'E4017', 'E4018', 'E4019',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
   'E6001', 'E6002',
-  'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007',
+  'E7001', 'E7002', 'E7003', 'E7004', 'E7005', 'E7006', 'E7007', 'E7008',
   'E9001',
   'cancelled',
 ])
@@ -724,10 +724,44 @@ export const inject = ['connection', 'subprocess']
  * applies as soon as it is made.
  */
 export const Config = z.object({
+  /**
+   * Where the plugin's way in sits, as one choice of three.
+   *
+   * It was two switches - a row in the sidebar's panel list and a shortcut in its footer -
+   * which is four arrangements for two entries, and the fourth (neither) put the plugin
+   * nowhere in the sidebar. One field with three named answers says what the three
+   * arrangements actually are, and the card offers them as a segmented control rather
+   * than as two pills that have to be read together.
+   *
+   * Volatile like the rest of this schema, and that is what makes the entry move when the
+   * choice is made: the client half registers the slot from the served value and
+   * re-registers on every change.
+   *
+   * No default, and that is the migration rather than an oversight. A default here would
+   * be served for every profile that has never written the field - including the ones
+   * whose two old switches say "panel row on" - and the derivation below would never run,
+   * so those users would silently lose the row they had turned on. Left unset, the field
+   * is absent until someone chooses one of the three, and until then the old pair is what
+   * answers. The card shows the fallback in the meantime.
+   */
+  entryStyle: z.union(['standard', 'quick', 'compact']).loose().volatile()
+    .description('Where the sidebar entry sits: standard is a row in the panel list, quick is the shortcut in the sidebar footer, compact is one icon at the end of the settings row.'),
+  /**
+   * The two switches `entryStyle` replaced, kept so a configuration written before it
+   * still says what it meant.
+   *
+   * Read, never written: the client derives `entryStyle` from them when that field is
+   * empty, which is every configuration that has not been asked the new question yet.
+   * Volatile so the card can see them and show the entry actually in force - the row
+   * draws one control, and it would otherwise say "quick" to someone whose entry is the
+   * panel row. The card draws no control for either of them and nothing writes them.
+   * Deleting them would reset the arrangement of anyone who had turned the panel row on,
+   * which is a change they never asked for and cannot see.
+   */
   panelEntry: z.union(['show', 'hide']).default('hide').loose().volatile()
-    .description('Also show the management page as a row in the sidebar panel list, under New session. Hidden by default: the footer shortcut is the one way in.'),
+    .description('Superseded by entryStyle. Kept so a configuration written before that field existed keeps the entry it had.'),
   sidebarEntry: z.union(['show', 'hide']).default('show').loose().volatile()
-    .description('Show the Worktree Space shortcut in the sidebar footer.'),
+    .description('Superseded by entryStyle. Kept so a configuration written before that field existed keeps the entry it had.'),
   /**
    * Whether the sessions a finish hands an agent are opened with full access.
    *
@@ -1308,7 +1342,13 @@ export function apply(ctx, config = {}) {
       const [output, counted, diffstat, workstat] = await Promise.all([
         runGit(ctx.subprocess, path, ['status', '--short', '--branch'], { signal }),
         target === '' ? '' : tryRunGit(ctx.subprocess, path, ['rev-list', '--left-right', '--count', `${target}...HEAD`], { signal }),
-        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', target], { signal }),
+        // `<target>...HEAD`, never `<target>` on its own. One revision is "that commit
+        // against the working tree", so the committed half also carried every uncommitted
+        // line: a checkout in step with its remote but dirty on disk reported the same
+        // pair under both labels, and the collapsed row's total counted it twice. The
+        // range is the merge base to HEAD - the same span `rev-list` above counts, which
+        // is what keeps the two commit counts and the line pair telling one story.
+        target === '' ? '' : tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', `${target}...HEAD`], { signal }),
         // The working tree's own line counts, uncommitted included: `--shortstat`
         // against HEAD is what the panel shows as "not committed yet".
         tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal }),
@@ -1325,29 +1365,15 @@ export function apply(ctx, config = {}) {
       const counts = counted.trim().split(/\s+/)
       const behind = Number.parseInt(counts[0], 10)
       const commits = Number.parseInt(counts[1], 10)
-      // `1 file changed, 12 insertions(+), 3 deletions(-)`; either half is absent
-      // when only one kind of change happened.
-      const insertions = /(\d+) insertion/.exec(diffstat)
-      const deletions = /(\d+) deletion/.exec(diffstat)
-      const workInsertions = /(\d+) insertion/.exec(workstat)
-      const workDeletions = /(\d+) deletion/.exec(workstat)
+      // One parser for the whole line - file count and both line counts - so the three
+      // numbers a row draws cannot disagree about the same measurement.
       const status = {
         branchLine: lines.find((line) => line.startsWith('## ')) ?? '',
         changedFiles: lines.filter((line) => line && !line.startsWith('## ')).length,
         ...(Number.isFinite(commits) ? { commits } : {}),
         ...(Number.isFinite(behind) ? { behind } : {}),
-        ...(diffstat.trim() === '' ? {} : {
-          committedChanges: {
-            insertions: insertions === null ? 0 : Number.parseInt(insertions[1], 10),
-            deletions: deletions === null ? 0 : Number.parseInt(deletions[1], 10),
-          },
-        }),
-        ...(workstat.trim() === '' ? {} : {
-          workingChanges: {
-            insertions: workInsertions === null ? 0 : Number.parseInt(workInsertions[1], 10),
-            deletions: workDeletions === null ? 0 : Number.parseInt(workDeletions[1], 10),
-          },
-        }),
+        ...(diffstat.trim() === '' ? {} : { committedChanges: parseShortstat(diffstat) }),
+        ...(workstat.trim() === '' ? {} : { workingChanges: parseShortstat(workstat) }),
         output,
       }
       rememberStatus(path, status)
@@ -1446,13 +1472,32 @@ export function apply(ctx, config = {}) {
       // branch (`<branch>@{upstream}`) is for asking about one the checkout is not on.
       // The empty name is `@{upstream}` with no branch in front of it - spelled that
       // way because `""@{upstream}` is not an expression git can resolve at all.
+      //
+      // The branch this comparison starts from, named so the row can say which two
+      // branches it is comparing instead of only the far end of it. One name on its own
+      // left the reader to guess: "origin/main" says nothing about which local branch
+      // the counts belong to. A target the caller named is the branch asked about;
+      // otherwise it is the one this checkout sits on - and a detached HEAD has no name
+      // worth showing, so it is left out rather than drawn as `HEAD`.
+      const head = target === ''
+        ? (await tryRunGit(ctx.subprocess, path, ['rev-parse', '--abbrev-ref', 'HEAD'], { signal })).trim()
+        : target
+      const onBranch = head === 'HEAD' ? '' : head
       const expression = target === '' ? '@{upstream}' : `${target}@{upstream}`
       const upstream = await tryRunGit(ctx.subprocess, path, ['rev-parse', '--abbrev-ref', expression], { signal })
       const name = upstream.trim()
       // `HEAD` or an empty answer both mean "this branch tracks nothing": git echoes
       // the expression back when it cannot resolve it, and that is not a ref name to
       // show a reader.
-      if (name === '' || name === 'HEAD' || name.includes('@{')) return { upstream: null, fetched, fetchEnabled: autoFetch, ...(fetchError === '' ? {} : { fetchError }) }
+      if (name === '' || name === 'HEAD' || name.includes('@{')) {
+        return {
+          upstream: null,
+          fetched,
+          fetchEnabled: autoFetch,
+          ...(onBranch === '' ? {} : { branch: onBranch }),
+          ...(fetchError === '' ? {} : { fetchError }),
+        }
+      }
       // The inexpensive answer first: a fetch that moved no remote-tracking ref means
       // the numbers below are exactly the ones the caller already holds, so they are
       // not computed at all. This is the whole point of the `changed` flag - the
@@ -1460,19 +1505,21 @@ export function apply(ctx, config = {}) {
       // `commits`/`behind`/`committedChanges` are left out rather than guessed: the
       // caller keeps what it has, and a zero here would claim "in step with the
       // remote" about a comparison nobody ran.
-      if (unmoved) return { upstream: name, fetched, changed: false, fetchEnabled: autoFetch }
+      if (unmoved) return { upstream: name, fetched, changed: false, fetchEnabled: autoFetch, ...(onBranch === '' ? {} : { branch: onBranch }) }
       const counted = await tryRunGit(ctx.subprocess, path, ['rev-list', '--left-right', '--count', `${name}...HEAD`], { signal })
       const counts = counted.trim().split(/\s+/)
       const behind = Number.parseInt(counts[0], 10)
       const ahead = Number.parseInt(counts[1], 10)
-      const diffstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', name], { signal })
-      const insertions = /(\d+) insertion/.exec(diffstat)
-      const deletions = /(\d+) deletion/.exec(diffstat)
+      // Measured the range, not the single revision: `git diff <commit>` answers "that
+      // commit against the working tree", so a repository whose branch is in step with
+      // its remote but has uncommitted work would report those lines as committed too -
+      // two identical pairs, and a total that doubled them. From the merge base to HEAD
+      // is what this branch adds, and `workingChanges` below owns everything else.
+      const diffstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', `${name}...HEAD`], { signal })
       const workstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal })
-      const workInsertions = /(\d+) insertion/.exec(workstat)
-      const workDeletions = /(\d+) deletion/.exec(workstat)
       return {
         upstream: name,
+        ...(onBranch === '' ? {} : { branch: onBranch }),
         // Whether the numbers below are against a remote this request just read, or
         // against the refs a previous fetch left behind. The panel says which.
         fetched,
@@ -1486,18 +1533,8 @@ export function apply(ctx, config = {}) {
         ...(fetchError === '' ? {} : { fetchError }),
         ...(Number.isFinite(ahead) ? { commits: ahead } : {}),
         ...(Number.isFinite(behind) ? { behind } : {}),
-        ...(diffstat.trim() === '' ? {} : {
-          committedChanges: {
-            insertions: insertions === null ? 0 : Number.parseInt(insertions[1], 10),
-            deletions: deletions === null ? 0 : Number.parseInt(deletions[1], 10),
-          },
-        }),
-        ...(workstat.trim() === '' ? {} : {
-          workingChanges: {
-            insertions: workInsertions === null ? 0 : Number.parseInt(workInsertions[1], 10),
-            deletions: workDeletions === null ? 0 : Number.parseInt(workDeletions[1], 10),
-          },
-        }),
+        ...(diffstat.trim() === '' ? {} : { committedChanges: parseShortstat(diffstat) }),
+        ...(workstat.trim() === '' ? {} : { workingChanges: parseShortstat(workstat) }),
       }
     })
 
@@ -1692,11 +1729,11 @@ export function apply(ctx, config = {}) {
         // A request that names no container root takes the configured one, which is
         // the same answer `task.suggest-root` just gave the dialog.
         configuredRoot: configuredTasksRoot(),
-        // The one delivery decision: whether this task expects a deployment. The
-        // dialog sends a target name; an invalid one is refused inside the create,
+        // The one acceptance decision: what this task owes before its work may land.
+        // The dialog sends a kind name; an invalid one is refused inside the create,
         // before anything is made.
-        delivery: typeof payload.deployTarget === 'string' && payload.deployTarget.trim() !== ''
-          ? { deploy: { target: payload.deployTarget.trim() } }
+        delivery: typeof payload.acceptanceKind === 'string' && payload.acceptanceKind.trim() !== ''
+          ? { acceptance: { kind: payload.acceptanceKind.trim() } }
           : undefined,
         // And the same walk that dialog previewed and the Workspace card counted,
         // with the same bounds: `scanDepth` decides what "the repositories under

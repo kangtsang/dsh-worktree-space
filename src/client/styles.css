@@ -1,7 +1,7 @@
 @layer dsh-worktree-space {
   /* DSH owns typography and colour. Keep these aliases local to our surfaces. The page
-     is listed here as well as the dialog it is usually drawn in: a dialog's content is
-     its parent, but the page also scrolls as a root of its own in the panel.
+     is listed here as well as the dialog it is drawn in: a dialog's content is its
+     parent, but the page is also a root of its own.
 
      The configuration card is listed for a reason worth keeping in mind: it is drawn
      into the Plugins page's own slot, which is none of the surfaces below, so
@@ -9,17 +9,17 @@
      `border: 1px solid var(--wt-line)` does not fall back to an initial value when
      `--wt-line` is undefined - the declaration is dropped whole - so the card's
      buttons came out with no border at all rather than with a faint one. */
-  /* The management page in its panel form needs this list too: it is a `dws-panel`, not
-     a `dws-manage-page`, and without the aliases here every `var(--wt-*)` inside it
-     computes to nothing - which is how the update capsule came out with no border and no
-     background in the panel while looking right in the dialog. */
+  /* The compact entry is in this list for the same reason the branch pickers are: its
+     button is portalled out of the overlay into the host's settings row, so it is a
+     child of no surface here and inherits none of these aliases. Without them its mark
+     and its hover fill compute to nothing. */
   /* The branch pickers' panel is in this list for the third time this note has been
      needed: its panel is portalled to `document.body`, so it is a SIBLING of the dialog
      that opened it, not a child. A portal moves the element in the DOM, not in the
      cascade, so the panel inherited none of these aliases - `background: var(--wt-surface)`
      was dropped whole and the list came out see-through, with the cards behind it reading
      through the options. Any surface that leaves the dialog by portal belongs here. */
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-panel, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
     --wt-muted: var(--dsw-alias-label-tertiary);
@@ -52,62 +52,23 @@
     line-height: 22px;
   }
   .dws-settings *, .dws-dialog-content *, .dws-manage-page *, .dws-manage-page *::before, .dws-manage-page *::after, .dws-new-session-action * { box-sizing: border-box; }
-  /* The management page as a main panel: the shell gives the column, so this owns the
-     two bands the page is made of. The first holds the way back and the heading; the
-     second holds the view column and the reading column. Splitting them is what puts the
-     view tabs on the toolbar's own line: in one band they would start under the back row
-     instead, and the panel would read differently from the dialog for no reason but its
-     back button. */
-  .dws-panel { --dws-nav-width: 167px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex-direction: column; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); }
-  .dws-panel *, .dws-panel *::before, .dws-panel *::after { box-sizing: border-box; }
-  /* The plugin's navigation column, shared by both hosts of the page: the panel that
-     takes the shell's main column and the dialog the footer's shortcut opens. Every
-     number below is a variable, because the two frames differ only in width, in how far
-     the column is inset, and in the line that separates it from what it selects — the
-     rows themselves are the shell's own panel rows, to the pixel, in both. */
-  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width, 167px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
+  /* The plugin's navigation column. Every number below is a variable so the dialog can
+     tune the width and the inset without moving the rows: they are the shell's own panel
+     rows, to the pixel. */
+  /* The three view rows sit a space apart rather than a hairline apart: at 4px they read
+     as one block of text with three lines rather than as three targets. */
+  .dws-nav { --dws-nav-pad: 24px 14px; --dws-nav-align: flex-end; --dws-nav-text: right; display: flex; flex: none; flex-direction: column; gap: 10px; width: var(--dws-nav-width, 167px); padding: var(--dws-nav-pad); overflow: auto; border-right: 1px solid var(--wt-line); }
   .dws-nav-item { box-sizing: border-box; display: flex; align-items: center; justify-content: var(--dws-nav-align); gap: 8px; min-height: 36px; margin: 0 2px; padding: 7px 8px; border: 0; border-radius: var(--dsw-radius-md, 12px); background: transparent; color: var(--dsw-alias-label-primary, var(--wt-text)); font: inherit; font-size: 14px; line-height: 22px; text-align: var(--dws-nav-text); white-space: nowrap; cursor: pointer; }
   .dws-nav-item > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .dws-nav-item:hover { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); }
   .dws-nav-item[aria-current="true"] { background: var(--dsw-alias-interactive-bg-hover, var(--wt-hover)); color: var(--dsw-alias-label-primary, var(--wt-text)); }
   .dws-nav-item:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, var(--wt-text))); outline-offset: -2px; }
   .dws-nav svg { flex: none; }
-  .dws-nav-rule { height: 1px; margin: 2px 6px; background: var(--wt-line); }
   /* The gear row sits at the foot of the column, the way the shell pins its own
      settings control to the foot of its sidebar: the views belong at the top, and
      the way out to the plugin's configuration belongs apart from them. */
   .dws-nav-settings { margin-top: auto; }
-  /* The panel's first band, and the whole reason the page is two bands: the back row and
-     the heading share it, and it grows to the taller of the two, so whatever the
-     description wraps to, the band below begins after it. The row's inset is 24px rather
-     than the heading's 28px, because a 36px row and a 28px heading line only share a
-     centre when the row starts the 4px higher. */
-  .dws-panel-lead { display: flex; flex: none; flex-direction: row; align-items: flex-start; min-width: 0; }
-  .dws-panel-lead-nav { display: flex; flex: none; flex-direction: column; gap: 4px; width: var(--dws-nav-width); padding: 24px 14px 0; border-right: 1px solid var(--wt-line); }
-  /* The panel's second band: the view column and the reading column side by side, each
-     bounded in height, so the tabs and the toolbar start on one line and only the rows
-     inside the list scroll. */
-  .dws-panel-body { display: flex; flex: 1 1 auto; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
-  /* No top inset in this host: the column starts on the band's first line, which is where
-     the toolbar is. The 2px matches the settings' own inset, which is what the toolbar
-     actually starts after — so the two columns' first rows share one edge, to the pixel. */
-  .dws-panel .dws-nav { --dws-nav-pad: 2px 14px 24px; }
-  /* The scroll container holds the height and passes it down; it does not scroll itself,
-     because the list inside is the only thing that should. Left at `overflow: auto` with
-     an unbounded child, the content grew to its natural height and this element scrolled
-     the heading and the toolbar away with the rows. */
-  .dws-panel-scroll { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
-  /* Flush against the navigation, not centred in the leftover width: the two columns share
-     one left inset, so their text lines up from the panel's edge inward. The top inset
-     belongs to the heading's band above, not here, or the toolbar would drop below the
-     tabs that switch what it filters. */
-  .dws-panel-content { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; max-width: 960px; padding: 0 32px 48px 24px; }
-  .dws-panel-content > .dws-settings { flex: 1 1 auto; min-height: 0; }
-  /* In the heading's band beside the back row: the same measure as the reading column
-     below it, and the band's own top inset lives here. */
-  .dws-panel-heading { flex: 1 1 auto; min-width: 0; max-width: 960px; padding: 28px 32px 20px 24px; }
-  .dws-panel-heading h1 { margin: 0; font-size: 20px; font-weight: 500; line-height: 28px; }
-  .dws-panel-heading p { margin: 6px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+
   /* The title and its update capsule on one line. Both hosts use this row, so the
      capsule sits beside the title in the panel and in the dialog at the same place,
      and the description beneath is untouched by it. `align-items: center` keeps a
@@ -120,11 +81,11 @@
      uses. Rendered only when there is something to say - the component returns null
      otherwise - so the heading row never reserves space for it.
      The three tokens are declared HERE rather than inherited, because this capsule has
-     three hosts and one of them is not a plugin surface: the panel and the dialog are
-     inside a `--wt-*` scope, but the Plugins page is the shell's own, and a capsule
-     placed there inherited nothing - it rendered with no border and no background, which
-     reads as text rather than as a control. Declaring them on the element makes the
-     appearance independent of where the shell mounts it. */
+     two hosts and one of them is not a plugin surface: the management dialog is inside a
+     `--wt-*` scope, but the Plugins page is the shell's own, and a capsule placed there
+     inherited nothing - it rendered with no border and no background, which reads as text
+     rather than as a control. Declaring them on the element makes the appearance
+     independent of where the shell mounts it. */
   .dws-update-pill {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
@@ -155,9 +116,7 @@
   .dws-settings-pinned { flex: none; }
   .dws-list-body { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--wt-line); }
   .dws-settings h2, .dws-settings h3, .dws-settings p { margin: 0; }
-  .dws-settings-header { margin-bottom: 20px; }
-  .dws-settings-header h2 { font-size: 16px; font-weight: 500; line-height: 24px; }
-  .dws-settings-header p { margin-top: 5px; color: var(--wt-secondary); font-size: 13px; line-height: 20px; }
+
   .dws-button { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; min-height: 34px; max-width: 100%; padding: 6px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: transparent; color: var(--wt-text); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
   .dws-button svg { flex: none; }
   .dws-button:hover:not(:disabled) { background: var(--wt-hover); }
@@ -239,6 +198,25 @@
      it is the one link on this screen, and a reader who has decided to report a
      problem should not also have to work out which words are pressable. */
   .dws-feedback-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  /* The links ran together as one unbroken run of underlined text, so which words were
+     one target and which were the next was a guess. Each one now starts a little way in
+     from the one before it. The gap is the visual separation; the space in the markup
+     stays as well, because a copied sentence and a screen reader both need a real space
+     between the words. */
+  .dws-feedback-link + .dws-feedback-link { margin-inline-start: 5px; }
+  /* The star link is an ordinary inline link and draws no line of its own.
+    
+     Two earlier versions fought this. The first laid it out as `inline-flex` with a border
+     underneath, and the border - which sits on the box's bottom edge, not on the text's
+     baseline - hung a few pixels below the two links beside it. The second used an inline
+     SVG, and the underline stopped at the edge of that replaced box: the word was
+     underlined, the star was not, and one link looked like two targets.
+    
+     The mark is a text character now, so it shares the run and the single underline covers
+     it. Nothing here positions it - it is set in the same face at the same size, and a
+     glyph the browser already has sits on the line by itself. `aria-hidden` is on the
+     span in the markup: the word beside it is what a screen reader should read. */
+  .dws-star-mark { font-size: 13px; line-height: 1; }
   .dws-repo-list { --dws-chevron-size: 14px; --dws-row-gap: 9px; --dws-lead-icon: 24px; min-width: 0; }
   .dws-repo { min-width: 0; border-bottom: 1px solid var(--wt-line); }
   /* The list's vertical rhythm. Rows are separated by their own padding, kept
@@ -300,6 +278,11 @@
   .dws-task-title .dws-ahead-behind, .dws-task-title .dws-lines { gap: 8px; padding: 0 2px; }
   .dws-task-title .dws-ahead-behind { margin-left: 2px; }
   .dws-line-add, .dws-ahead { color: var(--wt-success); }
+  /* The file count after the two line counts, in the amber the behind count wears:
+     both answer a question about size rather than direction, so they share one colour,
+     while green and red stay with the two directions of a change. Behind the pair is
+     also where it has to sit for the column of numbers to line up. */
+  .dws-line-files { color: var(--wt-warn); white-space: nowrap; }
   /* Behind is amber, not red: the base branch having commits this one lacks is
      ordinary - it means someone else moved - and red would read as an error the
      task has to fix. Red is kept for the lines a change removes. */
@@ -405,6 +388,15 @@
   .dws-plugin-config-field { position: relative; display: inline-flex; flex: none; align-items: center; }
   .dws-plugin-config-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; border: none; border-radius: 18px; padding: 0 14px; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; line-height: 22px; cursor: pointer; transition: background-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out); }
   .dws-plugin-config-select:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  /* A segmented control: two or three short labels that stay on screen, so the answers
+     are compared rather than looked up. Geometry copied from the pill beside it - the
+     same 36px height and the same 18px radius on the track - so the two row types read
+     as one column of settings rather than as two kinds of control. */
+  .dws-plugin-config-segmented { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 18px; background: var(--dsw-alias-bg-module-platform); }
+  .dws-plugin-config-segment { border: 0; border-radius: 15px; padding: 5px 12px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+  .dws-plugin-config-segment:hover { color: var(--dsw-alias-label-primary); }
+  .dws-plugin-config-segment[aria-pressed="true"] { background: var(--wt-surface); color: var(--dsw-alias-label-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+  .dws-plugin-config-segment:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
   .dws-plugin-config-select > svg { flex: none; }
   /* What a setting is for, in the same grey the plugin blurb below uses. */
   .dws-plugin-config-hint { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
@@ -546,33 +538,49 @@
   .dws-footer-action-label { flex: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The 56px rail shows the icon alone, as the neighbouring row does. */
   .dws-footer-action[data-wide="false"] { flex: none; justify-content: center; gap: 0; width: 36px; height: 36px; margin: 0; padding: 0; border-radius: 50%; }
-  /* The management page in a dialog, for the footer's shortcut: the same page the main
-     panel shows, in a window wide enough for two columns. It is a column of three
-     bands — the dialog's heading, the page, and the dialog's own footer — so the
-     heading and the footer stay put while the page inside scrolls.
+  /* The compact entry: one icon at the end of the host's settings row, beside the account
+     control. The host row is a flex row with an 8px gap, so this contributes a 26px button
+     and nothing else - no margin, no width of its own - and the icon sits on the same
+     centre line as the settings button and the account avatar it stands between. */
+  .dws-compact-entry { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+  .dws-compact-entry-button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; padding: 0; background: transparent; color: var(--wt-secondary); cursor: pointer; }
+  .dws-compact-entry-button:hover { background: var(--wt-hover); color: var(--wt-text); }
+  .dws-compact-entry-button:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+  /* The mark takes the button's ink rather than the primary label's. `.dws-brand-glyph`
+     asks for near-black everywhere it is used, which is right in the panel list and in the
+     footer - those are rows of the sidebar, drawn in the same ink as the labels beside them.
+     Here the neighbours are the host's own trailing controls: an account avatar and a
+     secondary-weight glyph. Near-black beside them read as a pressed or active state, not
+     as one more control in the row, so this one inherits the button's `--wt-secondary`. */
+  .dws-compact-entry-button .dws-brand-glyph { color: inherit; }
+  .dws-compact-entry-button:hover .dws-brand-glyph { color: var(--wt-text); }
+  /* The same button where it lands when the host row cannot be found: the overlay is the
+     whole window, so it is anchored to the bottom-left corner - the place the row would
+     have put it - rather than floating in the middle of the page. */
+  .dws-compact-entry-floating { position: fixed; left: 10px; bottom: 10px; z-index: 20; border-radius: 8px; padding: 2px; background: var(--wt-surface); box-shadow: 0 2px 8px rgb(0 0 0 / 12%); }
+  /* The management page, in the dialog all three entries open: a window wide enough for
+     two columns. It is a column of three bands — the dialog's heading, the page, and the
+     dialog's own footer — so the heading and the footer stay put while the page inside
+     scrolls.
      Height is a share of the window, and 80% of it: at 95% the dialog covered everything
      but the taskbar for a page that is a list of Workspaces, six of which fit in half
      that height. The share is written as a percentage so the page keeps its proportions
      on a taller screen; a list that outgrows it scrolls inside the dialog. */
   .dws-manage-dialog { width: min(980px, calc(100vw - 32px)); height: 80dvh; max-height: 80dvh; }
   .dws-manage-heading { flex: none; padding: 22px 56px 0 24px; }
-  /* The navigation belongs to the column this page scrolls in the panel, not to the top
-     edge of a window: inside the dialog it is the left rail of the body below the
-     heading, so the two are not one line of chrome too many. Its rows keep the panel's
-     own alignment — the label against the column's inner edge — because that is the edge
-     a label reads from, and a dialog does not move it. */
+  /* The navigation is the left rail of the body below the heading, not a line of chrome
+     at the top edge of a window, so the two are not one band too many. Its rows keep the
+     shell's own alignment — the label against the column's inner edge — because that is
+     the edge a label reads from. */
   .dws-manage-page { display: flex; flex: 1; flex-direction: row; min-width: 0; min-height: 0; overflow: hidden; }
   .dws-manage-page .dws-nav { --dws-nav-width: 157px; --dws-nav-pad: 16px 12px; border-right: 0; }
-  /* The column the lists scroll in: flush against the navigation on its left, the same
-     measure the panel's own content keeps, so both surfaces put their text on one line.
-     It is the frame, not the scroller: the section inside it owns the pinned toolbar and
-     the one list that scrolls, which is what keeps the two hosts' toolbars in the same
-     place, so this column never scrolls a second time on its own. */
+  /* The column the lists scroll in: flush against the navigation on its left, so the two
+     columns put their text on one line. It is the frame, not the scroller: the section
+     inside it owns the pinned toolbar and the one list that scrolls, so this column
+     never scrolls a second time on its own. */
   .dws-manage-page-content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; padding: 16px 24px 18px; }
   .dws-manage-page .dws-settings { padding: 0; }
-  /* The panel keeps the heading it draws for the shell's column; the dialog's own heading
-     already said all of it. */
-  .dws-manage-page .dws-settings-header { display: none; }
+
   .dws-dialog-close { position: absolute; top: 14px; right: 14px;display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 8px; padding: 0; color: var(--wt-muted); background: transparent; cursor: pointer; }
   .dws-dialog-close:hover:not(:disabled) { color: var(--wt-text); background: var(--wt-hover); }
   .dws-dialog-close:disabled { opacity: .4; cursor: not-allowed; }
@@ -965,9 +973,13 @@
   /* The counts wear the same colours they wear in the task view, so one pair of numbers
      reads the same way on both pages. `.dws-finish-repos span` above is a descendant
      selector and would otherwise win over the single-class colour rules below it - which
-     is exactly what happened: the pairs rendered, in one flat grey. */
+     is exactly what happened: the pairs rendered, in one flat grey. Every coloured part
+     of a pair is therefore restated here, including the file count after the two line
+     counts; restating only the lines left the count grey in this dialog while the same
+     count stayed amber elsewhere. */
   .dws-finish-repos .dws-line-add, .dws-finish-repos .dws-ahead { color: var(--wt-success); }
   .dws-finish-repos .dws-line-del { color: var(--wt-danger); }
+  .dws-finish-repos .dws-line-files { color: var(--wt-warn); }
   .dws-finish-repos .dws-behind { color: var(--wt-warn); }
   .dws-finish-repos .dws-changes-label { color: var(--wt-muted); font-size: 12px; }
   .dws-finish-report .dws-finish-error { color: var(--wt-danger); }
@@ -1045,8 +1057,8 @@
     .dws-worktree-list { padding: 1px 10px 1px calc(var(--dws-chevron-size) + var(--dws-row-gap) + var(--dws-lead-icon)); border-radius: 8px; }
     .dws-worktree { flex-wrap: wrap; gap: 6px; }
     .dws-worktree-actions { margin-left: auto; }
-    /* The dialog keeps its navigation, but there is no room for the panel's 208px rail
-       beside the lists at this width, so the rail narrows and the content takes the rest. */
+    /* The dialog keeps its navigation, but there is no room for a 157px rail beside the
+       lists at this width, so the rail narrows and the content takes the rest. */
     .dws-manage-page .dws-nav { --dws-nav-width: 100px; --dws-nav-pad: 12px 8px; }
     .dws-manage-page-content { padding: 12px 14px 16px; }
     .dws-manage-heading { padding: 18px 52px 0 18px; }

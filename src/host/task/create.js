@@ -476,10 +476,11 @@ export async function createTask(subprocess, options) {
   // be used is a request that does not add up, and it must fail before the worktrees exist.
   const deployScriptPath = resolveDeployScript(sourceRoot, deployScript)
 
-  // A task that says it deploys has to have something to deploy with, and this is checked
-  // before anything is made rather than discovered at the finish gate. Ticking the box and
-  // getting a task space whose card can only ever answer "nothing to deploy" is the silent
-  // failure this refuses: the request promised a deployment, and there is no script to run.
+  // A task that owes an acceptance has to have something to produce it with, and this is
+  // checked before anything is made rather than discovered at the finish gate. Choosing a
+  // kind and getting a task space whose card can only ever answer "nothing to run" is the
+  // silent failure this refuses: the request promised a verdict, and there is no script to
+  // produce one.
   //
   // The three sources are the same three, in the same order, that the deploy side looks in -
   // so this accepts exactly what a deploy would later find, and refuses exactly what it would
@@ -492,7 +493,14 @@ export async function createTask(subprocess, options) {
   // The check is for the ENTRY FILE, not for a `deploy/` directory. A directory holding only
   // other scripts would pass a directory test and still leave nothing to run, which is the
   // very outcome this guard exists to prevent.
-  if (policy.deploy.target !== 'none') {
+  //
+  // It can only be that much, and the `smoke` kind is where the limit is worth saying out
+  // loud: this side reads a file, not a shell script, so it cannot tell an entry that
+  // implements `smoke` from one that prints its usage and exits. A `deploy` kind has two
+  // subcommands to get wrong and the same blind spot - the first run is what finds out. The
+  // refusal's own wording carries that, rather than letting a passed create read as proof.
+  const kind = policy.acceptance.kind
+  if (kind !== 'none') {
     // A named script needs no re-check here: `resolveDeployScript` above already refused the
     // request (E4014) unless it exists, is a file, and sits under the workspace's
     // `.worktree-space/deploy/`. Re-testing it would be a second, weaker copy of a check
@@ -503,11 +511,13 @@ export async function createTask(subprocess, options) {
     if (!named && !sourceEntry && !repoEntry) {
       throw coded(
         'E4015',
-        `the task is set to deploy (deployTarget docker), but nothing can deploy it: no deploy script was named, `
+        `the task asks for a recorded acceptance (acceptanceKind ${kind}), but nothing can produce one: no script was named, `
           + `${sourceRoot} carries no \`${DEPLOY_DIR}/deploy.sh\`, and none of the selected repositories carries its own. `
           + `Add that file, name an existing one under \`${DEPLOY_DIR}/\` with deployScript, or create the task with `
-          + `deployTarget none and deploy it by hand.`,
-        { sourceRoot },
+          + 'acceptanceKind none and verify it by hand. '
+          + 'A create can confirm only that the entry file exists - whether it implements the subcommand is '
+          + 'settled by its first run.',
+        { sourceRoot, kind },
       )
     }
   }

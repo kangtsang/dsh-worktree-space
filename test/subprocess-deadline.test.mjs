@@ -148,7 +148,7 @@ async function deployableTaskSpace(entry = `${PLUGIN_ROOT}/deploy/deploy.sh`) {
   await writeFile(script, "echo entry\n", "utf8")
   await writeTaskMetadata(dir, taskMetadata({
     task: "login", project: "public", tasksRoot: join(dir, ".."), sourceRoot: "/repo",
-    branch: "task/login", delivery: { deploy: { target: "docker" } },
+    branch: "task/login", delivery: { acceptance: { kind: "deploy" } },
   }))
   return dir
 }

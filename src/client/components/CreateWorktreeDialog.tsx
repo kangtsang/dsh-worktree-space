@@ -9,7 +9,7 @@ import { errorText } from "../lib/error-text"
 import { nameOf, normalizedSlugOf, slashPath, taskDirectory } from "../lib/paths"
 import type { RepositoryBranchMap, TaskRootSuggestion, WorkspaceNavigation, WorkspacesService, Workspace } from "../lib/types"
 import type { ConfigFormLike } from "./PluginConfigCard"
-import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "./ui"
+import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input, Select } from "./ui"
 
 /**
  * The one delivery decision a create makes: whether the task expects a deployment.
@@ -19,31 +19,37 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogTitle, Input } 
  * somewhere else - what to merge, which branch, whether to delete it, what a
  * conflict does, what happens to leftovers. Four were read by nothing at all. What
  * is left is the one answer a later step cannot derive, because it turns the
- * finish gate on or off: does this task have an environment whose smoke has to
- * pass before the work may land?
+ * finish gate on or off: what does this task owe before its work may land - nothing,
+ * a passing smoke, or a passing smoke of a deployment it stands up?
  *
  * The rest is passed on the `done` call, where the caller can see the work it
  * applies to.
  */
 interface DeliveryChoice {
-  deployTarget: string
+  acceptanceKind: string
 }
 
-/** Where the choice starts: no deployment, which is also what a create without it gets. */
+/** Where the choice starts: no acceptance, which is also what a create without it gets. */
 const DEFAULT_DELIVERY: DeliveryChoice = {
-  deployTarget: "none",
+  acceptanceKind: "none",
 }
+
+/** The three answers the field offers, in the order the menu lists them. */
+const ACCEPTANCE_KINDS = ["none", "smoke", "deploy"] as const
 
 /**
  * The one choice, as the policy the Host records.
  *
  * A create says exactly what the user chose and nothing more. It used to send seven
  * more fields, every one of them a default standing in for a decision taken later;
- * what the Host records now is the deployment target alone, because that is the
- * only answer a later step cannot derive.
+ * what the Host records now is the acceptance kind alone, because that is the only
+ * answer a later step cannot derive.
  */
 function deliveryPolicyOf(choice: DeliveryChoice) {
-  return { deploy: { target: choice.deployTarget === "docker" ? "docker" : "none" } }
+  const kind = (ACCEPTANCE_KINDS as readonly string[]).includes(choice.acceptanceKind)
+    ? choice.acceptanceKind
+    : "none"
+  return { acceptance: { kind } }
 }
 
 /** Prefix the host uses when the caller names none; a suggestion normally carries it. */
@@ -325,11 +331,11 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
     return Object.keys(sent).length === 0 ? undefined : sent
   }
   const effectiveBaseRefs = sentBaseRefs()
-  // Whether this task deploys anywhere at all. It decides one thing in this dialog:
-  // whether the deploy-script field is offered, because naming a script for a task
-  // that deploys nowhere would say nothing. Every other delivery decision moved to
-  // the finish, so there is no longer a grid of fields to show or hide.
-  const deploys = delivery.deployTarget !== "none"
+  // Whether this task records an acceptance at all. It decides one thing in this dialog:
+  // whether the entry-script field is offered, because naming a script for a task that owes
+  // none would say nothing. The kind itself is sent as what it is; everything else a finish
+  // decides moved to the finish, so there is no longer a grid of fields to show or hide.
+  const deploys = delivery.acceptanceKind !== "none"
   const canCreate = validSlug && selected.length > 0 && tasksRoot.trim() !== "" && prefixProblem === ""
 
   const startBusy = () => { busyRef.current = true; setBusy(true); setError("") }
@@ -463,10 +469,10 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
         // the box is cleared, but it is not sent for a repository not in the task.
         ...(effectiveBaseRefs === undefined ? {} : { baseRefs: sentBaseRefs() }),
         branchPrefix: effectivePrefix,
-        // The one delivery decision, sent flat rather than as a policy blob: the
-        // Host reads it as the deployment target and records it. A target of `none`
-        // is sent too, so what the user chose is what is recorded.
-        deployTarget: deliveryPolicyOf(delivery).deploy.target,
+        // The one acceptance decision, sent flat rather than as a policy blob: the
+        // Host reads it as the kind and records it. `none` is sent too, so what the
+        // user chose is what is recorded.
+        acceptanceKind: deliveryPolicyOf(delivery).acceptance.kind,
         // Named only when there is one: an empty field leaves the request exactly as it
         // was, so the Host copies what the source root carries and nothing else.
         ...(deployScript.trim() === "" ? {} : { deployScript: deployScript.trim() }),
@@ -701,42 +707,45 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
           <p className="dws-field-note">{t("tasksRootStrategyHint")}</p>
         </> : null}
       </div>
-      {/* The one delivery decision, and it is the only one left: whether this task
-          expects a deployment. A tick rather than a dropdown, because there are only
-          two answers and one of them is "no" - and the question the tick asks is the
-          same one the finish gate reads. Everything else a finish decides is asked at
-          the finish, where the caller can see the work it applies to. */}
+      {/* The one acceptance decision, and it is the only one left: what this task owes
+          before its work may land. A menu now rather than a tick, because there are three
+          answers and two of them gate the finish - "a deploy" and "a smoke on its own" are
+          different things to owe, and one tick could not say which. Everything else a
+          finish decides is asked at the finish, where the caller can see the work it
+          applies to. */}
       <div className="dws-field-row">
-        {/* The tick's own label is the field name, so there is no separate name above it.
-            The explanation rides on that label's line, right-aligned - the same shape every
-            other field in this dialog uses - rather than under the tick, where it read as a
-            caption for the checkbox instead of as the field's own note. */}
-        {/* Its own class, not the repository picker's `dws-check-option`: that one is what
-            the selection count and the bulk actions select on, so sharing it would have the
-            deployment tick counted as a repository and swept up by "select all". */}
-        <div className="dws-deploy-line">
-          <label className="dws-deploy-option" htmlFor={`${id}-deploy-docker`}>
-            <input
-              id={`${id}-deploy-docker`}
-              className="dws-checkbox"
-              type="checkbox"
-              checked={delivery.deployTarget === "docker"}
-              disabled={fieldsDisabled}
-              onChange={(event) => setDelivery({ deployTarget: event.target.checked ? "docker" : "none" })}
-            />
-            <span className="dws-check-copy">
-              <span className="dws-check-label">{t("deliveryDeployCheckbox")}</span>
-              {/* The contract's own explanation, which is three paragraphs long: it belongs in
-                  the bubble rather than beside the tick, where it would push the rest of the
-                  form down on every create. */}
-              <HoverHint label={t("deliveryDeployNote")} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
-            </span>
-          </label>
-          <span className="dws-field-note">{t("deliveryDeployCheckboxHint")}</span>
-        </div>
-        {/* Shown only once deployment is ticked: naming a script for a task that deploys
-            nowhere would say nothing. */}
-        {delivery.deployTarget === "none" ? null : <>
+        <label className="dws-field-label" htmlFor={`${id}-acceptance-kind`}>
+          <span className="dws-field-name"><span id={`${id}-acceptance-kind-label`}>{t("deliveryAcceptanceKind")}</span>
+            {/* The contract's own explanation, which is several paragraphs long: it belongs in
+                the bubble rather than beside the menu, where it would push the rest of the
+                form down on every create. */}
+            <HoverHint label={t("deliveryAcceptanceNote")} className="dws-field-hint"><CircleQuestionMark size={13} aria-hidden="true" /></HoverHint>
+          </span>
+          {/* The chosen answer's cost, in one line, changing with the menu: the menu names
+              the kind, this says what it will make the finish wait for. */}
+          <span className="dws-field-note" id={`${id}-acceptance-kind-note`}>
+            {delivery.acceptanceKind === "deploy"
+              ? t("deliveryAcceptanceDeployHint")
+              : delivery.acceptanceKind === "smoke"
+                ? t("deliveryAcceptanceSmokeHint")
+                : t("deliveryAcceptanceNoneHint")}
+          </span>
+        </label>
+        <Select
+          id={`${id}-acceptance-kind`}
+          aria-labelledby={`${id}-acceptance-kind-label`}
+          aria-describedby={`${id}-acceptance-kind-note`}
+          value={delivery.acceptanceKind}
+          disabled={fieldsDisabled}
+          onChange={(event) => setDelivery({ acceptanceKind: event.target.value })}
+        >
+          <option value="none">{t("deliveryAcceptanceNone")}</option>
+          <option value="smoke">{t("deliveryAcceptanceSmoke")}</option>
+          <option value="deploy">{t("deliveryAcceptanceDeploy")}</option>
+        </Select>
+        {/* Shown only once the task records an acceptance a script has to produce. Naming
+            a script for a task that owes none would say nothing. */}
+        {deploys ? <>
           <div className="dws-field-row">
             <label className="dws-field-label" htmlFor={`${id}-deploy-script`}>
               <span className="dws-field-name"><span id={`${id}-deploy-script-label`}>{t("deployScript")}</span>
@@ -747,7 +756,7 @@ export function CreateWorktreeDialog({ target, api, workspaces, uiWorkspace, con
             <Input id={`${id}-deploy-script`} aria-labelledby={`${id}-deploy-script-label`} value={deployScript} disabled={fieldsDisabled} onChange={(event) => setDeployScript(event.target.value)} placeholder={t("deployScriptPlaceholder")} autoComplete="off" spellCheck={false} aria-describedby={`${id}-deploy-script-note`} />
             <span id={`${id}-deploy-script-note`} className="dws-field-note dws-visually-hidden">{t("deployScriptNote")}</span>
           </div>
-        </>}
+        </> : null}
       </div>
     </div>
   </fieldset>

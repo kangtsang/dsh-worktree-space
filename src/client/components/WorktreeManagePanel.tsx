@@ -25,14 +25,14 @@ interface WorktreeManagePanelProps {
 }
 
 /**
- * The management page in a dialog, for the sidebar footer's shortcut.
+ * The management page in a dialog, which is the only form it has.
  *
- * The panel row under New session opens the same page as a main panel; this is the
- * other way in, and it is a dialog on purpose: a shortcut at the foot of the sidebar
- * should not take the session you were reading off screen, and closing it puts you
- * back where you were. It draws the page the panel draws — the same navigation column,
- * the same lists — inside the dialog's own header and footer chrome, so the two ways
- * in are one page seen twice rather than two implementations of it.
+ * All three entries - the row in the sidebar's panel list, the shortcut in its footer,
+ * and the compact icon beside the settings row - open this. A dialog rather than the
+ * main column on purpose: a row in the sidebar should not take the session you were
+ * reading off screen, and closing the dialog puts you back where you were. The panel
+ * the row selects is a redirect to this, so there is one page rather than two frames
+ * around one page.
  */
 export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config, pickDirectory }: WorktreeManagePanelProps) {
   const t = useT()
@@ -53,7 +53,6 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           sessions={sessions}
           onCreate={onCreate}
           onOpenSettings={onOpenSettings}
-          variant="dialog"
           onLeave={onClose}
           config={config}
           pickDirectory={pickDirectory}

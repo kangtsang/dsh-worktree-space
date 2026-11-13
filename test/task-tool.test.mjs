@@ -553,14 +553,21 @@ describe("registerTaskTool", () => {
     expect(captured[0].description).toMatch(/cannot do `force`/)
   })
 
-  it("declares the delivery decisions where they are now taken, and nowhere else", () => {
+  it("declares the acceptance decision where it is now taken, and nowhere else", () => {
     const { ctx, captured } = toolContext()
     registerTaskTool(ctx)
     const properties = captured[0].parameters.properties
-    // The create states one flat target; the JSON policy blob it used to take is gone,
+    // The create states one flat kind; the JSON policy blob it used to take is gone,
     // so a caller cannot hand over a field this flow no longer reads.
-    expect(properties.deployTarget.enum).toEqual(["docker", "none"])
+    expect(properties.acceptanceKind.enum).toEqual(["none", "smoke", "deploy"])
     expect(properties).not.toHaveProperty("delivery")
+    // The superseded name stays declared for one reason only: so a create that still
+    // passes it is refused by name instead of silently obeyed. Removing the property
+    // would make the schema drop the argument, and the caller would build an ungated
+    // task space while believing it had set a fence.
+    expect(properties.deployTarget.enum).toEqual(["docker", "none"])
+    expect(properties.deployTarget.description).toMatch(/Renamed to acceptanceKind/)
+    expect(properties.deployTarget.description).toMatch(/E7008/)
     // The finish states its own decisions, in the shape the action reads them.
     // `discard` stays declared and is refused by the guard, which is exactly how
     // `force` is treated: the parameter exists so the refusal can be explained in
@@ -592,14 +599,18 @@ describe("registerTaskTool", () => {
     const properties = captured[0].parameters.properties
     // The decision is create-time only, so the parameter's own default is otherwise an
     // answer nobody gave; the description has to say where the question belongs.
-    expect(properties.deployTarget.description).toMatch(/before anything is created or dispatched/)
-    expect(properties.deployTarget.description).toMatch(/cannot be added or changed afterwards/)
+    expect(properties.acceptanceKind.description).toMatch(/ASK THE USER/)
+    expect(properties.acceptanceKind.description).toMatch(/cannot be added or changed afterwards/)
+    // And the three answers are distinguished, because the difference is the whole
+    // point of the third one: `smoke` owes no environment.
+    expect(properties.acceptanceKind.description).toMatch(/"smoke" requires a passing smoke/)
+    expect(properties.acceptanceKind.description).toMatch(/"deploy" additionally needs `up`/)
     // And the tool's own description carries the rule too, because `dispatch` takes no
-    // delivery argument at all - this is the only place a fence can be asked about when
+    // acceptance argument at all - this is the only place a fence can be asked about when
     // the space already exists.
     expect(captured[0].description).toMatch(/Ask about the acceptance fence/)
     expect(captured[0].description).toMatch(/never answer it for the user/)
-    expect(captured[0].description).toMatch(/the smoke is the finish line/)
+    expect(captured[0].description).toMatch(/what the task owes before its work may land/)
   })
 
   it("stays out of the way when the deployment serves no tool runtime", () => {
@@ -793,34 +804,46 @@ describe("registerTaskTool", () => {
     }
   })
 
-  it("records the delivery target the create stated, and nothing else", async () => {
-    // The delivery bar is the user's to set, and a create is where they state it: the flat
-    // `deployTarget` the call carries is wrapped as the policy the record keeps. The policy
+  it("records the acceptance kind the create stated, and nothing else", async () => {
+    // The acceptance bar is the user's to set, and a create is where they state it: the flat
+    // `acceptanceKind` the call carries is wrapped as the policy the record keeps. The policy
     // is one field now, and the per-project stored default it used to fall back on is gone,
     // so what this call says is the whole of what the task's own record knows.
-    const { value, cleanup } = await createOnce({}, { deployTarget: "docker" }, {}, { keep: true, deployScript: true })
+    const { value, cleanup } = await createOnce({}, { acceptanceKind: "deploy" }, {}, { keep: true, deployScript: true })
     try {
       const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
-      expect(record.delivery).toEqual({ version: 1, deploy: { target: "docker" } })
+      expect(record.delivery).toEqual({ version: 2, acceptance: { kind: "deploy" } })
     } finally {
       await cleanup()
     }
   })
 
-  it("records the built-in default when the create states no delivery target", async () => {
-    // Nothing stated, nothing deployed and no gate: a task nobody configured has to stay
+  it("records the smoke-only kind, which owes an entry and no environment", async () => {
+    // The third answer, end to end: a create can record an acceptance that is a test suite
+    // and nothing else, and the record then says so in the same one field.
+    const { value, cleanup } = await createOnce({}, { acceptanceKind: "smoke" }, {}, { keep: true, deployScript: true })
+    try {
+      const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
+      expect(record.delivery).toEqual({ version: 2, acceptance: { kind: "smoke" } })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it("records the built-in default when the create states no acceptance kind", async () => {
+    // Nothing stated, no acceptance and no gate: a task nobody configured has to stay
     // exactly as finishable as it was before delivery policies existed.
     const { value, cleanup } = await createOnce({}, {}, {}, { keep: true })
     try {
       const record = JSON.parse(await readFile(recordAt(value.container), "utf8"))
-      expect(record.delivery).toEqual({ version: 1, deploy: { target: "none" } })
+      expect(record.delivery).toEqual({ version: 2, acceptance: { kind: "none" } })
     } finally {
       await cleanup()
     }
   })
 
-  it("refuses a deploy target the declared enum does not offer, before anything is made", async () => {
-    // The target is a flat string with a closed list, so the runtime's own validation is
+  it("refuses an acceptance kind the declared enum does not offer, before anything is made", async () => {
+    // The kind is a flat string with a closed list, so the runtime's own validation is
     // what refuses a name outside it - ahead of the action, and therefore before a single
     // directory is made. `create.js` would answer E4010 for the same value; it never sees
     // this one.
@@ -830,9 +853,36 @@ describe("registerTaskTool", () => {
     try {
       registerTaskTool(ctx)
       await expect(captured[0].execute(
-        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, deployTarget: "kubernetes" },
+        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, acceptanceKind: "kubernetes" },
         {},
       )).rejects.toThrow(/must be one of/)
+      expect(await readdir(container)).toEqual([])
+    } finally {
+      await source.cleanup()
+      await rm(container, { recursive: true, force: true })
+    }
+  })
+
+  it("refuses the renamed deployTarget argument rather than silently dropping it", async () => {
+    // The one failure this guard exists for: a schema that ignores an unknown key would
+    // let an older caller create a task with no fence while believing it had set one, and
+    // the gap would only show up at the finish. So the old name is refused by name, and
+    // nothing is made.
+    const source = await sourceFixture()
+    const container = await mkdtemp(join(tmpdir(), "multi-worktree-tool-register-"))
+    const { ctx, captured } = toolContext(creatingSubprocess)
+    try {
+      registerTaskTool(ctx)
+      await expect(captured[0].execute(
+        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, deployTarget: "docker" },
+        {},
+      )).rejects.toMatchObject({ code: "E7008" })
+      // The message has to carry both facts the caller needs to fix it: the new name, and
+      // that the values changed too.
+      await expect(captured[0].execute(
+        { action: "create", sourceRoot: source.root, task: "login", tasksRoot: container, deployTarget: "docker" },
+        {},
+      )).rejects.toThrow(/renamed to `acceptanceKind`/)
       expect(await readdir(container)).toEqual([])
     } finally {
       await source.cleanup()
@@ -1472,8 +1522,8 @@ describe("registerTaskTool", () => {
     // The fence is settled at create, and this brief is the last moment its completion line
     // can be stated: a session that was never told is free to report written code as a
     // finished task, and the finish gate would then refuse a merge nobody was warned about.
-    const deploys = await taskSpaceFixture({ delivery: { deploy: { target: 'docker' } } })
-    const plain = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
+    const deploys = await taskSpaceFixture({ delivery: { acceptance: { kind: 'deploy' } } })
+    const plain = await taskSpaceFixture({ delivery: { acceptance: { kind: 'none' } } })
     try {
       const briefFor = async (fixture) => {
         const prompts = []
@@ -1928,7 +1978,7 @@ describe("registerTaskTool", () => {
     // `merge` is the caller's own answer and there is no policy fallback behind it any
     // more: the same record finishes one way or the other depending on what this call
     // says, and no field of it is read for a standing answer.
-    const asked = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
+    const asked = await taskSpaceFixture({ delivery: { acceptance: { kind: 'none' } } })
     try {
       const { ctx, captured } = toolContext(asked.subprocess)
       registerTaskTool(ctx)
@@ -1940,7 +1990,7 @@ describe("registerTaskTool", () => {
     } finally {
       await asked.cleanup()
     }
-    const saidNo = await taskSpaceFixture({ delivery: { deploy: { target: 'none' } } })
+    const saidNo = await taskSpaceFixture({ delivery: { acceptance: { kind: 'none' } } })
     try {
       const { ctx, captured } = toolContext(saidNo.subprocess)
       registerTaskTool(ctx)
@@ -1959,7 +2009,7 @@ describe("registerTaskTool", () => {
     // until a smoke has passed. The refusal is the gate's own (E5006, the single code for
     // both "no state file" and "smoke not green"), it applies to the merge alone, and a
     // finish that leaves the work on its branch goes through.
-    const fixture = await taskSpaceFixture({ delivery: { deploy: { target: 'docker' } } })
+    const fixture = await taskSpaceFixture({ delivery: { acceptance: { kind: 'deploy' } } })
     try {
       const { ctx, captured } = toolContext(fixture.subprocess)
       registerTaskTool(ctx)

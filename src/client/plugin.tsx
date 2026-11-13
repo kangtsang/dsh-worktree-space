@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { Context } from "@deepseek-ai/cordis"
 import type { ConnectionHandle } from "@deepseek-ai/dsh-client-connection/client"
 import type { PropsRuntime } from "@deepseek-ai/dsh-client-ui-slots"
@@ -21,9 +21,11 @@ import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
 import { WorkspaceActionPlacement } from "./components/WorkspaceActionPlacement"
 import { WorktreeFooterAction } from "./components/WorktreeFooterAction"
 import { WorktreeManagePanel } from "./components/WorktreeManagePanel"
-import { WorktreePanelIcon, WorktreePanelPage } from "./components/WorktreePanel"
+import { WorktreePanelIcon } from "./components/WorktreePanel"
+import { WorktreeCompactEntry } from "./components/WorktreeCompactEntry"
 import { createWorktreeApi } from "./lib/api"
 import { previewValue, subscribePreview } from "./lib/config-preview"
+import { ENTRY_STYLE_FALLBACK, ENTRY_STYLE_FIELD, entryStyleOf, type EntryStyle, type LegacyEntrySwitches } from "./lib/entry-style"
 import { installLocale, NS, t } from "./lib/i18n"
 import { alertIconSvg, closeIconSvg } from "./lib/menu-icons"
 import { type OpenCapability, openDirectoryWith, probeOpening } from "./lib/open-in-app"
@@ -53,10 +55,13 @@ const SIDEBAR_FOOTER_ORDER = 5
  * The management page's key, which is also its sidebar row's id.
  *
  * A keyed `main` slot and a `sidebar.panellist` list entry meet on this string: the
- * row is what selects the panel, and the page's own way back is `selectPanel(null)` —
- * the shell's reserved "show the Conversation" selection. The sidebar footer's
- * shortcut does not select it at all: it opens the same page as a dialog, so a
- * shortcut cannot move the session you were reading off screen.
+ * sidebar's row addresses the panel by the id it registered, so the two have to agree.
+ *
+ * The page itself is a dialog now, opened by all three entries alike, so the panel this
+ * key selects renders nothing but the redirect below. The registration stays because
+ * the shell's own row handler is `selectPanel(id)` and that call throws for a key no
+ * panel registered - and it throws from the sidebar's click handler, where a reader
+ * cannot see why the row stopped working.
  */
 const PANEL_ID = "dsh-worktree-space"
 
@@ -153,6 +158,53 @@ export const WorktreePlugin = {
     const requestCreate = (target: Pick<Workspace, "path" | "title">) => openCreate(target)
     const requestArchive = (path: string) => openArchive(path)
     const requestManage = () => openManage()
+    /**
+     * The panel the reader was on, as of the last selection that was not this plugin's.
+     *
+     * Tracked by subscription rather than read when the row is clicked, because by then it
+     * is too late: the shell's own row handler calls `selectPanel(id)` first, so a read at
+     * that moment returns this plugin's key - every time - and the column could only ever
+     * be put back to the conversation. Watching the selection instead means the value is
+     * already correct when the click arrives.
+     *
+     * `null` is a real selection - the shell's "show the Conversation" - so the remembered
+     * value is stored as `{ id }` and "nothing remembered" is a separate state. Reading a
+     * remembered `null` as "nothing" would put the reader back on the conversation, which
+     * is the bug this exists to avoid.
+     */
+    let panelBefore: { id: string | null } | null = null
+    const rememberPanel = () => {
+      const id = ctx.layout.panelInfo.getSnapshot().activePanelId as string | null
+      // This plugin's own key is the one selection that says nothing about where the reader
+      // was: it is the click, not the place they clicked from.
+      if (id === PANEL_ID) return
+      panelBefore = { id }
+    }
+    rememberPanel()
+    ctx.effect(
+      () => ctx.layout.panelInfo.subscribe(rememberPanel),
+      "dsh-worktree-space last panel",
+    )
+    /**
+     * Put the main column back where it was, then forget the memory.
+     *
+     * Both callbacks are hoisted out of the registration because the layout effect that
+     * calls them lists them as dependencies: a fresh arrow per render would re-run the
+     * redirect on every render, which would reopen the dialog each time.
+     */
+    const enterPanel = () => { openManage() }
+    const restorePanel = () => {
+      const previous = panelBefore
+      panelBefore = null
+      // Selecting a panel that has since been unregistered throws, and that check is the
+      // shell's own. A failed restore falls back to the conversation, the one selection the
+      // shell always has.
+      try {
+        ctx.layout.selectPanel((previous?.id ?? null) as never)
+      } catch {
+        ctx.layout.selectPanel(null)
+      }
+    }
     // The gear row's destination: this plugin's own configuration, which lives on
     // the shell's Plugins panel under this bundle's detail page. `pluginNavigation`
     // is the panel's published way in — it selects the panel and opens the bundle
@@ -211,11 +263,38 @@ export const WorktreePlugin = {
       }
     }, "dsh-worktree-space workspace classification")
 
+    /**
+     * The `main` panel the sidebar row selects: opens the management dialog and puts the
+     * main column back the way it found it.
+     *
+     * It renders nothing at all. The effect runs in the commit phase, which is before the
+     * browser paints, so the column is restored in the same frame the row was clicked: what
+     * a reader sees is the dialog opening over whatever they were looking at.
+     *
+     * **The column goes back to the panel that was selected before, not to the conversation.**
+     * The first version always selected `null`, which is the shell's "show the Conversation"
+     * selection - so opening this dialog from the Plugins page, a plugin detail page or the
+     * task board quietly replaced that page with the conversation behind the dialog. The
+     * reader closed the dialog and their page was gone. What the button promises is a dialog
+     * over the screen they were on, so the panel that was selected is remembered on the way
+     * in and selected again on the way out.
+     *
+     * `onOpen` is the dialog, `restore` puts the column back; both run once, and the effect's
+     * dependencies are the two stable callbacks handed in below.
+     */
+    function WorktreePanelRedirect({ onOpen, restore }: { onOpen: () => void; restore: () => void }) {
+      useLayoutEffect(() => {
+        onOpen()
+        restore()
+      }, [onOpen, restore])
+      return null
+    }
+
     function WorktreeOverlay() {
       // One overlay host for the dialogs this plugin floats over the shell: the
       // composer and the workspace list's menu open the create form, the menu also
-      // opens the archive form, and the sidebar footer's shortcut opens the
-      // management page here rather than switching the main column to it.
+      // opens the archive form, and all three sidebar entries open the management
+      // page here rather than switching the main column to it.
       const [request, setRequest] = useState<
         | { kind: "create"; target: Pick<Workspace, "path" | "title"> }
         | { kind: "archive"; path: string }
@@ -226,6 +305,8 @@ export const WorktreePlugin = {
       // both read the one classification rather than asking the Host again.
       const { sourceRootPaths } = useSyncExternalStore(subscribeClassification, getClassification, getClassification)
       const canCreate = useCallback((workspace: Workspace) => sourceRootPaths.has(cleanPath(workspace.path)), [sourceRootPaths])
+      // The entry in force, for the one form the overlay draws rather than registers.
+      const entryStyleNow = useSyncExternalStore(subscribeEntryStyle, getEntryStyle, getEntryStyle)
       // What this deployment can open a directory with, asked once at mount. `null` until
       // the probe returns; the menu simply offers fewer rows until then rather than dead
       // ones, and a host with no desktop at all keeps the answer `available: false`.
@@ -269,6 +350,11 @@ export const WorktreePlugin = {
       }, [])
       return <>
         <WorkspaceMenuEntries api={api} workspaces={workspaces} canCreate={canCreate} onCreate={requestCreate} onArchive={requestArchive} onOpenIn={openIn} capability={capability} />
+        {/* The compact entry lives here because it is not a slot registration: its button
+            is portalled into the host's settings row, which is not a slot at all. The
+            overlay is the one place this plugin always has mounted, and it is where the
+            button falls back to when the row cannot be found. */}
+        {entryStyleNow === "compact" ? <WorktreeCompactEntry onOpen={requestManage} /> : null}
         {revealFailure === null ? null : (
           // A card rather than a toast: the host exposes no general notice surface - its
           // own `RowToast` is a closed union of sidebar events - so this one carries the
@@ -365,44 +451,81 @@ export const WorktreePlugin = {
       WorktreeOverlay,
     ))
 
-    // The management page itself, registered once as the `main` panel its sidebar row
-    // selects. It stays registered even when that row is hidden: the panel is what the
-    // id means, and a hidden row is a preference, not an unbuilt page.
+    // The panel the sidebar row addresses, and the whole of it: selecting it opens the
+    // management dialog and hands the main column straight back to the conversation.
+    //
+    // A redirect rather than the page, because there is one management page now. The
+    // page used to be drawn here, in the main column, while the footer's shortcut drew
+    // the same page in a dialog - two frames, two sets of rules about where the heading
+    // and the way back sit, and two answers to "where does this open". The dialog is
+    // what survived: a row in the sidebar should not take the session being read off
+    // screen, and closing a dialog puts the reader back where they were.
+    //
+    // It stays registered whether or not the row is shown: the key is what the row means,
+    // and a hidden row is a preference rather than an unbuilt page.
     ctx.slots.inject("main", () => ctx.slots.register(
       { name: "main", key: PANEL_ID },
-      () => <WorktreePanelPage api={api} workspaces={workspaces} uiWorkspace={uiWorkspace} sessions={sessions} config={pluginConfigForm ?? undefined} pickDirectory={picker} onCreate={requestCreate} onOpenSettings={requestSettings} onBack={() => ctx.layout.selectPanel(null)} />,
+      () => <WorktreePanelRedirect onOpen={enterPanel} restore={restorePanel} />,
     ))
 
-    // The plugin's two ways in, each shown or hidden by this plugin's own
-    // configuration on the Plugins page — the same place, and the same shape, the
-    // neighbouring plugins use. The values arrive through the `configForms` service
-    // and are subscribed to, so the slots follow every change instead of waiting for a
-    // reload. Without that service the defaults stand: both shown.
+    // The plugin's one way in, in whichever of its three forms the configuration asks
+    // for. The value arrives through the `configForms` service and is subscribed to, so
+    // the entry moves with the click instead of waiting for a reload. Without that
+    // service the fallback stands: the footer shortcut.
     //
-    // The panel row is the front door — a row in the sidebar's panel list, under New
-    // Session, where the native Plugins and Task board entries sit. The footer action
-    // is a shortcut to the same page. Hiding one leaves the other, the workspace menu
-    // and the composer's own button, so nothing becomes unreachable.
-    // The panel row is asked for and the footer shortcut is assumed, which is what the
-    // Host's defaults say: one way in is always there, a second one is a choice.
+    // Exactly one form is registered at a time, which is the whole point of asking once
+    // rather than twice: the two switches this replaced described two facts and offered
+    // four arrangements, one of which put the plugin nowhere in the sidebar at all.
+    // The entry in force, for the one host that is not a slot registration: the compact
+    // button is portalled into the host's settings row, so the overlay draws it and needs
+    // to hear about a change the way it hears about the classification. A stable snapshot
+    // plus listeners, for the same reason that one has them - a closure alone cannot tell
+    // a mounted component that the answer arrived.
+    let entryStyle: EntryStyle = ENTRY_STYLE_FALLBACK
+    const entryStyleListeners = new Set<() => void>()
+    const getEntryStyle = () => entryStyle
+    const subscribeEntryStyle = (listener: () => void) => {
+      entryStyleListeners.add(listener)
+      return () => { entryStyleListeners.delete(listener) }
+    }
     let disposeEntries: Array<() => void> = []
-    const showEntries = (value: { sidebarEntry?: string; panelEntry?: string } | undefined) => {
+    /** Whether {@link showEntries} has run at least once, for the early return below. */
+    let entriesApplied = false
+    /**
+     * Register the entry the configuration asks for, once per actual change.
+     *
+     * The early return matters more than it looks: the form notifies on every write to
+     * *any* field in this plugin's configuration, so re-registering unconditionally tore
+     * the sidebar entry down and rebuilt it every time an unrelated setting was saved -
+     * a visible flicker on a row nobody asked to move, and a fresh registration for the
+     * sidebar to re-sort. The guard is on the style, which is the only thing this
+     * function reads.
+     */
+    const showEntries = (style: EntryStyle = ENTRY_STYLE_FALLBACK) => {
+      if (entriesApplied && style === entryStyle) return
+      entriesApplied = true
       for (const dispose of disposeEntries) dispose()
       disposeEntries = []
-      if (value?.panelEntry === "show") {
+      entryStyle = style
+      for (const listener of entryStyleListeners) listener()
+      if (style === "standard") {
         // A list slot: the sidebar owns the row and sorts by `order`, so placement is
-        // arranged rather than claimed.
+        // arranged rather than claimed. Its click selects `main`, which redirects to the
+        // dialog - see the panel registration above.
         disposeEntries.push(ctx.slots.inject("sidebar.panellist", () => ctx.slots.register(
           { name: "sidebar.panellist", id: PANEL_ID, order: SIDEBAR_PANEL_ORDER, label: () => t("worktrees") },
           (props: PropsRuntime<"sidebar.panellist">) => <WorktreePanelIcon size={props.size} />,
         )))
       }
-      if (value?.sidebarEntry !== "hide") {
+      if (style === "quick") {
         disposeEntries.push(ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register(
           { name: "sidebar.footer.action", id: "dsh-worktree-space", order: SIDEBAR_FOOTER_ORDER, label: () => t("worktrees") },
           (props: PropsRuntime<"sidebar.footer.action">) => <WorktreeFooterAction wide={props.wide} onOpen={requestManage} />,
         )))
       }
+      // The third form has no slot to register into: the host's settings row is not a
+      // slot, so the button is portalled into it and the overlay renders the host node.
+      // It is mounted from the overlay rather than registered here for that reason.
     }
     // DSH 0.1.7 addresses a settings form by the profile row's entry id, not by a
     // namespace the plugin registers: preferences live on the mount row. The locale
@@ -422,11 +545,14 @@ export const WorktreePlugin = {
       // A pending choice counts here too: the entry appears or disappears with the
       // click rather than a round trip later.
       const read = () => {
-        const served = form.getSnapshot().value as { sidebarEntry?: string; panelEntry?: string } | undefined
-        showEntries({
-          sidebarEntry: previewValue("sidebarEntry") ?? served?.sidebarEntry,
-          panelEntry: previewValue("panelEntry") ?? served?.panelEntry,
-        })
+        const served = form.getSnapshot().value as ({ entryStyle?: string } & LegacyEntrySwitches) | undefined
+        // The pending choice first, so the entry moves with the click rather than a round
+        // trip later; then the served field, and only then the two switches it replaced.
+        showEntries(entryStyleOf({
+          entryStyle: previewValue(ENTRY_STYLE_FIELD) ?? served?.entryStyle,
+          panelEntry: served?.panelEntry,
+          sidebarEntry: served?.sidebarEntry,
+        }))
       }
       read()
       ctx.effect(() => form.subscribe(read), "dsh-worktree-space entry configuration")

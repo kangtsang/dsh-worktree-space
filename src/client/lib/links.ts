@@ -13,6 +13,16 @@ export const ISSUES_URL = "https://github.com/kangtsang/dsh-worktree-space/issue
 export const VIDEO_URL = "https://www.bilibili.com/video/BV1iM466VEz2"
 
 /**
+ * The plugin's own repository, which is where a star is given.
+ *
+ * The issues page above is the same project one path deeper, and the two are spelled
+ * out rather than derived from one another: a star and a bug report are different
+ * intents, and a reader who follows either should land where that intent is answered
+ * rather than on a page they then have to navigate away from.
+ */
+export const STAR_URL = "https://github.com/kangtsang/dsh-worktree-space"
+
+/**
  * An acceptance URL the card may render, or nothing.
  *
  * The Host has this same rule (`acceptanceUrl` in `src/host/task/deploy.js`) and is

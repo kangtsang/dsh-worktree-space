@@ -178,7 +178,7 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     models: (signal?: AbortSignal) => read<{ providers: Array<{ provider: string; models: string[] }>; default?: { provider: string; model: string }; notes: string[]; registryRead: "ok" | "failed" }>("task.models", {}, signal),
     /** Create the task: one worktree per repository, all on one branch. */
-    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; baseRefs?: Record<string, string>; branchPrefix?: string; deployTarget?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
+    createTask: (payload: { sourceRoot: string; task: string; tasksRoot?: string; repos: string[]; baseRef?: string; baseRefs?: Record<string, string>; branchPrefix?: string; acceptanceKind?: string; deployScript?: string }) => call<CreateTaskResult>("task.create", payload),
     /**
      * Add repositories to a task that already exists.
      *
