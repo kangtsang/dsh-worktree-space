@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { worktreeNavItems, WorktreesSettings } from "./WorktreesSettings"
-import type { WorktreeView } from "./WorktreesSettings"
+import type { WorktreeView, ViewChangesTarget } from "./WorktreesSettings"
 import { BrandGlyph, Settings } from "./icons"
 import type { createWorktreeApi } from "../lib/api"
 import type { ConfigFormLike } from "./PluginConfigCard"
@@ -44,6 +44,12 @@ export interface WorktreesPageProps {
    * opens nothing.
    */
   pickDirectory?: () => Promise<string | null>
+  /**
+   * Opens the changes sidebar for one entry. Left out, the rows offer no
+   * "查看变更" action at all — a deployment with no right sidebar has nowhere
+   * to put the view, and a button that does nothing is worse than no button.
+   */
+  onViewChanges?: (target: ViewChangesTarget) => boolean
 }
 
 /**
@@ -88,7 +94,7 @@ export function WorktreesNav({ view, onView, onOpenSettings }: {
  * The view lives here rather than in the dialog, so a switch means the same thing every
  * time the page opens, and only the rows the view lists scroll.
  */
-export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onLeave, config, pickDirectory }: WorktreesPageProps) {
+export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onLeave, config, pickDirectory, onViewChanges }: WorktreesPageProps) {
   const t = useT()
   // A view is state, not a prop, so the dialog does not have to hold it: React unmounts
   // this component whenever the page closes, so every opening starts on the same view.
@@ -106,6 +112,7 @@ export function WorktreesPage({ api, workspaces, uiWorkspace, sessions, onCreate
         control={{ view, onView: setView }}
         onLeave={onLeave}
         config={config}
+        onViewChanges={onViewChanges}
       />
     </div>
   </section>

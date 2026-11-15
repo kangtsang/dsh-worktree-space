@@ -35,6 +35,7 @@
 - [1. 一次任务的完整生命周期](#1-一次任务的完整生命周期)
 - [2. 打开管理页面](#2-打开管理页面)　[3. 新建任务空间](#3-新建任务空间)
 - [4. 在任务空间里工作](#4-在任务空间里工作)　[5. 给任务补仓库](#5-给任务补仓库)
+  - [4.1 查看变更与评审](#41-查看变更与评审)
 - [6. 验收](#6-验收)　[7. 结束任务](#7-结束任务)
 - [8. 冲突与「停在工作上」](#8-冲突与停在工作上)　[9. 排障](#9-排障)
 
@@ -222,6 +223,49 @@ DSH 里切到那个工作区开新的会话接手 —— 多个任务各占一�
   不要靠猜（同样的事实以数据形式在 `.worktree-space/worktree-space.json`）。
 - **任务分支只在本机。** 推远端永远是你自己的动作，插件不写远端。
 
+### 4.1 查看变更与评审
+
+![变更查看：文件树、行号 diff 与行内评论](docs/img/change-review.png)
+
+**入口。** 任务空间行、工作区行右侧的 **查看变更** 打开 **变更总览**；Git 仓库视图里仓库下的
+worktree 行，以及工作区视图里的仓库行，右侧图标打开该仓库的 **变更查看**。没有对比基线的地方不显示
+按钮：没有 Git 仓库的工作区，以及 Git 仓库视图里的仓库行本身。
+
+**基线与范围。** 任务空间里的仓库以源码检出当前检出的分支为基线（与行上的已提交/未提交数字同一
+口径；读不到时依次退回任务记录里的 `sourceBranch`、`baseRef` 与 `startCommit`），工作区里的仓库
+以远端跟踪分支为基线。读取范围是「比较起点（merge-base）→ 工作树」：已提交、未提交与未跟踪文件
+都在内，与顶部「包含未提交的变更」一致。基线取自源码检出，所以源码分支改名后会跟随新名字。
+
+**变更总览。** 每个仓库一行：仓库名、`当前分支 → 基线分支`、`+新增 −删除`、文件数。某个仓库读不到
+基线时，该行显示原因且不能打开。
+
+**变更查看。**
+
+- 头部是 `分支：<当前分支> → <基线>`；
+- 工具栏依次是文件选择、`已评审 N / M`、总行数、文件树、全部展开、全部收起、自动换行、刷新；
+- 左侧文件树可拖动分隔条改宽（150–460px，双击恢复 208px），宽度记在本浏览器；
+- 右侧逐文件卡片：状态字母（`M`/`D`/`R`/`C`/`A`/`U`）、路径、`+/−`、未跟踪或新文件等徽标；
+  展开后是带行号的 diff，已提交与未提交在同一份补丁里；
+- 语法高亮来自 DSH 自身的高亮器；语法尚未加载、或部署没有共享该模块时按纯文本显示，语法加载完成后
+  自动变色；
+- **全部展开** 按文件逐个读取，最多 4 个并发；读取期间工具栏显示 **读取中 N**；
+- **已评审** 勾选后卡片收起。标记按「路径 + 变更签名」保存在本浏览器；文件之后又变时会显示
+  **有新改动** 并取消勾选，避免把改过的文件当成看过的。
+
+**评论。**
+
+- 悬停某行，行号左侧出现蓝色 `+`；点 `+` 或点该行的行号对，打开评论框。
+- 侧别由这一行决定：未变更行且新旧行号相同 → `L<旧行号>`；未变更行但新旧行号不同 → `R<新行号>`；
+  删除行 → `L<旧行号>`；新增行 → `R<新行号>`。
+- 提交后评论常驻在该行下方，可以编辑、删除；评论按会话保存在本浏览器，文件折叠时不可见，展开后
+  回到原位。
+- 输入框同步靠缓冲区：插件记住上一次写入的整块，任何增删改先移除整块，再按当前评论重写
+  `## User Comment N`（含 `File` / `Repository` / `Side` / `Lines` / `Source` / `Base` / `Diff hunk` / `Comment`），
+  追加到输入框末尾。输入框原有的文字与其它引用保留。评论块是普通 Markdown 文本，发送时随消息一起
+  发出，不随发送清空。
+- 一次评论只针对一行；拖选多行范围暂不支持。
+- 若在输入框里手工改过这块文本，下一次刷新找不到原块时只会追加新块，不会删除手工改过的内容。
+
 ---
 
 ## 5. 给任务补仓库
@@ -398,6 +442,23 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 不点「继续」也行：卡片上会直接写着「收尾合并还差：一次部署、一次通过的冒烟」，照它补齐即可。
 
 > **想在收尾之后还看得见验收地址的话，就在收尾之前看完** —— 收尾成功会自动销毁环境（[7.7](#77-收尾前的守卫与收尾后的清理)）。
+
+### 6.8 独立钩子文件（可选）
+
+部署根也可以不写单入口脚本，而是放两个独立文件：
+
+- `<部署根>/up`：起环境，把验收地址写进 `.state.json`；
+- `<部署根>/smoke`：跑冒烟，把 `lastSmoke` 合进同一个文件。
+
+文件存在即表示提供该动作，检查是纯文件系统操作。只提供 `up` 的任务是**只部署**：部署卡片不显示冒烟徽标
+与「执行冒烟」，收尾闸门只要求部署记录（状态文件里有可用的验收地址），不再等 `lastSmoke`。两个文件都
+提供时，行为与入口脚本的 `up`、`smoke` 子命令一致。
+
+文件名固定为 `up` / `smoke`；两者都以 bash 运行，环境 id 作为第一个参数，`DEPLOY_*` 环境变量与状态文件
+路径同入口脚本。钩子模式使用内置时限（`timeouts` 查询属于入口脚本约定），不提供独立的时限查询。
+
+同一部署根里同时有钩子文件与入口脚本时，钩子文件优先；只有入口脚本时完全按原来的子命令约定，旧任务
+空间不需要迁移。`.worktree-space/deploy/` 整个目录在创建时从源码根复制，钩子文件因此随项目走。
 
 ---
 
@@ -927,6 +988,7 @@ in section 15 serve both.
 - [1. The whole life of one task](#1-the-whole-life-of-one-task)
 - [2. Opening the management page](#2-opening-the-management-page)　[3. Creating a task space](#3-creating-a-task-space)
 - [4. Working inside a task space](#4-working-inside-a-task-space)　[5. Adding a repository to a task](#5-adding-a-repository-to-a-task)
+  - [4.1 Viewing changes and reviewing them](#41-viewing-changes-and-reviewing-them)
 - [6. Acceptance](#6-acceptance)　[7. Finishing a task](#7-finishing-a-task)
 - [8. Conflicts and the "stopped on work" flag](#8-conflicts-and-the-stopped-on-work-flag)　[9. Troubleshooting](#9-troubleshooting)
 
@@ -1147,6 +1209,60 @@ Inside that directory a few rules hold:
 - **The task branch exists on this machine only.** Pushing anywhere is always your own move; the plugin
   never writes to a remote.
 
+### 4.1 Viewing changes and reviewing them
+
+![Files changed: the file tree, the line-numbered diff and an inline comment](docs/img/change-review.png)
+
+**Entrances.** On a task-space row or a Workspace row, **View changes** opens **Changes overview**.
+On a worktree row under a repository in the Git repositories view, and on repository rows inside the
+Workspaces view, the icon on the right opens that repository's **Files changed**. No button appears
+where there is no comparison base: a Workspace holding no repository, or a repository row itself in
+the Git repositories view.
+
+**Base and range.** Inside a task space the base is the branch the source checkout has checked out —
+the same comparison the row's committed and uncommitted figures count against, falling back in order
+to the task record's `sourceBranch`, `baseRef` and `startCommit`. A Workspace's repository uses its
+remote-tracking branch. The range is `merge-base → working tree`: committed, uncommitted and untracked
+work are all included, matching the header's "Including uncommitted changes". The base follows the
+source checkout, so a renamed source branch is followed rather than shown as a missing commit.
+
+**Changes overview.** One row per repository: name, `current branch → base branch`, `+added -removed`
+and the file count. A repository whose base cannot be resolved states why and cannot be opened.
+
+**Files changed.**
+
+- The header reads `Branch: <current> → <base>`;
+- The toolbar holds the file picker, `Reviewed N / M`, the line totals, the file tree, Expand all,
+  Collapse all, wrapped lines and refresh;
+- The tree on the left is widened by dragging its divider (150–460px, double-click restores 208px);
+  the width is kept in this browser;
+- Each file is a card: status letter (`M`/`D`/`R`/`C`/`A`/`U`), path, `+/−`, and untracked or new-file
+  badges. Opened, it shows a line-numbered diff; committed and uncommitted work are in the same patch;
+- Syntax highlighting comes from DSH's own highlighter. A grammar that has not loaded yet, or a
+  deployment that does not share that module, shows plain text and repaints once the grammar arrives;
+- **Expand all** reads the files one by one, at most four at a time, with **Reading N** in the toolbar;
+- **Reviewed** folds the card once ticked. The mark binds to the path and the change's signature and
+  lives in this browser; a file that changes afterwards reads **New changes** and loses the tick, so a
+  file is never counted as read after it has moved.
+
+**Comments.**
+
+- Hovering a line shows a blue `+` at the left of its numbers. The `+`, or the row's number pair,
+  opens the composer.
+- The side follows the row: an unchanged line whose two numbers agree, or a removed line, is `L` with
+  the old number; an unchanged line whose numbers have moved apart, or an added line, is `R` with the
+  new number.
+- A submitted comment stays under its line and can be edited or deleted. Comments are kept per session
+  in this browser; they are hidden while the file is folded and return when it is opened again.
+- The input is kept in step through a buffer: the plugin remembers the block it wrote last time,
+  removes that whole block on every add, edit or delete, rewrites `## User Comment N` for the current
+  comments (`File`, `Repository`, `Side`, `Lines`, `Source`, `Base`, `Diff hunk`, `Comment`) and
+  appends it to the end of the input. The input's own text and its other quotes are left alone. The
+  block is plain Markdown: it is sent with the message and is not cleared by sending.
+- One line per comment; dragging a multi-line range is not offered yet.
+- If the block was edited by hand in the input, the next flush cannot find it and appends a new block
+  rather than deleting text someone typed.
+
 ---
 
 ## 5. Adding a repository to a task
@@ -1360,6 +1476,26 @@ passing smoke", and supplying those is the whole fix.
 
 > **If you want to still be able to open the acceptance URL after finishing, look at it before you finish**
 > — a successful finish takes the environment down ([7.7](#77-the-guards-before-finishing-the-cleanup-after)).
+
+### 6.8 Hook files (optional)
+
+A deploy root may carry two files instead of a single entry script:
+
+- `<deploy root>/up` raises the environment and writes the acceptance URL into `.state.json`;
+- `<deploy root>/smoke` runs the smoke test and merges `lastSmoke` into the same file.
+
+A file's presence is the declaration, and the check is a plain filesystem one. A task with `up` alone is
+**deployment-only**: the deployment card shows neither the smoke badge nor **Run smoke**, and the finish gate
+asks only for a deployment record (a usable acceptance URL in the state file) instead of waiting for
+`lastSmoke`. With both files present the behaviour matches the entry script's `up` and `smoke` subcommands.
+
+The names are fixed: `up` and `smoke`. Both run through bash with the environment id as the first argument,
+under the same `DEPLOY_*` environment and state file path as the entry script. Hook mode uses the built-in
+deadlines; the `timeouts` lookup belongs to the entry-script contract, not to the hook files.
+
+Hook files win over an entry script in the same deploy root; a root with only the entry script keeps the old
+subcommand contract, so existing task spaces need no migration. The whole `.worktree-space/deploy/` directory
+is copied from the source root at create time, so hook files travel with the project.
 
 ---
 

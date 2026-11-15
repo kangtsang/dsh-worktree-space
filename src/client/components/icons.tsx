@@ -4,6 +4,7 @@ import ArrowDown01Icon from "@hugeicons/core-free-icons/ArrowDown01Icon"
 import ArrowRight01Icon from "@hugeicons/core-free-icons/ArrowRight01Icon"
 import Cancel01Icon from "@hugeicons/core-free-icons/Cancel01Icon"
 import CheckIcon from "@hugeicons/core-free-icons/CheckIcon"
+import FileDiffIcon from "@hugeicons/core-free-icons/FileDiffIcon"
 import CircleQuestionMarkIcon from "@hugeicons/core-free-icons/CircleQuestionMarkIcon"
 import FolderClosedIcon from "@hugeicons/core-free-icons/FolderClosedIcon"
 import FolderGit2Icon from "@hugeicons/core-free-icons/FolderGit2Icon"
@@ -87,6 +88,8 @@ export const AlertCircle = iconOf(AlertCircleIcon)
 export const Check = iconOf(CheckIcon)
 /** The spinner: a loader, turned by the `dws-spin` animation its call sites add. */
 export const Loader2 = iconOf(Loading03Icon)
+/** A file with its change marks: the row action that opens the changes sidebar. */
+export const FileDiff = iconOf(FileDiffIcon)
 export const X = iconOf(Cancel01Icon)
 export const ChevronRight = iconOf(ArrowRight01Icon)
 export const ChevronDown = iconOf(ArrowDown01Icon)

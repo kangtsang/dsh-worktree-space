@@ -575,10 +575,26 @@ export interface DeploymentStatus {
    */
   urlSource: "state" | "derived" | "none"
   lastSmoke: { at: string; result: string } | null
+  /**
+   * Whether the deploy root offers a `smoke` hook.
+   *
+   * A deploy root declares its hooks by file: `up` and `smoke` beside the entry
+   * script, and either may be absent. `false` means the task owes no smoke and the
+   * card shows neither the badge nor the button. Optional because an older Host
+   * does not send it; absent reads as "a smoke exists", which is the old behaviour.
+   */
+  smokeAvailable?: boolean
   destroyedAt: string | null
   stateFound: boolean
   statePath: string | null
   containers: DeploymentContainer[]
+  /**
+   * What a finish would still be waiting for, recomputed with the status.
+   *
+   * Optional for a Host that predates it; the card then keeps the last gate an action
+   * reported rather than blanking a fact it cannot refresh.
+   */
+  gate?: DeliveryGatePreview
 }
 
 /** What tearing a deployment down answered. */
@@ -599,6 +615,8 @@ export interface DeliveryGatePreview {
   applies: boolean
   missing: string[]
   target: string
+  /** Whether the deploy root offers a smoke hook; absent on an older Host. */
+  smokeAvailable?: boolean
   /** The same answer as `target`, under the name the policy now uses. Absent on an older Host. */
   kind?: string
 }
@@ -625,4 +643,89 @@ export interface DeployUpResult {
   output: string
   status: DeploymentStatus
   gate?: DeliveryGatePreview
+}
+
+/**
+ * One file in a repository's change list, as the Host read it.
+ *
+ * `status` is the letter git's `--name-status` gave, spelled out; a file whose
+ * path changed carries `oldPath` so the view can name both sides of a rename.
+ */
+export type ChangeFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked"
+
+export interface ChangeFile {
+  path: string
+  /** The old path of a rename or copy. */
+  oldPath?: string
+  status: ChangeFileStatus
+  insertions: number
+  deletions: number
+  /** A binary change: there are no lines to count and no patch to draw. */
+  binary?: boolean
+  /** Too large for the view to read; the counts are zero because nobody counted lines. */
+  tooLarge?: boolean
+  /** A new file nobody has added yet. */
+  untracked?: boolean
+}
+
+/** One hunk of a file's patch, with its header kept for the view. */
+export interface ChangeHunk {
+  header: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  /** Unified-diff lines, each starting with `+`, `-` or a space. */
+  lines: string[]
+}
+
+/** One repository's row in the changes overview. */
+export interface ChangesOverviewRepository {
+  name: string
+  path: string
+  /** The branch this checkout sits on, or its short commit on a detached HEAD. */
+  branch?: string
+  head?: string
+  /** The base the comparison starts from, as the record or the upstream names it. */
+  base?: string
+  baseCommit?: string
+  insertions?: number
+  deletions?: number
+  files?: number
+  untracked?: number
+  /** Why this repository could not be compared; the row is still listed. */
+  error?: string
+}
+
+/** Answer of `worktree.changes.overview`: what a task space or Workspace holds. */
+export interface ChangesOverviewAnswer {
+  kind: "task" | "workspace" | "repo"
+  title: string
+  path: string
+  branch?: string
+  repositories: ChangesOverviewRepository[]
+}
+
+/** Answer of `worktree.changes.list`: one repository's files and range. */
+export interface ChangesListAnswer {
+  path: string
+  branch: string
+  head: string
+  base: string
+  baseCommit: string
+  files: ChangeFile[]
+  totals: LineChanges
+}
+
+/**
+ * Answer of `worktree.changes.file`: one file's lines.
+ *
+ * `text` carries hunks (empty when only the mode changed); `binary` and
+ * `tooLarge` carry no lines at all, because there are none to draw.
+ */
+export interface ChangeFileAnswer {
+  kind: "text" | "binary" | "tooLarge"
+  hunks?: ChangeHunk[]
+  untracked?: boolean
+  lines?: number
 }

@@ -103,6 +103,7 @@ const expected = [
   "docs/img/user-story-flow.png",
   "docs/img/why-worktree-space.png",
   "docs/img/new-worktree-space.png",
+  "docs/img/change-review.png",
   "docs/store-evidence.md",
   "docs/store-evidence.json",
   "icon.svg",

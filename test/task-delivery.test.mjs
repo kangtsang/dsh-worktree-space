@@ -20,7 +20,7 @@ import {
   normalizeDeliveryPolicy,
   resolveDeliveryPolicy,
 } from '../src/host/task/delivery.js'
-import { deployEnvironment, deploymentStatus, deliveryStateSummary, destroyDeployment, assertDeliveryGate } from '../src/host/task/deploy.js'
+import { deployEnvironment, deploymentStatus, deliveryStateSummary, destroyDeployment, assertDeliveryGate, deliveryGatePreview, smokeEnvironment } from '../src/host/task/deploy.js'
 import { PLUGIN_ROOT, taskMetadata } from '../src/host/task/shared.js'
 
 const STATE = {
@@ -310,6 +310,58 @@ describe('the acceptance URL a state file recorded', () => {
   })
 })
 
+describe('deploy root hook files', () => {
+  /** A task space whose deploy root carries `up`, and `smoke` only when asked. */
+  async function hookFixture({ smoke = false } = {}) {
+    const fixture = await taskFixture({
+      metadataDelivery: { acceptance: { kind: 'deploy' } },
+      state: { envId: 'dsh-public-login', url: 'http://localhost:51555', services: [] },
+    })
+    const deployDir = join(fixture.root, PLUGIN_ROOT, 'deploy')
+    await mkdir(deployDir, { recursive: true })
+    await writeFile(join(deployDir, 'up'), 'echo up "$1"\n', { mode: 0o755 })
+    if (smoke) await writeFile(join(deployDir, 'smoke'), 'echo smoke "$1"\n', { mode: 0o755 })
+    return { ...fixture, deployDir }
+  }
+
+  /** A subprocess that records spawns and answers empty output. */
+  function quietSubprocess(calls) {
+    return { spawn({ argv }) {
+      calls.push(argv.join(' '))
+      return {
+        done: Promise.resolve({ exitCode: 0, signal: null }),
+        collected: { stdout: { readFrom: () => ({ text: '' }) }, stderr: { readFrom: () => ({ text: '' }) } },
+      }
+    } }
+  }
+
+  it('treats an absent smoke file as no smoke hook, and gates only the deployment', async () => {
+    const { root } = await hookFixture()
+    const calls = []
+    const subprocess = quietSubprocess(calls)
+    const status = await deploymentStatus(subprocess, root)
+    expect(status.smokeAvailable).toBe(false)
+    // Nothing to run, and the refusal names the missing hook rather than a failure.
+    await expect(smokeEnvironment(subprocess, root)).rejects.toThrow(/no `smoke` hook/)
+    // A recorded deployment is the whole acceptance.
+    await expect(assertDeliveryGate({ delivery: { acceptance: { kind: 'deploy' } } }, root, { merge: true })).resolves.toBeUndefined()
+    expect((await deliveryGatePreview({ delivery: { acceptance: { kind: 'deploy' } } }, root)).missing).toEqual([])
+    const outcome = await deployEnvironment(subprocess, root)
+    expect(outcome.status.smokeAvailable).toBe(false)
+    expect(calls.some((line) => line.includes(join('deploy', 'up')))).toBe(true)
+  })
+
+  it('runs a smoke hook when the file exists', async () => {
+    const { root } = await hookFixture({ smoke: true })
+    const calls = []
+    const subprocess = quietSubprocess(calls)
+    expect((await deploymentStatus(subprocess, root)).smokeAvailable).toBe(true)
+    const outcome = await smokeEnvironment(subprocess, root)
+    expect(outcome.exitCode).toBe(0)
+    expect(calls.some((line) => line.includes(join('deploy', 'smoke')))).toBe(true)
+  })
+})
+
 describe('deployment state reads and writes', () => {
   it('answers the status live: state file for the facts, docker for the containers', async () => {
     const { root } = await taskFixture({ metadataDelivery: { acceptance: { kind: 'deploy' } }, state: STATE })
@@ -335,6 +387,9 @@ describe('deployment state reads and writes', () => {
     expect(status.kind).toBe('deploy')
     expect(status.target).toBe('deploy')
     expect(status.deploys).toBe(true)
+    // The same answer a finish would apply, carried with the status so a refresh can
+    // repaint the card's gate line.
+    expect(status.gate.missing).toEqual([])
     expect(status.targets).toBeUndefined()
     expect(status.autoAllowed).toBeUndefined()
     expect(status.verification).toBeUndefined()

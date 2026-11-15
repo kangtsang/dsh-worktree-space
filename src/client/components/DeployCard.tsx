@@ -68,6 +68,9 @@ export function DeployCard({ api, path }: Props) {
       // nothing, which is the same bug the mount effect's abort exists to prevent.
       if (signal?.aborted) return
       setStatus(next)
+      // A status read now carries the gate too, so a plain refresh repaints the line
+      // as well. An older Host sends no gate; its last answer stays standing.
+      if (next.gate !== undefined) setGate(next.gate)
       setFailed(false)
       setError("")
     } catch {
@@ -166,6 +169,9 @@ export function DeployCard({ api, path }: Props) {
   // A smoke-only task has no environment, so its card is the badge and one action. Nothing
   // else here applies to it: there is no URL to show, nothing to start, nothing to destroy.
   const smokeOnly = kind === "smoke"
+  // The task space declares its hooks by file: no `smoke` hook means there is no
+  // smoke to run and none is owed, so the badge and the button both go away.
+  const smokeExpected = status.smokeAvailable !== false
   if (kind === "none" && !status.stateFound && !containers) return null
 
   const smoke = status.lastSmoke
@@ -199,7 +205,9 @@ export function DeployCard({ api, path }: Props) {
         here for a human acceptance ack the policy could wait for; that gate is gone,
         so the row says one thing rather than two that disagreed. */}
     <div className="dws-deploy-badges">
-      <span className={`dws-status ${smokeBadge.cls}`} title={stamp(smoke?.at) || undefined}><span className="dws-status-dot" />{smokeBadge.label}{smoke?.at ? ` ${stamp(smoke.at)}` : ""}</span>
+      {smokeExpected
+        ? <span className={`dws-status ${smokeBadge.cls}`} title={stamp(smoke?.at) || undefined}><span className="dws-status-dot" />{smokeBadge.label}{smoke?.at ? ` ${stamp(smoke.at)}` : ""}</span>
+        : null}
     </div>
     {/* What a finish would still refuse over, said here rather than at the finish.
         Only shown when the last deploy or smoke answered it and something is in
@@ -220,9 +228,9 @@ export function DeployCard({ api, path }: Props) {
       <div className="dws-deploy-actions">
         {/* A smoke-only task is the one case where the smoke runs with no environment, so
             it must not be conditioned on containers: there are none, and there never will be. */}
-        {smokeOnly
+        {smokeOnly && smokeExpected
           ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
-          : deploys && containers
+          : deploys && containers && smokeExpected
             ? <Button className="dws-button-ghost dws-deploy-run-smoke" disabled={working} title={t("deploySmoke")} onClick={() => run(() => api.deploySmoke(path))}><RefreshCw size={14} /><span>{t("deploySmoke")}</span></Button>
             : null}
         {deploys && !containers

@@ -21,6 +21,22 @@ import { WorkspaceMenuEntries } from "./components/WorkspaceMenuEntries"
 import { WorkspaceActionPlacement } from "./components/WorkspaceActionPlacement"
 import { WorktreeFooterAction } from "./components/WorktreeFooterAction"
 import { WorktreeManagePanel } from "./components/WorktreeManagePanel"
+import type { ViewChangesTarget } from "./components/WorktreesSettings"
+import { ChangesOverviewTab } from "./components/changes/ChangesOverviewTab"
+import { ChangesViewTab } from "./components/changes/ChangesViewTab"
+import { lastFlushedBlock, rememberFlushedBlock } from "./components/changes/review-buffer"
+import {
+  CHANGES_OVERVIEW_KIND,
+  CHANGES_OVERVIEW_PATTERN,
+  CHANGES_VIEW_KIND,
+  CHANGES_VIEW_PATTERN,
+  changesOverviewAddress,
+  changesOverviewTitle,
+  changesViewAddress,
+  changesViewTitle,
+  parseChangesOverviewAddress,
+  parseChangesViewAddress,
+} from "./lib/change-address"
 import { WorktreePanelIcon } from "./components/WorktreePanel"
 import { WorktreeCompactEntry } from "./components/WorktreeCompactEntry"
 import { createWorktreeApi } from "./lib/api"
@@ -118,6 +134,100 @@ export const WorktreePlugin = {
     ctx.effect(installStyles, "dsh-worktree-space styles")
     ctx.effect(() => installLocale(ctx), "dsh-worktree-space locale")
     const api = createWorktreeApi(ctx.connection)
+    // The changes sidebar's two tab types — the overview of a task space or a
+    // Workspace, and one repository's files. Registered through a deferred
+    // injection because the right sidebar belongs to the shell's own bundle: a
+    // deployment without it keeps the "查看变更" buttons out of the rows rather
+    // than failing to load this plugin.
+    const overviewId = "@dsh-worktree-space/changes-overview"
+    const viewId = "@dsh-worktree-space/changes-view"
+    ctx.inject(["slots", "sidebarRight", "sidebarRightTabs"], (scope: any) => {
+      const tabs = scope?.sidebarRightTabs as { register(definition: unknown): () => void } | undefined
+      const slots = scope?.slots as {
+        inject(name: string, register: () => unknown): () => void
+        register(options: unknown, component: unknown): () => void
+      } | undefined
+      // A deployment without the right sidebar has no services to register into;
+      // the rows then offer no changes action and nothing else changes. Checked
+      // here rather than assumed because the injection is the only place this
+      // plugin learns whether that bundle is present.
+      if (tabs === undefined || typeof tabs.register !== "function") return
+      if (slots === undefined || typeof slots.inject !== "function" || typeof slots.register !== "function") return
+      ctx.effect(() => tabs.register({
+        id: overviewId,
+        kind: CHANGES_OVERVIEW_KIND,
+        keepMounted: true,
+        patterns: [CHANGES_OVERVIEW_PATTERN],
+        canOpen: (address: string) => parseChangesOverviewAddress(address) !== undefined,
+        title: changesOverviewTitle,
+      }), "dsh-worktree-space changes overview type")
+      ctx.effect(() => tabs.register({
+        id: viewId,
+        kind: CHANGES_VIEW_KIND,
+        keepMounted: true,
+        patterns: [CHANGES_VIEW_PATTERN],
+        canOpen: (address: string) => parseChangesViewAddress(address) !== undefined,
+        title: changesViewTitle,
+      }), "dsh-worktree-space changes view type")
+      ctx.effect(() => slots.inject("sidebar.right.pane.tab", () => slots.register({
+        name: "sidebar.right.pane.tab",
+        key: overviewId,
+        inject: () => ({ api, syncComments }),
+      }, ChangesOverviewTab)), "dsh-worktree-space changes overview body")
+      ctx.effect(() => slots.inject("sidebar.right.pane.tab", () => slots.register({
+        name: "sidebar.right.pane.tab",
+        key: viewId,
+        inject: () => ({ api, syncComments }),
+      }, ChangesViewTab)), "dsh-worktree-space changes view body")
+    })
+    /** Open a tab in the right sidebar; false when this deployment has none. */
+    const openChanges = (target: ViewChangesTarget) => {
+      const sidebar = (ctx as any).get?.("sidebarRight") as { openResource?: (address: string) => void } | undefined
+      if (sidebar === undefined || typeof sidebar.openResource !== "function") return false
+      try {
+        sidebar.openResource(target.kind === "overview"
+          ? changesOverviewAddress(target.path)
+          : changesViewAddress(target.path, target.base ?? ""))
+        return true
+      } catch {
+        return false
+      }
+    }
+    /**
+     * Replace the comment block in a session's main input.
+     *
+     * The conversation input can insert a quote but cannot address one later, so
+     * an edited comment cannot be patched in place. The plugin therefore keeps
+     * its comments in a buffer and writes the whole block each time: the exact
+     * previous block is removed from the draft text, the new one is appended, and
+     * the rest of the draft - text, references and quotes of other origins - is
+     * written back unchanged. A block that the reader has edited or removed is
+     * left alone and the new one is appended, which is the only honest outcome
+     * once the text no longer matches what this plugin wrote.
+     */
+    const syncComments = (sessionId: string, block: string): boolean => {
+      try {
+        const scoped = (ctx.sessions as any)?.scope?.(sessionId)
+        const conversation = scoped?.get?.("conversation")
+        const input = conversation?.input?.for?.(scoped)
+        if (input === undefined) return false
+        const snapshot = (input as any).draftSnapshot as { text: string; [key: string]: unknown } | undefined
+        const current = snapshot !== undefined && typeof snapshot.text === "string"
+          ? snapshot.text
+          : String(input.state?.getSnapshot?.()?.draft ?? "")
+        const previous = lastFlushedBlock(sessionId)
+        const base = previous !== "" && current.includes(previous) ? current.replace(previous, "") : current
+        const trimmed = base.replace(/\s+$/u, "")
+        const text = block === "" ? trimmed : `${trimmed}${trimmed === "" ? "" : "\n\n"}${block}`
+        if (snapshot === undefined) input.setDraft(text)
+        else input.setDraft({ ...snapshot, text })
+        rememberFlushedBlock(sessionId, block)
+        input.focus()
+        return true
+      } catch {
+        return false
+      }
+    }
     const workspaces = ctx.workspaces
     // Opening a Session belongs to the workspace navigation face: ISessions.open
     // was removed after 0.1.5, while openWorkspace reuses or creates the target
@@ -414,6 +524,15 @@ export const WorktreePlugin = {
             config={pluginConfigForm ?? undefined}
             pickDirectory={picker}
             onCreate={(target) => setRequest({ kind: "create", target })}
+            onViewChanges={(target) => {
+              // The dialog is a modal over the page; a tab opened behind it would
+              // look like nothing happened. Closing it first puts the right
+              // sidebar's new tab in front of the reader, which is the thing the
+              // click asked for.
+              const opened = openChanges(target)
+              if (opened) setRequest(null)
+              return opened
+            }}
             onOpenSettings={() => {
               // Close first: the dialog covers the main column, and the page it is
               // jumping to lives in that column — leaving it open would put the

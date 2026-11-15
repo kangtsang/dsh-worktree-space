@@ -19,7 +19,7 @@
      cascade, so the panel inherited none of these aliases - `background: var(--wt-surface)`
      was dropped whole and the list came out see-through, with the cards behind it reading
      through the options. Any surface that leaves the dialog by portal belongs here. */
-  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker {
+  .dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker, .dws-changes-overview, .dws-changes-view {
     --wt-text: var(--dsw-alias-label-primary);
     --wt-secondary: var(--dsw-alias-label-secondary);
     --wt-muted: var(--dsw-alias-label-tertiary);
@@ -1099,3 +1099,154 @@
    The fallback is for a card drawn outside the token scope, where the variable is
    undefined and the colour would otherwise drop out entirely. */
 .dws-deploy-warning { font-size: 12px; color: var(--wt-warn, #b45309); }
+
+/* ── 变更侧栏（变更总览 / 变更查看）──────────────────────────────
+   The two tabs live inside the shell's right sidebar, so they fill the pane
+   they are given and scroll inside it rather than growing the column. */
+.dws-changes-overview, .dws-changes-view { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--dsw-alias-bg-base, transparent); color: var(--wt-text); font-size: 13px; }
+.dws-changes-overview-head, .dws-changes-view-head { display: flex; align-items: center; gap: 8px; flex: none; min-height: 38px; padding: 6px 10px; border-bottom: 1px solid var(--wt-line); }
+.dws-changes-overview-title { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-changes-overview-title > svg, .dws-changes-view-refs > svg { flex: none; color: var(--wt-secondary); }
+.dws-changes-overview-path { flex: none; margin: 0; padding: 4px 10px 2px; color: var(--wt-muted); font-size: 11px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-changes-overview-list { display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; min-height: 0; padding: 8px 10px; overflow: auto; }
+.dws-change-repo { display: flex; flex-flow: row wrap; align-items: center; gap: 4px 8px; padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.dws-change-repo:hover { background: var(--wt-hover); }
+.dws-change-repo:disabled { opacity: .62; cursor: default; }
+.dws-change-repo:disabled:hover { background: var(--wt-surface); }
+.dws-change-repo-name { flex: 1 1 100%; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-change-repo-refs { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--wt-secondary); font-size: 12px; }
+.dws-change-repo-label { color: var(--wt-muted); font-size: 12px; white-space: nowrap; }
+.dws-change-repo-head, .dws-change-repo-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 13em; }
+.dws-change-repo-base { color: var(--wt-muted); }
+.dws-change-repo-counts { display: flex; gap: 6px; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.dws-change-repo-error { flex: 1 1 100%; color: var(--wt-danger); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.dws-changes-loading, .dws-changes-empty, .dws-changes-notice, .dws-changes-error { margin: 8px 10px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
+.dws-changes-loading { display: flex; align-items: center; gap: 6px; }
+.dws-changes-error { color: var(--wt-danger); }
+.dws-changes-notice { padding: 10px 12px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }
+.dws-changes-tool { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.dws-changes-tool:hover { background: var(--wt-hover); color: var(--wt-text); }
+.dws-changes-tool:disabled { opacity: .5; cursor: default; }
+.dws-changes-tool.is-text { width: auto; padding: 0 7px; }
+.dws-changes-tool[aria-pressed="true"] { background: var(--wt-soft); color: var(--wt-text); }
+.dws-changes-view-head .dws-changes-tool, .dws-changes-overview-head .dws-changes-tool { margin-inline-start: auto; }
+.dws-changes-view-refs { display: flex; align-items: center; gap: 5px; flex: 1 1 auto; min-width: 0; color: var(--wt-secondary); font-size: 12px; }
+.dws-changes-current, .dws-changes-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-changes-current { color: var(--wt-text); font-family: var(--ds-font-family-code, ui-monospace, monospace); }
+.dws-changes-base { color: var(--wt-muted); font-family: var(--ds-font-family-code, ui-monospace, monospace); }
+.dws-changes-arrow { color: var(--wt-muted); }
+.dws-changes-note { flex: none; color: var(--wt-muted); font-size: 11px; white-space: nowrap; }
+.dws-changes-toolbar { display: flex; align-items: center; gap: 8px; flex: none; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--wt-line); }
+.dws-changes-scope { color: var(--wt-secondary); font-size: 12px; }
+.dws-changes-jump { width: auto; max-width: 210px; min-height: 28px; height: 28px; padding: 3px 8px; font-size: 12px; }
+.dws-changes-toolbar-spacer { flex: 1 1 auto; }
+.dws-changes-totals { display: flex; gap: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dws-changes-reviewed-progress { color: var(--wt-secondary); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dws-changes-loading-badge { color: var(--wt-secondary); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dws-changes-tools { display: flex; align-items: center; gap: 4px; flex: none; }
+.dws-changes-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.dws-changes-files { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0; min-height: 0; padding: 8px; overflow: auto; }
+.dws-change-tree { display: flex; flex-direction: column; gap: 6px; flex: 0 0 var(--tree-width, 208px); width: var(--tree-width, 208px); min-height: 0; padding: 6px; overflow: auto; }
+.dws-change-splitter { position: relative; flex: 0 0 5px; width: 5px; align-self: stretch; cursor: col-resize; touch-action: none; background: transparent; }
+.dws-change-splitter::after { content: ""; position: absolute; inset-block: 0; inset-inline-start: 2px; width: 1px; background: var(--wt-line); }
+.dws-change-splitter:hover::after, .dws-change-splitter:focus-visible::after { width: 2px; background: var(--dsw-alias-brand-primary); }
+.dws-change-splitter:focus-visible { outline: none; }
+.dws-change-tree-filter { min-height: 28px; height: 28px; padding: 3px 8px; font-size: 12px; }
+.dws-change-tree-branch { display: flex; flex-direction: column; gap: 1px; }
+.dws-change-tree-folder, .dws-change-tree-file { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: start; cursor: pointer; }
+.dws-change-tree-folder { color: var(--wt-secondary); }
+.dws-change-tree-folder:hover, .dws-change-tree-file:hover { background: var(--wt-hover); }
+.dws-change-tree-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-change-tree-counts { display: flex; gap: 4px; flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+.dws-change-tree-empty { margin: 4px 6px; color: var(--wt-muted); font-size: 12px; }
+.dws-change-file { flex: none; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-surface); overflow: hidden; }
+.dws-change-file-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; width: 100%; padding: 7px 10px; background: var(--dsw-alias-card-fill, var(--wt-soft)); color: inherit; }
+.dws-change-file-head:hover { background: var(--wt-hover); }
+.dws-change-file-toggle { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; overflow: hidden; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 12px; text-align: start; cursor: pointer; }
+.dws-change-reviewed { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-inline-start: auto; color: var(--wt-secondary); font-size: 11px; line-height: 18px; white-space: nowrap; cursor: pointer; }
+.dws-change-reviewed .dws-checkbox { width: 13px; height: 13px; margin: 0; border-radius: 4px; }
+.dws-change-flag-stale { color: var(--wt-warn); border-color: color-mix(in srgb, var(--wt-warn) 45%, transparent); }
+.dws-change-status { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 5px; background: var(--wt-soft); color: var(--wt-secondary); font-size: 11px; font-weight: 600; }
+.dws-change-status-added { color: var(--wt-success); background: color-mix(in srgb, var(--wt-success) 14%, transparent); }
+.dws-change-status-deleted { color: var(--wt-danger); background: color-mix(in srgb, var(--wt-danger) 14%, transparent); }
+.dws-change-status-renamed, .dws-change-status-copied { color: var(--dsw-alias-state-business-primary, var(--wt-secondary)); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, var(--wt-secondary)) 12%, transparent); }
+.dws-change-status-untracked { color: var(--wt-warn, var(--wt-secondary)); background: color-mix(in srgb, var(--wt-warn, var(--wt-secondary)) 14%, transparent); }
+.dws-change-file-path { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.dws-change-file-name { color: var(--wt-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-change-file-dir { color: var(--wt-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dws-change-file-flags { display: flex; gap: 4px; flex: none; }
+.dws-change-flag { padding: 0 5px; border: 1px solid var(--wt-line); border-radius: 4px; color: var(--wt-muted); font-size: 10px; line-height: 16px; }
+.dws-change-file-counts { display: flex; gap: 6px; flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+.dws-change-count-label { color: var(--wt-muted); }
+.dws-change-file-chevron { display: inline-flex; flex: none; color: var(--wt-muted); }
+.dws-change-file-body { border-top: 1px solid var(--wt-line); }
+.dws-change-file-note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 10px; color: var(--wt-muted); font-size: 12px; }
+.dws-change-file-note.is-error { color: var(--wt-danger); }
+/* The two changes surfaces are not inside the dialog's box-sizing rule, and a
+   `width: 100%` control with padding or a border overflows its parent by exactly
+   that padding: the tree's filter lost its right border and the file header
+   pushed "已审阅" past the card's edge. */
+.dws-changes-overview, .dws-changes-overview *, .dws-changes-overview *::before, .dws-changes-overview *::after,
+.dws-changes-view, .dws-changes-view *, .dws-changes-view *::before, .dws-changes-view *::after { box-sizing: border-box; }
+
+/* The rows copy DSH's own file-changes view: three tracks for the two line
+   numbers and the sign, one for the code; added and removed rows take the
+   theme's diff fills, and the numbers sit on the matching gutter. Those four
+   tokens live on the shell's root, so they are read directly rather than
+   through this plugin's aliases. */
+.dws-diff { overflow-x: auto; font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, monospace); font-size: 12px; line-height: 22px; }
+.dws-diff-row { position: relative; display: grid; grid-template-columns: 3.5em 3.5em 1.4em minmax(0, 1fr); min-height: 22px; line-height: 22px; }
+/* The comment affordance: a blue round button over the gutter, shown on the
+   row's hover the way GitHub draws it. It overlays the first number rather than
+   taking a column of its own. */
+.dws-diff-plus { position: absolute; inset-block-start: 50%; inset-inline-start: 1px; z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 5px; background: var(--dsw-alias-state-business-primary, #2f81f7); color: var(--dsw-alias-label-primary-foreground, #fff); font: inherit; font-size: 13px; line-height: 1; transform: translateY(-50%); cursor: pointer; opacity: 0; }
+.dws-diff-row:hover .dws-diff-plus, .dws-diff-plus:focus-visible { opacity: 1; }
+.dws-diff-plus:hover { filter: brightness(1.08); }
+.dws-diff-plus:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dws-diff-num { padding: 0 6px 0 0; color: var(--dsw-alias-label-tertiary); text-align: end; user-select: none; font-variant-numeric: tabular-nums; }
+/* The two numbers of a row are ONE control: clicking either side comments on the
+   row's one target, decided by its kind (equal numbers -> L, moved numbers -> R,
+   removed -> L, added -> R). */
+.dws-diff-lines { display: grid; grid-column: 1 / span 2; grid-template-columns: 3.5em 3.5em; align-items: stretch; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.dws-diff-lines.is-plain { cursor: default; }
+.dws-diff-lines:hover { background: var(--wt-soft); }
+.dws-diff-lines.is-plain:hover { background: transparent; }
+.dws-diff-lines:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+.dws-diff-lines .dws-diff-num { display: block; line-height: 22px; }
+.dws-diff-sign { color: var(--dsw-alias-label-secondary); text-align: center; user-select: none; }
+.dws-diff-text { padding: 0 16px 0 6px; white-space: pre; }
+.dws-diff-add { background: var(--dsw-alias-file-diff-added-bg); }
+.dws-diff-add .dws-diff-num { background: var(--dsw-alias-file-diff-added-gutter); color: var(--dsw-alias-file-diff-added-marker); }
+.dws-diff-add .dws-diff-sign { color: var(--dsw-alias-file-diff-added-marker); }
+.dws-diff-del { background: var(--dsw-alias-file-diff-deleted-bg); }
+.dws-diff-del .dws-diff-num { background: var(--dsw-alias-file-diff-deleted-gutter); color: var(--dsw-alias-file-diff-deleted-marker); }
+.dws-diff-del .dws-diff-sign { color: var(--dsw-alias-file-diff-deleted-marker); }
+.dws-diff-context .dws-diff-text { color: var(--dsw-alias-label-secondary); }
+.dws-diff-gap { display: flex; align-items: center; width: 100%; min-height: 26px; padding: 0 12px; border: 0; border-block: 1px solid var(--wt-line); background: var(--dsw-alias-card-fill, var(--wt-soft)); color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 18px; text-align: start; cursor: pointer; }
+.dws-diff-gap:hover { background: var(--wt-hover); color: var(--wt-text); }
+/* The line comment composer, under the row it was opened from. */
+.dws-comment-composer { margin: 4px 10px 10px; padding: 8px 10px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--dsw-alias-bg-base, var(--wt-surface)); }
+.dws-comment-head { margin: 0 0 6px; color: var(--wt-text); font-size: 12px; font-weight: 600; }
+.dws-comment-input { display: block; width: 100%; min-height: 64px; padding: 6px 8px; border: 1px solid var(--wt-line); border-radius: 7px; background: var(--wt-surface); color: var(--wt-text); font: inherit; font-size: 12px; line-height: 18px; resize: vertical; outline: none; }
+.dws-comment-input:focus-visible { border-color: var(--dsw-alias-brand-primary); }
+.dws-comment-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.dws-comment-cancel { padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 12px; cursor: pointer; }
+.dws-comment-cancel:hover { background: var(--wt-hover); color: var(--wt-text); }
+.dws-comment-add { padding: 4px 12px; border: 0; border-radius: 7px; background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-base); font: inherit; font-size: 12px; cursor: pointer; }
+.dws-comment-add:disabled { opacity: .4; cursor: default; }
+.dws-comment-error { margin: 6px 0 0; color: var(--wt-danger); font-size: 11px; }
+/* A submitted comment stays under its line, editable in place. */
+.dws-review-comment { margin: 6px 10px 8px calc(3.5em + 3.5em + 1.4em); padding: 8px 10px; border: 1px solid var(--wt-line); border-radius: 9px; background: var(--wt-soft); }
+.dws-review-comment-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--wt-secondary); font-size: 11px; }
+.dws-review-comment-actions { display: flex; gap: 8px; }
+.dws-review-comment-actions button { padding: 0 2px; border: 0; background: transparent; color: var(--wt-secondary); font: inherit; font-size: 11px; cursor: pointer; }
+.dws-review-comment-actions button:hover { color: var(--wt-text); }
+.dws-review-comment-body { margin: 4px 0 0; color: var(--wt-text); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dws-review-comment-edit { margin-top: 6px; }
+.dws-change-file.is-wrap .dws-diff { overflow-x: hidden; }
+.dws-change-file.is-wrap .dws-diff-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.dws-view-changes { white-space: nowrap; }
+@media (max-width: 720px) {
+  .dws-changes-jump { max-width: 140px; }
+  .dws-changes-note { display: none; }
+}

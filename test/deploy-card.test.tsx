@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act } from "react"
 import { DeployCard } from "../src/client/components/DeployCard"
 import { format, t } from "../src/client/lib/i18n"
+import { gateMissingText } from "../src/client/lib/deploy-gate-text"
 
 afterEach(cleanup)
 
@@ -107,6 +108,21 @@ describe("the deployment card", () => {
     expect(api.deployUp).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: t("deployUp") }))
     await waitFor(() => expect(api.deployUp).toHaveBeenCalledWith("/task"))
+  })
+
+  it("repaints the gate line from a plain status refresh", async () => {
+    // The line describes what a finish would still wait for, so a refresh that only
+    // read the state used to leave it stale until the next deploy or smoke.
+    const gate = (missing: string[]) => ({ applies: true, missing, target: "deploy", kind: "deploy" })
+    const api = { deployStatus: vi.fn()
+      .mockResolvedValueOnce(status({ gate: gate(["deployment", "smoke"]) }))
+      .mockResolvedValueOnce(status({ gate: gate([]) })) }
+    const { container } = render(<DeployCard api={api} path="/task" />)
+    await settle()
+    const waiting = format(t("deployGateWaiting"), { missing: gateMissingText(t, ["deployment", "smoke"]) })
+    expect(container.textContent).toContain(waiting)
+    fireEvent.click(screen.getByRole("button", { name: t("deployRefresh") }))
+    await waitFor(() => expect(container.textContent).not.toContain(waiting))
   })
 
   it("re-runs the smoke and repaints from the result, failed or passed", async () => {

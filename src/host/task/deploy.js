@@ -279,6 +279,79 @@ async function deployTimeouts(subprocess, found, taskPath, envId, { signal } = {
   }
 }
 
+/**
+ * The hook files a deploy root offers, or none.
+ *
+ * The file contract beside the legacy entry script: a deploy root may provide `up`
+ * and `smoke` as executable shell files. Existence is the whole declaration - a
+ * `smoke` file means this task owes and can run a smoke, its absence means the task
+ * is deployment-only and no smoke is ever required. The files are run with the
+ * chosen bash and receive the environment id as the first argument, with the same
+ * `DEPLOY_*` environment the entry script gets.
+ *
+ * Hook files win over an entry script in the same directory, so a project can move
+ * to the file contract without deleting its old entry. A directory with neither
+ * keeps the legacy subcommand contract untouched.
+ * @param dir - the deploy root directory.
+ * @returns `{ dir, up, smoke }` with null for each absent file, or undefined when
+ *   neither hook exists.
+ */
+function deployHooksIn(dir) {
+  const hook = (name) => {
+    const path = join(dir, name)
+    try {
+      return statSync(path).isFile() ? path : null
+    } catch {
+      return null
+    }
+  }
+  const up = hook('up')
+  const smoke = hook('smoke')
+  return up === null && smoke === null ? undefined : { dir, up, smoke }
+}
+
+/**
+ * How this task deploys and smokes: hook files first, the recorded entry script
+ * second, and nothing at all when neither exists.
+ * @param taskPath - the task space directory.
+ * @param recorded - the task's own record, whose `deployScript` names the legacy entry.
+ * @returns the plan, or undefined when the space deploys nothing.
+ * @throws Error carrying E5008 when the record names an entry that is not usable.
+ */
+async function findDeployPlan(taskPath, recorded) {
+  const legacy = await findDeployScript(taskPath, recorded)
+  if (legacy !== undefined) {
+    const hooks = deployHooksIn(legacy.dir)
+    if (hooks !== undefined) return { mode: 'hooks', ...hooks, script: legacy.script }
+    return { mode: 'legacy', script: legacy.script, dir: legacy.dir }
+  }
+  // No entry script anywhere; hook files may still declare a deploy root on their
+  // own, including the repository-shaped root a single-repository space carries.
+  const candidates = [taskDeployRootPath(taskPath)]
+  const entries = await readdir(taskPath, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name !== PLUGIN_ROOT) candidates.push(join(taskPath, entry.name, DEPLOY_ROOT))
+  }
+  for (const dir of candidates) {
+    const hooks = deployHooksIn(dir)
+    if (hooks !== undefined) return { mode: 'hooks', ...hooks, script: undefined }
+  }
+  return undefined
+}
+
+/** Whether the plan offers a smoke; a legacy entry always answers yes. */
+function planHasSmoke(plan) {
+  return plan === undefined || plan.mode === 'legacy' || plan.smoke !== null
+}
+
+/** Whether the plan offers an `up`; a legacy entry always answers yes. */
+function planHasUp(plan) {
+  return plan !== undefined && (plan.mode === 'legacy' || plan.up !== null)
+}
+
+/** The built-in budgets a hook file runs under; the `timeouts` lookup belongs to the entry contract. */
+const HOOK_BUDGETS = { upMs: DEPLOY_UP_TIMEOUT_MS, smokeMs: DEPLOY_SMOKE_TIMEOUT_MS }
+
 /** Run docker through {@link runProcess}, under the query deadline. */
 async function runDocker(subprocess, args, { signal } = {}) {
   return runProcess(subprocess, ['docker', ...args], {
@@ -309,6 +382,20 @@ async function runDocker(subprocess, args, { signal } = {}) {
  * @throws Error carrying E5008 when this machine has no bash that can run the entry.
  */
 function deployEntryCommand(script, subcommand, envId) {
+  return deployCommand(script, subcommand, envId)
+}
+
+/** The same shell choice for one hook file; the environment id is its first argument. */
+function deployHookCommand(script, envId) {
+  return deployCommand(script, null, envId)
+}
+
+/**
+ * Build the bash invocation for an entry subcommand or, with a null subcommand, one
+ * hook file. Both go through the same interpreter choice and the same PATH repair, so
+ * a hook is exactly as portable as the entry it replaced.
+ */
+function deployCommand(script, subcommand, envId) {
   const bash = bashInterpreter()
   if (bash === undefined) {
     throw coded(
@@ -322,7 +409,7 @@ function deployEntryCommand(script, subcommand, envId) {
     )
   }
   return {
-    argv: [bash.command, script, subcommand, ...(envId === '' ? [] : [envId])],
+    argv: [bash.command, script, ...(subcommand === null ? [] : [subcommand]), ...(envId === '' ? [] : [envId])],
     env: { PATH: pathForShell(bash.toolDir, process.env.PATH) },
   }
 }
@@ -585,6 +672,11 @@ export async function deploymentStatus(subprocess, taskPath, { signal } = {}) {
   const kind = policy.acceptance.kind
   const found = await readDeliveryState(taskPath)
   const stateUrl = acceptanceUrl(found?.state?.url)
+  // Which contract this space uses is a fact of its deploy root: hook files if any,
+// the legacy entry otherwise. The card hides the smoke section when the files say
+// this task never smoke-tests.
+  const plan = kind === 'deploy' ? await findDeployPlan(taskPath, recorded) : undefined
+  const smokeAvailable = kind === 'deploy' ? planHasSmoke(plan) : true
   // A smoke-only task has no environment, so it is not asked about containers and its
   // recorded URL is not reported: the script is free to write one, and a URL shown as the
   // task's deliverable would promise something no `up` ever stood up. The card decides what
@@ -594,6 +686,9 @@ export async function deploymentStatus(subprocess, taskPath, { signal } = {}) {
     envId,
     kind,
     target: kind,
+    // Whether this entry offers a smoke hook; see `deployHooks`. The card hides the
+    // smoke section and its button when this is false.
+    smokeAvailable,
     // Whether anything was deployed is a fact of the policy, not of the state file: a
     // deploying task whose file is missing has no URL either, and the two absences mean
     // different things to the reader.
@@ -605,6 +700,9 @@ export async function deploymentStatus(subprocess, taskPath, { signal } = {}) {
     stateFound: found !== undefined,
     statePath: found?.path ?? null,
     containers: deploys && envId !== '' ? await containersFor(subprocess, envId, { signal }) : [],
+    // What a finish would still be waiting for, so a status refresh repaints the gate
+    // line too - it used to freeze until the next deploy or smoke answered.
+    gate: await deliveryGatePreview(recorded, taskPath),
   }
 }
 
@@ -675,13 +773,33 @@ export async function deliveryStateSummary(taskPath) {
  *   either passed cleanly or does not apply.
  * @throws Error carrying E5006 when the merge may not proceed.
  */
-export async function assertDeliveryGate(recorded, taskPath, { merge = false, bypass = false } = {}) {
+export async function assertDeliveryGate(recorded, taskPath, { merge = false, bypass = false, smokeAvailable: knownSmoke } = {}) {
   if (merge !== true) return undefined
   const policy = deliveryPolicyOf(recorded)
   const kind = policy.acceptance.kind
   if (kind === 'none') return undefined
   const envId = typeof recorded?.deploymentEnvId === 'string' ? recorded.deploymentEnvId : ''
   const found = await readDeliveryState(taskPath)
+  // Whether the deploy root provides a smoke is declared by hook-file existence, and
+  // a deployment-only task owes its deployment rather than a smoke nothing can run.
+  const smokeAvailable = kind === 'deploy'
+    ? (knownSmoke ?? planHasSmoke(await findDeployPlan(taskPath, recorded)))
+    : true
+  if (kind === 'deploy' && !smokeAvailable) {
+    const deployed = found !== undefined && acceptanceUrl(found.state?.url) !== null
+    if (deployed) return undefined
+    const missing = ['deployment']
+    if (bypass) {
+      return warned('delivery-gate-bypassed', 'the user acknowledged finishing without a recorded deployment', { missing })
+    }
+    throw coded(
+      'E5006',
+      'the task records no deployment, so the merge is refused: this task space offers no `smoke` hook, so its acceptance is the deployment alone, '
+        + 'and `<deploy root>/.state.json` carries no usable acceptance URL. Deploy the task space, then merge.'
+        + (envId === '' ? '' : ` (environment ${envId})`),
+      { target: kind, kind, envId, missing },
+    )
+  }
   // No state file is the same answer as a state file with no green smoke: the task's
   // acceptance has not been recorded. `missing` still says which of the two it is, so a
   // screen can name the step rather than the code.
@@ -764,13 +882,22 @@ function smokeTime(smoke) {
  * @param taskPath - the task space directory, where the state is looked up.
  * @returns the missing keys, and whether the policy gates a merge at all.
  */
-export async function deliveryGatePreview(recorded, taskPath) {
+export async function deliveryGatePreview(recorded, taskPath, { smokeAvailable: knownSmoke } = {}) {
   const policy = deliveryPolicyOf(recorded)
   const kind = policy.acceptance.kind
   // A policy that records no acceptance has no gate to preview, and saying otherwise would
   // invent a requirement the finish will not enforce.
   if (kind === 'none') return { applies: false, missing: [], target: 'none', kind }
   const found = await readDeliveryState(taskPath)
+  // A deployment-only task is gated on its deployment record; there is no smoke to
+  // wait for because the task space provides no smoke hook.
+  const smokeAvailable = kind === 'deploy'
+    ? (knownSmoke ?? planHasSmoke(await findDeployPlan(taskPath, recorded)))
+    : true
+  if (kind === 'deploy' && !smokeAvailable) {
+    const deployed = found !== undefined && acceptanceUrl(found.state?.url) !== null
+    return { applies: true, missing: deployed ? [] : ['deployment'], target: kind, kind, smokeAvailable }
+  }
   // The same keys the gate reports, by the same judgement - one function, so a screen
   // cannot say "nothing is missing" about a merge the gate then refuses. The smoke is
   // read through the gate's own rule: green, and for a deployment no older than the last
@@ -1085,22 +1212,35 @@ async function findDeployScript(taskPath, recorded) {
 export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
   const recorded = await requireRecorded(taskPath)
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const found = await findDeployScript(taskPath, recorded)
-  if (found === undefined) {
-    throw coded('E5008', `no deploy script exists in this task space, so there is nothing to smoke: ${taskPath}`)
+  const plan = await findDeployPlan(taskPath, recorded)
+  if (plan === undefined) {
+    throw coded('E5008', `no deploy root exists in this task space, so there is nothing to smoke: ${taskPath}`)
+  }
+  // The deploy root declares its hooks by file existence. Refused here rather than
+  // left to the card: a direct caller (a tool, an older page) must not run a hook
+  // the space never provided.
+  if (!planHasSmoke(plan)) {
+    throw coded(
+      'E5008',
+      `this task space offers no \`smoke\` hook (\`${DEPLOY_DIR}/smoke\` is absent), so there is nothing to smoke`,
+      { path: taskPath },
+    )
   }
   // Resolved before the try on purpose: a machine with no usable bash is a fact about
   // this machine, and it must keep its own name. Left inside, the catch below would
   // re-wrap it as "could not be started ... bash must be on the PATH the server runs
   // with" - the very wording that sent the original hunt towards a missing file.
-  const command = deployEntryCommand(found.script, 'smoke', envId)
+  const command = plan.mode === 'hooks' ? deployHookCommand(plan.smoke, envId) : deployEntryCommand(plan.script, 'smoke', envId)
   // Asked before the smoke runs, because that is the only moment its answer can still
-  // be used: the deadline it sets is the one this call runs under.
-  const timeouts = await deployTimeouts(subprocess, found, taskPath, envId, { signal })
+  // be used: the deadline it sets is the one this call runs under. Hook files keep the
+  // built-in budgets; the `timeouts` lookup belongs to the legacy entry contract.
+  const timeouts = plan.mode === 'hooks'
+    ? HOOK_BUDGETS
+    : await deployTimeouts(subprocess, { script: plan.script, dir: plan.dir }, taskPath, envId, { signal })
   let out
   try {
     out = await runProcess(subprocess, command.argv, {
-      cwd: found.dir,
+      cwd: plan.dir,
       maxBytes: 2 * 1024 * 1024,
       // A smoke runs a test suite, so it is allowed minutes - but not forever. Without
       // this the handler that asked for it waits on a script that may never exit. The
@@ -1127,7 +1267,7 @@ export async function smokeEnvironment(subprocess, taskPath, { signal } = {}) {
     // The smoke is what the gate waits for, so this is the moment its answer is
     // most useful: a red one says so here, while the user is still on the card,
     // rather than as an E5006 refusal at the finish.
-    gate: await deliveryGatePreview(recorded, taskPath),
+    gate: await deliveryGatePreview(recorded, taskPath, { smokeAvailable: planHasSmoke(plan) }),
   }
 }
 
@@ -1164,18 +1304,28 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
     )
   }
   const envId = typeof recorded.deploymentEnvId === 'string' ? recorded.deploymentEnvId.trim() : ''
-  const found = await findDeployScript(taskPath, recorded)
-  if (found === undefined) {
-    throw coded('E5008', `no deploy script exists in this task space, so there is nothing to deploy: ${taskPath}`)
+  const plan = await findDeployPlan(taskPath, recorded)
+  if (plan === undefined) {
+    throw coded('E5008', `no deploy root exists in this task space, so there is nothing to deploy: ${taskPath}`)
+  }
+  if (!planHasUp(plan)) {
+    throw coded(
+      'E5008',
+      `this task space offers no \`up\` hook (\`${DEPLOY_DIR}/up\` is absent), so there is nothing to deploy`,
+      { path: taskPath },
+    )
   }
   // Before the try, for the reason given at the `smoke` call site above.
-  const command = deployEntryCommand(found.script, 'up', envId)
+  const command = plan.mode === 'hooks' ? deployHookCommand(plan.up, envId) : deployEntryCommand(plan.script, 'up', envId)
   // Before the deploy runs, for the same reason: this call's deadline is the answer.
-  const timeouts = await deployTimeouts(subprocess, found, taskPath, envId, { signal })
+  // Hook files keep the built-in budgets; `timeouts` belongs to the entry contract.
+  const timeouts = plan.mode === 'hooks'
+    ? HOOK_BUDGETS
+    : await deployTimeouts(subprocess, { script: plan.script, dir: plan.dir }, taskPath, envId, { signal })
   let out
   try {
     out = await runProcess(subprocess, command.argv, {
-      cwd: found.dir,
+      cwd: plan.dir,
       maxBytes: 2 * 1024 * 1024,
       // A rebuild pulls images and starts services, so this is the longest deadline here
       // - and still a deadline. A build that has not answered in ten minutes is one that
@@ -1219,7 +1369,7 @@ export async function deployEnvironment(subprocess, taskPath, { signal } = {}) {
     // What a finish would still be waiting for, read now rather than discovered as
     // an E5006 refusal at the very end. The deploy has just run, so this is
     // the first moment the question can be answered at all.
-    gate: await deliveryGatePreview(recorded, taskPath),
+    gate: await deliveryGatePreview(recorded, taskPath, { smokeAvailable: planHasSmoke(plan) }),
     // Asked after `up` exited zero, which is the only moment it can be asked: the
     // script has run, so whatever it started either carries the label or does not.
     ...(await labelledContainerWarning(subprocess, envId, { signal })),

@@ -1,6 +1,7 @@
 import { useT } from "../lib/i18n"
 import type { Workspace, WorkspacesService, WorkspaceNavigation } from "../lib/types"
 import { WorktreesPage } from "./WorktreePanel"
+import type { ViewChangesTarget } from "./WorktreesSettings"
 import type { ConfigFormLike } from "./PluginConfigCard"
 import { PluginDescription } from "./PluginDescription"
 import { UpdatePill } from "./UpdatePill"
@@ -22,6 +23,8 @@ interface WorktreeManagePanelProps {
   config?: ConfigFormLike
   /** The host's directory chooser, when this deployment has one; see {@link WorktreesPageProps}. */
   pickDirectory?: () => Promise<string | null>
+  /** Opens the changes sidebar for one entry; see {@link WorktreesPageProps}. */
+  onViewChanges?: (target: ViewChangesTarget) => boolean
 }
 
 /**
@@ -34,7 +37,7 @@ interface WorktreeManagePanelProps {
  * the row selects is a redirect to this, so there is one page rather than two frames
  * around one page.
  */
-export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config, pickDirectory }: WorktreeManagePanelProps) {
+export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, onCreate, onOpenSettings, onClose, config, pickDirectory, onViewChanges }: WorktreeManagePanelProps) {
   const t = useT()
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -56,6 +59,7 @@ export function WorktreeManagePanel({ api, workspaces, uiWorkspace, sessions, on
           onLeave={onClose}
           config={config}
           pickDirectory={pickDirectory}
+          onViewChanges={onViewChanges}
         />
       </DialogContent>
     </Dialog>

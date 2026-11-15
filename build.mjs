@@ -27,7 +27,12 @@ await esbuild.build({
   target: ["es2020"],
   sourcemap: false,
   minify,
-  external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client"],
+  // React is shared by the shell, and so is its UI primitives package - that one
+// only for the syntax highlighter the changes view borrows. It stays a runtime
+// `require` resolved against the shell's frozen module table, guarded by the
+// caller, so a deployment that does not share it draws plain text instead of
+// failing to load the plugin.
+  external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "react-dom/client", "@deepseek-ai/dsh-client-ui-primitives"],
   // The version the running bundle reports. A browser cannot read `package.json`, and
   // asking the Host for it would be a round trip for a number that is fixed at build
   // time anyway - so it is substituted in here, from the same file the manifest and the

@@ -1,6 +1,9 @@
 import { failure } from "./error-text"
 import type {
   AddRepositoriesResult,
+  ChangeFileAnswer,
+  ChangesListAnswer,
+  ChangesOverviewAnswer,
   ConnectionService,
   CreateTaskResult,
   DeployDestroyResult,
@@ -130,6 +133,37 @@ export function createWorktreeApi(connection: ConnectionService) {
      */
     upstream: (path: string, signal?: AbortSignal, fetch = false) =>
       read<UpstreamStatus>("worktree.upstream", fetch ? { path, fetch: true } : { path }, signal),
+
+    /**
+     * The repositories whose changes a task space or Workspace holds, each with
+     * the base it is compared against and the counts a row draws.
+     *
+     * A task space is answered from its own record, so the base is the branch the
+     * task was cut from rather than whichever branch happens to be checked out
+     * now; a plain repository is answered against its upstream.
+     */
+    changesOverview: (path: string, signal?: AbortSignal) =>
+      read<ChangesOverviewAnswer>("worktree.changes.overview", { path }, signal),
+    /** One repository's changed files, their counts, and the range they are against. */
+    changesList: (path: string, base: string, signal?: AbortSignal) =>
+      read<ChangesListAnswer>("worktree.changes.list", base === "" ? { path } : { path, base }, signal),
+    /**
+     * One file's lines, read when the reader opens that file.
+     *
+     * `oldPath` is the rename's old side, so git can detect a rename instead of
+     * drawing one deletion and one addition; `context` widens the unchanged
+     * lines around each hunk when a gap is expanded.
+     */
+    changesFile: (path: string, base: string, file: string, options: { oldPath?: string; untracked?: boolean; context?: number; baseCommit?: string; signal?: AbortSignal } = {}) =>
+      read<ChangeFileAnswer>("worktree.changes.file", {
+        path,
+        ...(base === "" ? {} : { base }),
+        file,
+        ...(options.oldPath === undefined || options.oldPath === "" ? {} : { oldPath: options.oldPath }),
+        ...(options.untracked === true ? { untracked: true } : {}),
+        ...(options.context === undefined ? {} : { context: options.context }),
+        ...(options.baseCommit === undefined || options.baseCommit === "" ? {} : { baseCommit: options.baseCommit }),
+      }, options.signal),
 
     /** Whether a workspace can hold a task, and which repositories it would span. */
     classifyRoot: (sourceRoot: string, signal?: AbortSignal) => read<SourceRootClassification>("task.classify-root", { sourceRoot }, signal),

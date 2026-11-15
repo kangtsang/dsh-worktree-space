@@ -482,15 +482,17 @@ export async function createTask(subprocess, options) {
   // silent failure this refuses: the request promised a verdict, and there is no script to
   // produce one.
   //
-  // The three sources are the same three, in the same order, that the deploy side looks in -
-  // so this accepts exactly what a deploy would later find, and refuses exactly what it would
-  // not. Any one of them is enough:
+  // The sources are the same ones the deploy side looks in, in the same order, so this
+  // accepts exactly what a deploy would later find and refuses exactly what it would not.
+  // Any one is enough:
   //
   //   1. a script the caller named, which E4014 above has already proven exists and is a file;
   //   2. the workspace's own `.worktree-space/deploy/deploy.sh`, which travels over whole;
-  //   3. a repository carrying its own `deploy/deploy.sh` (the single-repository shape).
+  //   3. a repository carrying its own `deploy/deploy.sh` (the single-repository shape);
+  //   4. a hook file (`up` for a deploying task, `smoke` for a smoke-only one) in either
+  //      deploy root - file existence is the hook contract's own declaration.
   //
-  // The check is for the ENTRY FILE, not for a `deploy/` directory. A directory holding only
+  // The check is for a FILE, not for a `deploy/` directory. A directory holding only
   // other scripts would pass a directory test and still leave nothing to run, which is the
   // very outcome this guard exists to prevent.
   //
@@ -506,16 +508,26 @@ export async function createTask(subprocess, options) {
     // `.worktree-space/deploy/`. Re-testing it would be a second, weaker copy of a check
     // that has already passed.
     const named = deployScriptPath !== ''
-    const sourceEntry = existsSync(join(sourceDeployRootPath(sourceRoot), 'deploy.sh'))
+    const hookIn = (dir, name) => existsSync(join(dir, name))
+    const sourceDeploy = sourceDeployRootPath(sourceRoot)
+    const sourceEntry = existsSync(join(sourceDeploy, 'deploy.sh'))
     const repoEntry = selected.some((repoPath) => existsSync(join(repoPath, DEPLOY_ROOT, 'deploy.sh')))
-    if (!named && !sourceEntry && !repoEntry) {
+    const hookFiles = [
+      ...['up', 'smoke'].filter((name) => hookIn(sourceDeploy, name)),
+      ...selected.flatMap((repoPath) => ['up', 'smoke'].filter((name) => hookIn(join(repoPath, DEPLOY_ROOT), name))),
+    ]
+    // A smoke-only task needs the `smoke` hook; a deploying task needs `up`, and its
+    // smoke hook is optional - its absence is what makes the task deployment-only.
+    const hookCovers = kind === 'smoke' ? hookFiles.includes('smoke') : hookFiles.includes('up')
+    if (!named && !sourceEntry && !repoEntry && !hookCovers) {
       throw coded(
         'E4015',
         `the task asks for a recorded acceptance (acceptanceKind ${kind}), but nothing can produce one: no script was named, `
-          + `${sourceRoot} carries no \`${DEPLOY_DIR}/deploy.sh\`, and none of the selected repositories carries its own. `
-          + `Add that file, name an existing one under \`${DEPLOY_DIR}/\` with deployScript, or create the task with `
+          + `${sourceRoot} carries no \`${DEPLOY_DIR}/deploy.sh\` (and no \`up\`/\`smoke\` hook file), and none of the selected `
+          + 'repositories carries its own. Add that file or a hook file, name an existing one under '
+          + `\`${DEPLOY_DIR}/\` with deployScript, or create the task with `
           + 'acceptanceKind none and verify it by hand. '
-          + 'A create can confirm only that the entry file exists - whether it implements the subcommand is '
+          + 'A create can confirm only that the entry exists - whether it implements the subcommand is '
           + 'settled by its first run.',
         { sourceRoot, kind },
       )

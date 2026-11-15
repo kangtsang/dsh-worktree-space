@@ -12,7 +12,7 @@ const styles = readFileSync(new URL("../src/client/styles.css", import.meta.url)
  * drops the declaration whole. So the list is pinned as written, and adding a
  * surface to it is a decision this file makes the reader look at.
  */
-const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker"
+const TOKEN_SCOPE = ".dws-settings, .dws-dialog-content, .dws-manage-page, .dws-compact-entry, .dws-new-session-action, .dws-footer-action, .dws-plugin-config, .dws-branch-picker, .dws-changes-overview, .dws-changes-view"
 
 /** One rule's declarations, by its exact selector. */
 function rule(selector: string) {

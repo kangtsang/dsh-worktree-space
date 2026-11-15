@@ -2,6 +2,7 @@ import z from '@deepseek-ai/schemastery'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { auditEnter, auditEnabled, recordError, setAuditEnabled, setAuditEnabledReader } from './task/audit-log.js'
+import { changesFile, changesList, changesOverview } from './task/changes.js'
 import { coded, UNKNOWN } from './task/codes.js'
 import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
 import { resolveDeliveryPolicy } from './task/delivery.js'
@@ -25,7 +26,7 @@ import { CONFIG_CATALOG_TIMEOUT_MS, installRouteHook, modelCatalogOf } from './t
 export { detectDefaultBranch, parseGitArgv, parseWorktrees, runGit } from './task/git.js'
 
 const API_PREFIX = '/api/dsh-worktree-space'
-const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status', 'worktree.upstream']
+const WORKTREE_ENDPOINTS = ['worktree.scan', 'worktree.cached', 'worktree.status', 'worktree.upstream', 'worktree.changes.overview', 'worktree.changes.list', 'worktree.changes.file']
 const TASK_ENDPOINTS = ['task.classify-root', 'task.classify-roots', 'task.suggest-root', 'task.branches', 'task.create', 'task.add-repositories', 'task.list', 'task.inspect', 'task.plan', 'task.done', 'task.deploy-status', 'task.deploy-destroy', 'task.deploy-up', 'task.deploy-smoke', 'task.preference', 'task.handoff-access', 'task.handoff-open', 'task.models']
 const ENDPOINTS = [...WORKTREE_ENDPOINTS, ...TASK_ENDPOINTS]
 
@@ -62,7 +63,7 @@ export const ok = (value) => ({ ok: true, value })
 export const PUBLIC_ERROR_CODES = new Set([
   'E1001', 'E1002', 'E1003', 'E1004', 'E1005', 'E1006',
   'E2001', 'E2002', 'E2003', 'E2004', 'E2005', 'E2006', 'E2007',
-  'E3001', 'E3002', 'E3003', 'E3004', 'E3005',
+  'E3001', 'E3002', 'E3003', 'E3004', 'E3005', 'E3006',
   'E4001', 'E4002', 'E4003', 'E4004', 'E4005', 'E4006', 'E4007', 'E4008', 'E4009', 'E4010', 'E4011', 'E4012', 'E4014', 'E4015', 'E4016', 'E4017', 'E4018', 'E4019',
   'E5001', 'E5002', 'E5003', 'E5004', 'E5006', 'E5008', 'E5011', 'E5012',
   'E6001', 'E6002',
@@ -1536,6 +1537,34 @@ export function apply(ctx, config = {}) {
         ...(diffstat.trim() === '' ? {} : { committedChanges: parseShortstat(diffstat) }),
         ...(workstat.trim() === '' ? {} : { workingChanges: parseShortstat(workstat) }),
       }
+    })
+
+    // The changes sidebar's three reads: what a task space or Workspace holds,
+    // one repository's file list, and one file's lines. All read-only, and all
+    // `log: false` inside changes.js so a reader opening a diff does not fill the
+    // audit log with one record per file.
+    if (endpoint === 'worktree.changes.overview') return recover(async () => {
+      const path = absolutePath(payload.path)
+      if (!path) throw coded('E4005', 'A workspace or repository path is required.')
+      return changesOverview(ctx.subprocess, path, { signal })
+    })
+
+    if (endpoint === 'worktree.changes.list') return recover(async () => {
+      const path = absolutePath(payload.path)
+      if (!path) throw coded('E4005', 'A repository path is required.')
+      return changesList(ctx.subprocess, path, typeof payload.base === 'string' ? payload.base : '', { signal })
+    })
+
+    if (endpoint === 'worktree.changes.file') return recover(async () => {
+      const path = absolutePath(payload.path)
+      if (!path) throw coded('E4005', 'A repository path is required.')
+      return changesFile(ctx.subprocess, path, typeof payload.base === 'string' ? payload.base : '', payload.file, {
+        ...(typeof payload.oldPath === 'string' ? { oldPath: payload.oldPath } : {}),
+        untracked: payload.untracked === true,
+        ...(typeof payload.context === 'number' ? { context: payload.context } : {}),
+        ...(typeof payload.baseCommit === 'string' ? { baseCommit: payload.baseCommit } : {}),
+        signal,
+      })
     })
 
     if (endpoint === 'task.classify-root') return recover(async () => {

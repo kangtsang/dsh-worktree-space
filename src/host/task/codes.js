@@ -67,6 +67,7 @@ export const ERROR_CODES = {
   E3003: 'git.js - derived from git stderr: a git command failed for any reason not covered below',
   E3004: 'git.js - derived from git stderr: the directory is not a git repository',
   E3005: 'git.js - derived from git stderr: the worktree checkout has gone',
+  E3006: 'changes.js - the comparison base does not resolve, tracks no remote, or shares no history with HEAD',
 
   // --- E4xxx arguments and validation -------------------------------------
   E4001: 'create.js, add.js - no repository was selected',

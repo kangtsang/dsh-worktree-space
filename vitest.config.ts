@@ -23,6 +23,7 @@ import { defineConfig } from "vitest/config"
  */
 const REAL_GIT = [
   "test/task-merge-worktree.test.mjs",
+  "test/changes.test.mjs",
   "test/encoding.test.ts",
   // Not git, but it earns the same place: it forks a real node worker that hangs and
   // a real copy of the runner, so what it checks is process-tree behaviour. Same

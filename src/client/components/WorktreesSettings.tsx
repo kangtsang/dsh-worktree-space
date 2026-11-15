@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronRight, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
+import { AlertCircle, Check, ChevronRight, FileDiff, FolderClosed, FolderGit, FolderGit2, GitPullRequest, Loader2, Plus, RefreshCw, Search, X } from "./icons"
 import { format, useT } from "../lib/i18n"
 import { sumLines } from "../lib/lines"
 import { errorText } from "../lib/error-text"
@@ -72,6 +72,21 @@ interface Props {
    * that from the Host - and simply does not offer the way to change it from there.
    */
   config?: ConfigFormLike
+  /**
+   * Opens the changes sidebar for one entry: an overview for a task space or a
+   * Workspace, one repository's file view for a repository row. Answers whether
+   * a tab could be opened — false means the shell has no right sidebar to open
+   * it in, which is a fact about the deployment rather than a failure.
+   */
+  onViewChanges?: (target: ViewChangesTarget) => boolean
+}
+
+/** One entry whose changes the right sidebar can show. */
+export interface ViewChangesTarget {
+  path: string
+  /** The base the view compares with; empty lets the Host resolve the upstream. */
+  base?: string
+  kind: "overview" | "view"
 }
 type Filter = "all" | "attention"
 /** The filters both views offer: everything found, or only what needs attention. */
@@ -212,8 +227,13 @@ function BranchDetail({ currentBranch, currentLabel, baseBranch, baseLabel, ahea
 const STATUS_CONCURRENCY = 6
 const relativePath = (repoPath: string, path: string) => path.startsWith(`${repoPath}/`) ? path.slice(repoPath.length + 1) : path
 
-export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pickDirectory, onCreate, control, onLeave, config }: Props) {
+export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pickDirectory, onCreate, control, onLeave, config, onViewChanges }: Props) {
   const t = useT()
+  const openChanges = (target: ViewChangesTarget) => {
+    if (onViewChanges === undefined) return
+    if (onViewChanges(target)) setChangesError("")
+    else setChangesError(t("changesOpenFailed"))
+  }
   const [ownView, setOwnView] = useState<WorktreeView>("spaces")
   const view = control?.view ?? ownView
   const setView = control?.onView ?? setOwnView
@@ -242,6 +262,8 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
     return servedDepth
   }
   const [error, setError] = useState("")
+  /** Why the changes sidebar did not open; dismissed by the reader. */
+  const [changesError, setChangesError] = useState("")
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<Filter>("all")
   // The rows the user has opened. Empty is the page's opening state: every foldable row
@@ -962,6 +984,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
         </div> : null}
       </div>
       {sourceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{sourceError}</span></div> : null}
+      {changesError === "" ? null : <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{changesError}</span><Button className="dws-button-ghost" onClick={() => setChangesError("")}>{t("close")}</Button></div>}
         {sourceNotice ? <p className="dws-notice" role="status"><AlertCircle size={15} aria-hidden="true" /><span>{sourceNotice}</span></p> : null}
       {spaceError ? <div className="dws-error" role="alert"><AlertCircle size={16} /><span>{spaceError}</span></div> : null}
       <div className="dws-list-controls">
@@ -1020,6 +1043,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                   <div className="dws-worktree-path" title={slashPath(row.path)}>{slashPath(relativePath(repo.repoPath, row.path))}</div>
                   <ChangeSummary committed={row.committedChanges} working={row.workingChanges} />
                 </div>
+                {onViewChanges === undefined ? null : <button type="button" className="dws-button dws-icon-button dws-view-changes" title={t("viewChanges")} aria-label={`${t("viewChanges")} ${row.branch ?? row.path}`} onClick={() => openChanges({ kind: "view", path: row.path, base: repo.currentBranch ?? "" })}><FileDiff size={15} /></button>}
               </div>
             })}
           </div> : null}
@@ -1054,6 +1078,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
             </span>
             <span className="dws-task-path" title={slashPath(task.path)}>{slashPath(task.path)}</span>
           </span>
+          {onViewChanges === undefined ? null : <Button className="dws-button-ghost dws-view-changes" onClick={() => openChanges({ kind: "overview", path: task.path })}><FileDiff size={15} /><span>{t("viewChanges")}</span></Button>}
           <Button className="dws-button-ghost dws-add-repository" disabled={busy} onClick={() => setExtending(task.path)}><Plus size={15} /><span>{t("addRepositoryToTask")}</span></Button>
           <Button className="dws-button-ghost dws-finish-task" disabled={busy} onClick={() => finishClick(task)}><Check size={15} /><span>{t("finishTask")}</span></Button>
         </header>
@@ -1076,6 +1101,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                 <div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(repository.path)}</div>
                 <ChangeSummary committed={repository.committedChanges} working={repository.workingChanges} />
               </div>
+              {onViewChanges === undefined ? null : <button type="button" className="dws-button dws-icon-button dws-view-changes" title={t("viewChanges")} aria-label={`${t("viewChanges")} ${repository.name}`} onClick={() => openChanges({ kind: "view", path: repository.path, base: repository.baseBranch })}><FileDiff size={15} /></button>}
             </div>
           })}
         </div> : null}
@@ -1216,6 +1242,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
             </span>
             {empty && asTask === undefined ? <span className="dws-status dws-space-status">{t("workspaceCannot")}</span> : null}
             {onCreate && canHost ? <Button className="dws-button-ghost dws-create-repo" aria-label={t("workspaceCreate")} title={t("workspaceCreate")} onClick={() => onCreate({ path: workspace.path, title: workspace.title })}><Plus size={15} /><span>{t("workspaceCreate")}</span></Button> : null}
+            {onViewChanges === undefined || (asTask === undefined && owned.length === 0) ? null : <Button className="dws-button-ghost dws-view-changes" onClick={() => openChanges({ kind: "overview", path: workspace.path })}><FileDiff size={15} /><span>{t("viewChanges")}</span></Button>}
           </header>
           {/* The repositories the Workspace spans, in the row shape the worktrees below a
               repository use - that is the shape this panel already reads as "something
@@ -1287,6 +1314,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                   <div className="dws-worktree-path" title={`${t("repositoryPathLabel")}: ${slashPath(repository.repoPath)}`}>{slashPath(relativePath(workspace.path, repository.repoPath))}</div>
                   <ChangeSummary committed={remote?.committedChanges} working={remote?.workingChanges} committedHint={t("upstreamCommittedHint")} workingHint={t("upstreamWorkingHint")} />
                 </div>
+                {onViewChanges === undefined ? null : <button type="button" className="dws-button dws-icon-button dws-view-changes" title={t("viewChanges")} aria-label={`${t("viewChanges")} ${repoName(repository.repoPath)}`} onClick={() => openChanges({ kind: "view", path: repository.repoPath, base: remote?.upstream ?? "" })}><FileDiff size={15} /></button>}
               </div>})
               : asTask.repositories.map(repository => <div className="dws-worktree" key={repository.path}>
                 <FolderGit2 size={18} className="dws-tree-icon" aria-hidden="true" />
@@ -1299,6 +1327,7 @@ export function WorktreesSettings({ api, workspaces, uiWorkspace, sessions, pick
                   <div className="dws-worktree-path" title={slashPath(repository.path)}>{slashPath(relativePath(workspace.path, repository.path))}</div>
                   <ChangeSummary committed={repository.committedChanges} working={repository.workingChanges} />
                 </div>
+                {onViewChanges === undefined ? null : <button type="button" className="dws-button dws-icon-button dws-view-changes" title={t("viewChanges")} aria-label={`${t("viewChanges")} ${repository.name}`} onClick={() => openChanges({ kind: "view", path: repository.path, base: repository.baseBranch })}><FileDiff size={15} /></button>}
               </div>)}
           </div> : null}
         </article>
