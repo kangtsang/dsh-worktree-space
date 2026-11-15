@@ -84,11 +84,12 @@
 - **命令执行**：通过宿主注入的 `subprocess` 服务以**固定 argv** 调用 `git`
   （`argv: ['git', '-C', <cwd>, ...args]`）：**不经过 shell**，没有字符串拼接，不接受用户提供的命令。
   全部子命令见下表。
-- **唯一的例外是任务空间自己的入口脚本。** 创建时选了**只跑冒烟**或**部署到 Docker** 的任务，插件会
-  运行该任务空间部署根下那一个入口脚本：`smoke` 子命令（两种验收方式都有）、`up` 子命令与 `destroy`、
-  `timeouts`（只有部署任务会用到）。argv 的是解析出来的 bash 绝对路径加脚本路径与子命令，
+- **唯一的例外是任务空间自己的部署根。** 创建时选了**只跑冒烟**或**部署到 Docker** 的任务，插件会运行
+  该任务空间部署根里的东西：入口脚本的 `smoke` 子命令（两种验收方式都有）、`up` 子命令与 `destroy`、
+  `timeouts`（只有部署任务会用到）；部署根改用 `up` / `smoke` 钩子文件声明动作时，运行的是那两个文件本身。
+  argv 的是解析出来的 bash 绝对路径加脚本路径与子命令（钩子文件则是脚本路径加环境 id），
   脚本内容由使用者自己写、由使用者自己维护 —— 插件只是执行它，不读它、不改它。也就是说：
-  **选了需要入口脚本的验收方式，就等于允许插件执行那个文件。** 没选的任务不会被跑任何脚本。
+  **选了需要部署根的验收方式，就等于允许插件执行那里的文件。** 没选的任务不会被跑任何脚本。
 
 - **插件自己不提交**：`git add` 与 `git commit` **都不在本插件的命令表里**。结束任务时某个 worktree 还有
   未提交的改动，该仓库就停下并点名（见失败边界），插件不会替它写一笔提交。「把提交交给 agent」是插件
@@ -340,13 +341,14 @@ Declared baseline: `dsh-worktree-space@1.2.1`, at the fixed commit on this repos
 - **Command execution**: `git` is invoked through the host's `subprocess` service with a **fixed argv**
   (`argv: ['git', '-C', <cwd>, ...args]`): **no shell**, no string interpolation, no user-supplied command.
   Every subcommand is listed in the table below.
-- **The one exception is the task space's own entry script.** A task created with **Smoke only** or **Deploy
-  to Docker** has the plugin run the single entry script under that task space's deploy root: its `smoke`
-  subcommand (both kinds), its `up` subcommand, and `destroy` / `timeouts` (a deploying task only). The argv
-  is a resolved absolute path to bash plus the script path and the subcommand; the script itself is written
-  and maintained by the user — the plugin executes it and never reads or edits it. In other words: **choosing
-  a kind that needs an entry script is what permits the plugin to execute that file.** A task that chose
-  none has no script run for it at all.
+- **The one exception is the task space's own deploy root.** A task created with **Smoke only** or **Deploy
+  to Docker** has the plugin run what that deploy root holds: the entry script's `smoke` subcommand (both
+  kinds), its `up` subcommand, and `destroy` / `timeouts` (a deploying task only) — or, when the root declares
+  its actions as `up` / `smoke` hook files, those two files themselves. The argv is a resolved absolute path
+  to bash plus the script path and the subcommand (the hook shape passes the script path and the environment
+  id); the script itself is written and maintained by the user — the plugin executes it and never reads or
+  edits it. In other words: **choosing a kind that needs a deploy root is what permits the plugin to execute
+  that file.** A task that chose none has no script run for it at all.
 
 - **The plugin does not commit**: `git add` and `git commit` are **not in this plugin's command table**. When
   a worktree still holds uncommitted work at finish, that repository stops and is named (see the failure

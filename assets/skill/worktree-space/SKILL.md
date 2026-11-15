@@ -122,9 +122,10 @@ when a finish answers with `mergeInProgress` or `dirtyCheckout`, and
 - **`references/conflicts.md`** — the one part of a finish that is not routine: a conflict
   left standing on `mergeInProgress`, and a checkout of the user's own that a merge would
   overwrite (`dirtyCheckout`).
-- **`references/deploying.md`** — recording an acceptance: the entry script and its
-  `smoke` subcommand, the state file the gate reads, and how a `deploy` task adds `up`, an
-  environment and an acceptance URL on top of that. What "finished" means for a task that
+- **`references/deploying.md`** — recording an acceptance: the deploy root and its two shapes (an
+  entry script's `smoke` subcommand, or `up` / `smoke` hook files), the state file the gate reads,
+  and how a `deploy` task adds `up`, an environment and an acceptance URL on top of that — plus
+  what a deployment-only task (no `smoke` hook) owes instead. What "finished" means for a task that
   records an acceptance.
 - **`references/failures.md`** — the refusals worth knowing by their code — E2002, E4015,
   E5011, E5006, E5012, E7006, E7007 and the rest — and what each is telling you to do.

@@ -6,6 +6,45 @@
 
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
+## 1.4.4 — 2026-11-15
+
+任务空间的改动可以在右侧栏里逐文件查看、逐行评审，评审意见随之进入会话输入框；验收一侧，部署根除了单入口脚本，
+也可以把 `up`、`smoke` 写成独立文件，只部署不冒烟因此成了一种合法的验收方式。
+
+### 新增
+
+- **在右侧栏查看变更。** 任务空间行、工作区行，以及 Git 仓库视图里的 worktree 行都有 **查看变更**：
+  先开 **变更总览**，按仓库列出当前分支、基线分支与 `+新增 −删除 文件数`；点某个仓库再开 **变更查看**，
+  左侧是可拖宽的文件树，右侧逐文件给出行号 diff。读取范围是「比较起点 → 工作树」，已提交、未提交与
+  未跟踪的改动都在里面；文件多时 **全部展开** 按文件逐个读取并限制并发，工具栏显示还在读取几个。
+  diff 带语法高亮、全部展开/收起、自动换行与文件树开关；语法尚未加载、或部署没有共享高亮器时按纯文本显示。
+- **逐文件评审。** 每个文件可勾 **已评审**，工具栏显示 `已评审 N / M`，勾选后卡片收起。标记保存在本浏览器
+  并绑定那一份改动，文件之后又变了会标出 **有新改动** 并取消勾选——不会把改过的文件当成看过的。
+- **行内评审意见。** 悬停某行，行号左侧出现蓝色 `+`；点它或点该行的行号对打开评论框。评论的侧别由行本身
+  决定：未变更行（新旧行号相同）与删除行记 `L`（旧行号），新旧行号不同的未变更行与新增行记 `R`。
+  提交后的评论常驻在该行下方，可以再编辑、删除；一次评论针对一行。
+- **评审意见写进会话输入框。** 每次新增、编辑或删除都会先移除上一次写入的整块，再按当前评论重写
+  `## User Comment N` 段落并追加到输入框末尾，输入框原有的文字与其它引用不受影响。评论按会话保存，
+  刷新页面后仍在。
+
+### 变更
+
+- **「查看变更」只出现在有对比基线的地方。** 任务空间与包含仓库的工作区给总览，worktree 行直接给明细；
+  没有 Git 仓库的工作区不显示，Git 仓库视图里的仓库行也不再显示——那一行只有当前分支，没有可比的对象。
+- **部署根可以把 `up`、`smoke` 写成独立文件。** 文件存在即表示提供该动作，同一目录里钩子文件优先于
+  入口脚本；两者都以 bash 运行，环境 id 作为第一个参数，`DEPLOY_*` 环境变量与状态文件路径同入口脚本。
+- **只部署不冒烟。** 只提供 `up` 的部署任务不再要求冒烟：部署卡片没有冒烟徽标与「执行冒烟」，收尾闸门
+  只要求一条可用的部署记录。只跑冒烟的任务仍必须有 `smoke`，没有就没有可跑的验收。
+- **创建时只校验一个动作的文件存在。** 选了验收方式却既没有入口脚本、也没有对应钩子文件时照旧拒绝（E4015），
+  提示里点明两种写法；部署任务的 **部署脚本** 因此可以留空。
+- **「部署到 Docker」的说明改成「部署环境；入口提供 smoke 钩子时，收尾前还要冒烟通过」。**
+- **更新胶囊不再支持右键复制版本号。** 只保留点击打开更新说明，右键回到浏览器自己的菜单。
+
+### 兼容性
+
+- 只写入口脚本、按子命令调用的任务空间不用改任何东西，行为与本版之前一致；`timeouts` 仍只属于入口脚本。
+- 旧的任务记录照常读，没有新增必填字段。
+
 ## 1.4.3 — 2026-11-13
 
 验收方式从两个答案变成三个，字段也从 `deployTarget` 改名为 `acceptanceKind`。
@@ -466,6 +505,61 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.4.4 — 2026-11-15
+
+A task space's changes can be read file by file in the right sidebar and reviewed line by line, with the
+review comments carried into the session input; on the acceptance side a deploy root may now provide `up`
+and `smoke` as separate files, which makes a deployment with no smoke a legitimate acceptance.
+
+### Added
+
+- **A changes sidebar.** Task-space rows, Workspace rows and the worktree rows of the Git repositories view
+  all offer **View changes**: **Changes overview** first, one row per repository with its current branch,
+  base branch and `+added -removed, files`; a row opens **Files changed** - a resizable file tree on the
+  left and, per file, a line-numbered diff on the right. The range is `comparison base -> working tree`, so
+  committed, uncommitted and untracked work are all included. With many files, Expand all reads them one at
+  a time under a concurrency cap and the toolbar says how many are still loading. The diff offers syntax
+  highlighting, expand/collapse all, wrapped lines and a tree toggle, and falls back to plain text when a
+  grammar has not loaded or the deployment does not share the highlighter.
+- **Per-file review.** Each file takes a **Reviewed** mark, the toolbar counts `Reviewed N / M`, and marking
+  one folds the card. The mark lives in this browser and is bound to that particular change: a file that
+  changes afterwards reads **New changes** and loses its tick, so a file is never counted as read after it
+  has moved.
+- **Line comments.** Hovering a line shows a blue `+` at the left of its numbers; the `+`, or the row's
+  number pair, opens the composer. The side follows the row: an unchanged line whose two numbers agree, and
+  a removed line, are quoted as `L` (the old number); an unchanged line whose numbers have moved apart, and
+  an added line, are quoted as `R`. A submitted comment stays under its line and can be edited or deleted.
+  One line per comment.
+- **Comments reach the session input.** Every add, edit or delete removes the block written last time and
+  rewrites the `## User Comment N` paragraphs for the current comments, appending them to the end of the
+  input; the input's own text and its other quotes are left alone. Comments are kept per session, so a
+  reload does not lose them.
+
+### Changed
+
+- **View changes appears only where there is a comparison base.** A task space or a Workspace holding
+  repositories opens the overview; a worktree row opens the view itself. A Workspace with no repository
+  offers nothing, and neither does a repository row in the Git repositories view - that row carries a
+  current branch and nothing to compare it with.
+- **A deploy root may declare `up` and `smoke` as separate files.** A file's presence declares that action,
+  and hook files win over an entry script in the same directory; both run through bash with the environment
+  id as the first argument, under the same `DEPLOY_*` environment and state file path as the entry script.
+- **Deployment without smoke.** A deploying task that offers `up` alone no longer owes a smoke: its card
+  shows no smoke badge and no Run smoke, and the finish gate asks only for a usable deployment record. A
+  smoke-only task still needs `smoke` - without it there is nothing to run.
+- **A create checks that one action's file exists.** Choosing an acceptance kind while the deploy root has
+  neither an entry script nor the matching hook file is still refused (E4015), and the message now names
+  both shapes; the **Deploy script** field may therefore be left empty for a hook-file root.
+- **The Deploy to Docker hint now says the smoke is required only when the entry provides a `smoke` hook.**
+- **The update capsule no longer copies the version on a right click.** A left click still opens the release
+  notes; the right button returns to the browser's own menu.
+
+### Compatibility
+
+- A task space that keeps its single entry script and calls its subcommands needs no change; the `timeouts`
+  lookup still belongs to the entry script alone.
+- Older task records keep reading; no new required field was added.
 
 
 ## 1.4.3 — 2026-11-13

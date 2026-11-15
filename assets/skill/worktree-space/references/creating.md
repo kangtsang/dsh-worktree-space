@@ -73,10 +73,12 @@ Follow this order. Never create a workspace with a guessed location.
    until `.worktree-space/deploy/.state.json` records a passing smoke — and that smoke is
    the finish line rather than a formality, so it is what a completion report carries.
    `deploy` adds an environment, so `up` also writes an acceptance URL and that URL is
-   part of the report; a rebuilt deployment needs a fresh smoke. `none` means no
-   acceptance and no gate. A create that chooses either gated kind with no entry script to
-   run is refused (E4015), and that check confirms the file exists only — whether the
-   subcommand is implemented is settled by its first run. Everything else a finish
+   part of the report; a rebuilt deployment needs a fresh smoke, while a deploy root that
+   offers `up` and no `smoke` is deployment-only and owes the URL alone. `none` means no
+   acceptance and no gate. A create that chooses either gated kind with no entry to run —
+   neither a script nor an `up` / `smoke` hook file in the deploy root — is refused (E4015),
+   and that check confirms the file exists only — whether the
+   action is implemented is settled by its first run. Everything else a finish
    decides (whether to merge, which branch, whether to delete it, what happens to
    untracked files) is passed on the `done` call instead, where you can see the work
    it applies to. See `references/finishing.md`.

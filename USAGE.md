@@ -84,7 +84,7 @@
 
 **插件只在两处替你强制把关**，其余每一步都等你点：
 
-- **验收闸门**：选了验收方式的任务，冒烟没通过就不能合并（[6.7](#67-收尾闸门)）；
+- **验收闸门**：选了验收方式的任务，该跑的那一步没通过就不能合并（[6.7](#67-收尾闸门)）；
 - **收尾守卫**：任务空间里还有会话在活动，或 worktree 被别的进程占着，结束任务会被拒（[7.7](#77-收尾前的守卫与收尾后的清理)）。
 
 第 4 步只在勾了「部署到 Docker」时存在；没勾的任务，第 3 步之后直接到第 5 步。
@@ -148,7 +148,8 @@
    `~/workspace/deep-path/project2` 推荐的是**同一个**容器。改动时同样出现 **设为默认…** 勾选框。
    容器根必须与源码根互不包裹，容器根自己就是 Git 仓库会被拒绝。
 6. **部署到 Docker**（默认不勾）：勾上后多出 **部署脚本** 输入框，
-   留空则用 `工作区/.worktree-space/deploy/deploy.sh`。这一项为什么要在建之前定下来，见 3.2。
+   留空则用 `工作区/.worktree-space/deploy/deploy.sh`；部署根用 `up`/`smoke` 钩子文件声明动作时可以
+   留空不填。这一项为什么要在建之前定下来，见 3.2。
 7. **预览**：算出这个任务会用到的**分支名**和**空间目录名**，跟着上面的输入实时更新。
 8. **创建并打开会话**：建完直接在该任务空间开一个会话。
 
@@ -158,11 +159,13 @@
 的痕迹。所以不选就等于定了「这个任务不做验收」，而且之后没有任何东西提示这件事。
 
 - **不做验收（`none`）是个好答案**：本来就不需要一条记录的活不该选。但它要是**你自己选的**答案。
-- **只跑冒烟（`smoke`）**：冒烟通过就是这个任务的完成线，而任务只需要入口脚本的 `smoke` 子命令 ——
-  没有环境、没有验收地址、没有容器要拆。单元测试、集成测试、构建检查都可以放在这里，用哪种方式
-  由项目自己决定。收尾时同样会被闸门检查（[6.7](#67-收尾闸门)）。
-- **部署到 Docker（`deploy`）**：在「只跑冒烟」之上再加一个 `up` 子命令 —— 起环境、写验收地址，
-  冒烟验的是这个站起来的环境。**重新部署之后要重新冒烟**，上一次的通过记录不再算数。
+- **只跑冒烟（`smoke`）**：冒烟通过就是这个任务的完成线，而任务只需要一个 `smoke` 动作 —— 入口脚本的
+  `smoke` 子命令，或部署根里的 `smoke` 钩子文件。没有环境、没有验收地址、没有容器要拆。单元测试、
+  集成测试、构建检查都可以放在这里，用哪种方式由项目自己决定。收尾时同样会被闸门检查
+  （[6.7](#67-收尾闸门)）。
+- **部署到 Docker（`deploy`）**：在「只跑冒烟」之上再加一个 `up` 动作 —— 起环境、写验收地址。
+  **另外提供了 `smoke` 时**，冒烟验的是这个站起来的环境，**重新部署之后要重新冒烟**，上一次的通过记录
+  不再算数；**只提供 `up` 的任务是只部署**，不跑、也不要求冒烟，收尾只验部署记录。
 - 选了后两者却没有任何可用入口脚本时，**创建直接被拒**（`E4015`），而不是建出一个永远做不了验收的任务空间。
 
 ### 3.3 创建出来的是什么
@@ -284,13 +287,14 @@ worktree 行，以及工作区视图里的仓库行，右侧图标打开该仓�
 ## 6. 验收
 
 适用于创建时选了「只跑冒烟」或「部署到 Docker」的任务。两者的契约是同一个入口脚本与同一个状态文件，
-区别只有两处：**部署的任务多一个 `up` 子命令**，于是它有环境、有验收地址、有容器要拆；
-**只跑冒烟的任务没有这些，闸门一样在**。
+区别只有两处：**部署的任务多一个 `up` 动作**，于是它有环境、有验收地址、有容器要拆；
+**只跑冒烟的任务没有这些，闸门一样在**。动作可以由入口脚本的子命令提供，也可以由部署根里的
+`up` / `smoke` 钩子文件提供，见 [6.8](#68-独立钩子文件可选)；下面讲到脚本的地方两种写法都适用。
 
 ### 6.0 只跑冒烟不需要容器
 
 选「只跑冒烟」时，这一节里讲容器引擎、环境身份、验收地址、销毁按钮的部分**全都不适用** —— 没有环境可查，
-面板也不会去问容器引擎。要做的只有一件事：入口脚本的 `smoke` 子命令跑完，把 `lastSmoke` 合进状态文件
+面板也不会去问容器引擎。要做的只有一件事：`smoke` 跑完，把 `lastSmoke` 合进状态文件
 （[6.5](#65-状态文件契约)）。跑什么由项目自己决定，单元测试、集成测试、构建检查都算。
 
 **下面 6.1 起讲部署到 Docker 的部分**，只跑冒烟的任务读到 [6.5](#65-状态文件契约) 就够。
@@ -309,9 +313,9 @@ Podman、colima、原生 Linux 引擎都可以。插件不检查也不代替这�
 - **验收地址只在 localhost 上可达**，因为动态端口是引擎映射出来的。换台机器、或从引擎外面
   访问，都打不开这个地址。
 
-### 6.2 契约：一个入口脚本
+### 6.2 契约：入口脚本的子命令
 
-部署契约就是一个入口脚本实现两个子命令：
+部署根的第一种写法是一个入口脚本，用子命令声明动作：
 
 ```sh
 bash <任务空间>/.worktree-space/<entry> up     <envId>   # 构建并启动，把验收地址写进状态文件
@@ -323,6 +327,9 @@ bash <任务空间>/.worktree-space/<entry> smoke  <envId>   # 跑冒烟，把�
 
 `destroy` 子命令**可选，插件从不调用它** —— 面板的销毁按钮按容器的 `dsh.env-id` 标签直接拆，
 不需要脚本参与。**只实现 `up` 和 `smoke` 的入口就是完整的。**
+
+> 另一种写法是把 `up`、`smoke` 放成两个独立文件，见 [6.8](#68-独立钩子文件可选)。两种写法可以并存，
+> 同一个部署根里钩子文件优先。
 
 #### 可选：`timeouts` 调整等待时限
 
@@ -429,7 +436,10 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 选了验收方式（`smoke` 或 `deploy`）的任务，**合并必须有通过的冒烟**：没有状态文件、或里面的
 `lastSmoke.result` 不是 `pass`，合并就被拒（`E5006`）。这是服务端真拦，不是提示。
 
-**部署到 Docker 的任务还多一条：冒烟不能早于最近一次本侧部署。** 重新部署换了一个环境，
+**只部署的任务（部署根只提供 `up`）例外**：它的验收就是那条部署记录 —— 状态文件里有可用的验收地址即可，
+不要求也不等待 `lastSmoke`。
+
+**提供了 `smoke` 的部署任务还多一条：冒烟不能早于最近一次本侧部署。** 重新部署换了一个环境，
 上一次的通过记录说的是上一个环境，**重新部署之后要重新冒烟**。只跑冒烟的任务没有部署，这条对它无意义。
 
 **这道闸门是规范约束，不是对代码的核对。** 它防的是「忘了冒烟就收尾」，不检查改了什么、也不要求先提交 ——
@@ -445,12 +455,12 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 
 ### 6.8 独立钩子文件（可选）
 
-部署根也可以不写单入口脚本，而是放两个独立文件：
+部署根的第二种写法是放两个独立文件，不用入口脚本：
 
 - `<部署根>/up`：起环境，把验收地址写进 `.state.json`；
 - `<部署根>/smoke`：跑冒烟，把 `lastSmoke` 合进同一个文件。
 
-文件存在即表示提供该动作，检查是纯文件系统操作。只提供 `up` 的任务是**只部署**：部署卡片不显示冒烟徽标
+文件存在即表示提供该动作，检查是纯文件系统操作。**只提供 `up` 的任务是只部署**：部署卡片不显示冒烟徽标
 与「执行冒烟」，收尾闸门只要求部署记录（状态文件里有可用的验收地址），不再等 `lastSmoke`。两个文件都
 提供时，行为与入口脚本的 `up`、`smoke` 子命令一致。
 
@@ -458,7 +468,11 @@ bash <任务空间>/.worktree-space/<entry> timeouts <envId>
 路径同入口脚本。钩子模式使用内置时限（`timeouts` 查询属于入口脚本约定），不提供独立的时限查询。
 
 同一部署根里同时有钩子文件与入口脚本时，钩子文件优先；只有入口脚本时完全按原来的子命令约定，旧任务
-空间不需要迁移。`.worktree-space/deploy/` 整个目录在创建时从源码根复制，钩子文件因此随项目走。
+空间不需要迁移。`.worktree-space/deploy/` 整个目录在创建时从源码根复制，钩子文件因此随项目走；
+单个仓库自带 `<仓库>/deploy/` 钩子时也随仓库进入任务空间。
+
+采用钩子文件时，创建对话框里的「部署脚本」可以留空 —— 创建只检查能不能找到需要的那一个动作：
+只跑冒烟要 `smoke`，部署到 Docker 要 `up`（`smoke` 可选）。
 
 ---
 
@@ -1121,8 +1135,9 @@ Top to bottom:
    root must neither contain nor be contained by the source root, and a container root that is itself a
    git repository is refused.
 6. **Deploy to Docker** (unticked by default): ticking it reveals the **Deploy script** box; leave it
-   empty and `workspace/.worktree-space/deploy/deploy.sh` is used. Why this has to be settled before the
-   create is explained in 3.2.
+   empty and `workspace/.worktree-space/deploy/deploy.sh` is used. A deploy root that declares its actions
+   with `up`/`smoke` hook files may leave this empty. Why this has to be settled before the create is
+   explained in 3.2.
 7. **Preview**: the **branch name** and **space directory name** this task will use, updating live as you
    type above.
 8. **Create and open session**: builds everything, then opens a session in that task space.
@@ -1135,11 +1150,11 @@ answers "this task does not get accepted", and nothing later reminds you that it
 
 - **Unticked (`none`) is a fine answer**: a task with no runtime behaviour to accept should not tick it.
   But it has to be **your** answer.
-- **Ticked (`docker`)**: a passing smoke *is* this task's finish line. `up` writes the acceptance URL,
-  `smoke` records the result, and the finishing merge is checked against the gate
-  ([6.7](#67-the-finish-gate)).
-- Choose either gated kind with no usable entry script and **the create itself is refused** (`E4015`) rather than leaving
-  you a task space that can never deploy.
+- **Ticked (`docker`)**: `up` writes the acceptance URL. `smoke` records the result and a passing smoke *is*
+  this task's finish line; a deploy root that offers `up` alone is deployment-only, and its finish line is
+  the deployment record itself ([6.7](#67-the-finish-gate)).
+- Choose either gated kind with no usable entry — neither a script nor a hook file inside the deploy root — and
+  **the create itself is refused** (`E4015`) rather than leaving you a task space that can never deploy.
 
 ### 3.3 What a create produces
 
@@ -1284,18 +1299,20 @@ a second task space, and do not run `git worktree add` by hand.
 
 ## 6. Acceptance
 
-For tasks created with **Smoke only** or **Deploy to Docker**. Both answer to the same entry script and
-the same state file; they differ in exactly two ways: **a deploying task has one more subcommand, `up`**,
-so it has an environment, an acceptance URL and containers to tear down; **a smoke-only task has none of
-those, and the gate is still there**.
+For tasks created with **Smoke only** or **Deploy to Docker**. Both answer to the same deploy root and the
+same state file; they differ in exactly two ways: **a deploying task has one more action, `up`**, so it has
+an environment, an acceptance URL and containers to tear down; **a smoke-only task has none of those, and
+the gate is still there**. An action comes either from the entry script's subcommands or from the
+`up` / `smoke` hook files in the deploy root ([6.8](#68-hook-files-optional)); everywhere below, a rule about
+"the script" holds for both shapes.
 
 ### 6.0 Smoke only needs no container
 
 With **Smoke only**, everything below about the container engine, the environment identity, the
 acceptance URL and the destroy button **does not apply** — there is no environment to look at, and the
-panel never asks the container engine about it. One step is owed: the entry script's `smoke` subcommand
-runs and merges `lastSmoke` into the state file ([6.5](#65-the-state-file-contract)). What it runs is the
-project's own choice — a unit suite, an integration suite, a build check all count.
+panel never asks the container engine about it. One step is owed: `smoke` runs and merges `lastSmoke` into
+the state file ([6.5](#65-the-state-file-contract)). What it runs is the project's own choice — a unit
+suite, an integration suite, a build check all count.
 
 **Sections 6.2 onward describe Deploy to Docker.** A smoke-only task can stop at 6.5.
 
@@ -1316,9 +1333,9 @@ Two that catch people:
 - **The acceptance URL is reachable on localhost only**, because the dynamic port is published by
   the engine. From another machine, or from outside the engine, it will not answer.
 
-### 6.2 The contract: one entry script
+### 6.2 The first contract: the entry script's subcommands
 
-The whole deploy contract is one entry script answering two subcommands:
+The first shape of a deploy root is one entry script declaring its actions as subcommands:
 
 ```sh
 bash <task space>/.worktree-space/<entry> up     <envId>   # build and raise it, write the acceptance URL into the state file
@@ -1332,6 +1349,9 @@ a script may reference files sitting beside it.
 A `destroy` subcommand is **optional, and the plugin never calls it** — the card's destroy button takes
 the containers down by their `dsh.env-id` label, with no help from a script. **An entry that implements
 `up` and `smoke` alone is complete.**
+
+> The other shape is two files, `up` and `smoke`, in the deploy root —
+> [6.8](#68-hook-files-optional). The two may coexist; hook files win in the same deploy root.
 
 #### Optional: `timeouts` for the wait
 
@@ -1457,9 +1477,14 @@ A task that records an acceptance (`smoke` or `deploy`) **may only merge on a pa
 state file, or with a `lastSmoke.result` that is not `pass`, the merge is refused (`E5006`). That is the host
 refusing, not a hint.
 
-**A deploying task has one more rule: the smoke may not predate the last deployment this side ran.** A
-rebuild stands up a new environment, so an earlier `pass` describes the one before it — **a rebuilt
-deployment needs a fresh smoke**. A smoke-only task deploys nothing, so the rule does not apply to it.
+**A deployment-only task — one whose deploy root offers `up` and no `smoke` — is the exception**: its
+acceptance is the deployment record itself, so a usable acceptance URL in the state file is enough and no
+`lastSmoke` is asked for or waited on.
+
+**A deploying task that does provide `smoke` has one more rule: the smoke may not predate the last
+deployment this side ran.** A rebuild stands up a new environment, so an earlier `pass` describes the one
+before it — **a rebuilt deployment needs a fresh smoke**. A smoke-only task deploys nothing, so the rule
+does not apply to it.
 
 **This gate is a convention, not a check on the code.** It exists so that "smoke it before you finish" is
 not a thing anyone has to remember; it does not inspect what changed and does not ask for a commit first —
@@ -1479,13 +1504,13 @@ passing smoke", and supplying those is the whole fix.
 
 ### 6.8 Hook files (optional)
 
-A deploy root may carry two files instead of a single entry script:
+The second shape of a deploy root is two files rather than an entry script:
 
 - `<deploy root>/up` raises the environment and writes the acceptance URL into `.state.json`;
 - `<deploy root>/smoke` runs the smoke test and merges `lastSmoke` into the same file.
 
-A file's presence is the declaration, and the check is a plain filesystem one. A task with `up` alone is
-**deployment-only**: the deployment card shows neither the smoke badge nor **Run smoke**, and the finish gate
+A file's presence is the declaration, and the check is a plain filesystem one. **A task with `up` alone is
+deployment-only**: the deployment card shows neither the smoke badge nor **Run smoke**, and the finish gate
 asks only for a deployment record (a usable acceptance URL in the state file) instead of waiting for
 `lastSmoke`. With both files present the behaviour matches the entry script's `up` and `smoke` subcommands.
 
@@ -1495,7 +1520,11 @@ deadlines; the `timeouts` lookup belongs to the entry-script contract, not to th
 
 Hook files win over an entry script in the same deploy root; a root with only the entry script keeps the old
 subcommand contract, so existing task spaces need no migration. The whole `.worktree-space/deploy/` directory
-is copied from the source root at create time, so hook files travel with the project.
+is copied from the source root at create time, so hook files travel with the project; a repository's own
+`<repo>/deploy/` hooks travel with that repository.
+
+With hook files the **Deploy script** field in the create dialog may stay empty — the create only checks that
+it can find the action it needs: `smoke` for a smoke-only task, `up` for a deploying one (`smoke` optional).
 
 ---
 

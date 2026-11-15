@@ -5,7 +5,8 @@ work may land. Both use the same entry script and the same state file; they diff
 there is an environment.
 
 **Smoke only** (`smoke`) is the answer for a task whose acceptance is the project's own
-checks: the entry needs a `smoke` subcommand that runs them and records the result, and that
+checks: the deploy root needs a `smoke` action — the entry's subcommand, or a `smoke` hook file —
+that runs them and records the result, and that
 is the whole contract. There is no environment, no acceptance URL and no container to tear
 down — do not stand one up to satisfy it, and do not go looking for a URL. A unit suite, an
 integration suite or a build check all belong here, and how the project verifies itself is
@@ -36,10 +37,24 @@ directory, or naming no file, is refused (E4014) before anything is made.
 There is no manifest to declare targets in: the entry script is the whole contract,
 and docker is the only target.
 
+**A deploy root declares its actions in one of two shapes.** The first is one entry script
+answering subcommands — `smoke`, `up`, and optionally `timeouts` / `destroy`. The second is two
+files in the deploy root, `up` and `smoke`, whose **presence** is the declaration: the check is a
+plain filesystem one, both run through bash with the environment id as the first argument, and
+hook mode keeps the built-in deadlines (no `timeouts` lookup). Hook files win over an entry
+script sitting in the same deploy root, so a project can move to the file shape without deleting
+its old script first; a root with only the script keeps the subcommand contract unchanged.
+
+**A deploying task that offers `up` and no `smoke` is deployment-only**: nothing is smoked, the
+card has no smoke badge or button, and the finish gate asks only for a usable acceptance URL in
+the state file. That shape is legal — do not invent a smoke to satisfy it, and do not tell the
+user a smoke is owed.
+
 **A task created with either gated kind needs something to run**, and a create that has none
-is refused (E4015) rather than made unable to record an acceptance. Any one of the
-three counts: a `.worktree-space/deploy/deploy.sh` at the source root, a script named by `deployScript`,
-or a selected repository carrying its own `deploy/deploy.sh`. So before creating a
+is refused (E4015) rather than made unable to record an acceptance. Any one of these counts: a
+`.worktree-space/deploy/deploy.sh` at the source root, a script named by `deployScript`, a selected
+repository carrying its own `deploy/deploy.sh`, or an `up` / `smoke` hook file in either of those
+deploy roots. So before creating a
 deploying task, check that one of those exists — and if the user wants a deployment and
 none does, building that `.worktree-space/deploy/` root from the repositories' own run
 commands is ordinary session work; what must not happen is starting the services on the
@@ -110,11 +125,15 @@ is already there, the user removes that single file and finishes the task again.
   acceptance URL apart from every other task's — never guess one, and never reuse
   another's.
 - Run the task's own deploy entry — `<entry>` below is the path the note names, run from
-  `.worktree-space/`, and `.worktree-space/deploy/deploy.sh` when it names none. `<entry> up`
+  `.worktree-space/`, and `.worktree-space/deploy/deploy.sh` when it names none. A deploy root
+  using the hook-file shape has no subcommands at all: run `deploy/up` and `deploy/smoke` with the
+  environment id as the only argument instead. `<entry> up` / `deploy/up`
   builds and starts the environment
-  and prints the acceptance URL. Run `<entry> smoke` and let it pass **before** reporting
+  and prints the acceptance URL. Run the smoke and let it pass **before** reporting
   the URL: an address that answers 500 is not a deliverable. When it fails, the reason is
-  usually in `<entry> logs <service>`.
+  usually in `<entry> logs <service>`, or in `docker logs` for the hook shape.
+- **A deployment-only task has no smoke to run**: report the URL and what was started, and do not
+  claim a smoke passed — none exists, and the gate does not ask for one.
 - Report the URL together with what to click to see the change, and say that the
   environment keeps running until it is destroyed.
 - Leave the environment to the user. The panel's destroy button takes it down, and every

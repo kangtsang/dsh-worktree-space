@@ -119,22 +119,19 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
   **不做验收**（默认）、**只跑冒烟**、**部署到 Docker**。选后两者时会多出一个 **部署脚本** 输入框
   （留空则用 `工作区/.worktree-space/deploy/deploy.sh`）。
   它之所以在建的时候就问，是因为**验收方式只在创建时落一次，事后没有入口能加、能改**：不选等于定了
-  「这个任务不做验收」，之后也不会有任何东西再提起这件事。反过来，选了后两者却找不到可用的入口脚本时
-  **创建会被直接拒绝**，而不是留一个永远做不了验收的任务空间。
+  「这个任务不做验收」，之后也不会有任何东西再提起这件事。反过来，选了后两者却找不到可用的入口文件
+  （入口脚本或 `up` / `smoke` 钩子文件）时**创建会被直接拒绝**，而不是留一个永远做不了验收的任务空间。
   其余收尾时的决定 —— 合到哪条分支、要不要删分支、冲突怎么办、遗留文档怎么处理 —— 都不在这里预定，
   留给结束任务那一刻当场决定。
-- **验收**（选了后两项才有）。任务空间自带一个部署根：源码根的 `.worktree-space/deploy/` 会被复制进来，
-  入口脚本提供 `smoke`（跑冒烟、把结果写进 `.state.json`）；选了「部署到 Docker」时另有 `up`
-  （起环境、写验收地址）。**只跑冒烟**没有环境：单元测试、集成测试、构建检查都可以放在 `smoke` 里，
-  用什么方式由项目自己决定。选了部署时每个任务的环境身份互不相同，任务之间不会互相顶掉，而且
-  **重新部署之后要重新冒烟**，上一次的通过记录不再算数。
-  **合并之前有一道闸门**：`<部署根>/.state.json`
-  里没有一条 `result: "pass"` 的 `lastSmoke`，合并就被拒；面板会问「冒烟还没过，仍要结束吗？」，
-  这份豁免只有人能给。
-- **部署根也接受独立钩子文件。** 在部署根里放两个 shell 文件 `up`、`smoke`，就分别声明了部署与冒烟两个
-  动作；文件存在即提供。只放 `up` 的任务就是**只部署**：部署卡片不显示冒烟徽标与「执行冒烟」，收尾也只
-  要求一条可用的部署记录，不再等 `lastSmoke`。同一目录里同时有入口脚本时钩子文件优先；两者都没有时仍
-  按入口脚本的 `up`/`smoke` 子命令约定，旧项目不受影响。
+- **验收**（选了后两项才有）。任务空间自带一个部署根：源码根的 `.worktree-space/deploy/` 会被复制进来。
+  部署根用两种写法之一声明动作，**文件或子命令存在即提供**：一个入口脚本的 `smoke` / `up` 子命令，
+  或独立的 `up` / `smoke` 钩子文件（同一目录里钩子文件优先，仓库自带的 `deploy/` 钩子随仓库进入）。
+  **只跑冒烟**没有环境：单元测试、集成测试、构建检查都可以放在 `smoke` 里，用什么方式由项目自己决定。
+  选了部署时每个任务的环境身份互不相同，任务之间不会互相顶掉；**另外提供 `smoke` 时**，重新部署之后要
+  重新冒烟，上一次的通过记录不再算数；**只提供 `up` 的任务是只部署**，不跑冒烟、也不要求冒烟。
+  **合并之前有一道闸门**：需要冒烟的任务，`<部署根>/.state.json` 里没有一条 `result: "pass"` 的
+  `lastSmoke` 就拒绝合并；只部署的任务则要求一条可用的部署记录（状态文件里有可用的验收地址）。
+  面板会问「冒烟还没过，仍要结束吗？」，这份豁免只有人能给。
 - **注册成工作区**，名字是 `<上级>/<任务名>`，同时开一个会话，工作目录就是这个任务空间 —— 在任务空间里
   改代码，不会动到源码检出。
 - **管理页面**，分三个视图（入口见「管理 Worktree Space」一节）：
@@ -275,7 +272,8 @@ Agent 执行合并、移除 worktree、归档遗留内容，并按需删除分�
    改动时同样出现 **设为默认…**，勾选后把这次的路径写回设置。容器根自身是 Git 仓库会被拒绝。
 6. **验收方式**（默认「不做验收」）：选「只跑冒烟」或「部署到 Docker」后多出 **部署脚本** 输入框，留空则用
    `工作区/.worktree-space/deploy/deploy.sh`。这一格定的是「合并要不要冒烟这道闸门」，
-   **只在创建时这一回落一次**，之后没有入口能补。
+   **只在创建时这一回落一次**，之后没有入口能补。部署根改用 `up`/`smoke` 钩子文件时可以不填，
+   创建只要求能找到其中一个动作的文件。
 7. **预览**：跟着上面的输入实时算出这次的**分支名**与**空间目录名**。
 8. 点 **创建并打开会话**：建完直接在该任务空间开一个会话。
 
@@ -327,27 +325,34 @@ DSH 实例的内存里，实例关闭时随之清空。
 ### 🚢 验收
 
 选了「只跑冒烟」或「部署到 Docker」的任务，任务空间里会多一张验收卡片（管理页面的任务行下面）：
-只跑冒烟的叫**冒烟验收**，部署的叫**部署验收**。
-入口脚本按验收方式提供子命令：
+只跑冒烟的叫**冒烟验收**，部署的叫**部署验收**。部署根按两种写法之一声明动作：
+
+- **入口脚本的子命令** —— 默认 `.worktree-space/deploy/deploy.sh`（也可以在「部署脚本」里指定同目录下的
+  别的文件）：`smoke` 跑冒烟、`up` 起环境，`timeouts` 可选地交出两个时限，`destroy` 可选且插件从不调用；
+- **独立的钩子文件** —— 部署根里的 `up` / `smoke` 两个 shell 文件，文件名固定，存在即提供。两者都以 bash
+  运行，环境 id 作为第一个参数，`DEPLOY_*` 环境变量与状态文件路径同入口脚本；钩子模式用内置时限。
+
+同一部署根里同时有钩子文件与入口脚本时**钩子文件优先**；只有入口脚本时完全按子命令约定，旧任务空间不需要
+迁移。
 
 - **`smoke`** —— 跑冒烟，由脚本自己把 `lastSmoke: { result, at }` 合进 `<部署根>/.state.json`。
-  **只跑冒烟**的任务只有这一个：单元测试、集成测试、构建检查都可以放在里面，用什么方式由项目自己决定。
-- **`up`** —— 只有**部署到 Docker**的任务才有：跑入口脚本把环境起来，并把**验收地址**写进同一个状态文件。
+  **只跑冒烟**的任务必须提供它：单元测试、集成测试、构建检查都可以放在里面，用什么方式由项目自己决定。
+- **`up`** —— 只有**部署到 Docker**的任务才需要：起环境，并把**验收地址**写进同一个状态文件。
 
 部署时环境身份由容器根、项目、任务名与本地端口一起算出，**每个任务一份，互不干扰**；动态端口每次部署都可能变，
-所以状态（地址、最后一次冒烟）都是每次读了实时拿的，而不是某次读到的缓存。**重新部署之后要重新冒烟**：
-上一次的通过记录说的是上一个环境，不再算数。结束任务时若有这套环境，会把它拆掉 —— 随它一起消失的是那个 URL
+所以状态（地址、最后一次冒烟）都是每次读了实时拿的，而不是某次读到的缓存。**另外提供了 `smoke` 时，重新部署
+之后要重新冒烟**：上一次的通过记录说的是上一个环境，不再算数；**只提供 `up` 的任务是只部署**，卡片没有冒烟
+徽标与「执行冒烟」，也不要求冒烟。结束任务时若有这套环境，会把它拆掉 —— 随它一起消失的是那个 URL
 （动态端口已经没了），而冒烟的通过与否会留在记录里。只跑冒烟的任务没有环境，结束任务时也不会去问容器引擎。
 
-合并之前还有一道闸门：`<部署根>/.state.json` 里没有一条 `result: "pass"` 的 `lastSmoke`，合并就被拒，
-对话框直接说出缺的是部署还是冒烟。**这份豁免只有面板上的你能给** —— 你可以在对话框里确认「冒烟没过仍要结束」，
-任务记录里会留下一条 `delivery-gate-bypassed` 警告；走工具调用那条路时，越过闸门的唯一办法是把冒烟跑过
-（部署任务还要把环境起来）。这条闸门是**规范约束**：它防的是「忘了冒烟就收尾」，不核对代码是否改过、
-也不要求先提交 —— 冒烟通过之后继续改代码，闸门不会察觉。
+合并之前还有一道闸门：需要冒烟的任务，`<部署根>/.state.json` 里没有一条 `result: "pass"` 的 `lastSmoke`
+就拒绝合并；只部署的任务要求一条可用的部署记录。对话框直接说出缺的是部署还是冒烟。**这份豁免只有面板上的
+你能给** —— 你可以在对话框里确认「冒烟没过仍要结束」，任务记录里会留下一条 `delivery-gate-bypassed` 警告；
+走工具调用那条路时，越过闸门的唯一办法是把那一步跑过。这条闸门是**规范约束**：它防的是「忘了冒烟就收尾」，
+不核对代码是否改过、也不要求先提交 —— 冒烟通过之后继续改代码，闸门不会察觉。
 
-独立钩子文件：部署根里放 `up`、`smoke` 两个 shell 文件即可按文件声明动作，存在即提供。只放 `up` 的任务是
-**只部署**，卡片不显示冒烟、收尾只要求部署记录；钩子文件优先于同目录的入口脚本，只有入口脚本时仍按
-`up`/`smoke` 子命令约定，旧项目不需要迁移。
+独立钩子文件的文件名固定为 `up` / `smoke`，检查是纯文件系统操作；记录里点名了别的入口脚本时仍以那个入口
+所在目录为准。两种写法可以并存，迁移时先放钩子文件即可，旧入口脚本可以最后再删。
 
 > 部署根的复制规则、状态文件契约、环境身份怎么算，见
 > [使用指南第 6 节](USAGE.md#6-验收)。
@@ -485,9 +490,9 @@ worktree 里，可以就地处理。
 > **只说「只检出本次改动涉及的仓库」**则由 Agent 依据改动范围自行判断，省事但需要复核它的选择。
 > 任务空间为列出的每个仓库各建一个 worktree，未列出的仓库不会被检出——这是它区别于「检出全部」的地方。
 >
-> 部署在**创建任务空间时确定**，事后无法追加，因此必须在提示词中一并说明。冒烟由任务空间自己的入口脚本
-> 执行（默认 `.worktree-space/deploy/deploy.sh`，实现 `up` / `smoke` / `destroy` 三个子命令），
-> 结果写入状态文件，未通过则拒绝合并；所以冒烟需要的依赖写在 `deploy.sh` 里，或随列出的仓库一并检出。
+> 部署在**创建任务空间时确定**，事后无法追加，因此必须在提示词中一并说明。冒烟由任务空间自己的部署根执行
+> （默认入口脚本 `.worktree-space/deploy/deploy.sh` 的 `up` / `smoke` 子命令，或同目录下的 `up` / `smoke`
+> 钩子文件），结果写入状态文件，未通过则拒绝合并；所以冒烟需要的依赖写在入口脚本里，或随列出的仓库一并检出。
 
 > **仅执行合并收尾。**
 > 「任务已完成，合并回 `main` 并删除任务分支。」
@@ -783,29 +788,28 @@ the repository that stopped it, and merges once that session has resolved it.
   `workspace/.worktree-space/deploy/deploy.sh`). It is asked at creation because **the choice is made
   once, when the space is created, and nothing afterwards can add or change it**: not choosing one
   settles "this task needs no acceptance", and nothing later will mention that again. Choosing the
-  last two while no usable entry script exists **refuses the create outright**, rather than leaving a
-  task space that can never be accepted.
-  **Smoke only** is the answer for a task whose acceptance is a test suite: the entry needs a `smoke`
-  subcommand and nothing else, there is no environment and no acceptance URL, and the finish gate
+  last two while no usable entry exists — neither an entry script nor a `up`/`smoke` hook file —
+  **refuses the create outright**, rather than leaving a task space that can never be accepted.
+  **Smoke only** is the answer for a task whose acceptance is a test suite: the deploy root needs a
+  `smoke` action and nothing else, there is no environment and no acceptance URL, and the finish gate
   still waits for a recorded `pass`.
   Everything a finish decides — which branch to merge into, whether to delete it, what a conflict
   does, what happens to the documents left behind — is deliberately not settled here, and is asked at
   the finish, where you can see the work it applies to.
 - **Acceptance** (when one was chosen). The task space carries its own deploy root: the source
-  root's `.worktree-space/deploy/` is copied into it, and its entry script answers `smoke` (run the
-  smoke test, write the result into `.state.json`) — plus `up` (raise the environment, write the
-  acceptance URL) when the answer was **Deploy to Docker**. **Smoke only** has no environment: a unit
-  or integration suite recorded through `smoke` is a complete answer. For a deploying task the
-  environment identity is computed from the container root, the project, the task name and a local
-  port, so **each task gets its own, and tasks cannot crowd each other out**. There
-  is **a gate before the merge**: without a `lastSmoke` carrying `result: "pass"` in
-  `<deploy root>/.state.json`, the merge is refused; the panel then asks whether to finish anyway,
-  and that exemption is one only a person can give.
-- **A deploy root may declare its hooks as files.** Two shell files, `up` and `smoke`, inside the deploy root
-  declare those actions; a file's presence is the declaration. A task with `up` alone is deployment-only: the
-  card shows no smoke badge and no **Run smoke**, and the finish asks only for a usable deployment record
-  instead of waiting for `lastSmoke`. Hook files win over an entry script beside them; a root with neither keeps
-  the entry script's `up`/`smoke` subcommand contract, so existing projects are unchanged.
+  root's `.worktree-space/deploy/` is copied into it, and that root declares its actions in one of two
+  ways, **a file or subcommand present meaning provided**: an entry script's `smoke` / `up`
+  subcommands, or the standalone `up` / `smoke` hook files (hook files win over an entry script beside
+  them, and a repository's own `deploy/` hooks travel with the repository). **Smoke only** has no
+  environment: a unit or integration suite recorded through `smoke` is a complete answer. For a
+  deploying task the environment identity is computed from the container root, the project, the task
+  name and a local port, so **each task gets its own, and tasks cannot crowd each other out**. When a
+  `smoke` is also provided, **a rebuilt deployment needs a fresh smoke** — the earlier `pass` describes
+  the environment before it. **With `up` alone the task is deployment-only**: no smoke is run or
+  required, and the card shows neither the smoke badge nor **Run smoke**. There is **a gate before the
+  merge**: a task that owes a smoke needs a `lastSmoke` carrying `result: "pass"` in
+  `<deploy root>/.state.json`, while a deployment-only task needs a usable deployment record; the panel
+  then asks whether to finish anyway, and that exemption is one only a person can give.
 - **Registered as a Workspace** named `<parent>/<task>`, opened with a session whose working
   directory is the task space, so code can be edited inside the task space without touching the
   source checkouts.
@@ -997,7 +1001,8 @@ top down:
 6. **Acceptance** (No acceptance to start with): choosing **Smoke only** or **Deploy to Docker** adds
    one **Deploy script** field, empty meaning `workspace/.worktree-space/deploy/deploy.sh`. This menu
    settles whether a passing smoke gates the merge, and it is **recorded once, at creation** — nothing
-   afterwards can add it.
+   afterwards can add it. A deploy root that declares its actions with `up`/`smoke` hook files may leave
+   this empty; the create only needs to find one of the actions.
 7. **Preview**: the branch name and the space's directory this task will use, live as you type.
 8. Press **Create and open session**: the space is built and a session is opened in it.
 
@@ -1063,35 +1068,41 @@ per comment; range selection is not offered yet.
 A task created with **Smoke only** or **Deploy to Docker** gains an acceptance card in its row on the
 management page. The two kinds are titled apart - **Smoke acceptance** for one with no environment,
 **Deployment acceptance** for one that deploys - so the heading describes what the card actually shows.
-The entry script answers one call, and a second when it deploys:
+The deploy root declares its actions in one of two ways:
+
+- **An entry script's subcommands** - `.worktree-space/deploy/deploy.sh` by default, or another file in the
+  same directory named in **Deploy script**: `smoke` runs the smoke test, `up` raises the environment,
+  `timeouts` optionally hands over two deadlines, and `destroy` is optional and never called by the plugin;
+- **The standalone hook files** - `up` and `smoke` inside the deploy root, names fixed, present means
+  provided. Both run through bash with the environment id as the first argument, under the same `DEPLOY_*`
+  environment and state file path as the entry script; hook mode uses the built-in deadlines.
+
+Hook files win over an entry script in the same deploy root; with only the entry script the subcommand
+contract applies unchanged, so no existing task space has to migrate.
 
 - **`smoke`** — runs the smoke test, the script merging `lastSmoke: { result, at }` into
-  `<deploy root>/.state.json`. A **Smoke only** task has just this one: a unit suite, an integration
+  `<deploy root>/.state.json`. A **Smoke only** task must provide it: a unit suite, an integration
   suite or a build check all belong there, and how the project verifies itself is its own business.
-- **`up`** — only for a **Deploy to Docker** task: runs the entry script to raise the environment, and
-  writes the **acceptance URL** into that same state file.
+- **`up`** — needed only by a **Deploy to Docker** task: raises the environment and writes the
+  **acceptance URL** into that same state file.
 
 The environment identity comes from the container root, the project, the task name and a local port,
 so **each task has its own and they do not crowd each other out**; that port can change with every
 deploy, which is why the state — the URL, the last smoke — is read live on every call rather than
-cached. **A rebuilt deployment needs a fresh smoke**: the earlier `pass` describes the environment
-before it, so it stops counting. When such a task is finished, its environment is taken down: what dies
-with the containers is the URL, since that dynamic port is gone, while the smoke's own verdict stays
-in the task's record. A smoke-only task has no environment, so no container engine is asked about it.
+cached. **When a `smoke` is provided too, a rebuilt deployment needs a fresh smoke**: the earlier `pass`
+describes the environment before it, so it stops counting. **With `up` alone the task is
+deployment-only** — the card has neither the smoke badge nor **Run smoke**, and no smoke is required.
+When such a task is finished, its environment is taken down: what dies with the containers is the URL,
+since that dynamic port is gone, while the smoke's own verdict stays in the task's record. A smoke-only
+task has no environment, so no container engine is asked about it.
 
-Before the merge there is one gate: absent a `lastSmoke` with `result: "pass"` in
-`<deploy root>/.state.json`, the merge is refused and the dialog names what is missing, a deployment
-or a smoke. **That exemption is only yours to give on the panel** — you can confirm "finish anyway"
-and the task's record keeps a `delivery-gate-bypassed` warning; down the tool route, the only way past
-the gate is running the smoke — plus raising the environment first, for a deploying task. This gate is
-**a convention, not a check on the code**: it exists so that "smoke it before you finish" is not a thing
-anyone has to remember, and it does not inspect what changed or ask for a commit first — editing after a
-passing smoke leaves the gate open.
-
-A deploy root may also declare its hooks as files: an `up` and a `smoke` shell file inside the deploy root,
-present means provided. A task with `up` alone is **deployment-only** - the card shows no smoke and the finish
-asks only for the deployment record. Hook files win over an entry script beside them; with only the entry
-script the old `up`/`smoke` subcommand contract applies, so no existing project has to migrate.
+Before the merge there is one gate: a task that owes a smoke needs a `lastSmoke` with
+`result: "pass"` in `<deploy root>/.state.json`, while a deployment-only task needs a usable deployment
+record; the dialog names what is missing. **That exemption is only yours to give on the panel** — you can
+confirm "finish anyway" and the task's record keeps a `delivery-gate-bypassed` warning; down the tool
+route, the only way past the gate is running that step. This gate is **a convention, not a check on the
+code**: it exists so that "smoke it before you finish" is not a thing anyone has to remember, and it does
+not inspect what changed or ask for a commit first — editing after a passing smoke leaves the gate open.
 
 > How the deploy root is copied, the state file's contract, and how the environment identity is
 > computed: [section 6 of the manual](USAGE.md#6-acceptance).
@@ -1260,10 +1271,11 @@ scenarios and can be adapted directly.
 > is what makes this different from checking out everything.
 >
 > The deployment is **settled when the task space is created** and cannot be added later, so it has to
-> be stated in the prompt. The smoke runs through the task space's own entry script
-> (`.worktree-space/deploy/deploy.sh` by default, implementing `up` / `smoke` / `destroy`), writes its
-> result to the state file, and a smoke that did not pass refuses the merge; whatever the smoke depends
-> on therefore belongs in `deploy.sh`, or among the repositories listed above.
+> be stated in the prompt. The smoke runs through the task space's own deploy root (the entry script
+> `.worktree-space/deploy/deploy.sh` and its `up` / `smoke` subcommands by default, or the `up` / `smoke`
+> hook files beside it), writes its result to the state file, and a smoke that did not pass refuses the
+> merge; whatever the smoke depends on therefore belongs in the entry script, or among the repositories
+> listed above.
 
 > **Finish and merge only.**
 > "The task is complete; merge it back into `main` and delete the task branch."
