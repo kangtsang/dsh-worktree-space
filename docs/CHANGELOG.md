@@ -6,6 +6,39 @@
 
 记录每个版本的改动。更早的版本只留在 git 历史里；宿主兼容性的逐版本实测证据在
 [`store-evidence.md`](store-evidence.md)。英文版见[本文档英文部分](#english)。
+## 1.4.5 — 2026-11-16
+
+换行符被 Git 改写的检出，不再被读成整棵树的改动；没有行数的文件不再占一行，一个什么都没有的仓库也不再用三个零说话。
+
+### 修复
+
+- **CRLF 检出不再把整棵树算成「未提交变更」。** 检出的文件按 CRLF 写在磁盘上、仓库里的对象是 LF 时，
+  每一行都算不同。工作区与任务空间的已提交/未提交数字走的是 `git diff --shortstat HEAD`，它不看换行符，
+  于是一个谁都没动过的工作区读成 115 个文件、4.3 万行改动；而变更查看一直带着 `--ignore-cr-at-eol`，
+  打开同一个仓库显示的是空。同一件事两个答案，屏幕上那个是错的。现在工作树的几条读取——仓库状态、
+  远端对比、结束任务对话框里每个仓库那一行——都带上这个标志；两个提交之间的比较（`<目标>...HEAD`）
+  刻意不带，因为提交之间的回车是有人选择提交的内容，这与变更查看里已有的划分一致。
+- **没有行数的文件不再列成「已修改 +0 −0」。** `--name-status` 与 `--numstat` 是两条命令，对
+  `--ignore-cr-at-eol` 的遵守并不一致：Git 2.56 把这文件从两份输出里都去掉，2.28 只在 `--numstat` 里
+  去掉（报 `0 0`）、`--name-status` 仍然留着它。于是文件列表与行数对不上，拼出一行「已修改 +0 −0」，
+  点开是空 diff。本机上一个没人动过的工作区在三个仓库里就有八个这样的文件。现在列表只保留有行数的行、
+  二进制改动（Git 用 `-` 而不是数字报它）和重命名——后两者没有行数，但都有话要说。面板、工作区头部与
+  结束任务对话框读未提交那一对时走同一条规则。
+- **变更总览里什么都没有的仓库写「暂无变更」。** 以前画 `+0 −0 0 个文件`，三个数读起来像一次测量，
+  实际什么都没测；现在用与上面分支同一档的灰色小字说这件事。
+
+### 变更
+
+- **变更查看的标题先写仓库名。** 标签页上只有「变更查看」四个字，头部原来只有 `分支：<当前分支> → <基线>`，
+  比的是哪个仓库要靠文件路径去猜。现在标题行以加粗的仓库名开头，悬停给出完整路径，再接那对分支。
+
+### 性能
+
+- **任务空间的变更总览不再逐个仓库排队读取。** 每个仓库一行要跑几条 `git`，几十个仓库时串行等待
+  叠起来会撞上 15 秒超时。现在按扫描同一档的并发度并行取，并保持任务记录里的仓库顺序，两次打开顺序一致。
+  文件列表与行数这两条描述同一范围的命令也改成同时发出。
+
+
 ## 1.4.4 — 2026-11-15
 
 任务空间的改动可以在右侧栏里逐文件查看、逐行评审，评审意见随之进入会话输入框；验收一侧，部署根除了单入口脚本，
@@ -505,6 +538,48 @@
 What changed in each release. Earlier versions live in the git history only; the per-release
 evidence for host compatibility is in [`store-evidence.md`](store-evidence.md).
 The Chinese version is [the first half of this file](#chinese).
+
+## 1.4.5 — 2026-11-16
+
+A checkout whose line endings Git rewrites is no longer read as a whole-tree change; a file with no lines no longer
+occupies a row, and a repository carrying nothing no longer speaks in three zeros.
+
+### Fixed
+
+- **A CRLF checkout no longer counts as uncommitted work across every line.** When a checkout writes its files with
+  CRLF against blobs that hold LF, every line differs. The committed and uncommitted figures of a Workspace and a
+  task space came from `git diff --shortstat HEAD`, which has no end-of-line handling, so a Workspace nobody had
+  touched read as 115 files and 43k changed lines - while the changes sidebar, which has always passed
+  `--ignore-cr-at-eol`, opened the same repository and showed nothing. Two answers to one question, and the number
+  on screen was the wrong one. The working-tree reads now pass the flag - repository status, the upstream comparison,
+  and the per-repository row in the finish dialog. The committed ranges (`<target>...HEAD`) deliberately keep it off,
+  because between two commits a carriage return is content somebody chose to commit; that is the same split the
+  sidebar already draws.
+- **A file with no lines is no longer listed as "modified +0 −0".** `--name-status` and `--numstat` are two commands,
+  and gits disagree about how they honour `--ignore-cr-at-eol`: 2.56 leaves such a file out of both listings, while
+  2.28 honours the flag in `--numstat` (reporting `0 0`) but not in `--name-status`, which still carries it. The file
+  list and the counts then disagreed, and the row they built read "modified +0 −0" and opened onto an empty diff. On
+  this machine that was eight files across three repositories of a Workspace nobody had touched. The list now keeps a
+  row only when it has lines, a binary change (Git reports those with a `-`) or a rename - the last two have no line
+  counts, and both have something to say. The panel, the Workspace head and the finish dialog read the uncommitted
+  pair through that one rule.
+- **A repository carrying nothing says "No changes" in the overview.** It used to draw `+0 −0 0 files`: three numbers
+  that read like a measurement, where there was nothing measured. It is now said in the muted small type the branch
+  line above it already wears.
+
+### Changed
+
+- **The Files changed header names its repository first.** The tab chip says only "Files changed", and the header
+  carried just `Branch: <current> → <base>`, leaving the reader to infer the repository from the file paths. The
+  title line now opens with the repository name in bold, its full path on hover, and then that branch pair.
+
+### Performance
+
+- **A task space's changes overview no longer reads its repositories one at a time.** Each row costs a handful of
+  `git` processes, and in sequence a few dozen repositories stacked up against a fifteen-second timeout. The rows are
+  now fetched in parallel at the scan's own concurrency, keeping the record's order so two openings list them the same
+  way. The file list and the counts, which describe the same range, are now asked for together.
+
 
 ## 1.4.4 — 2026-11-15
 
