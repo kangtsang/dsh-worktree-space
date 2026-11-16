@@ -417,6 +417,24 @@ export function parseShortstat(shortstat) {
 }
 
 /**
+ * The uncommitted pair a row draws, or nothing when it carries no lines.
+ *
+ * The worktree is the one side where `--ignore-cr-at-eol` is in force, so a checkout
+ * whose files were written with CRLF against LF blobs answers "8 files changed, 0
+ * insertions(+), 0 deletions(-)". Drawing that pair put a file count in front of a zero
+ * for a Workspace nobody had touched: eight files, no lines, and no way to tell from the
+ * row that they were empty. A pair with no lines is no change here, and the row says so
+ * the way it does for a clean tree. A binary change reads the same way, which is the
+ * cost of measuring a summary in lines.
+ * @param shortstat - git's `--shortstat` output for the working tree against HEAD.
+ * @returns the counts, or undefined when nothing was added or removed.
+ */
+export function workingPair(shortstat) {
+  const pair = parseShortstat(shortstat)
+  return pair.insertions === 0 && pair.deletions === 0 ? undefined : pair
+}
+
+/**
  * Pick the branch new work should start from, preferring the remote's own
  * default and then the conventional names.
  * @param subprocess - the profile's subprocess service.

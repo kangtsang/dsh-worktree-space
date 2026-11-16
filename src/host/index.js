@@ -6,7 +6,7 @@ import { changesFile, changesList, changesOverview } from './task/changes.js'
 import { coded, UNKNOWN } from './task/codes.js'
 import { deployEnvironment, deploymentStatus, destroyDeployment, smokeEnvironment } from './task/deploy.js'
 import { resolveDeliveryPolicy } from './task/delivery.js'
-import { detectDefaultBranch, parseShortstat, parseWorktrees, runGit, tryRunGit } from './task/git.js'
+import { detectDefaultBranch, parseShortstat, parseWorktrees, runGit, tryRunGit, workingPair } from './task/git.js'
 import { mapWithLimit, SCAN_CONCURRENCY } from './task/concurrency.js'
 import { recordedSourceRepositories } from './task/discover.js'
 import { absolutePath, canonicalPath, isInside } from './task/paths.js'
@@ -1352,7 +1352,16 @@ export function apply(ctx, config = {}) {
         target === '' ? '' : tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', `${target}...HEAD`], { signal }),
         // The working tree's own line counts, uncommitted included: `--shortstat`
         // against HEAD is what the panel shows as "not committed yet".
-        tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal }),
+        //
+        // `--ignore-cr-at-eol` because the working tree is the one side that a copy, an
+        // editor or a checkout written with another `core.autocrlf` can rewrite wholesale.
+        // Files laid down with CRLF against blobs that hold LF then differ on every line,
+        // and counting that as work reported a checkout nobody had touched as one with
+        // thousands of changed lines - while the changes sidebar, which has always passed
+        // this flag, opened the same repository and showed nothing. The committed range
+        // above deliberately keeps the flag off: between two commits a carriage return is
+        // content somebody chose to commit.
+        tryRunGit(ctx.subprocess, path, ['diff', '--ignore-cr-at-eol', '--shortstat', 'HEAD'], { signal }),
       ])
       const lines = output ? output.split(/\r?\n/) : []
       // What this worktree would carry back, and what the target carries that it
@@ -1367,14 +1376,18 @@ export function apply(ctx, config = {}) {
       const behind = Number.parseInt(counts[0], 10)
       const commits = Number.parseInt(counts[1], 10)
       // One parser for the whole line - file count and both line counts - so the three
-      // numbers a row draws cannot disagree about the same measurement.
+      // numbers a row draws cannot disagree about the same measurement. The committed
+      // pair keeps its file count even at zero lines (between two commits that is a real
+      // change); the uncommitted one drops the pair entirely, because there the only
+      // line-less difference this measurement produces is a written-out carriage return.
+      const working = workingPair(workstat)
       const status = {
         branchLine: lines.find((line) => line.startsWith('## ')) ?? '',
         changedFiles: lines.filter((line) => line && !line.startsWith('## ')).length,
         ...(Number.isFinite(commits) ? { commits } : {}),
         ...(Number.isFinite(behind) ? { behind } : {}),
         ...(diffstat.trim() === '' ? {} : { committedChanges: parseShortstat(diffstat) }),
-        ...(workstat.trim() === '' ? {} : { workingChanges: parseShortstat(workstat) }),
+        ...(working === undefined ? {} : { workingChanges: working }),
         output,
       }
       rememberStatus(path, status)
@@ -1517,7 +1530,15 @@ export function apply(ctx, config = {}) {
       // two identical pairs, and a total that doubled them. From the merge base to HEAD
       // is what this branch adds, and `workingChanges` below owns everything else.
       const diffstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', `${name}...HEAD`], { signal })
-      const workstat = await tryRunGit(ctx.subprocess, path, ['diff', '--shortstat', 'HEAD'], { signal })
+      // Same split as `worktree.status`: the committed range keeps the flag off, the
+      // working tree ignores a carriage return. A source checkout written with CRLF
+      // against LF blobs otherwise reports every file as changed on the row, which is
+      // exactly the false positive this row exists to avoid.
+      const workstat = await tryRunGit(ctx.subprocess, path, ['diff', '--ignore-cr-at-eol', '--shortstat', 'HEAD'], { signal })
+      // A pair with no lines is no uncommitted change, for the same reason the status
+      // endpoint drops it: under the flag, the only line-less difference a worktree
+      // produces is a carriage return nobody edited.
+      const working = workingPair(workstat)
       return {
         upstream: name,
         ...(onBranch === '' ? {} : { branch: onBranch }),
@@ -1535,7 +1556,7 @@ export function apply(ctx, config = {}) {
         ...(Number.isFinite(ahead) ? { commits: ahead } : {}),
         ...(Number.isFinite(behind) ? { behind } : {}),
         ...(diffstat.trim() === '' ? {} : { committedChanges: parseShortstat(diffstat) }),
-        ...(workstat.trim() === '' ? {} : { workingChanges: parseShortstat(workstat) }),
+        ...(working === undefined ? {} : { workingChanges: working }),
       }
     })
 

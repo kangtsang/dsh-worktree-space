@@ -71,11 +71,19 @@ export function ChangesOverviewTab({ useTabInfo, api }: ChangesTabProps): ReactN
                       <span aria-hidden="true">→</span>
                       <span className="dws-change-repo-base" title={repository.baseCommit}>{repository.base ?? t("noRemoteBranch")}</span>
                     </span>
-                    <span className="dws-change-repo-counts">
-                      <span className="dws-line-add">+{repository.insertions ?? 0}</span>
-                      <span className="dws-line-del">−{repository.deletions ?? 0}</span>
-                    </span>
-                    <span className="dws-line-files">{format(t("changesFileCount"), { count: String(repository.files ?? 0) })}</span>
+                    {/* A row carrying nothing says so in words. "+0 −0 0 个文件" is three
+                        numbers that add up to no information, and it reads as a measurement
+                        where there is nothing measured; the muted line matches the branch
+                        text above it, which is the row's own voice for what is not a number. */}
+                    {carriesNothing(repository)
+                      ? <span className="dws-change-repo-none">{t("changesNoChanges")}</span>
+                      : <>
+                        <span className="dws-change-repo-counts">
+                          <span className="dws-line-add">+{repository.insertions ?? 0}</span>
+                          <span className="dws-line-del">−{repository.deletions ?? 0}</span>
+                        </span>
+                        <span className="dws-line-files">{format(t("changesFileCount"), { count: String(repository.files ?? 0) })}</span>
+                      </>}
                   </>
                 )}
               </button>
@@ -89,4 +97,9 @@ export function ChangesOverviewTab({ useTabInfo, api }: ChangesTabProps): ReactN
 
 function Notice({ children }: { children: ReactNode }) {
   return <div className="dws-changes-notice" role="alert">{children}</div>
+}
+
+/** Whether a row's three counts are all zero, which the row states in words instead. */
+function carriesNothing(repository: { files?: number; insertions?: number; deletions?: number }): boolean {
+  return (repository.files ?? 0) === 0 && (repository.insertions ?? 0) === 0 && (repository.deletions ?? 0) === 0
 }

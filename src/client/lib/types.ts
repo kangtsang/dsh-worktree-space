@@ -685,7 +685,6 @@ export interface ChangesOverviewRepository {
   path: string
   /** The branch this checkout sits on, or its short commit on a detached HEAD. */
   branch?: string
-  head?: string
   /** The base the comparison starts from, as the record or the upstream names it. */
   base?: string
   baseCommit?: string

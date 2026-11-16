@@ -17,8 +17,9 @@
 import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join, relative, sep } from 'node:path'
 import { coded } from './codes.js'
+import { mapWithLimit, SCAN_CONCURRENCY } from './concurrency.js'
 import { discoverSourceRepos } from './discover.js'
-import { runGit, tryRunGit } from './git.js'
+import { runGit, tryRunGit, workingPair } from './git.js'
 import { absolutePath, isInside } from './paths.js'
 import { DEFAULT_IGNORED_SCAN_DIRECTORY_SET, DEFAULT_SCAN_DEPTH } from './scan-bounds.js'
 import { readTaskMetadata } from './shared.js'
@@ -61,10 +62,11 @@ export async function changesOverview(subprocess, path, { signal } = {}) {
   if (!root) throw coded('E4005', 'A workspace or repository path is required.')
   const metadata = await readTaskMetadata(root)
   if (metadata !== undefined && Array.isArray(metadata.repositories) && metadata.repositories.length > 0) {
-    const repositories = []
-    for (const entry of metadata.repositories) {
-      repositories.push(await taskRepository(subprocess, root, entry, signal))
-    }
+    // The repositories of a task space are independent of one another, and each row costs
+    // a handful of `git` processes; asking them one at a time is what made a Workspace
+    // with a dozen repositories time out at fifteen seconds. The batch is bounded, and it
+    // keeps the record's order, so the rows do not shuffle between two openings.
+    const repositories = await mapWithLimit(metadata.repositories, SCAN_CONCURRENCY, (entry) => taskRepository(subprocess, root, entry, signal))
     return {
       kind: 'task',
       title: typeof metadata.task === 'string' && metadata.task !== '' ? metadata.task : basename(root),
@@ -85,8 +87,7 @@ export async function changesOverview(subprocess, path, { signal } = {}) {
     signal,
   })
   if (found.length > 1 || (found.length === 1 && found[0] !== root)) {
-    const repositories = []
-    for (const repository of found) repositories.push(await plainRepository(subprocess, repository, signal))
+    const repositories = await mapWithLimit(found, SCAN_CONCURRENCY, (repository) => plainRepository(subprocess, repository, signal))
     return { kind: 'workspace', title: basename(root), path: root, repositories }
   }
   const entry = await plainRepository(subprocess, root, signal)
@@ -107,8 +108,13 @@ export async function changesList(subprocess, repoPath, base, { signal } = {}) {
   const head = await readHead(subprocess, root, signal)
   const candidates = [typeof base === 'string' ? base : '', ...(await taskBaseCandidates(subprocess, root, signal))]
   const resolved = await resolveBase(subprocess, root, candidates, signal)
-  const statuses = parseNameStatus(await runGit(subprocess, root, ['-c', 'core.quotePath=false', 'diff', '--ignore-cr-at-eol', '--name-status', '-z', resolved.commit], { signal, log: false }))
-  const numbered = parseNumstat(await runGit(subprocess, root, ['-c', 'core.quotePath=false', 'diff', '--ignore-cr-at-eol', '--numstat', '-z', resolved.commit], { signal, log: false }))
+  // Both listings describe the same range, so they go out together: one repository's
+  // file list is opened by a reader who is already waiting, and two walks of the same
+  // diff in sequence is a round of `git` bought for nothing.
+  const [statuses, numbered] = await Promise.all([
+    runGit(subprocess, root, ['-c', 'core.quotePath=false', 'diff', '--ignore-cr-at-eol', '--name-status', '-z', resolved.commit], { signal, log: false }).then(parseNameStatus),
+    runGit(subprocess, root, ['-c', 'core.quotePath=false', 'diff', '--ignore-cr-at-eol', '--numstat', '-z', resolved.commit], { signal, log: false }).then(parseNumstat),
+  ])
   const untracked = await untrackedFiles(subprocess, root, signal)
   const statusOf = new Map(statuses.map((entry) => [entry.path, entry]))
   const files = []
@@ -117,15 +123,39 @@ export async function changesList(subprocess, repoPath, base, { signal } = {}) {
     statusOf.delete(entry.path)
     files.push(fileOf(entry, found))
   }
+  // A row is a change a reader can open. `modified` with no lines is not one: the
+  // working tree was written with CRLF over blobs that hold LF, so the file differs on
+  // every line, and `--ignore-cr-at-eol` is the only thing that says otherwise. Gits
+  // disagree about *how* they say it - 2.56 leaves such a file out of both listings,
+  // 2.28 honours the flag in `--numstat` (reporting `0 0`) but not in `--name-status`,
+  // which still carries it - and both answers drew a row reading "modified +0 −0" that
+  // opened onto an empty diff. What said nothing about lines is dropped here, once, for
+  // either shape, rather than per git version. A binary change and a rename keep their
+  // row: neither has line counts, and both have something to say.
   for (const found of statusOf.values()) files.push(fileOf({ path: found.path, insertions: 0, deletions: 0 }, found))
   for (const entry of untracked) files.push(fileOf(entry, { status: 'untracked' }))
-  files.sort((left, right) => left.path.localeCompare(right.path))
-  const totals = { files: files.length, insertions: 0, deletions: 0 }
-  for (const file of files) {
+  const shown = files.filter((file) => file.status !== 'modified' || carriesLines(file))
+  shown.sort((left, right) => left.path.localeCompare(right.path))
+  const totals = { files: shown.length, insertions: 0, deletions: 0 }
+  for (const file of shown) {
     totals.insertions += file.insertions
     totals.deletions += file.deletions
   }
-  return { path: root, branch: head.branch, head: head.short, base: resolved.label, baseCommit: resolved.commit, files, totals }
+  return { path: root, branch: head.branch, head: head.short, base: resolved.label, baseCommit: resolved.commit, files: shown, totals }
+}
+
+/**
+ * Whether a diff entry has something a reader can look at.
+ *
+ * `--ignore-cr-at-eol` makes a carriage-return-only difference count as no lines at all,
+ * and the two count commands then still name the file. A binary change is the exception
+ * that keeps its entry: git reports it as `-` rather than `0`, and there is a difference
+ * even though there are no line counts to show.
+ * @param entry - a change record with `insertions` and `deletions`.
+ * @returns false only when the entry is a text change with no lines in it.
+ */
+export function carriesLines(entry) {
+  return entry.binary === true || entry.insertions !== 0 || entry.deletions !== 0
 }
 
 /**
@@ -192,36 +222,60 @@ async function plainRepository(subprocess, root, signal) {
 
 /** The branch, the resolved base, and the counts of one working tree. */
 async function summarize(subprocess, root, candidates, signal) {
-  const head = await readHead(subprocess, root, signal)
-  const resolved = await resolveBase(subprocess, root, candidates, signal)
-  const numbered = parseNumstat(await runGit(subprocess, root, ['-c', 'core.quotePath=false', 'diff', '--ignore-cr-at-eol', '--numstat', '-z', resolved.commit], { signal, log: false }))
-  const untracked = await untrackedFiles(subprocess, root, signal)
-  let insertions = 0
-  let deletions = 0
-  for (const entry of numbered) {
-    insertions += entry.insertions
-    deletions += entry.deletions
-  }
+  // Three independent questions, asked at once: the branch, what is untracked, and where
+  // the comparison starts. One repository is one of a dozen in a Workspace, so the cost
+  // that matters is rounds of `git` rather than their number.
+  const [branch, untracked, resolved] = await Promise.all([
+    // The short commit is not read here: this row draws the branch, the base and the
+    // counts, and a second `rev-parse` for a hash nobody prints was a whole process per
+    // repository. The changes view, which does print it, reads it through `readHead`.
+    readBranch(subprocess, root, signal),
+    untrackedFiles(subprocess, root, signal),
+    resolveBase(subprocess, root, candidates, signal),
+  ])
+  // `--shortstat`, not `--numstat`: this row needs three counts, and a per-file listing
+  // carries every path and every number across the process boundary for nothing. On a
+  // working tree with thousands of changed files that listing is most of the wait.
+  //
+  // The pairing rule is the sidebar's own, from `workingPair`: a text difference with no
+  // lines in it is not a change, which is what the flag produces for a checkout written
+  // with CRLF against LF blobs. `--shortstat` cannot be filtered per file, so the counts
+  // have to be read through that rule rather than trusted as they arrive.
+  const pair = workingPair(await runGit(subprocess, root, ['diff', '--ignore-cr-at-eol', '--shortstat', resolved.commit], { signal, log: false }))
+  let insertions = pair?.insertions ?? 0
+  let deletions = pair?.deletions ?? 0
   for (const entry of untracked) {
     insertions += entry.insertions
     deletions += entry.deletions
   }
   return {
-    branch: head.branch,
-    head: head.short,
+    branch,
     base: resolved.label,
     baseCommit: resolved.commit,
     insertions,
     deletions,
-    files: numbered.length + untracked.length,
+    files: (pair?.files ?? 0) + untracked.length,
     untracked: untracked.length,
   }
 }
 
+/** The branch a checkout sits on, or its short commit when the HEAD is detached. */
+async function readBranch(subprocess, root, signal) {
+  const branch = (await runGit(subprocess, root, ['rev-parse', '--abbrev-ref', 'HEAD'], { signal, log: false })).trim()
+  // `HEAD` is git's answer for a detached checkout, and it is not a name to print; the
+  // commit is, and only that case pays for the second read.
+  if (branch !== '' && branch !== 'HEAD') return branch
+  return (await runGit(subprocess, root, ['rev-parse', '--short', 'HEAD'], { signal, log: false })).trim()
+}
+
 /** The branch name (or the short commit on a detached HEAD) and that commit. */
 async function readHead(subprocess, root, signal) {
-  const branch = (await runGit(subprocess, root, ['rev-parse', '--abbrev-ref', 'HEAD'], { signal, log: false })).trim()
-  const short = (await runGit(subprocess, root, ['rev-parse', '--short', 'HEAD'], { signal, log: false })).trim()
+  const [branchOut, shortOut] = await Promise.all([
+    runGit(subprocess, root, ['rev-parse', '--abbrev-ref', 'HEAD'], { signal, log: false }),
+    runGit(subprocess, root, ['rev-parse', '--short', 'HEAD'], { signal, log: false }),
+  ])
+  const branch = branchOut.trim()
+  const short = shortOut.trim()
   return { branch: branch === '' || branch === 'HEAD' ? short : branch, short }
 }
 
@@ -241,9 +295,10 @@ async function resolveBase(subprocess, root, candidates, signal) {
   }
   if (wanted.length === 0) throw coded('E3006', 'There is no comparison base: the task records none, and the branch tracks no remote.')
   for (const ref of wanted) {
-    const commit = (await tryRunGit(subprocess, root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { signal, log: false })).trim()
-    if (commit === '') continue
-    const mergeBase = (await tryRunGit(subprocess, root, ['merge-base', commit, 'HEAD'], { signal, log: false })).trim()
+    // One process per candidate rather than two: `merge-base` already refuses a ref it
+    // cannot resolve, so `rev-parse --verify` ahead of it only answered a question the
+    // same command answers by not running.
+    const mergeBase = (await tryRunGit(subprocess, root, ['merge-base', ref, 'HEAD'], { signal, log: false })).trim()
     if (mergeBase === '') continue
     return { label: labelOf(ref), commit: mergeBase }
   }

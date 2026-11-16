@@ -283,6 +283,10 @@ export function ChangesViewTab({ useTabInfo, api, sessionId, syncComments }: Cha
   return (
     <div className="dws-changes-view">
       <header className="dws-changes-view-head">
+        {/* The repository first, and in bold: one view per repository, and the tab's own
+            chip says only "变更查看" - without this the two branches to its right name a
+            comparison whose repository the reader has to infer from the file paths. */}
+        <span className="dws-changes-repo" title={target.path}>{entryName(target.path)}</span>
         <span className="dws-changes-scope">{t("changesScopeBranch")}：</span>
         <span className="dws-changes-view-refs">
           <span className="dws-changes-current" title={list?.head}>{list?.branch ?? entryName(target.path)}</span>

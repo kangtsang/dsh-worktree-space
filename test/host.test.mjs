@@ -706,7 +706,7 @@ describe("worktree RPC contract", () => {
       "rev-parse --abbrev-ref main@{upstream}": "origin/main\n",
       "rev-list --left-right --count origin/main...HEAD": "3\t1",
       "diff --shortstat origin/main...HEAD": "1 file changed, 7 insertions(+), 2 deletions(-)\\n",
-      "diff --shortstat HEAD": "1 file changed, 4 deletions(-)\\n",
+      "diff --ignore-cr-at-eol --shortstat HEAD": "1 file changed, 4 deletions(-)\\n",
     })
 
     expect((await handler("worktree.upstream", { path: "/repo", target: "main" })).value)
@@ -720,6 +720,30 @@ describe("worktree RPC contract", () => {
         committedChanges: { insertions: 7, deletions: 2 },
         workingChanges: { insertions: 0, deletions: 4 },
       })
+  })
+
+  it("ignores a carriage return in the working tree, and only there", async () => {
+    // A checkout whose files were written with CRLF against blobs that hold LF differs on
+    // every line, so `--shortstat HEAD` reported thousands of changed lines on a tree nobody
+    // had touched - while the changes sidebar, which has always passed this flag, opened the
+    // same repository and showed nothing. Both halves of the split are pinned here: the
+    // working-tree read ignores a carriage return, the committed range does not, because
+    // between two commits a carriage return is content somebody chose to commit.
+    const asked = []
+    const handler = handleFor({
+      "rev-parse --abbrev-ref main@{upstream}": "origin/main\n",
+      "rev-list --left-right --count origin/main...HEAD": "0 0",
+      "diff --shortstat origin/main...HEAD": "1 file changed, 9 insertions(+)\n",
+      // What git answers under the flag for a tree whose only difference is the EOL.
+      "diff --ignore-cr-at-eol --shortstat HEAD": "",
+    }, {}, asked)
+
+    const value = (await handler("worktree.upstream", { path: "/repo", target: "main" })).value
+    expect(value).not.toHaveProperty("workingChanges")
+    expect(value.committedChanges).toEqual({ files: 1, insertions: 9, deletions: 0 })
+    expect(asked).toContain("diff --ignore-cr-at-eol --shortstat HEAD")
+    expect(asked).toContain("diff --shortstat origin/main...HEAD")
+    expect(asked).not.toContain("diff --shortstat HEAD")
   })
 
   it("names the branch the comparison starts from, and leaves a detached HEAD unnamed", async () => {
@@ -757,7 +781,7 @@ describe("worktree RPC contract", () => {
       "rev-parse --abbrev-ref main@{upstream}": "origin/main",
       "rev-list --left-right --count origin/main...HEAD": "0 0",
       // Nothing committed between the merge base and HEAD; twelve lines dirty on disk.
-      "diff --shortstat HEAD": "2 files changed, 12 insertions(+), 12 deletions(-)",
+      "diff --ignore-cr-at-eol --shortstat HEAD": "2 files changed, 12 insertions(+), 12 deletions(-)",
     }, {}, asked)
 
     const value = (await handler("worktree.upstream", { path: "/repo", target: "main" })).value
@@ -767,6 +791,24 @@ describe("worktree RPC contract", () => {
     // tree's numbers and handed them back as committed.
     expect(asked).toContain("diff --shortstat origin/main...HEAD")
     expect(asked).not.toContain("diff --shortstat origin/main")
+  })
+
+  it("draws no uncommitted pair for a tree whose only difference is a carriage return", async () => {
+    // Git 2.28 answers "8 files changed, 0 insertions(+), 0 deletions(-)" for a checkout
+    // written with CRLF against LF blobs, so the row drew a file count with nothing behind
+    // it - eight files, no lines, on a branch nobody had touched. A pair with no lines is
+    // no uncommitted change, and the row says so the way it does for a clean tree.
+    const handler = handleFor({
+      "rev-parse --abbrev-ref main@{upstream}": "origin/main",
+      "rev-list --left-right --count origin/main...HEAD": "0 0",
+      "diff --ignore-cr-at-eol --shortstat HEAD": "8 files changed, 0 insertions(+), 0 deletions(-)",
+    })
+
+    const value = (await handler("worktree.upstream", { path: "/repo", target: "main" })).value
+    expect(value).not.toHaveProperty("workingChanges")
+    // The committed pair keeps its own file count: between two commits a file change with
+    // no lines is a real answer (a rename, a mode change), not a carriage return.
+    expect(value).not.toHaveProperty("committedChanges")
   })
 
   it("answers a branch that tracks nothing with a null upstream, not an error", async () => {
@@ -826,7 +868,7 @@ describe("worktree RPC contract", () => {
       "rev-parse --abbrev-ref @{upstream}": "origin/main\n",
       "rev-list --left-right --count origin/main...HEAD": "1\t2",
       "diff --shortstat origin/main...HEAD": "1 file changed, 9 insertions(+)\n",
-      "diff --shortstat HEAD": "",
+      "diff --ignore-cr-at-eol --shortstat HEAD": "",
     }, { autoFetchRemote: { get: () => true } }, asked)
 
     // `fetch: true` is what asks for the refresh; the first call the panel makes omits
@@ -838,13 +880,14 @@ describe("worktree RPC contract", () => {
   })
 
   it("counts the commits a worktree carries back when a target is named", async () => {
+    const asked = []
     const handler = handleFor({
       "status --short --branch": "## feat/antest",
       // `--left-right --count develop...HEAD` prints "<behind> <ahead>".
       "rev-list --left-right --count develop...HEAD": "2\t4",
       "diff --shortstat develop...HEAD": "2 files changed, 12 insertions(+), 3 deletions(-)\n",
-      "diff --shortstat HEAD": "1 file changed, 5 insertions(+)\n",
-    })
+      "diff --ignore-cr-at-eol --shortstat HEAD": "1 file changed, 5 insertions(+)\n",
+    }, {}, asked)
 
     expect((await handler("worktree.status", { path: "/repo", target: "develop" })).value)
       .toMatchObject({
@@ -854,6 +897,11 @@ describe("worktree RPC contract", () => {
         committedChanges: { insertions: 12, deletions: 3 },
         workingChanges: { insertions: 5, deletions: 0 },
       })
+    // The working-tree read is the one that ignores a carriage return; the committed range
+    // is not. A checkout written with CRLF against LF blobs therefore reads as clean work in
+    // progress rather than as every file changed.
+    expect(asked).toContain("diff --ignore-cr-at-eol --shortstat HEAD")
+    expect(asked).not.toContain("diff --shortstat HEAD")
     // No target, or one git cannot resolve, leaves the counts out rather than
     // claiming a clean branch: the page shows nothing instead of a wrong zero.
     expect((await handler("worktree.status", { path: "/repo" })).value).not.toHaveProperty("commits")

@@ -310,7 +310,8 @@ DSH 实例的内存里，实例关闭时随之清空。
 当前检出的那条分支为基线（与面板行上的数字同一口径，读不到时退回任务记录里的起点），工作区里的
 仓库以远端跟踪分支为基线。点一行进入 **变更查看**。
 
-**变更查看** 读取的是「比较起点 → 工作树」，已提交、未提交与未跟踪都在内。左侧文件树可拖动分隔条
+**变更查看** 读取的是「比较起点 → 工作树」，已提交、未提交与未跟踪都在内。头部先写仓库名（加粗），
+再写 `分支：<当前分支> → <基线>`——标签页上只有「变更查看」，仓库名只在这一行。左侧文件树可拖动分隔条
 改宽（双击恢复默认）；右侧逐文件显示带行号的 diff，支持语法高亮、全部展开/收起、自动换行与文件树
 开关。文件可勾 **已评审**，工具栏显示 `已评审 N / M`；勾选后文件收起，标记保存在本浏览器，文件之后
 又变时会标出 **有新改动** 并取消勾选。
@@ -841,6 +842,8 @@ the repository that stopped it, and merges once that session has resolved it.
   one row per repository with its current branch, base branch and `+added -removed, files`; opening a
   repository gives **Files changed** — a resizable file tree on the left and a line-numbered diff per
   file on the right, with syntax highlighting, expand/collapse all, wrapped lines and a tree toggle.
+  Its header names the repository first, in bold, then `Branch: <current> → <base>`: the tab chip
+  says only "Files changed", so that line is the one place the repository is named.
   Each file takes a **Reviewed** mark, with the progress in the toolbar; a file that changes after
   being marked reads **New changes**. Hovering a line's numbers shows a blue `+`; the `+` or the
   number pair opens a comment, recorded as `L` (old number) for an unchanged line whose two numbers
@@ -1041,7 +1044,8 @@ or a Workspace holding repositories opens **Changes overview**, a worktree row o
 directly, and a Workspace with no repository offers no button.
 
 **Changes overview** lists each repository with `current branch → base branch` and
-`+added -removed, files`. Inside a task space the base is the branch the source checkout has checked
+`+added -removed, files`; a repository carrying nothing says 「暂无变更」 there instead of drawing three
+zeros. Inside a task space the base is the branch the source checkout has checked
 out — the same comparison the rows on the page count against, falling back to the task's recorded
 start point — while a Workspace's repository is compared with its remote-tracking branch. A row opens
 **Files changed**.

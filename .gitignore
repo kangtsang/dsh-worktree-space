@@ -18,3 +18,4 @@ _test-output/
 # space is what this repository uses for isolated work, and it lives outside the
 # checkout by design - so nothing in it is a source of this plugin.
 /.workbuddy/
+/.pnpm-store/

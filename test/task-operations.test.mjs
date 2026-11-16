@@ -3518,7 +3518,7 @@ describe("planTask", () => {
       // The two line pairs the panel draws: the range from the target's merge base to
       // HEAD, and the working tree against HEAD. `alpha` carries both, `beta` neither.
       "diff --shortstat develop...HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 41 insertions(+), 67 deletions(-)\n" : "",
-      "diff --shortstat HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 12 insertions(+), 5 deletions(-)\n" : "",
+      "diff --ignore-cr-at-eol --shortstat HEAD": ({ cwd }) => basename(cwd) === "alpha" ? " 2 files changed, 12 insertions(+), 5 deletions(-)\n" : "",
     }
     return { root, taskPath, handlers, cleanup: () => rm(root, { recursive: true, force: true }) }
   }

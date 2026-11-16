@@ -145,11 +145,16 @@ describe.skipIf(!gitAvailable)("worktree.changes reads", () => {
       git(alpha, ["remote", "add", "origin", bare])
       git(alpha, ["push", "-q", "-u", "origin", "main"])
       await writeFile(join(alpha, "a.txt"), text("one", "two", "three"))
+      // Untracked work belongs in the row's three counts as well: the diff cannot see it,
+      // so the overview adds it itself.
+      await writeFile(join(alpha, "b.txt"), text("extra"))
       const subprocess = realSubprocess()
       const answer = await changesOverview(subprocess, workspace)
       expect(answer.kind).toBe("workspace")
       expect(answer.repositories.map((repository) => repository.name)).toEqual(["alpha", "beta"])
-      expect(answer.repositories[0]).toMatchObject({ base: "origin/main", insertions: 1 })
+      // One committed line and one untracked line, in two files: the counts are read from
+      // the same diff `--shortstat` the row draws and the untracked files are added to it.
+      expect(answer.repositories[0]).toMatchObject({ base: "origin/main", branch: "main", insertions: 2, deletions: 0, files: 2, untracked: 1 })
       // A repository tracking no remote answers a row with the reason, not a failure.
       expect(answer.repositories[1].error).toBeTruthy()
     } finally {

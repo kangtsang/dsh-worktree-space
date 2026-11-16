@@ -12,7 +12,7 @@ import { coded, warned } from './codes.js'
 import { SCAN_CONCURRENCY, mapWithLimit } from './concurrency.js'
 import { assertDeliveryGate, deliveryGatePreview, destroyDeployment } from './deploy.js'
 import { applyStraysPolicy, deliveryPolicyOf } from './delivery.js'
-import { gitSucceeded, parseShortstat, parseWorktrees, runGit, tryRunGit } from './git.js'
+import { gitSucceeded, parseShortstat, parseWorktrees, runGit, tryRunGit, workingPair } from './git.js'
 import { findLinks, symlinksRefused } from './links.js'
 import { validateProjectName } from './naming.js'
 import { assertIsolated, isInside, refuseDelete, samePathLocation } from './paths.js'
@@ -688,7 +688,12 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
           // span: `plan.target` alone means "against the working tree", which put the
           // uncommitted lines in the committed half as well.
           tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', `${plan.target}...HEAD`]),
-          tryRunGit(subprocess, worktreePath, ['diff', '--shortstat', 'HEAD']),
+          // The working tree against HEAD, with a carriage return ignored for the same
+          // reason the panel's own row ignores it: files written with CRLF against LF
+          // blobs differ on every line, and a checkout nobody had touched would otherwise
+          // read as work this finish is about to discard. The committed range above keeps
+          // the flag off - between two commits a carriage return is content.
+          tryRunGit(subprocess, worktreePath, ['diff', '--ignore-cr-at-eol', '--shortstat', 'HEAD']),
         ])
         // Left out rather than claimed as zero when git will not answer the count:
         // "no commits" is a fact about the branch, and a repository that could not be
@@ -700,7 +705,10 @@ export async function planTask(subprocess, { task, project, tasksRoot, targets }
         if (Number.isFinite(behind)) plan.behind = behind
         if (Number.isFinite(ahead)) plan.commits = ahead
         if (diffstat.trim() !== '') plan.committedChanges = parseShortstat(diffstat)
-        if (workstat.trim() !== '') plan.workingChanges = parseShortstat(workstat)
+        // The finish dialog draws the same pair the panel does; a worktree whose only
+        // difference is a carriage return reads as clean there too.
+        const working = workingPair(workstat)
+        if (working !== undefined) plan.workingChanges = working
       } catch (error) {
         plan.error = error.message
       }

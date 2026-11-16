@@ -538,6 +538,14 @@ const zh: Dict = {
   changesNoRepositories: "这个空间里没有可查看的仓库。",
   changesDetached: "分离 HEAD",
   changesFileCount: "{count} 个文件",
+  /**
+   * A repository row that carries nothing, in place of its counts.
+   *
+   * "+0 −0 0 个文件" is three numbers saying nothing; the row says it in words, in the
+   * same muted voice as the branch line above it, because a zero is a state rather than
+   * a measurement.
+   */
+  changesNoChanges: "暂无变更",
   changesIncludeUncommitted: "包含未提交的变更",
   changesScopeBranch: "分支",
   changesJumpFile: "跳到文件",
@@ -1060,6 +1068,8 @@ const en: Dict = {
   changesNoRepositories: "This space holds no repository whose changes can be shown.",
   changesDetached: "detached HEAD",
   changesFileCount: "{count} files",
+  /** A repository row that carries nothing, in place of its counts. See the zh text. */
+  changesNoChanges: "No changes",
   changesIncludeUncommitted: "Including uncommitted changes",
   changesScopeBranch: "Branch",
   changesJumpFile: "Jump to a file",

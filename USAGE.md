@@ -239,12 +239,13 @@ worktree 行，以及工作区视图里的仓库行，右侧图标打开该仓�
 以远端跟踪分支为基线。读取范围是「比较起点（merge-base）→ 工作树」：已提交、未提交与未跟踪文件
 都在内，与顶部「包含未提交的变更」一致。基线取自源码检出，所以源码分支改名后会跟随新名字。
 
-**变更总览。** 每个仓库一行：仓库名、`当前分支 → 基线分支`、`+新增 −删除`、文件数。某个仓库读不到
+**变更总览。** 每个仓库一行：仓库名、`当前分支 → 基线分支`、`+新增 −删除`、文件数。没有变更时那个位置
+写灰色小字「暂无变更」，不画 `+0 −0 0 个文件`（三个零读起来像一次测量，其实什么都没测）。某个仓库读不到
 基线时，该行显示原因且不能打开。
 
 **变更查看。**
 
-- 头部是 `分支：<当前分支> → <基线>`；
+- 头部先写仓库名（加粗，悬停给出完整路径），再写 `分支：<当前分支> → <基线>`：标签页上只有「变更查看」四个字，不看这一行就不知道比的是哪个仓库；
 - 工具栏依次是文件选择、`已评审 N / M`、总行数、文件树、全部展开、全部收起、自动换行、刷新；
 - 左侧文件树可拖动分隔条改宽（150–460px，双击恢复 208px），宽度记在本浏览器；
 - 右侧逐文件卡片：状态字母（`M`/`D`/`R`/`C`/`A`/`U`）、路径、`+/−`、未跟踪或新文件等徽标；
@@ -1242,11 +1243,15 @@ work are all included, matching the header's "Including uncommitted changes". Th
 source checkout, so a renamed source branch is followed rather than shown as a missing commit.
 
 **Changes overview.** One row per repository: name, `current branch → base branch`, `+added -removed`
-and the file count. A repository whose base cannot be resolved states why and cannot be opened.
+and the file count. A repository carrying nothing says 「No changes」 there in muted small type rather
+than drawing `+0 -0 0 files`, which reads like a measurement of something that was not measured. A
+repository whose base cannot be resolved states why and cannot be opened.
 
 **Files changed.**
 
-- The header reads `Branch: <current> → <base>`;
+- The header names the repository first, in bold and with its full path on hover, then
+  `Branch: <current> → <base>` — the tab chip says only "Files changed", so this line is the
+  only thing that says which repository is being compared;
 - The toolbar holds the file picker, `Reviewed N / M`, the line totals, the file tree, Expand all,
   Collapse all, wrapped lines and refresh;
 - The tree on the left is widened by dragging its divider (150–460px, double-click restores 208px);

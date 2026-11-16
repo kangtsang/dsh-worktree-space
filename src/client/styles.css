@@ -1119,6 +1119,9 @@
 .dws-change-repo-head, .dws-change-repo-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 13em; }
 .dws-change-repo-base { color: var(--wt-muted); }
 .dws-change-repo-counts { display: flex; gap: 6px; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+/* A row carrying nothing, where its counts would be. The same muted 12px as the branch
+   line above it - both say something that is not a measurement. */
+.dws-change-repo-none { margin-inline-start: auto; color: var(--wt-muted); font-size: 12px; white-space: nowrap; }
 .dws-change-repo-error { flex: 1 1 100%; color: var(--wt-danger); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .dws-changes-loading, .dws-changes-empty, .dws-changes-notice, .dws-changes-error { margin: 8px 10px; color: var(--wt-secondary); font-size: 12px; line-height: 18px; }
 .dws-changes-loading { display: flex; align-items: center; gap: 6px; }
@@ -1133,6 +1136,9 @@
 .dws-changes-view-refs { display: flex; align-items: center; gap: 5px; flex: 1 1 auto; min-width: 0; color: var(--wt-secondary); font-size: 12px; }
 .dws-changes-current, .dws-changes-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dws-changes-current { color: var(--wt-text); font-family: var(--ds-font-family-code, ui-monospace, monospace); }
+/* The repository a 变更查看 tab belongs to. Bold and neutral, so it reads as the subject
+   of the line and the two branches after it as the comparison. */
+.dws-changes-repo { flex: none; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wt-text); font-weight: 600; }
 .dws-changes-base { color: var(--wt-muted); font-family: var(--ds-font-family-code, ui-monospace, monospace); }
 .dws-changes-arrow { color: var(--wt-muted); }
 .dws-changes-note { flex: none; color: var(--wt-muted); font-size: 11px; white-space: nowrap; }
