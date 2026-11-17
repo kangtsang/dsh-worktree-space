@@ -643,6 +643,10 @@ profile 提供，不随插件分发 —— 安装本插件不会引入新的运�
 | [CHANGELOG.md](docs/CHANGELOG.md) | 版本发布历史 |
 | [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) | 问题反馈 |
 
+## 友情链接
+
+- [Linux.Do](https://linux.do/) — 一个理想的新社区
+
 ---
 
 <a id="english"></a>
@@ -1464,3 +1468,7 @@ it with it. Failing to write it never affects any operation.
 | [docs/store-evidence.md](docs/store-evidence.md) | The disposable-profile install, start, uninstall and rollback acceptance steps, with per-release records |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Release history |
 | [GitHub Issues](https://github.com/kangtsang/dsh-worktree-space/issues) | Problem reports |
+
+## Friends
+
+- [Linux.Do](https://linux.do/) — A new ideal community
